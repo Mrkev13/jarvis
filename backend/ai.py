@@ -1323,7 +1323,7 @@ def _run_tool_calls(db, tool_calls):
             }
         else:
             try:
-                result = function()
+                result = function(**arguments)
             except Exception as exc:
                 result = {
                     "error": "tool_execution_failed",
