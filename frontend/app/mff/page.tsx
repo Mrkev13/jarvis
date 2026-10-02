@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 const ROLE_OPTIONS = ["ABX", "ABL", "GBR", "World Boss", "PvP", "Dispatch", "Other"] as const;
@@ -241,8 +241,8 @@ export default function MffPage() {
     setError(null);
     try {
       const [sumRes, charsRes] = await Promise.all([
-        fetch(apiUrl("/mff/summary")),
-        fetch(apiUrl("/mff/characters")),
+        apiFetch("/mff/summary"),
+        apiFetch("/mff/characters"),
       ]);
       if (!sumRes.ok || !charsRes.ok) throw new Error();
       setSummary((await sumRes.json()) as MffSummary);
@@ -348,7 +348,7 @@ export default function MffPage() {
         uru_slots_filled: uf,
         odin_blessings_count: ob,
       };
-      const res = await fetch(apiUrl("/mff/character"), {
+      const res = await apiFetch("/mff/character", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -377,7 +377,7 @@ export default function MffPage() {
   async function confirmDeleteChar() {
     if (!deletingChar) return;
     try {
-      const res = await fetch(apiUrl(`/mff/character/${deletingChar.id}`), {
+      const res = await apiFetch(`/mff/character/${deletingChar.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete character");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type FinanceSummary = {
@@ -60,8 +60,8 @@ export default function FinancePage() {
   const loadData = useCallback(async () => {
     try {
       const [sumRes, txRes] = await Promise.all([
-        fetch(apiUrl("/finance/summary")),
-        fetch(apiUrl("/finance/transactions")),
+        apiFetch("/finance/summary"),
+        apiFetch("/finance/transactions"),
       ]);
       if (!sumRes.ok || !txRes.ok) {
         throw new Error("Failed to load finance data");
@@ -104,7 +104,7 @@ export default function FinancePage() {
         description: form.description.trim(),
         transaction_type: formType,
       };
-      const res = await fetch(apiUrl("/finance/transaction"), {
+      const res = await apiFetch("/finance/transaction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -125,7 +125,7 @@ export default function FinancePage() {
   async function confirmDeleteTx() {
     if (!deletingTx) return;
     try {
-      const res = await fetch(apiUrl(`/finance/transaction/${deletingTx.id}`), {
+      const res = await apiFetch(`/finance/transaction/${deletingTx.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete transaction");

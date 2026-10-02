@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type WorkSummary = {
@@ -69,8 +69,8 @@ export default function WorkPage() {
     setError(null);
     try {
       const [sRes, sumRes] = await Promise.all([
-        fetch(apiUrl("/work/sessions")),
-        fetch(apiUrl("/work/summary")),
+        apiFetch("/work/sessions"),
+        apiFetch("/work/summary"),
       ]);
       if (!sRes.ok || !sumRes.ok) throw new Error();
       const s = (await sRes.json()) as WorkSessionItem[];
@@ -102,7 +102,7 @@ export default function WorkPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl("/work/session"), {
+      const res = await apiFetch("/work/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -133,7 +133,7 @@ export default function WorkPage() {
   async function confirmDeleteSession() {
     if (!deletingSession) return;
     try {
-      const res = await fetch(apiUrl(`/work/session/${deletingSession.id}`), {
+      const res = await apiFetch(`/work/session/${deletingSession.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete session");

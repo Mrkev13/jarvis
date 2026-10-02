@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 type NotificationItem = {
   id: number;
@@ -61,7 +61,7 @@ export default function NotificationsBell() {
 
   const refreshSummary = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl("/notifications/summary"));
+      const res = await apiFetch("/notifications/summary");
       if (!res.ok) return;
       const data = (await res.json()) as NotificationSummary;
       setSummary({
@@ -77,7 +77,7 @@ export default function NotificationsBell() {
 
   async function refreshList() {
     try {
-      const res = await fetch(apiUrl("/notifications"));
+      const res = await apiFetch("/notifications");
       if (!res.ok) return;
       const data = (await res.json()) as NotificationItem[];
       setItems(Array.isArray(data) ? data : []);
@@ -88,7 +88,7 @@ export default function NotificationsBell() {
 
   async function ensureGenerated() {
     try {
-      await fetch(apiUrl("/notifications/generate"), { method: "POST" });
+      await apiFetch("/notifications/generate", { method: "POST" });
     } catch {
       return;
     }
@@ -107,7 +107,7 @@ export default function NotificationsBell() {
 
   async function markRead(id: number) {
     try {
-      await fetch(apiUrl(`/notifications/${id}/read`), { method: "PATCH" });
+      await apiFetch(`/notifications/${id}/read`, { method: "PATCH" });
       await Promise.all([refreshSummary(), refreshList()]);
     } catch {
       return;
@@ -116,7 +116,7 @@ export default function NotificationsBell() {
 
   async function resolve(id: number) {
     try {
-      await fetch(apiUrl(`/notifications/${id}/resolve`), { method: "PATCH" });
+      await apiFetch(`/notifications/${id}/resolve`, { method: "PATCH" });
       await Promise.all([refreshSummary(), refreshList()]);
     } catch {
       return;
@@ -125,7 +125,7 @@ export default function NotificationsBell() {
 
   async function readAll() {
     try {
-      await fetch(apiUrl("/notifications/read-all"), { method: "PATCH" });
+      await apiFetch("/notifications/read-all", { method: "PATCH" });
       await Promise.all([refreshSummary(), refreshList()]);
     } catch {
       return;

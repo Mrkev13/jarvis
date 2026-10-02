@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { API_URL, apiUrl } from "@/lib/api";
+import { API_URL, apiFetch } from "@/lib/api";
 import PlannerCardRenderer, { type PlannerCard } from "@/components/PlannerCards";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import {
@@ -962,7 +962,7 @@ export default function AiPage() {
   const loadMessages = useCallback(async (conversationId: number) => {
     setLoadingMessages(true);
     try {
-      const response = await fetch(apiUrl(`/conversations/${conversationId}/messages`));
+      const response = await apiFetch(`/conversations/${conversationId}/messages`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -986,7 +986,7 @@ export default function AiPage() {
   }, []);
 
   const createConversation = useCallback(async (title?: string): Promise<number | null> => {
-    const response = await fetch(apiUrl("/conversations"), {
+    const response = await apiFetch("/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: title ?? null }),
@@ -1016,7 +1016,7 @@ export default function AiPage() {
   const loadConversations = useCallback(async (preferId?: number) => {
     setLoadingConversations(true);
     try {
-      const response = await fetch(apiUrl("/conversations"));
+      const response = await apiFetch("/conversations");
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -1056,7 +1056,7 @@ export default function AiPage() {
     if (title === null) return;
     const trimmed = title.trim();
     if (!trimmed) return;
-    const response = await fetch(apiUrl(`/conversations/${conversationId}`), {
+    const response = await apiFetch(`/conversations/${conversationId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: trimmed }),
@@ -1087,7 +1087,7 @@ export default function AiPage() {
       `Opravdu smazat chat${conv?.title ? ` “${conv.title}”` : ""}?`,
     );
     if (!ok) return;
-    const response = await fetch(apiUrl(`/conversations/${conversationId}`), {
+    const response = await apiFetch(`/conversations/${conversationId}`, {
       method: "DELETE",
     });
     if (!response.ok) return;
@@ -1111,7 +1111,7 @@ export default function AiPage() {
     const conversationId = activeConversationId;
     if (conversationId == null) return;
     try {
-      await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+      await apiFetch(`/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: text }),
@@ -1133,7 +1133,7 @@ export default function AiPage() {
 
     setConfirmingIdx(idx);
     try {
-      const response = await fetch(apiUrl("/actions/confirm"), {
+      const response = await apiFetch("/actions/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action_id: action.action_id }),
@@ -1254,7 +1254,7 @@ export default function AiPage() {
     try {
       let response: Response;
       try {
-        response = await fetch(apiUrl("/chat"), {
+        response = await apiFetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

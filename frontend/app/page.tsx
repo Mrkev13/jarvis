@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { areaMeta } from "@/components/PlannerCards";
 
 type NotificationPreview = {
@@ -257,7 +257,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     void Promise.resolve()
-      .then(() => fetch(apiUrl("/dashboard")))
+      .then(() => apiFetch("/dashboard"))
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const payload = (await r.json()) as DashboardPayload;

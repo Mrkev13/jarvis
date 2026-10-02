@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Subject = {
@@ -126,9 +126,9 @@ export default function SchoolPage() {
   const loadData = useCallback(async () => {
     try {
       const [subjRes, asRes, examRes] = await Promise.all([
-        fetch(apiUrl("/school/subjects")),
-        fetch(apiUrl("/school/assignments")),
-        fetch(apiUrl("/school/exams")),
+        apiFetch("/school/subjects"),
+        apiFetch("/school/assignments"),
+        apiFetch("/school/exams"),
       ]);
       if (!subjRes.ok || !asRes.ok || !examRes.ok) {
         throw new Error("Failed to load school data");
@@ -183,7 +183,7 @@ export default function SchoolPage() {
         credits: subjectDraft.credits === "" ? 0 : Number(subjectDraft.credits),
         active: subjectDraft.active,
       };
-      const res = await fetch(apiUrl("/school/subject"), {
+      const res = await apiFetch("/school/subject", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -225,7 +225,7 @@ export default function SchoolPage() {
         status: assignmentDraft.status,
         subject_id: Number(assignmentDraft.subject_id),
       };
-      const res = await fetch(apiUrl("/school/assignment"), {
+      const res = await apiFetch("/school/assignment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -267,7 +267,7 @@ export default function SchoolPage() {
         notes: examDraft.notes.trim(),
         subject_id: Number(examDraft.subject_id),
       };
-      const res = await fetch(apiUrl("/school/exam"), {
+      const res = await apiFetch("/school/exam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -295,7 +295,7 @@ export default function SchoolPage() {
   async function confirmDeleteAssignment() {
     if (!deletingAssignment) return;
     try {
-      const res = await fetch(apiUrl(`/school/assignment/${deletingAssignment.id}`), {
+      const res = await apiFetch(`/school/assignment/${deletingAssignment.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete assignment");
@@ -311,7 +311,7 @@ export default function SchoolPage() {
   async function confirmDeleteExam() {
     if (!deletingExam) return;
     try {
-      const res = await fetch(apiUrl(`/school/exam/${deletingExam.id}`), {
+      const res = await apiFetch(`/school/exam/${deletingExam.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete exam");

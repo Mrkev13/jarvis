@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Resources = {
@@ -88,8 +88,8 @@ export default function WotPage() {
   const loadData = useCallback(async () => {
     try {
       const [resRes, grindsRes] = await Promise.all([
-        fetch(apiUrl("/wot/resources")),
-        fetch(apiUrl("/wot/grinds")),
+        apiFetch("/wot/resources"),
+        apiFetch("/wot/grinds"),
       ]);
       if (!resRes.ok || !grindsRes.ok) {
         throw new Error("Failed to load WoT data");
@@ -127,7 +127,7 @@ export default function WotPage() {
 
       await Promise.all(
         entries.map((body) =>
-          fetch(apiUrl("/wot/resource"), {
+          apiFetch("/wot/resource", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -162,7 +162,7 @@ export default function WotPage() {
         priority: grindDraft.priority,
         status: grindDraft.status,
       };
-      const res = await fetch(apiUrl("/wot/grind"), {
+      const res = await apiFetch("/wot/grind", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -198,7 +198,7 @@ export default function WotPage() {
   async function confirmDeleteGrind() {
     if (!deletingGrind || deletingGrind.id == null) return;
     try {
-      const res = await fetch(apiUrl(`/wot/grind/${deletingGrind.id}`), {
+      const res = await apiFetch(`/wot/grind/${deletingGrind.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete grind");

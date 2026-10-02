@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type GoalsSummary = {
@@ -253,8 +253,8 @@ export default function GoalsPage() {
     setError(null);
     try {
       const [sumRes, listRes] = await Promise.all([
-        fetch(apiUrl("/goals/summary")),
-        fetch(apiUrl("/goals/list")),
+        apiFetch("/goals/summary"),
+        apiFetch("/goals/list"),
       ]);
       if (!sumRes.ok || !listRes.ok) throw new Error();
       setSummary((await sumRes.json()) as GoalsSummary);
@@ -335,7 +335,7 @@ export default function GoalsPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl("/goal"), {
+      const res = await apiFetch("/goal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -354,7 +354,7 @@ export default function GoalsPage() {
   async function confirmDeleteGoal() {
     if (!deletingGoal) return;
     try {
-      const res = await fetch(apiUrl(`/goal/${deletingGoal.id}`), {
+      const res = await apiFetch(`/goal/${deletingGoal.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete goal");

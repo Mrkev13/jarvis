@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import {
   DailyPlanCard,
   WeeklyPlanCard,
@@ -20,7 +20,7 @@ export default function PlannerPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl(`/planner?mode=${encodeURIComponent(nextMode)}`));
+      const res = await apiFetch(`/planner?mode=${encodeURIComponent(nextMode)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as PlannerPlan | GoalReview;
       setPlan(data);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type MemoryItem = {
@@ -68,7 +68,7 @@ export default function MemoryPage() {
       if (category !== "all") params.set("category", category);
       if (includeInactive) params.set("include_inactive", "true");
 
-      const res = await fetch(apiUrl(`/memories?${params.toString()}`));
+      const res = await apiFetch(`/memories?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as MemoryItem[];
       setItems(Array.isArray(data) ? data : []);
@@ -107,7 +107,7 @@ export default function MemoryPage() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl("/memory"), {
+      const res = await apiFetch("/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -149,7 +149,7 @@ export default function MemoryPage() {
     }
     setError(null);
     try {
-      const res = await fetch(apiUrl(`/memory/${editingId}`), {
+      const res = await apiFetch(`/memory/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -171,7 +171,7 @@ export default function MemoryPage() {
 
   async function toggleActive(item: MemoryItem, next: boolean) {
     try {
-      const res = await fetch(apiUrl(`/memory/${item.id}`), {
+      const res = await apiFetch(`/memory/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: next }),
@@ -187,7 +187,7 @@ export default function MemoryPage() {
   async function confirmHardDelete() {
     if (!deleteTarget) return;
     try {
-      const res = await fetch(apiUrl(`/memory/${deleteTarget.id}/hard`), {
+      const res = await apiFetch(`/memory/${deleteTarget.id}/hard`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

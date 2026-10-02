@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 const AREAS = [
   "finance",
@@ -230,7 +230,7 @@ export default function ActivityPage() {
     setError(null);
     try {
       const query = buildQuery(0);
-      const res = await fetch(apiUrl(`/activity?${query}`));
+      const res = await apiFetch(`/activity?${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as ActivityResponse;
       setItems(data.items);
@@ -251,7 +251,7 @@ export default function ActivityPage() {
     setError(null);
     try {
       const query = buildQuery(offset);
-      const res = await fetch(apiUrl(`/activity?${query}`));
+      const res = await apiFetch(`/activity?${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as ActivityResponse;
       setItems((prev) => [...prev, ...data.items]);
