@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
+import { PageTransition } from "@/components/motion/PageTransition";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +30,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <DesktopSidebar />
           <div className="flex-1 flex flex-col min-w-0">
             <MobileHeader />
-            <div className="flex-1">{children}</div>
+            <div className="flex-1">
+              <PageTransition>{children}</PageTransition>
+            </div>
           </div>
         </div>
       </body>

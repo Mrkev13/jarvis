@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useIncreaseSignal } from "@/lib/motion";
 
 type NotificationItem = {
   id: number;
@@ -57,7 +58,10 @@ export default function NotificationsBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // UI-only: první úspěšné načtení souhrnu (puls badge až při dalším nárůstu, ne při načtení stránky).
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
   const unread = summary.unread || 0;
+  const unreadIncrease = useIncreaseSignal(unread, summaryLoaded);
 
   const refreshSummary = useCallback(async () => {
     try {
@@ -70,6 +74,7 @@ export default function NotificationsBell() {
         warning: Number(data.warning) || 0,
         info: Number(data.info) || 0,
       });
+      setSummaryLoaded(true);
     } catch {
       return;
     }
@@ -165,11 +170,15 @@ export default function NotificationsBell() {
         type="button"
         aria-label="Notifikace"
         onClick={() => (open ? setOpen(false) : void openPanel())}
-        className="relative px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors text-sm"
+        className="motion-press relative px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors text-sm"
       >
         <span className="select-none">🔔</span>
         {unread > 0 && (
-          <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-200">
+          <span
+            // key se mění jen při NÁRŮSTU unread → puls se přehraje, ne při každém obnovení
+            key={unreadIncrease}
+            className={`ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-200 ${unreadIncrease > 0 ? "motion-pulse" : ""}`}
+          >
             {unread}
           </span>
         )}

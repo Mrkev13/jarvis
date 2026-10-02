@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { staggerStyle, useNewIds } from "@/lib/motion";
 
 type FinanceSummary = {
   income: number;
@@ -45,6 +47,11 @@ function formatDate(value?: string) {
 export default function FinancePage() {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  // Nově přidané transakce krátce zvýraznit (souhrn a seznam se načítají spolu → summary = ready).
+  const newTxIds = useNewIds(
+    transactions.map((tx) => tx.id),
+    summary !== null,
+  );
 
   const [formType, setFormType] = useState<FormType>(null);
   const [form, setForm] = useState({
@@ -155,15 +162,15 @@ export default function FinancePage() {
 
       {/* ===== SUMMARY CARDS ===== */}
       <section id="summary">
-        <div className="bg-gradient-to-br from-zinc-900 to-zinc-900/40 border border-zinc-800 rounded-3xl p-5 md:p-8 mb-4 md:mb-6">
+        <div className="motion-card bg-gradient-to-br from-zinc-900 to-zinc-900/40 border border-zinc-800 rounded-3xl p-5 md:p-8 mb-4 md:mb-6">
           <div className="text-sm text-zinc-400">Current balance</div>
           <div className="text-3xl md:text-5xl font-bold mt-2">
-            {formatNumber(summary?.balance)} Kč
+            <AnimatedNumber value={summary?.balance} format={formatNumber} /> Kč
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6">
+          <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6" style={staggerStyle(1)}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm text-zinc-400">Income</div>
               <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-green-500/15 text-green-400 border-green-500/30">
@@ -171,11 +178,11 @@ export default function FinancePage() {
               </span>
             </div>
             <div className="text-2xl md:text-3xl font-semibold text-green-400">
-              {formatNumber(summary?.income)} Kč
+              <AnimatedNumber value={summary?.income} format={formatNumber} /> Kč
             </div>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6">
+          <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6" style={staggerStyle(2)}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm text-zinc-400">Expenses</div>
               <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-red-500/15 text-red-400 border-red-500/30">
@@ -183,7 +190,7 @@ export default function FinancePage() {
               </span>
             </div>
             <div className="text-2xl md:text-3xl font-semibold text-red-400">
-              {formatNumber(summary?.expenses)} Kč
+              <AnimatedNumber value={summary?.expenses} format={formatNumber} /> Kč
             </div>
           </div>
         </div>
@@ -300,7 +307,7 @@ export default function FinancePage() {
                 return (
                   <div
                     key={tx.id}
-                    className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
+                    className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-4 ${newTxIds.has(String(tx.id)) ? "motion-highlight" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
@@ -368,7 +375,7 @@ export default function FinancePage() {
                       return (
                         <tr
                           key={tx.id}
-                          className="border-b border-zinc-800/70 last:border-0 hover:bg-zinc-800/30"
+                          className={`border-b border-zinc-800/70 last:border-0 hover:bg-zinc-800/30 ${newTxIds.has(String(tx.id)) ? "motion-highlight-row" : ""}`}
                         >
                           <td className="px-5 py-4">
                             <div className="font-medium">

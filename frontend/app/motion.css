@@ -1,0 +1,275 @@
+/*
+ * Standa Hub – motion system.
+ *
+ * Jediné místo pro časování a pohyb. Komponenty používají jen třídy `motion-*`
+ * (příp. tokeny přes var()). Hodnoty potřebné v JS (časovače, tween čísel) zrcadlí
+ * `lib/motion.ts` → při změně upravit obě místa.
+ *
+ * Pravidla:
+ *  - animuje se jen transform / opacity / box-shadow → žádný layout shift,
+ *  - vstupní animace mají fill-mode `backwards` (po doběhnutí nepřebíjí hover transform),
+ *  - nic neblokuje interakci (prvky jsou klikací i během animace),
+ *  - opakované animace jsou omezené (počet iterací) nebo vázané na stav (executing, aktivní streak),
+ *  - prefers-reduced-motion vypíná všechny nepodstatné animace a transformace.
+ */
+
+:root {
+  /* Trvání */
+  --motion-fast: 140ms;
+  --motion-normal: 240ms;
+  --motion-slow: 700ms;
+  --motion-highlight-duration: 1600ms;
+  --motion-attention-duration: 1800ms;
+  --motion-shimmer-duration: 1200ms;
+  --motion-flame-duration: 1400ms;
+
+  /* Easing */
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);      /* zpomalení – vstupy, hover */
+  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* symetrické – pulzy */
+
+  /* Vzdálenosti a měřítka */
+  --motion-enter-distance: 6px;
+  --motion-hover-lift: -2px;
+  --motion-press-scale: 0.97;
+  --motion-pop-scale: 1.04;
+  --motion-pulse-scale: 1.22;
+  --motion-shake-distance: 4px;
+  --motion-done-shift: 4px;
+  --motion-stagger: 45ms;
+
+  /* Barvy efektů (shadow / highlight) */
+  --motion-success-rgb: 16 185 129;   /* emerald-500 */
+  --motion-danger-rgb: 248 113 113;   /* red-400 */
+  --motion-highlight-rgb: 52 211 153; /* emerald-400 */
+}
+
+/* ===== Keyframes ===== */
+
+@keyframes motion-enter {
+  from { opacity: 0; transform: translateY(var(--motion-enter-distance)); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes motion-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes motion-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(var(--motion-pop-scale)); }
+  100% { transform: scale(1); }
+}
+
+@keyframes motion-success-glow {
+  from { box-shadow: 0 0 0 0 rgb(var(--motion-success-rgb) / 0.55); }
+  to   { box-shadow: 0 0 0 10px rgb(var(--motion-success-rgb) / 0); }
+}
+
+@keyframes motion-badge-pulse {
+  0%   { transform: scale(1);                         box-shadow: 0 0 0 0 rgb(var(--motion-danger-rgb) / 0.6); }
+  35%  { transform: scale(var(--motion-pulse-scale)); }
+  100% { transform: scale(1);                         box-shadow: 0 0 0 8px rgb(var(--motion-danger-rgb) / 0); }
+}
+
+@keyframes motion-highlight {
+  0%   { box-shadow: inset 0 0 0 999px rgb(var(--motion-highlight-rgb) / 0.12), 0 0 0 1px rgb(var(--motion-highlight-rgb) / 0.55); }
+  100% { box-shadow: inset 0 0 0 999px rgb(var(--motion-highlight-rgb) / 0),    0 0 0 1px rgb(var(--motion-highlight-rgb) / 0); }
+}
+
+/* Varianta pro řádky tabulky – <tr> nevykresluje box-shadow, animuje se pozadí. */
+@keyframes motion-highlight-row {
+  0%   { background-color: rgb(var(--motion-highlight-rgb) / 0.14); }
+  100% { background-color: rgb(var(--motion-highlight-rgb) / 0); }
+}
+
+@keyframes motion-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(calc(var(--motion-shake-distance) * -1)); }
+  40%      { transform: translateX(var(--motion-shake-distance)); }
+  60%      { transform: translateX(calc(var(--motion-shake-distance) * -0.5)); }
+  80%      { transform: translateX(calc(var(--motion-shake-distance) * 0.5)); }
+}
+
+@keyframes motion-attention {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--motion-danger-rgb) / 0); }
+  50%      { box-shadow: 0 0 0 3px rgb(var(--motion-danger-rgb) / 0.22); }
+}
+
+@keyframes motion-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+@keyframes motion-fade-out {
+  0%, 70% { opacity: 1; }
+  100%    { opacity: 0; }
+}
+
+@keyframes motion-flame-flicker {
+  0%, 100% { transform: scale(1) rotate(-2deg); opacity: 0.95; }
+  30%      { transform: scale(1.05) rotate(2deg); opacity: 1; }
+  60%      { transform: scale(0.97) rotate(-1deg); opacity: 0.9; }
+}
+
+@keyframes motion-flame-burst {
+  0%   { transform: scale(1);    filter: drop-shadow(0 0 0 rgb(251 146 60 / 0)); }
+  40%  { transform: scale(1.35); filter: drop-shadow(0 0 10px rgb(251 146 60 / 0.9)); }
+  100% { transform: scale(1);    filter: drop-shadow(0 0 0 rgb(251 146 60 / 0)); }
+}
+
+/* ===== Primitiva ===== */
+
+/* Vstup stránky (obal obsahu v layoutu, klíčovaný cestou). */
+.motion-page {
+  animation: motion-enter var(--motion-normal) var(--motion-ease) backwards;
+}
+
+/* Vstup karty; postupné zpoždění přes inline proměnnou --motion-i (index karty). */
+.motion-card {
+  animation: motion-enter var(--motion-normal) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-i, 0) * var(--motion-stagger));
+}
+
+/*
+ * motion.css je mimo Tailwind vrstvy → jeho `transition-property` přebíjí `transition-colors`.
+ * Interaktivní primitiva proto přechází i barvy, aby hover pozadí/okraje zůstaly plynulé.
+ */
+.motion-hover-lift,
+.motion-press {
+  transition-property: transform, box-shadow, background-color, border-color, color, opacity;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--motion-ease);
+}
+
+/* Jemné zvednutí jen u klikacích prvků a jen na zařízeních s hoverem (ne mobil). */
+@media (hover: hover) {
+  .motion-hover-lift:hover {
+    transform: translateY(var(--motion-hover-lift));
+    box-shadow: 0 10px 24px -14px rgb(0 0 0 / 0.7);
+  }
+}
+
+/* Stisk tlačítka – okamžitá odezva, nic neblokuje. */
+.motion-press:active:not(:disabled) {
+  transform: scale(var(--motion-press-scale));
+}
+
+/* Progress bar: první vykreslení „naroste" zleva, změny šířky plynule. */
+.motion-progress {
+  transform-origin: left center;
+  animation: motion-grow var(--motion-slow) var(--motion-ease) backwards;
+  transition: width var(--motion-slow) var(--motion-ease);
+}
+
+/* Úspěch (potvrzení, uložení) – krátký „pop". */
+.motion-success {
+  animation: motion-pop var(--motion-normal) var(--motion-ease);
+}
+
+/* Dokončení (100 %) – pop + jeden zelený záblesk. */
+.motion-complete {
+  animation:
+    motion-pop var(--motion-normal) var(--motion-ease),
+    motion-success-glow var(--motion-slow) ease-out;
+}
+
+/* Upozornění – jeden puls (znovu spustit = nový key / znovu přidat třídu). */
+.motion-pulse {
+  animation: motion-badge-pulse var(--motion-slow) var(--motion-ease-in-out);
+}
+
+/* Nově přidaný řádek – krátké zvýraznění. */
+.motion-highlight {
+  animation: motion-highlight var(--motion-highlight-duration) ease-out;
+}
+
+.motion-highlight-row {
+  animation: motion-highlight-row var(--motion-highlight-duration) ease-out;
+}
+
+/* Chyba – krátké zatřesení. */
+.motion-shake {
+  animation: motion-shake calc(var(--motion-normal) * 1.5) var(--motion-ease-in-out);
+}
+
+/* Po termínu – 3 jemné pulzy, pak klid (žádná trvalá animace). */
+.motion-attention {
+  animation: motion-attention var(--motion-attention-duration) var(--motion-ease-in-out) 3;
+}
+
+/* Hotová položka – mírně ztlumená a posunutá; plynulý přechod při změně stavu. */
+.motion-done-transition {
+  transition:
+    opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease);
+}
+.motion-done {
+  opacity: 0.6;
+  transform: translateX(var(--motion-done-shift));
+}
+
+/* Probíhající akce – lesk přes prvek (prvek musí mít relative + overflow-hidden). */
+.motion-executing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.07) 50%, transparent 65%);
+  animation: motion-shimmer var(--motion-shimmer-duration) linear infinite;
+}
+
+/* Dočasná stavová karta (úspěch / zrušeno), která po chvíli zmizí; neinteraktivní. */
+.motion-outcome {
+  pointer-events: none;
+  animation:
+    motion-pop var(--motion-normal) var(--motion-ease),
+    motion-fade-out var(--motion-highlight-duration) ease-in forwards;
+}
+
+/* Streak plamen */
+.motion-flame {
+  display: inline-block;
+  transform-origin: 50% 85%;
+}
+.motion-flame-active {
+  animation: motion-flame-flicker var(--motion-flame-duration) var(--motion-ease-in-out) infinite;
+}
+.motion-flame-milestone {
+  animation:
+    motion-flame-burst var(--motion-slow) var(--motion-ease) 2,
+    motion-flame-flicker var(--motion-flame-duration) var(--motion-ease-in-out) calc(var(--motion-slow) * 2) infinite;
+}
+
+/* ===== Omezený pohyb ===== */
+@media (prefers-reduced-motion: reduce) {
+  .motion-page,
+  .motion-card,
+  .motion-progress,
+  .motion-success,
+  .motion-complete,
+  .motion-pulse,
+  .motion-highlight,
+  .motion-highlight-row,
+  .motion-shake,
+  .motion-attention,
+  .motion-flame-active,
+  .motion-flame-milestone,
+  .motion-executing::after {
+    animation: none !important;
+  }
+  /* Stavová karta zůstane krátce viditelná bez pohybu (informace se neztratí). */
+  .motion-outcome {
+    animation: motion-fade-out var(--motion-highlight-duration) step-end forwards !important;
+  }
+  /* Barvy se mění dál (nejde o pohyb), jen bez transformací a bez plynulé šířky/posunu. */
+  .motion-progress,
+  .motion-done-transition {
+    transition: none !important;
+  }
+  .motion-hover-lift:hover,
+  .motion-press:active,
+  .motion-done {
+    transform: none !important;
+  }
+}
