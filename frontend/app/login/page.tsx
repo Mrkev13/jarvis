@@ -1,14 +1,20 @@
 "use client";
 
 import { useState, FormEvent, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { safeNextPath } from "@/lib/safeNext";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+function goTo(path: string): void {
+  // Full-page navigace: client router cache drží prefetch odpovědi z doby před přihlášením
+  // (middleware je přesměroval na /login), router.replace by je použil a uživatel by zůstal na loginu.
+  window.location.replace(path);
+}
+
 function LoginInner() {
-  const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") || "/";
+  const next = safeNextPath(search.get("next"));
 
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -27,12 +33,12 @@ function LoginInner() {
           if (b.auth_disabled) {
             setAuthDisabled(true);
           } else if (b.valid) {
-            router.replace(next);
+            goTo(next);
           }
         }
       } catch {}
     })();
-  }, [next, router]);
+  }, [next]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -47,7 +53,7 @@ function LoginInner() {
       });
       const b = await r.json();
       if (b.ok) {
-        router.replace(next);
+        goTo(next);
         return;
       }
       setErr(b.error || "Neplatný PIN");
@@ -72,7 +78,7 @@ function LoginInner() {
           </p>
           <button
             className="w-full bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded"
-            onClick={() => router.replace(next)}
+            onClick={() => goTo(next)}
           >
             Pokračovat → {next === "/" ? "Dashboard" : next}
           </button>
