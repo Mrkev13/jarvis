@@ -3,7 +3,8 @@
 ## 1. Stack a celková architektura
 
 - **Backend**: FastAPI + SQLAlchemy 2.x (declarative Base v `models.py`) + `database.py` (SessionLocal / engine).
-- **DB**: Primárně Postgres; SQLite (přes `DATABASE_URL`) podporováno pro testy / offline fallback. Žádné runtime `ALTER TABLE` – migrace řízeny **Alembic** (viz kapitola 3).
+- **DB**: Primárně Postgres; SQLite (přes `DATABASE_URL`) podporováno pro testy / offline fallback. Žádné runtime `ALTER TABLE` ani `create_all` – schéma spravuje výhradně **Alembic** (viz kapitola 3).
+- **Závislosti**: `requirements.txt` je pinnutý na ověřené verze (vč. `tzdata` pro `zoneinfo` na Windows). Groq se volá přes balíček `openai` (OpenAI-kompatibilní API).
 - **Frontend**: Next.js 16 App Router (TypeScript) + Tailwind. Port `3000` běží samostatně, komunikuje s BE přes `NEXT_PUBLIC_API_URL` (typicky `http://…:8000`).
 - **Spouštění BE ( produkce )**:
   ```
@@ -68,41 +69,73 @@ Pokud insert ActivityLog selže (např. UNIQUE constraint na `dedupe_key`), vyho
 
 ---
 
-## 3. Alembic migrace (6 revizí)
+## 3. Alembic migrace (7 revizí)
 
-### 3.1 Pořadí revizí (odpovídá skutečnému vývoji, žádné budoucí tabulky v baseline)
+Alembic je **jediný vlastník schématu**. `Base.metadata.create_all` se v produkčním startu nevolá
+(používají ho jen unit testy na in-memory SQLite).
+
+### 3.1 Pořadí revizí
 
 | Soubor (v `backend/alembic/versions/`) | Tabulky / účel                                                      |
 |----------------------------------------|---------------------------------------------------------------------|
-| `0001_baseline_existing_schema.py`     | 15 původních tabulek (BEZ activity, pending, backup, auth)         |
-| `0002_activity_log.py`                 | `activity_logs` (10 sloupců, 2 indexy, UNIQUE dedupe_key)          |
+| `0001_initial_baseline.py`             | 15 původních tabulek (BEZ activity, pending, backup, auth)         |
+| `0002_activity_log.py`                 | `activity_logs` (10 sloupců, `ix_activity_dedupe_key` UNIQUE)      |
 | `0003_pending_actions.py`              | `pending_actions` (6 sloupců, FSM index `ix_pending_status_created`) |
-| `0004_goals_sources_noop.py`           | Marker no-op (změny v goal source logic jsou čistě Python, DB nemění) |
-| `0005_backup_log.py`                   | `backup_logs` (10 sloupců, index `ix_backup_started_at`)           |
-| `0006_auth_sessions.py`                | `auth_sessions` (8 sloupců, UNIQUE `ix_auth_token_hash`)           |
+| `0004_goals_sources.py`                | Marker no-op (změny v goal source logic jsou čistě Python, DB nemění) |
+| `0005_backup_log.py`                   | `backup_logs` (10 sloupců)                                          |
+| `0006_auth_sessions.py`                | `auth_sessions` (8 sloupců)                                         |
+| `0007_reconcile_schema_drift.py`       | Sjednocení názvů/existence indexů a NOT NULL s `models.py` (viz 3.4) |
 
-### 3.2 Startup upgrade
+### 3.2 Startup (FastAPI lifespan)
 
-`main.py` startup sekvence:
+Při **importu** `main.py` se na DB nesahá. Vše běží v `lifespan` při startu aplikace:
 
 ```
-Base.metadata.create_all(engine)
-  → RUN_ALEMBIC_UPGRADE_AT_STARTUP ? command.upgrade(cfg, "head") : warning
-  → Pending recovery (expired + executing>15min → failed)
-  → SCHEDULER_ENABLED ? start_scheduler()
+lifespan:
+  RUN_ALEMBIC_UPGRADE_AT_STARTUP (default true)
+      ? run_migrations()  → alembic upgrade head   (chyba = FATÁLNÍ, server nenastartuje)
+      : jen log – schéma musí být na head ručně (alembic upgrade head)
+  → _seed_default_subjects()         (jen pokud tabulka subjects je prázdná)
+  → _recover_pending_actions()       (viz 4.3)
+  → start_scheduler()                (jen pokud SCHEDULER_ENABLED=true)
+  … aplikace běží …
+  shutdown → stop_scheduler()
 ```
 
-Pokud Alembic upgrade selže (např. importní chyba cesty), **NENÍ to fatální** – pokračuje se (graceful degradation + warning log).
+`run_migrations()` používá absolutní cesty (`script_location`, `version_locations`), funguje z libovolného cwd.
+`alembic/env.py` volá `fileConfig(..., disable_existing_loggers=False)`, aby upgrade uvnitř uvicornu nevypnul jeho loggery.
 
-### 3.3 CLI (ruční spouštění, produkce)
+**Pozor – žádný `alembic/__init__.py`.** Složka `backend/alembic/` nesmí být Python balíček: při startu
+z `backend/` (`python -m uvicorn`) by zastínila knihovnu `alembic` (`ModuleNotFoundError: alembic.config`).
+Hlídá to test `test_alembic_library_importable_from_backend_dir`.
+
+### 3.3 CLI (ruční spouštění)
 
 ```
 cd backend
-export PYTHONPATH="$(pwd):$PYTHONPATH"
 alembic -c alembic.ini current
 alembic -c alembic.ini upgrade head
 alembic -c alembic.ini downgrade -1
 ```
+
+(`alembic.ini` má `prepend_sys_path = .`, `env.py` bere `DATABASE_URL` z prostředí / `.env`.)
+
+### 3.4 Schema drift (0007) a regresní testy
+
+Produkční PostgreSQL byla původně vytvořena přes `create_all` (bez `alembic_version`) a před Roadmap 3.0
+stampnuta na `0006_auth_sessions`. Její indexy / NOT NULL se lišily od migrací i od modelů. `0007`:
+
+- se řídí aktuálním stavem DB (inspector) → idempotentní pro čistou DB (0001→0007) i stampnutou produkci,
+- **nejdřív zkontroluje NULL** ve sloupcích, které mají být NOT NULL; při nálezu migraci přeruší s výpisem
+  (žádné vymýšlení hodnot) – oprav data a spusť znovu,
+- downgrade vrací tvar dle řetězce 0001→0006 (ne původní nekonzistentní stav create_all DB).
+
+Regresní testy:
+- `SchemaDriftTestCase.test_head_matches_models` – čistá SQLite na head == `models.py` (`compare_metadata == []`).
+  **Každá nová migrace musí tento test udržet zelený.**
+- `tests/test_migration_postgres.py` – opt-in proti skutečnému PostgreSQL; spouští se jen s
+  `TEST_POSTGRES_URL` na jednorázovou DB s `test` v názvu (prázdná DB i obnovená kopie produkce z `pg_dump`).
+  Novou migraci vždy nejdřív ověř na obnovené kopii, teprve pak na produkci.
 
 ---
 
@@ -136,10 +169,14 @@ Kvůli `rowcount==1` lze záznam potvrdit **přesně jednou**, i když uživatel
 
 ### 4.3 Startup recovery
 
-Při startu backendu (hned po Alembic upgrade):
+Při startu backendu (v lifespan, hned po Alembic upgrade) – `main._recover_pending_actions()`:
 
 1. `status="pending" AND expires_at < now()` → `status="expired"`
-2. `status="executing" AND executed_at < now()-15 min` → `status="failed"`, `error_message="executing timeout, restart recovery"`
+2. `status="executing" AND created_at < now()-15 min` → `status="failed"`
+
+Pozn.: tabulka `pending_actions` zatím **nemá** sloupce `executed_at` / `error_message`, proto recovery
+používá `created_at` (a ukázka v 4.2 s `executed_at` je cílový stav). Doplnění sloupců a přechod na
+`executed_at` je naplánován v Roadmap 3.0 fázi B1.
 
 ### 4.4 JSON shape zpětná kompatibilita
 
@@ -253,11 +290,16 @@ Při startu backendu (hned po Alembic upgrade):
   - Fetch selhalo z důvodu BE downtime → lenient `next()` (BE si pořád ověří Depends).
 - Catch chyb: `catch { next() }`.
 
-### 8.2 Vrstva 2 – BE (FastAPI Depends)
+### 8.2 Vrstva 2 – BE (globální FastAPI dependency)
 
-- `require_auth(request) -> AuthSession | None` dependece injektována do citlivých endpointů (Finance CRUD, Work POST, AI write confirm, …).
-- 401 JSON pokud session cookie chybí / neplatná / vypršelá.
-- AUTH_PIN_HASH prázdný → **graceful degradation, auth je vypnutý** (vrací rovnou None povolit).
+- `require_auth` je **globální** dependency (`FastAPI(dependencies=[Depends(require_auth)])`) → platí pro všechny routy,
+  i pro budoucí `APIRouter`y přidané přes `include_router`.
+- Allowlist bez session: `AUTH_PUBLIC_PATHS = {"/", "/auth/login", "/auth/logout", "/auth/session/validate"}`.
+- 401 JSON pokud session cookie chybí / neplatná / vypršelá / revokovaná.
+- AUTH_PIN_HASH prázdný → **graceful degradation, auth je vypnutý**.
+- FE posílá cookie přes `lib/api.ts → apiFetch()` (`credentials: "include"`, na 401 redirect na `/login?next=…`).
+  FE otevírej na stejném hostu jako `NEXT_PUBLIC_API_URL`, jinak je cookie cross-site a neodejde.
+- State-changing endpointy jsou POST/PATCH/DELETE (např. `POST /ai/reject/{id}`; GET → 405).
 
 ### 8.3 Pin hash + token storage
 
@@ -308,4 +350,10 @@ print(_hash_pin("123456"))
 ## 10. Související artefakty
 
 - Spec + tasks (schválené REV.2): `.trae/specs/roadmap-7bodu/spec.md`, `.trae/specs/roadmap-7bodu/tasks.md`.
-- Testy: `backend/tests/test_activity_log.py` (10), `test_alembic_migration.py` (2), `test_pending_persistent.py` (5), `test_goals_automatic_v2.py` (3), `test_scheduler.py` (3), `test_backup.py` (3), `test_auth.py` (6). Spustit: `python -m unittest discover -s backend/tests -p "test_*.py"`.
+- Testy: `python -m unittest discover -s backend/tests -p "test_*.py"` (z kořene repa). Klíčové soubory:
+  `test_alembic_migration.py` (migrace, drift guard, lifespan startup), `test_migration_postgres.py` (opt-in PG),
+  `test_auth.py` + `test_auth_enforcement.py`, `test_pending_persistent.py`, `test_ai_read_tool_args.py`,
+  `test_backup.py`.
+- Testy importují modul s `os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")` **před** importem
+  backendu – nikdy nesahají na produkční DB z `.env`.
+

@@ -399,7 +399,8 @@ class ActivityLog(Base):
     summary = Column(String(500), nullable=False)
     delta_json = Column(Text, nullable=True)
     user_context = Column(String(100), nullable=True)
-    dedupe_key = Column(String(180), nullable=True, unique=True)
+    # Unikátnost hlídá výhradně ix_activity_dedupe_key (bez duplicitního column UNIQUE).
+    dedupe_key = Column(String(180), nullable=True)
 
 
 Index("ix_activity_area_timestamp", ActivityLog.area, ActivityLog.timestamp.desc())

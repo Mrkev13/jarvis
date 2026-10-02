@@ -70,7 +70,9 @@ def _make_cfg_for_memory_engine(engine) -> AlembicCfg:
     return cfg
 
 
-class AlembicMigrationTestCase(unittest.TestCase):
+class _TempSqliteAlembicMixin:
+    """Dočasná souborová SQLite DB + Alembic config (sdílí migrační test třídy)."""
+
     def setUp(self):
         self._tmpfile = tempfile.NamedTemporaryFile(
             suffix=".db", delete=False, dir=str(BACKEND_DIR)
@@ -95,6 +97,8 @@ class AlembicMigrationTestCase(unittest.TestCase):
         except Exception:
             pass
 
+
+class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
     def test_01_baseline_applies_up_down(self):
         alembic_cmd.stamp(self.cfg, "base")
 
@@ -160,6 +164,69 @@ class AlembicMigrationTestCase(unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
         self.assertEqual(tables_second, tables_first)
+
+
+class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
+    """Migration head musí přesně odpovídat SQLAlchemy modelům (0007+)."""
+
+    AFFECTED_TABLES = (
+        "finance_transactions", "goals", "memories", "mff_characters",
+        "auth_sessions", "backup_logs", "pending_actions", "activity_logs",
+    )
+
+    def _schema_snapshot(self) -> dict:
+        from sqlalchemy import inspect
+        insp = inspect(self.conn)
+        snap = {}
+        for t in self.AFFECTED_TABLES:
+            snap[t] = {
+                "columns": sorted((c["name"], c["nullable"]) for c in insp.get_columns(t)),
+                "indexes": sorted(
+                    (ix["name"], tuple(ix["column_names"]), bool(ix["unique"]))
+                    for ix in insp.get_indexes(t)
+                ),
+                "uniques": sorted(tuple(u["column_names"]) for u in insp.get_unique_constraints(t)),
+            }
+        return snap
+
+    def test_head_matches_models(self):
+        from alembic.migration import MigrationContext
+        from alembic.autogenerate import compare_metadata
+        from database import Base
+        import models  # noqa: F401  (registruje tabulky do metadata)
+
+        alembic_cmd.upgrade(self.cfg, "head")
+        diffs = compare_metadata(MigrationContext.configure(self.conn), Base.metadata)
+        self.assertEqual(diffs, [], msg=f"schema drift mezi migracemi a models.py: {diffs}")
+
+    def test_0007_aborts_on_null_instead_of_inventing_values(self):
+        alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
+        self.conn.execute(text(
+            "INSERT INTO auth_sessions (token_hash, created_at, expires_at, revoked) "
+            "VALUES ('h1', '2026-10-01 10:00:00', '2026-10-02 10:00:00', NULL)"
+        ))
+        self.conn.commit()
+
+        with self.assertRaises(RuntimeError) as ctx:
+            alembic_cmd.upgrade(self.cfg, "head")
+        self.assertIn("auth_sessions.revoked: 1 NULL", str(ctx.exception))
+
+        version = self.conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        self.assertEqual(version, "0006_auth_sessions")
+        still_null = self.conn.execute(
+            text("SELECT COUNT(*) FROM auth_sessions WHERE revoked IS NULL")
+        ).scalar()
+        self.assertEqual(still_null, 1)
+
+    def test_0007_downgrade_restores_0006_shape(self):
+        alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
+        before = self._schema_snapshot()
+
+        alembic_cmd.upgrade(self.cfg, "0007_reconcile_schema_drift")
+        self.assertNotEqual(self._schema_snapshot(), before)
+
+        alembic_cmd.downgrade(self.cfg, "0006_auth_sessions")
+        self.assertEqual(self._schema_snapshot(), before)
 
 
 class StartupSchemaTestCase(unittest.TestCase):

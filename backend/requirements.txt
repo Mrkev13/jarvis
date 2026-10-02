@@ -1,12 +1,15 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-python-dotenv
-requests
-psycopg2-binary
-alembic
-apscheduler
-bcrypt
-httpx
-openai
-groq
+# Přímé závislosti backendu, pinnuté na ověřené verze (backend testy + live start).
+# Groq API se volá přes OpenAI-kompatibilní SDK (balíček openai, base_url Groq).
+fastapi==0.120.2
+uvicorn[standard]==0.38.0
+sqlalchemy==2.0.52
+python-dotenv==1.2.3
+requests==2.32.3
+psycopg2-binary==2.9.13
+alembic==1.20.0
+apscheduler==3.11.3
+bcrypt==5.0.0
+httpx==0.28.1
+openai==3.11.0
+# IANA časová pásma pro zoneinfo (Europe/Prague) – Windows nemá systémovou tz databázi.
+tzdata==2025.3
