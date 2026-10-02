@@ -377,3 +377,25 @@ print(_hash_pin("123456"))
   kalendářní měsíc (transakce 1. 10. v 00:30 Praha = 30. 9. 22:30 UTC patří do října).
 - **Zálohy**: `BACKUP_HOUR_OF_DAY` = pražská hodina.
 - Pozn.: `WorkSession.date`, `Assignment.due_date` apod. jsou čisté `Date` (lokální kalendářní data) – bez konverze.
+
+---
+
+## 12. LLM konfigurace a rozpočet tokenů (`llm_config.py`, `llm_budget.py`)
+
+- **Konfigurace** (`LLM_SETTINGS`, z env / `.env`; prázdné = default): `GROQ_MODEL` (`openai/gpt-oss-120b`),
+  `GROQ_SUMMARY_MODEL` (= `GROQ_MODEL`), `GROQ_BASE_URL`, `AI_MAX_FIXED_TOKENS` (3500),
+  `AI_MAX_CONTEXT_TOKENS` (2500, pro A3/A4). `GROQ_API_KEY` se čte jen při vytvoření klienta v `ai.py`.
+- **Odhad tokenů** (`llm_budget.py`): deterministický, bez tokenizeru – ~4 ASCII znaky / token, ne-ASCII znak 2×.
+  `estimate_fixed_overhead(system_prompt, tools)` = system prompt (vč. A1 data/času) + kompaktní JSON tool schémat.
+- **Groq free tier = 8 000 TPM** a celá fixní režie se posílá v *každém* LLM volání (i v každém tool kole).
+  Proto platí pevný limit **3 500 odhadovaných tokenů**, hlídaný testem
+  `FixedOverheadBudgetTestCase` (všechny dny v týdnu, CET i CEST). Za běhu `ask_ai` jen loguje warning,
+  pokud režie překročí `AI_MAX_FIXED_TOKENS` (request neblokuje).
+- **Pravidla pro tool schémata** (vytvářej přes `ai._tool()`): obecná pravidla (potvrzení zápisu, paměť,
+  nevymýšlení dat) patří do `SYSTEM_PROMPT`, ne do popisů toolů. Popis = krátce *co* tool dělá + jen
+  nezbytné rozlišení. Jména, parametry a `required` musí sedět s Python funkcí (`ToolRegistryTestCase`);
+  READ tooly začínají `get_`, WRITE `add_`/`update_`/`upsert_`/`save_` (prompt je podle jména rozlišuje).
+  Interní `user_context` se LLM nikdy nevystavuje.
+- **Kontrakt s frontendem**: planner JSON blok (` ```json ` + `summary`, `actions[priority, area, title, reason]`)
+  parsuje `frontend/app/ai/page.tsx → tryParseWeeklyPlan`; hlídá `SystemPromptSafetyTestCase`.
+- Přidání dalších toolů nad rozpočet → nejdřív routing toolů (Roadmap 3.0 A5), ne zvyšování limitu.
