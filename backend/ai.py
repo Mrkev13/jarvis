@@ -26,9 +26,18 @@ from activity_service import log_activity, delta_dict
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
+from context_service import CurrentContext, build_current_context
 from llm_budget import estimate_fixed_overhead
 from llm_config import LLM_SETTINGS
-from llm_usage import LLMCallRecord, log_call, log_request_summary, log_retry, ratelimit_remaining_tokens, retry_wait_seconds
+from llm_usage import (
+    LLMCallRecord,
+    log_call,
+    log_request_summary,
+    log_retry,
+    rate_limit_kind,
+    ratelimit_remaining_tokens,
+    retry_wait_seconds,
+)
 from planner_guard import (
     build_evidence,
     find_planner_block,
@@ -48,13 +57,12 @@ client = OpenAI(
 
 
 SYSTEM_PROMPT = """
-You are the AI assistant inside Standa Hub, a personal dashboard for: finances, work sessions, school (subjects, assignments, exams), personal goals, World of Tanks (WoT), Marvel Future Fight (MFF) and long-term user memory.
+You are the AI assistant inside Standa Hub, a personal dashboard: finances, work, school, goals, World of Tanks (WoT), Marvel Future Fight (MFF), long-term memory.
 
 TOOLS
-- READ tools (get_*): call freely, they never change data.
-- WRITE tools (add_*, update_*, upsert_*, save_memory): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
-- Call only the tools a request needs. Do not repeat a call with the same arguments in one request unless the user wants fresh data, it failed, or a result requires it. Greetings / chit-chat: no tools.
-- Tool results are authoritative for current data.
+- READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
+- CURRENT STATE (system message) is live module data: if it answers the question, answer directly. Never re-fetch what it contains; call READ tools only for missing data, all needed ones in one turn. No identical repeated calls.
+- Tool results are authoritative for current data, like CURRENT STATE. RELEVANT MEMORY is context only.
 
 WRITE SAFETY
 - Every write goes through confirmation. Never bypass it.
@@ -71,11 +79,11 @@ DATA RULES
 
 MEMORY
 - Memory = long-term context only: preferences, plans, decisions, routines, constraints.
-- Memory is NOT authoritative for volatile data (balances, transaction totals, XP, work hours, earnings, deadlines, exam dates, goal progress, WoT resources, MFF state) - always use the module READ tool. If memory conflicts with module data, module data wins.
+- Memory is NOT authoritative for volatile data (balances, totals, XP, work hours, earnings, deadlines, exam dates, goal progress, WoT/MFF state) - use CURRENT STATE or a READ tool. If memory conflicts with module data, module data wins.
 - Call save_memory only when the user explicitly wants something remembered ("pamatuj si", "zapamatuj si", "ulož si", "do budoucna chci...") and it is long-term. Never save temporary numbers.
 
 PLANNER (what to do today/this week, priorities, focus, stagnating goals, time split)
-- Read-only. ALWAYS call get_goals AND get_memories first (together), then only the module tools needed, in as few turns as possible.
+- Read-only. Goals and memories come from CURRENT STATE / RELEVANT MEMORY; only if missing call get_goals AND get_memories (together), then only tools for data still missing.
 - Priority order: overdue obligations > hard deadlines within 14 days > exams within 14 days > finance constraints / lagging monthly targets > work commitments / lagging hour targets > high-priority goals under 50 % > medium > low > routine tasks.
 - GROUNDING: project names, amounts, dates, deadlines and targets only if they appear in tool results or the current context. Missing value: omit it, never invent it. Up to 5 actions; fewer grounded actions beat speculative ones.
 - Each action: specific, actionable now (bad: "Více se učit."). No generic filler ("šetři peníze") unless directly supported. WoT/MFF: no speculative mechanics.
@@ -543,6 +551,9 @@ def _run_tool_calls(db, tool_calls):
     return tool_messages, pending_actions
 
 
+DAILY_LIMIT_KINDS = frozenset({"TPD", "RPD"})
+
+
 def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
@@ -584,9 +595,16 @@ def _llm_create_with_retry(
             record = LLMCallRecord(
                 attempt=attempt, latency_ms=_elapsed_ms(started), rate_limited=True,
                 ratelimit_remaining_tokens=ratelimit_remaining_tokens(headers),
+                limit_kind=rate_limit_kind(exc),
             )
             records.append(record)
             log_call(record, log_enabled)
+            if record.limit_kind in DAILY_LIMIT_KINDS:
+                # Denní limit: čekání v řádu sekund nepomůže – neretryovat, říct pravdu.
+                raise RuntimeError(
+                    "AI provider má vyčerpaný denní limit (rate limit tokenů/požadavků za den byl překročen). "
+                    "Zkus to prosím později – limit se průběžně obnovuje."
+                ) from last_exc
             if attempt < attempts:
                 wait_s = retry_wait_seconds(exc, LLM_SETTINGS.retry_max_wait_seconds)
                 log_retry(attempt, attempts, wait_s, "429", log_enabled)
@@ -661,9 +679,29 @@ def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
     return [*round_calls, synthetic]
 
 
-def _finalize_planner_answer(answer: str, evidence_texts: list[str]) -> tuple[str, int]:
-    """Odstraní z planner JSON bloku akce s nepodloženými projekty/částkami/daty/cíli."""
-    result = ground_planner_answer(answer, build_evidence(evidence_texts))
+def _build_context_safely(db, last_user_message: str) -> CurrentContext | None:
+    """CURRENT STATE prefetch; chyba nesmí shodit chat (model si data načte tooly jako dřív)."""
+    try:
+        return build_current_context(
+            db,
+            last_user_message,
+            target_tokens=LLM_SETTINGS.context_target_tokens,
+            max_tokens=LLM_SETTINGS.max_context_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001 - kontext je optimalizace, ne podmínka odpovědi
+        db.rollback()
+        print(f"[ai] WARNING context prefetch selhal ({type(exc).__name__}) – pokračuji bez kontextu")
+        return None
+
+
+def _finalize_planner_answer(
+    answer: str, evidence_texts: list[str], memory_texts: tuple[str, ...] = (),
+) -> tuple[str, int]:
+    """Odstraní z planner JSON bloku akce s nepodloženými projekty/částkami/daty/cíli.
+
+    memory_texts (RELEVANT MEMORY) ověřují jen jména/plány, nikdy čísla – paměť není autorita pro data.
+    """
+    result = ground_planner_answer(answer, build_evidence(evidence_texts, memory_texts))
     return result.answer, result.removed_actions
 
 
@@ -675,6 +713,8 @@ def ask_ai(messages):
     planner_nudged = False
     planner_memories_autoloaded = False
     planner_actions_removed = 0
+    context_tokens = 0
+    context_sections = 0
     try:
         _check_pending_expired(db)
 
@@ -693,10 +733,20 @@ def ask_ai(messages):
             api_messages.append(_message_to_dict(message))
 
         # „Evidence" pro planner grounding: co model v tomto requestu skutečně viděl jako data.
-        evidence_texts = [date_block] + [
-            str(m.get("content") or "") for m in api_messages[1:] if m.get("role") == "user"
-        ]
+        user_texts = [str(m.get("content") or "") for m in api_messages[1:] if m.get("role") == "user"]
+        evidence_texts = [date_block, *user_texts]
+        # Planner pravidla: data, která už nese CURRENT STATE, se počítají jako „načtená".
         called_tools: set[str] = set()
+        memory_evidence: tuple[str, ...] = ()
+
+        context = _build_context_safely(db, user_texts[-1] if user_texts else "")
+        if context is not None:
+            context_tokens, context_sections = context.estimated_tokens, len(context.sections)
+            # Hned za system prompt, před historii – kontext popisuje stav TEĎ.
+            api_messages.insert(1, {"role": "system", "content": context.text})
+            evidence_texts.append(context.text[: len(context.text) - len(context.memory_text)])
+            memory_evidence = (context.memory_text,) if context.memory_text else ()
+            called_tools |= context.covered_tools
         all_pending_actions = []
         MAX_TOOL_ROUNDS = 10
 
@@ -721,7 +771,7 @@ def ask_ai(messages):
                         planner_nudged = True
                         api_messages.append({"role": "system", "content": planner_tools_nudge(missing)})
                         continue
-                    answer, planner_actions_removed = _finalize_planner_answer(answer, evidence_texts)
+                    answer, planner_actions_removed = _finalize_planner_answer(answer, evidence_texts, memory_evidence)
                 return {
                     "answer": answer,
                     "pending_actions": all_pending_actions,
@@ -764,6 +814,7 @@ def ask_ai(messages):
             call_log, tool_rounds, _elapsed_ms(request_started),
             planner_actions_removed=planner_actions_removed, planner_nudged=planner_nudged,
             planner_memories_autoloaded=planner_memories_autoloaded,
+            context_tokens=context_tokens, context_sections=context_sections,
             enabled=LLM_SETTINGS.usage_logging,
         )
         db.close()

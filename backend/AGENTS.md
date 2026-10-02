@@ -384,7 +384,8 @@ print(_hash_pin("123456"))
 
 - **Konfigurace** (`LLM_SETTINGS`, z env / `.env`; prázdné = default): `GROQ_MODEL` (`openai/gpt-oss-120b`),
   `GROQ_SUMMARY_MODEL` (= `GROQ_MODEL`), `GROQ_BASE_URL`, `AI_MAX_FIXED_TOKENS` (3500),
-  `AI_MAX_CONTEXT_TOKENS` (2500, pro A3/A4). `GROQ_API_KEY` se čte jen při vytvoření klienta v `ai.py`.
+  `AI_CONTEXT_TARGET_TOKENS` (500) / `AI_MAX_CONTEXT_TOKENS` (600) pro CURRENT STATE prefetch (kap. 15).
+  Klíč `GROQ_API_KEY` (fallback `OPENAI_API_KEY`) se čte jen při vytvoření klienta v `ai.py`.
 - **Odhad tokenů** (`llm_budget.py`): deterministický, bez tokenizeru – ~4 ASCII znaky / token, ne-ASCII znak 2×.
   `estimate_fixed_overhead(system_prompt, tools)` = system prompt (vč. A1 data/času) + kompaktní JSON tool schémat.
 - **Groq free tier = 8 000 TPM** a celá fixní režie se posílá v *každém* LLM volání (i v každém tool kole).
@@ -417,6 +418,10 @@ print(_hash_pin("123456"))
     `planner_nudged`, `planner_actions_removed`.
 - **Nikdy** se neloguje obsah promptu, zprávy uživatele, argumenty toolů, odpovědi ani klíče
   (hlídá `test_llm_observability.py`).
+- 429 log obsahuje **druh limitu** z Groq zprávy (`limit=TPM|TPD|RPM|RPD`). Denní limity (`TPD`, `RPD`)
+  se **neretryují** – čekání v sekundách nepomůže; uživatel dostane hlášku o denním limitu. Free tier
+  gpt-oss-120b má kromě 8k TPM i denní limit tokenů – opakované ladicí běhy ho umí vyčerpat
+  (`rl_remaining_tokens=8000`, a přesto 429 = typicky TPD).
 
 ---
 
@@ -439,3 +444,33 @@ print(_hash_pin("123456"))
      Obecné rady bez konkrétních hodnot guard neodstraňuje (to řeší jen prompt).
      Nezbude-li žádná akce, JSON blok se nahradí poznámkou (karta se nevykreslí). Testy: `test_planner_grounding.py`.
 - Heuristika je záměrně přísná (raději méně akcí). Výstup pro UI zůstává kontraktem `tryParseWeeklyPlan`.
+
+---
+
+## 15. Server-side context prefetch (A3, `context_service.py`)
+
+**Proč**: model (gpt-oss-120b na Groq) volá **1 tool na kolo** a `parallel_tool_calls=True` to nemění
+(ověřeno reálně: API parametr přijme, ale vrací 1 tool call). Dotazy typu „co mám zítra" tak stály
+3–6 kol × ~3k tokenů → 429 na 8k TPM. A3 proto data **předem načte serverem** a model odpovídá z nich.
+
+- `ask_ai` před prvním LLM voláním zavolá `build_current_context(db, poslední_zpráva)` a vloží výsledek
+  jako **druhou system zprávu** (hned za system prompt, před historii). Chyba prefetch = warning a request
+  pokračuje bez kontextu (model si data načte tooly).
+- **Výběr oblastí** `classify_areas`: deterministická klíčová slova bez diakritiky + jména projektů/tanků z DB.
+  Čas/plán (zítra, dnes, týden, plán, priority, myslet…) → škola + cíle + upozornění; finance → finance + cíle;
+  práce/projekt → práce + finance + cíle; WoT/tank → WoT; „jak jsem na tom/přehled" → škola, upozornění,
+  cíle, práce, finance. Neznámý dotaz → jen datum. Žádné LLM volání.
+- **Obsah** (max 3 položky na sekci, krátké řádky, prázdné = „žádné"): datum/čas, zítra, týden (po–ne);
+  škola po termínu + úkoly a zkoušky na 7 dní (pražské datum); důležitá nepřečtená upozornění; aktivní cíle
+  s progresem; práce tento měsíc + poslední záznam; finance tento měsíc + celková bilance; WoT zdroje + grindy.
+  Připomínky (reminders) zatím neexistují (fáze D).
+- **Paměť** `rank_memories`: jen aktivní; skóre = 3×překryv slov (5znakové kmeny) + 3 za shodu oblasti
+  + importance; recency tiebreak; max 3 řádky po 140 znacích. Pro plánovací/přehledové dotazy i bez překryvu.
+- **Rozpočet**: cíl 500, tvrdé max 600 odhadovaných tokenů (oddělené od fixní režie). Nad cíl se ubírá paměť,
+  nad max sekce od nejméně relevantní (explicitně zmíněné oblasti zůstávají nejdéle). Test: `ContextBudgetTestCase`.
+- **Autorita**: `CURRENT STATE` = živá data (prompt: odpovídej z něj, nenačítej znovu; tooly jen pro chybějící
+  data). `RELEVANT MEMORY` = jen kontext. Pro planner grounding je CURRENT STATE evidence pro čísla/data/jména,
+  paměť **jen pro jména/plány** (`build_evidence(..., name_only_texts)`), nikdy pro čísla.
+- `covered_tools` kontextu se počítají jako „načtené" pro planner pravidla (žádné auto-`get_memories`
+  ani připomínka, pokud cíle/paměť nese kontext).
+- Log souhrnu requestu má `context_tokens` a `context_sections` (počet), nikdy obsah kontextu.

@@ -17,6 +17,8 @@ if not logger.handlers:
 
 _DEFAULT_RETRY_WAIT = 2.5
 _TRY_AGAIN_RE = re.compile(r"try again in ([0-9.]+)(ms|s)", re.I)
+# Groq 429 text: "... on tokens per minute (TPM): Limit 8000 ..." → jen druh limitu (žádný obsah).
+_LIMIT_KIND_RE = re.compile(r"\((TPM|TPD|RPM|RPD|ASH|ASD)\)")
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,13 @@ class LLMCallRecord:
     tool_calls: int = 0
     rate_limited: bool = False
     error_status: int | None = None
+    limit_kind: str | None = None  # TPM / TPD / RPM / RPD z Groq 429 zprávy
+
+
+def rate_limit_kind(exc: Exception) -> str | None:
+    """Druh vyčerpaného limitu z Groq 429 (TPM vs TPD apod.) – rozhoduje, zda má smysl čekat."""
+    m = _LIMIT_KIND_RE.search(str(exc))
+    return m.group(1) if m else None
 
 
 def ratelimit_remaining_tokens(headers) -> str | None:
@@ -62,8 +71,8 @@ def log_call(record: LLMCallRecord, enabled: bool = True) -> None:
         return
     if record.rate_limited:
         logger.warning(
-            "call attempt=%s 429 rate_limited latency_ms=%s rl_remaining_tokens=%s",
-            record.attempt, record.latency_ms, record.ratelimit_remaining_tokens,
+            "call attempt=%s 429 rate_limited limit=%s latency_ms=%s rl_remaining_tokens=%s",
+            record.attempt, record.limit_kind or "?", record.latency_ms, record.ratelimit_remaining_tokens,
         )
     elif record.error_status is not None:
         logger.warning("call attempt=%s api_error status=%s latency_ms=%s", record.attempt, record.error_status, record.latency_ms)
@@ -89,6 +98,8 @@ def log_request_summary(
     planner_actions_removed: int = 0,
     planner_nudged: bool = False,
     planner_memories_autoloaded: bool = False,
+    context_tokens: int = 0,
+    context_sections: int = 0,
     enabled: bool = True,
 ) -> None:
     if not enabled:
@@ -96,10 +107,12 @@ def log_request_summary(
     ok = [r for r in records if not r.rate_limited and r.error_status is None]
     logger.info(
         "request calls=%s tool_rounds=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s "
-        "rate_limited=%s api_errors=%s planner_memories_autoloaded=%s planner_nudged=%s planner_actions_removed=%s",
+        "rate_limited=%s api_errors=%s context_tokens=%s context_sections=%s "
+        "planner_memories_autoloaded=%s planner_nudged=%s planner_actions_removed=%s",
         len(records), tool_rounds,
         sum(r.prompt_tokens or 0 for r in ok), sum(r.completion_tokens or 0 for r in ok),
         sum(r.total_tokens or 0 for r in ok), latency_ms,
         sum(1 for r in records if r.rate_limited), sum(1 for r in records if r.error_status is not None),
+        context_tokens, context_sections,
         planner_memories_autoloaded, planner_nudged, planner_actions_removed,
     )

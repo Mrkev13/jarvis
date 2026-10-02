@@ -43,7 +43,11 @@ def _rate_limit_error(retry_after="2", remaining="0"):
     response = httpx.Response(
         429, headers={"retry-after": retry_after, "x-ratelimit-remaining-tokens": remaining}, request=request,
     )
-    return openai.RateLimitError("Rate limit reached. Please try again in 1.5s.", response=response, body=None)
+    return openai.RateLimitError(
+        "Rate limit reached for model `m` on tokens per minute (TPM): Limit 8000, Used 7000, Requested 2000. "
+        "Please try again in 1.5s.",
+        response=response, body=None,
+    )
 
 
 def _fake_client(script, calls):
@@ -121,7 +125,8 @@ class LLMObservabilityTestCase(unittest.TestCase):
         self.assertEqual(records[0].ratelimit_remaining_tokens, "0")
         self.assertEqual(self.sleeps, [2.3])
         text = "\n".join(logs.output)
-        self.assertIn("429 rate_limited", text)
+        self.assertIn("429 rate_limited limit=TPM", text)
+        self.assertEqual(records[0].limit_kind, "TPM")
         self.assertIn("retry after 429 attempt=1/3 wait_s=2.3", text)
         self._assert_no_content(text)
 
@@ -136,6 +141,25 @@ class LLMObservabilityTestCase(unittest.TestCase):
         self.assertEqual(sum(r.rate_limited for r in records), attempts)
         self.assertEqual(len(self.sleeps), attempts - 1)
         self.assertEqual(sum("429 rate_limited" in line for line in logs.output), attempts)
+
+    def test_daily_limit_is_not_retried_and_reported_as_daily(self):
+        request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+        tpd = openai.RateLimitError(
+            "Rate limit reached for model `m` on tokens per day (TPD): Limit 200000, Used 199500, Requested 2900.",
+            response=httpx.Response(429, headers={"retry-after": "600", "x-ratelimit-remaining-tokens": "8000"},
+                                    request=request),
+            body=None,
+        )
+        records = []
+        with patch.object(ai, "client", _fake_client([tpd], self.calls)), self.assertLogs(LOGGER, "INFO") as logs:
+            with self.assertRaises(RuntimeError) as ctx:
+                ai._llm_create_with_retry([{"role": "user", "content": "x"}], tools=[], call_log=records)
+        self.assertEqual(len(self.calls), 1, msg="denní limit se nesmí retryovat")
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(records[0].limit_kind, "TPD")
+        self.assertIn("denní limit", str(ctx.exception))
+        self.assertIn("překročen", str(ctx.exception))  # /chat podle toho vrací HTTP 429
+        self.assertIn("limit=TPD", "\n".join(logs.output))
 
     def test_retry_wait_prefers_header_then_message_and_is_capped(self):
         self.assertEqual(retry_wait_seconds(_rate_limit_error(retry_after="2"), max_wait=20), 2.3)
