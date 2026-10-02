@@ -3,6 +3,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL, apiFetch } from "@/lib/api";
 import { MOTION } from "@/lib/motion";
+import {
+  confirmActionBody,
+  normalizePendingActions,
+  rejectActionPath,
+  type PendingAction,
+} from "@/lib/pendingActions";
 import PlannerCardRenderer, { type PlannerCard } from "@/components/PlannerCards";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import {
@@ -24,12 +30,6 @@ type Message = {
   content: string;
   createdAt: number;
   plannerCard?: PlannerCard | null;
-};
-
-type PendingAction = {
-  action_id: string;
-  tool: string;
-  arguments: Record<string, unknown>;
 };
 
 type ActionOutcome = {
@@ -988,7 +988,9 @@ export default function AiPage() {
     return conversations.find((c) => c.id === id) ?? null;
   }
 
-  const loadMessages = useCallback(async (conversationId: number) => {
+  // keepPendingActions: obnova téže konverzace hned po /chat nesmí smazat právě
+  // vrácené pending akce (jinak karta k potvrzení zmizí dřív, než ji lze potvrdit).
+  const loadMessages = useCallback(async (conversationId: number, keepPendingActions = false) => {
     setLoadingMessages(true);
     try {
       const response = await apiFetch(`/conversations/${conversationId}/messages`);
@@ -1008,7 +1010,9 @@ export default function AiPage() {
         createdAt: toTs(m.created_at),
       }));
       setHistory(mapped);
-      setPendingActions([]);
+      if (!keepPendingActions) {
+        setPendingActions([]);
+      }
     } finally {
       setLoadingMessages(false);
     }
@@ -1042,7 +1046,7 @@ export default function AiPage() {
     return created.id;
   }, []);
 
-  const loadConversations = useCallback(async (preferId?: number) => {
+  const loadConversations = useCallback(async (preferId?: number, keepPendingActions = false) => {
     setLoadingConversations(true);
     try {
       const response = await apiFetch("/conversations");
@@ -1070,7 +1074,7 @@ export default function AiPage() {
       }
       if (nextId !== null) {
         setActiveConversationId(nextId);
-        await loadMessages(nextId);
+        await loadMessages(nextId, keepPendingActions);
       }
     } catch {
       return;
@@ -1165,7 +1169,8 @@ export default function AiPage() {
       const response = await apiFetch("/actions/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_id: action.action_id }),
+        // Backend vrací pending akci s `id`; /actions/confirm vyžaduje { action_id: <id> }.
+        body: JSON.stringify(confirmActionBody(action)),
       });
 
       if (!response.ok) {
@@ -1237,7 +1242,7 @@ export default function AiPage() {
     }
   }
 
-  function cancelAction(idx: number) {
+  async function cancelAction(idx: number) {
     const action = pendingActions[idx];
     setPendingActions((prev) => prev.filter((_, i) => i !== idx));
     const info = action ? describePendingAction(action) : null;
@@ -1253,6 +1258,25 @@ export default function AiPage() {
       },
     ]);
     void appendLocalAssistantMessageToDb(botText);
+
+    if (!action) return;
+    // Zamítnout i na serveru (stejné id jako potvrzení) – jinak by pending akce zůstala
+    // potvrditelná až do vypršení. 409 = už zpracovaná / vypršelá → není co rušit.
+    try {
+      const response = await apiFetch(rejectActionPath(action), { method: "POST" });
+      if (!response.ok && response.status !== 409) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error(err);
+      const warn =
+        "⚠️ Zrušení se nepodařilo uložit na serveru – akce zůstane nepotvrzená a sama vyprší.";
+      setHistory((h) => [
+        ...h,
+        { id: `a-${Date.now()}`, role: "assistant", content: warn, createdAt: Date.now() },
+      ]);
+      void appendLocalAssistantMessageToDb(warn);
+    }
   }
 
   const sendMessage = useCallback(async () => {
@@ -1353,7 +1377,7 @@ export default function AiPage() {
 
       const data = (await response.json()) as {
         answer: string;
-        pending_actions?: PendingAction[];
+        pending_actions?: unknown;
         planner_result?: PlannerCard | null;
       };
 
@@ -1376,10 +1400,11 @@ export default function AiPage() {
         },
       ]);
 
-      if (Array.isArray(data.pending_actions) && data.pending_actions.length > 0) {
-        setPendingActions(data.pending_actions);
+      const incomingActions = normalizePendingActions(data.pending_actions);
+      if (incomingActions.length > 0) {
+        setPendingActions(incomingActions);
       }
-      void loadConversations(activeConversationId);
+      void loadConversations(activeConversationId ?? undefined, true);
     } catch (err) {
       console.error(err);
       const msg =
