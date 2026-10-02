@@ -565,29 +565,35 @@ def _llm_create_with_retry(
     temperature: float = 0.2,
     max_retries: int | None = None,
     call_log: list[LLMCallRecord] | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
 ):
     """Chat completion s aplikačním retry (SDK retry je vypnuté → každý 429/5xx je vidět v logu).
 
     max_retries = celkový počet pokusů (default LLM_SETTINGS.llm_max_attempts). Po 429 se čeká dle
     hlavičky retry-after / textu „try again in …" (max AI_LLM_RETRY_MAX_WAIT_SECONDS). Každý pokus
-    se zapíše do call_log (jen čísla) a zaloguje bez obsahu zpráv.
+    se zapíše do call_log (jen čísla) a zaloguje bez obsahu zpráv. tools=None → volání bez toolů
+    (např. shrnutí konverzace); model default LLM_SETTINGS.groq_model.
     """
     import openai as _openai
 
     attempts = max_retries or LLM_SETTINGS.llm_max_attempts
     log_enabled = LLM_SETTINGS.usage_logging
     records = call_log if call_log is not None else []
+    request_kwargs: dict = {
+        "model": model or LLM_SETTINGS.groq_model,
+        "messages": api_messages,
+        "temperature": temperature,
+    }
+    if tools:
+        request_kwargs.update(tools=tools, tool_choice=tool_choice)
+    if max_tokens is not None:
+        request_kwargs["max_tokens"] = max_tokens
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         started = time.monotonic()
         try:
-            raw = client.chat.completions.with_raw_response.create(
-                model=LLM_SETTINGS.groq_model,
-                messages=api_messages,
-                tools=tools,
-                tool_choice=tool_choice,
-                temperature=temperature,
-            )
+            raw = client.chat.completions.with_raw_response.create(**request_kwargs)
             response = raw.parse()
         except _openai.RateLimitError as exc:
             last_exc = exc
@@ -703,6 +709,39 @@ def _finalize_planner_answer(
     """
     result = ground_planner_answer(answer, build_evidence(evidence_texts, memory_texts))
     return result.answer, result.removed_actions
+
+
+SUMMARY_SYSTEM_PROMPT = (
+    "Shrň starší část konverzace uživatele s asistentem Standa Hub tak, aby šlo v rozhovoru plynule "
+    "pokračovat. Zapracuj dosavadní shrnutí (pokud je) a nové zprávy do JEDNOHO aktualizovaného shrnutí.\n"
+    "Zachovej: rozhodnutí a preference uživatele vyslovené v konverzaci; nevyřešené úkoly a otevřené otázky; "
+    "důležitá fakta a dohody; odkazy potřebné k navázání (o čem se mluvilo, na co se uživatel odkazuje).\n"
+    "Vynech: small talk, pozdravy, opakování, doslovné formulace, přesná aktuální čísla z modulů "
+    "(finance, hodiny, XP, progres – ta se vždy čtou živě).\n"
+    "Nic nevymýšlej. Česky, stručné odrážky, nejvýše {max_words} slov."
+)
+
+
+def summarize_conversation(previous_summary: str | None, messages: list[dict]) -> str:
+    """Jedno LLM volání (GROQ_SUMMARY_MODEL, bez toolů) → aktualizované shrnutí starší historie."""
+    transcript = "\n".join(
+        f"{'Uživatel' if m.get('role') == 'user' else 'Asistent'}: {m.get('content') or ''}" for m in messages
+    )
+    user_content = (f"Dosavadní shrnutí:\n{previous_summary}\n\n" if previous_summary else "") + (
+        f"Nové starší zprávy k zapracování:\n{transcript}"
+    )
+    max_tokens = LLM_SETTINGS.max_summary_tokens
+    response = _llm_create_with_retry(
+        api_messages=[
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT.format(max_words=max(40, int(max_tokens * 0.6)))},
+            {"role": "user", "content": user_content},
+        ],
+        tools=None,
+        temperature=0.1,
+        model=LLM_SETTINGS.groq_summary_model,
+        max_tokens=max_tokens,
+    )
+    return response.choices[0].message.content or ""
 
 
 def ask_ai(messages):

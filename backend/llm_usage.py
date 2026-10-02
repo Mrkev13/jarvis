@@ -85,6 +85,17 @@ def log_call(record: LLMCallRecord, enabled: bool = True) -> None:
         )
 
 
+def log_history(result, enabled: bool = True) -> None:
+    """Souhrn přípravy historie (A4) – jen počty, nikdy obsah zpráv ani shrnutí."""
+    if enabled:
+        logger.info(
+            "history messages=%s window=%s history_tokens=%s summary_used=%s summary_called=%s "
+            "summary_failed=%s dropped_messages=%s",
+            len(result.messages), result.window_messages, result.history_tokens, result.summary_used,
+            result.summary_called, result.summary_failed, result.dropped_messages,
+        )
+
+
 def log_retry(attempt: int, max_attempts: int, wait_s: float, reason: str, enabled: bool = True) -> None:
     if enabled:
         logger.warning("retry after %s attempt=%s/%s wait_s=%.1f", reason, attempt, max_attempts, wait_s)

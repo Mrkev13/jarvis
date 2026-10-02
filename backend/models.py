@@ -296,6 +296,9 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), default="Nový chat")
+    # A4: shrnutí starší historie + ID poslední zprávy, kterou shrnutí pokrývá.
+    summary = Column(Text, nullable=True)
+    summarized_until_message_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(
