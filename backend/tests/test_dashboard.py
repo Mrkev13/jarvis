@@ -246,7 +246,7 @@ class DashboardTestCase(unittest.TestCase):
         self.db.add(g)
         self.db.commit()
 
-        work = _get_work_with_goal(self.db)
+        work = _get_work_with_goal(self.db, today=today)
         self.assertEqual(work["this_month_hours"], 42.0)
         self.assertIsNotNone(work["goal"])
         self.assertEqual(work["goal"]["title"], "100h měsíčně")
@@ -279,7 +279,7 @@ class DashboardTestCase(unittest.TestCase):
         self.db.add(g)
         self.db.commit()
 
-        fin = _get_finance_with_goal(self.db)
+        fin = _get_finance_with_goal(self.db, today=today)
         self.assertEqual(fin["balance"], 65000.0)
         self.assertEqual(fin["this_month_income"], 50000.0)
         self.assertEqual(fin["this_month_expenses"], 15000.0)

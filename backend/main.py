@@ -1640,8 +1640,8 @@ def _top_active_goals(db, limit: int = 3):
     return enriched[:max(0, int(limit))]
 
 
-def _get_work_with_goal(db):
-    today = date.today()
+def _get_work_with_goal(db, today: date | None = None):
+    today = today or date.today()
     this_month = (today.year, today.month)
     items = db.query(WorkSession).all()
     this_month_hours = 0.0
@@ -1684,11 +1684,11 @@ def _get_work_with_goal(db):
     }
 
 
-def _get_finance_with_goal(db):
+def _get_finance_with_goal(db, today: date | None = None):
     transactions = db.query(FinanceTransaction).all()
     income = 0.0
     expenses = 0.0
-    today = date.today()
+    today = today or date.today()
     this_month = (today.year, today.month)
     this_month_income = 0.0
     this_month_expenses = 0.0
