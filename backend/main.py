@@ -35,6 +35,7 @@ from goal_history_service import ensure_goal_progress_snapshot, compute_goal_pro
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
 from planner_service import generate_plan
 from activity_service import log_activity, delta_dict
+from time_utils import local_month_bounds_utc, today_local
 
 
 PLANNER_MODE_DAILY = "daily"
@@ -1651,7 +1652,7 @@ def _top_active_goals(db, limit: int = 3):
 
 
 def _get_work_with_goal(db, today: date | None = None):
-    today = today or date.today()
+    today = today or today_local()
     this_month = (today.year, today.month)
     items = db.query(WorkSession).all()
     this_month_hours = 0.0
@@ -1698,19 +1699,21 @@ def _get_finance_with_goal(db, today: date | None = None):
     transactions = db.query(FinanceTransaction).all()
     income = 0.0
     expenses = 0.0
-    today = today or date.today()
-    this_month = (today.year, today.month)
+    today = today or today_local()
+    # created_at je naive UTC → porovnání s pražským měsícem převedeným do UTC.
+    month_start_utc, month_end_utc = local_month_bounds_utc(today)
     this_month_income = 0.0
     this_month_expenses = 0.0
     for t in transactions:
         amt = float(t.amount or 0.0)
+        in_this_month = t.created_at is not None and month_start_utc <= t.created_at < month_end_utc
         if (t.transaction_type or "").lower() == "income":
             income += amt
-            if t.created_at and (t.created_at.year, t.created_at.month) == this_month:
+            if in_this_month:
                 this_month_income += amt
         else:
             expenses += amt
-            if t.created_at and (t.created_at.year, t.created_at.month) == this_month:
+            if in_this_month:
                 this_month_expenses += amt
     goal_row = (
         db.query(Goal)

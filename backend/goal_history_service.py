@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import FinanceTransaction, Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam
+from time_utils import local_month_bounds_utc, today_local
 
 
 def _float_equal(a: float | None, b: float | None) -> bool:
@@ -24,7 +25,7 @@ def _is_tier_t4(tier: str | None) -> bool:
 
 
 def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today: date | None = None) -> tuple[float, bool]:
-    d = today or date.today()
+    d = today or today_local()
 
     if source == "work_month_hours":
         month_start = date(d.year, d.month, 1)
@@ -71,28 +72,15 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
         )
         return float(income or 0.0) - float(expenses or 0.0), True
 
-    if source == "finance_month_income":
-        month_start = datetime(d.year, d.month, 1, 0, 0, 0)
-        last_day = calendar.monthrange(d.year, d.month)[1]
-        month_end = datetime(d.year, d.month, last_day, 23, 59, 59)
+    if source in ("finance_month_income", "finance_month_expenses"):
+        # created_at je naive UTC → pražský kalendářní měsíc převedený do UTC, [start, end).
+        month_start_utc, month_end_utc = local_month_bounds_utc(d)
+        kind = "income" if source == "finance_month_income" else "expense"
         amount = (
             db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0))
-            .filter(FinanceTransaction.transaction_type == "income")
-            .filter(FinanceTransaction.created_at >= month_start)
-            .filter(FinanceTransaction.created_at <= month_end)
-            .scalar()
-        )
-        return float(amount or 0.0), True
-
-    if source == "finance_month_expenses":
-        month_start = datetime(d.year, d.month, 1, 0, 0, 0)
-        last_day = calendar.monthrange(d.year, d.month)[1]
-        month_end = datetime(d.year, d.month, last_day, 23, 59, 59)
-        amount = (
-            db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0))
-            .filter(FinanceTransaction.transaction_type == "expense")
-            .filter(FinanceTransaction.created_at >= month_start)
-            .filter(FinanceTransaction.created_at <= month_end)
+            .filter(FinanceTransaction.transaction_type == kind)
+            .filter(FinanceTransaction.created_at >= month_start_utc)
+            .filter(FinanceTransaction.created_at < month_end_utc)
             .scalar()
         )
         return float(amount or 0.0), True

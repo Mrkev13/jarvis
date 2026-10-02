@@ -24,6 +24,7 @@ from tools import save_memory
 from activity_service import log_activity, delta_dict
 from database import SessionLocal
 from models import PendingAction
+from time_utils import now_local
 
 load_dotenv()
 
@@ -442,6 +443,22 @@ The user communicates primarily in Czech.
 
 Reply in Czech unless the user switches to another language.
 """
+
+_CZECH_WEEKDAYS = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
+
+
+def build_system_prompt(now: datetime | None = None) -> str:
+    """SYSTEM_PROMPT + skutečné pražské datum/čas, aby „dnes/zítra/včera" neodhadoval model."""
+    local = now if now is not None else now_local()
+    weekday = _CZECH_WEEKDAYS[local.weekday()]
+    return (
+        f"{SYSTEM_PROMPT}\n"
+        "================================================================================\n"
+        "CURRENT APPLICATION DATE AND TIME (Europe/Prague)\n\n"
+        f"CURRENT APPLICATION DATE: {local.date().isoformat()} ({weekday})\n"
+        f"Current local time: {local:%H:%M} {local.tzname()}\n"
+        "Use this date for 'dnes', 'zítra', 'včera' and every other relative date.\n"
+    )
 
 
 READ_TOOLS = [
@@ -1415,7 +1432,7 @@ def ask_ai(messages):
         api_messages = [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT,
+                "content": build_system_prompt(),
             }
         ]
 

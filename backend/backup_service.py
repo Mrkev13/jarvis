@@ -9,6 +9,7 @@ from typing import Optional
 
 from database import SessionLocal
 from models import BackupLog
+from time_utils import local_day_bounds_utc, now_local
 
 BACKUP_ENABLED = (os.environ.get("BACKUP_ENABLED", "false").lower() in ("1", "true", "yes"))
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "./backups")
@@ -226,16 +227,18 @@ def list_backups(db_session=None, limit=20) -> list[dict]:
         if db_session is None:
             db.close()
 
-def should_run_backup_daily(hour_of_day: int = BACKUP_HOUR_OF_DAY) -> bool:
-    now = datetime.utcnow()
-    if now.hour < hour_of_day:
+def should_run_backup_daily(hour_of_day: int = BACKUP_HOUR_OF_DAY, now_utc: datetime | None = None) -> bool:
+    """hour_of_day (BACKUP_HOUR_OF_DAY) je hodina v Europe/Prague; „dnes" = pražský den."""
+    now_utc = now_utc if now_utc is not None else datetime.utcnow()
+    local_now = now_local(now_utc)
+    if local_now.hour < hour_of_day:
         return False
-    today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+    today_start_utc, _ = local_day_bounds_utc(local_now.date())
     db = SessionLocal()
     try:
         ran = db.query(BackupLog).filter(
             BackupLog.status == "success",
-            BackupLog.started_at >= today_start,
+            BackupLog.started_at >= today_start_utc,
         ).first()
         return ran is None
     finally:

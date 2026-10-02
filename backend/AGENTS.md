@@ -5,6 +5,7 @@
 - **Backend**: FastAPI + SQLAlchemy 2.x (declarative Base v `models.py`) + `database.py` (SessionLocal / engine).
 - **DB**: Primárně Postgres; SQLite (přes `DATABASE_URL`) podporováno pro testy / offline fallback. Žádné runtime `ALTER TABLE` ani `create_all` – schéma spravuje výhradně **Alembic** (viz kapitola 3).
 - **Závislosti**: `requirements.txt` je pinnutý na ověřené verze (vč. `tzdata` pro `zoneinfo` na Windows). Groq se volá přes balíček `openai` (OpenAI-kompatibilní API).
+- **Čas**: timestampy v DB jsou naive UTC; kalendářní logika je v Europe/Prague přes `time_utils.py` (viz kapitola 11).
 - **Frontend**: Next.js 16 App Router (TypeScript) + Tailwind. Port `3000` běží samostatně, komunikuje s BE přes `NEXT_PUBLIC_API_URL` (typicky `http://…:8000`).
 - **Spouštění BE ( produkce )**:
   ```
@@ -265,9 +266,12 @@ používá `created_at` (a ukázka v 4.2 s `executed_at` je cílový stav). Dopl
 ### 7.3 BackupLog status FSM
 
 ```
- running ──ok──▶ success   │   BACKUP_HOUR_OF_DAY default = 3 (03:00 AM)
+ running ──ok──▶ success   │   BACKUP_HOUR_OF_DAY default = 3 (03:00 Europe/Prague)
     └──err──▶ failed       │   1× / den (hourly scheduler 24×, ale jen 1× proběhne)
 ```
+
+`should_run_backup_daily(hour_of_day, now_utc=None)`: hodina i „dnes už proběhla" se vyhodnocují
+v pražském čase (den = pražská půlnoc → půlnoc převedená do UTC), nezávisle na DST.
 
 ### 7.4 Endpointy
 
@@ -353,7 +357,23 @@ print(_hash_pin("123456"))
 - Testy: `python -m unittest discover -s backend/tests -p "test_*.py"` (z kořene repa). Klíčové soubory:
   `test_alembic_migration.py` (migrace, drift guard, lifespan startup), `test_migration_postgres.py` (opt-in PG),
   `test_auth.py` + `test_auth_enforcement.py`, `test_pending_persistent.py`, `test_ai_read_tool_args.py`,
-  `test_backup.py`.
+  `test_ai_system_prompt_date.py`, `test_time_utils.py`, `test_finance_local_month.py`, `test_backup.py`.
 - Testy importují modul s `os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")` **před** importem
   backendu – nikdy nesahají na produkční DB z `.env`.
 
+---
+
+## 11. Čas a časová pásma (`time_utils.py`)
+
+- **Úložiště**: všechny `DateTime` sloupce jsou **naive UTC** (`datetime.utcnow`). Žádná migrace dat.
+- **Kalendář aplikace**: Europe/Prague (`APP_TZ = ZoneInfo("Europe/Prague")`, data z balíčku `tzdata`).
+- Helpery: `now_local()`, `today_local()`, `to_local()`, `local_to_utc()`,
+  `local_day_bounds_utc(d)`, `local_week_bounds_utc(d)` (po–ne), `local_month_bounds_utc(d)`.
+  Hranice vrací naive UTC jako **polouzavřený interval `[start, end)`** → v dotazech `col >= start AND col < end`.
+  DST je ošetřené (den má 23/24/25 h).
+- **AI**: `ai.build_system_prompt()` přidává do system promptu při **každém** requestu
+  `CURRENT APPLICATION DATE: YYYY-MM-DD (den v týdnu)` + aktuální pražský čas – model neodhaduje „dnes/zítra".
+- **Finance**: `finance_month_income/expenses` (goal sources) i dashboard měsíční součty počítají pražský
+  kalendářní měsíc (transakce 1. 10. v 00:30 Praha = 30. 9. 22:30 UTC patří do října).
+- **Zálohy**: `BACKUP_HOUR_OF_DAY` = pražská hodina.
+- Pozn.: `WorkSession.date`, `Assignment.due_date` apod. jsou čisté `Date` (lokální kalendářní data) – bez konverze.

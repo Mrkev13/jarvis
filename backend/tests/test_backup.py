@@ -166,6 +166,39 @@ class BackupTestCase(unittest.TestCase):
             result2 = backup_service.should_run_backup_daily(hour_of_day=3)
             self.assertTrue(result2, "should_run_backup_daily should be True when not ran today")
 
+    def test_04_backup_hour_is_prague_local_time(self):
+        import backup_service
+
+        with patch.object(backup_service, "SessionLocal", self.TestSession):
+            # léto (CEST = UTC+2): 00:30 UTC = 02:30 Praha, 01:30 UTC = 03:30 Praha
+            self.assertFalse(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 2, 0, 30)))
+            self.assertTrue(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 2, 1, 30)))
+            # zima (CET = UTC+1): 01:30 UTC = 02:30 Praha, 02:00 UTC = 03:00 Praha
+            self.assertFalse(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 12, 2, 1, 30)))
+            self.assertTrue(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 12, 2, 2, 0)))
+
+    def test_05_already_ran_today_uses_prague_day(self):
+        import backup_service
+
+        # 2. 10. 00:30 Praha = 1. 10. 22:30 UTC → je to záloha z pražského „dnes" (2. 10.)
+        self.db.add(_all_models.BackupLog(
+            started_at=datetime(2026, 10, 1, 22, 30),
+            finished_at=datetime(2026, 10, 1, 22, 31),
+            status="success",
+            filename="/tmp/dummy.sqlite.gz",
+            size_bytes=100,
+            checksum="abc",
+            duration_seconds=1.0,
+            retention_days=30,
+        ))
+        self.db.commit()
+
+        with patch.object(backup_service, "SessionLocal", self.TestSession):
+            # 2. 10. 03:30 Praha → dnes už proběhla → nespouštět
+            self.assertFalse(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 2, 1, 30)))
+            # 3. 10. 03:30 Praha → nový den → spustit
+            self.assertTrue(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 3, 1, 30)))
+
 
 if __name__ == "__main__":
     unittest.main()
