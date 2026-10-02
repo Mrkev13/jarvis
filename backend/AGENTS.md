@@ -399,3 +399,43 @@ print(_hash_pin("123456"))
 - **Kontrakt s frontendem**: planner JSON blok (` ```json ` + `summary`, `actions[priority, area, title, reason]`)
   parsuje `frontend/app/ai/page.tsx → tryParseWeeklyPlan`; hlídá `SystemPromptSafetyTestCase`.
 - Přidání dalších toolů nad rozpočet → nejdřív routing toolů (Roadmap 3.0 A5), ne zvyšování limitu.
+- **Reálné měření (gpt-oss-120b)**: skutečné `prompt_tokens` ≈ 0,77 × odhad (odhad je záměrně konzervativní);
+  fixní režie ≈ 2 700 skutečných tokenů na volání. Groq limit potvrzen hlavičkou `x-ratelimit-limit-tokens: 8000`.
+
+---
+
+## 13. Retry a observabilita LLM (`llm_usage.py`)
+
+- SDK retry je vypnuté (`GROQ_SDK_MAX_RETRIES=0`); retry dělá jen `ai._llm_create_with_retry`
+  (`AI_LLM_MAX_ATTEMPTS`, default 3). Po 429 čeká dle `retry-after` / „try again in …" (max
+  `AI_LLM_RETRY_MAX_WAIT_SECONDS`). Dřív SDK tiše retryovalo 2× uvnitř každého aplikačního pokusu.
+- Logger `standa_hub.llm` (vlastní handler, `AI_USAGE_LOG=false` vypne) loguje **jen čísla**:
+  - každé volání: `prompt_tokens`, `completion_tokens`, `total_tokens`, `latency_ms`, `tool_calls`,
+    `rl_remaining_tokens` (hlavička `x-ratelimit-remaining-tokens`), 429 / API chyby,
+  - každý retry: důvod, pokus, čekání,
+  - souhrn requestu (`ask_ai`): počet volání, `tool_rounds`, součty tokenů, latence, počet 429,
+    `planner_nudged`, `planner_actions_removed`.
+- **Nikdy** se neloguje obsah promptu, zprávy uživatele, argumenty toolů, odpovědi ani klíče
+  (hlídá `test_llm_observability.py`).
+
+---
+
+## 14. Planner: routing a grounding (`main.detect_planner_intent`, `planner_guard.py`)
+
+- **Rychlá cesta** (`detect_planner_intent` → rule-based `generate_plan`, bez LLM):
+  dotazy na datum/čas (`DATE_TIME_QUESTION_SIGNALS`) jdou vždy na model; týdenní intent se kontroluje
+  **před** denním („co mám dělat tento týden", „týdenní plán" ⊃ „denní plán"). Regrese: `test_planner_intent.py`.
+- **LLM planner** (odpověď s ```json planner blokem) prochází v `ask_ai` pojistkami:
+  0. zavolá-li model `get_goals` bez `get_memories`, server přidá `get_memories` do **téhož kola**
+     (`_with_planner_memories`) – bez dalšího LLM volání. Model paměť v reálu často vynechá a připomínka
+     by stála celé další kolo (~3k tokenů) → v ověřovacím běhu to přetáhlo 8k TPM;
+  1. přijde-li planner odpověď úplně bez `get_goals`, model dostane **jednou** systémovou připomínku a pokračuje;
+  2. `ground_planner_answer` odstraní akce, jejichž čísla s jednotkou / velká čísla, data, projekty
+     (po slově „projekt…") nebo vlastní jména nejsou v evidence (tool výsledky tohoto requestu, zprávy
+     uživatele, aktuální datum) ani z ní nejdou dopočítat (a±b, a·b, a/b·100 – jen pro hodnoty ≥ 100;
+     přímá shoda ±0,51 nebo ±1 % kvůli zaokrouhlení). Čísla z tool výsledků se berou z JSON **hodnot**
+     kromě metadat (`id`, `*_id`, `importance`); ISO data/timestampy a časy se jako čísla nepočítají
+     (data se ověřují zvlášť) – jinak by např. rok 2026 „ověřil" vymyšlených 2 000 Kč (reálný případ).
+     Obecné rady bez konkrétních hodnot guard neodstraňuje (to řeší jen prompt).
+     Nezbude-li žádná akce, JSON blok se nahradí poznámkou (karta se nevykreslí). Testy: `test_planner_grounding.py`.
+- Heuristika je záměrně přísná (raději méně akcí). Výstup pro UI zůstává kontraktem `tryParseWeeklyPlan`.

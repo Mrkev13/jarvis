@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import types
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -27,12 +28,22 @@ from models import PendingAction
 from time_utils import now_local
 from llm_budget import estimate_fixed_overhead
 from llm_config import LLM_SETTINGS
+from llm_usage import LLMCallRecord, log_call, log_request_summary, log_retry, ratelimit_remaining_tokens, retry_wait_seconds
+from planner_guard import (
+    build_evidence,
+    find_planner_block,
+    ground_planner_answer,
+    missing_planner_tools,
+    planner_tools_nudge,
+)
 
 load_dotenv()
 
 client = OpenAI(
-    api_key=os.getenv("GROQ_API_KEY"),
+    # Groq klíč: GROQ_API_KEY, jinak OPENAI_API_KEY (dosavadní chování – SDK fallback, nyní explicitně).
+    api_key=os.getenv("GROQ_API_KEY") or os.getenv("OPENAI_API_KEY"),
     base_url=LLM_SETTINGS.groq_base_url,
+    max_retries=LLM_SETTINGS.sdk_max_retries,
 )
 
 
@@ -64,11 +75,10 @@ MEMORY
 - Call save_memory only when the user explicitly wants something remembered ("pamatuj si", "zapamatuj si", "ulož si", "do budoucna chci...") and it is long-term. Never save temporary numbers.
 
 PLANNER (what to do today/this week, priorities, focus, stagnating goals, time split)
-- Read-only: call get_goals, then get_memories, then only the module tools needed for the relevant areas.
+- Read-only. ALWAYS call get_goals AND get_memories first (together), then only the module tools needed, in as few turns as possible.
 - Priority order: overdue obligations > hard deadlines within 14 days > exams within 14 days > finance constraints / lagging monthly targets > work commitments / lagging hour targets > high-priority goals under 50 % > medium > low > routine tasks.
-- Up to 5 actions (3-5 when data supports it, only 1-2 if that is all the data supports). Never invent tasks to fill the plan.
-- Each action: specific, actionable now, based on tool data or memory (bad: "Více se učit."; good: "Projít kapitolu 3 z práva před pátečním testem."). No generic filler ("hraj efektivně", "šetři peníze") unless directly supported.
-- WoT/MFF progression: stored data + memories, no speculative mechanics.
+- GROUNDING: project names, amounts, dates, deadlines and targets only if they appear in tool results or the current context. Missing value: omit it, never invent it. Up to 5 actions; fewer grounded actions beat speculative ones.
+- Each action: specific, actionable now (bad: "Více se učit."). No generic filler ("šetři peníze") unless directly supported. WoT/MFF: no speculative mechanics.
 - The planner never creates or modifies anything by itself; saving an action needs the WRITE tool and confirmation.
 - Output: 1-2 short Czech sentences, then exactly one ```json fenced block, no other JSON, never mention the schema:
   {"summary": "...", "actions": [{"priority": 1, "area": "school", "title": "...", "reason": "..."}]}
@@ -82,18 +92,22 @@ LANGUAGE: the user writes Czech; reply in Czech unless the user switches languag
 _CZECH_WEEKDAYS = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
 
 
-def build_system_prompt(now: datetime | None = None) -> str:
-    """SYSTEM_PROMPT + skutečné pražské datum/čas, aby „dnes/zítra/včera" neodhadoval model."""
+def current_date_block(now: datetime | None = None) -> str:
+    """Aktuální pražské datum/čas pro model (součást „current context" pro planner grounding)."""
     local = now if now is not None else now_local()
     weekday = _CZECH_WEEKDAYS[local.weekday()]
     return (
-        f"{SYSTEM_PROMPT}\n"
         "================================================================================\n"
         "CURRENT APPLICATION DATE AND TIME (Europe/Prague)\n\n"
         f"CURRENT APPLICATION DATE: {local.date().isoformat()} ({weekday})\n"
         f"Current local time: {local:%H:%M} {local.tzname()}\n"
         "Use this date for 'dnes', 'zítra', 'včera' and every other relative date.\n"
     )
+
+
+def build_system_prompt(now: datetime | None = None) -> str:
+    """SYSTEM_PROMPT + skutečné pražské datum/čas, aby „dnes/zítra/včera" neodhadoval model."""
+    return f"{SYSTEM_PROMPT}\n{current_date_block(now)}"
 
 
 def _tool(name: str, description: str, properties: dict | None = None, required: list[str] | None = None) -> dict:
@@ -472,7 +486,8 @@ def _run_tool_calls(db, tool_calls):
             arguments = json.loads(tc.function.arguments or "{}")
         except json.JSONDecodeError:
             arguments = {}
-            print(f"  [TOOL ERROR] invalid JSON args: {tc.function.arguments}")
+            # Bez obsahu argumentů (mohou obsahovat uživatelská data).
+            print(f"  [TOOL ERROR] invalid JSON args for {fn_name}")
 
         if fn_name in WRITE_TOOL_NAMES:
             action_id = _store_pending_action(db, fn_name, arguments, ttl_minutes=30)
@@ -528,51 +543,53 @@ def _run_tool_calls(db, tool_calls):
     return tool_messages, pending_actions
 
 
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
 def _llm_create_with_retry(
     api_messages: list[dict],
     tools,
     tool_choice: str = "auto",
     temperature: float = 0.2,
-    max_retries: int = 2,
+    max_retries: int | None = None,
+    call_log: list[LLMCallRecord] | None = None,
 ):
-    """Create chat completion with automatic retry on Groq rate limits (429).
+    """Chat completion s aplikačním retry (SDK retry je vypnuté → každý 429/5xx je vidět v logu).
 
-    Groq free tier enforces 8 000 TPM. A Planner request with many read
-    tools often triggers 429; the server usually suggests retrying after
-    200-2000 ms, so we use a conservative 2.5 s backoff and one retry.
-    Other API errors are re-raised as descriptive RuntimeError.
+    max_retries = celkový počet pokusů (default LLM_SETTINGS.llm_max_attempts). Po 429 se čeká dle
+    hlavičky retry-after / textu „try again in …" (max AI_LLM_RETRY_MAX_WAIT_SECONDS). Každý pokus
+    se zapíše do call_log (jen čísla) a zaloguje bez obsahu zpráv.
     """
     import openai as _openai
 
+    attempts = max_retries or LLM_SETTINGS.llm_max_attempts
+    log_enabled = LLM_SETTINGS.usage_logging
+    records = call_log if call_log is not None else []
     last_exc: Exception | None = None
-    for attempt in range(max_retries):
+    for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
-            return client.chat.completions.create(
+            raw = client.chat.completions.with_raw_response.create(
                 model=LLM_SETTINGS.groq_model,
                 messages=api_messages,
                 tools=tools,
                 tool_choice=tool_choice,
                 temperature=temperature,
             )
+            response = raw.parse()
         except _openai.RateLimitError as exc:
             last_exc = exc
-            wait_s = 2.5
-            try:
-                body = getattr(exc, "response", None)
-                if body is not None:
-                    try:
-                        data = body.json()
-                        msg = (data or {}).get("error", {}).get("message", "")
-                        m = __import__("re").search(
-                            r"Please try again in ([0-9.]+)ms", msg
-                        )
-                        if m:
-                            wait_s = max(0.5, min(5.0, float(m.group(1)) / 1000.0 + 0.3))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            if attempt < max_retries - 1:
+            headers = getattr(getattr(exc, "response", None), "headers", None)
+            record = LLMCallRecord(
+                attempt=attempt, latency_ms=_elapsed_ms(started), rate_limited=True,
+                ratelimit_remaining_tokens=ratelimit_remaining_tokens(headers),
+            )
+            records.append(record)
+            log_call(record, log_enabled)
+            if attempt < attempts:
+                wait_s = retry_wait_seconds(exc, LLM_SETTINGS.retry_max_wait_seconds)
+                log_retry(attempt, attempts, wait_s, "429", log_enabled)
                 time.sleep(wait_s)
                 continue
             raise RuntimeError(
@@ -581,11 +598,16 @@ def _llm_create_with_retry(
             ) from last_exc
         except _openai.APIError as exc:
             last_exc = exc
-            if attempt < max_retries - 1 and getattr(exc, "status_code", 500) >= 500:
+            status = getattr(exc, "status_code", None)
+            record = LLMCallRecord(attempt=attempt, latency_ms=_elapsed_ms(started), error_status=status or 0)
+            records.append(record)
+            log_call(record, log_enabled)
+            if attempt < attempts and (status or 500) >= 500:
+                log_retry(attempt, attempts, 1.5, f"api_error {status}", log_enabled)
                 time.sleep(1.5)
                 continue
             raise RuntimeError(
-                f"AI provider vrátil chybu ({getattr(exc, 'status_code', '?')}). "
+                f"AI provider vrátil chybu ({status if status is not None else '?'}). "
                 f"Zkus to prosím později znovu."
             ) from last_exc
         except Exception as exc:
@@ -593,6 +615,21 @@ def _llm_create_with_retry(
             raise RuntimeError(
                 f"Při volání AI došlo k chybě: {exc}"
             ) from last_exc
+
+        usage = getattr(response, "usage", None)
+        message = response.choices[0].message
+        record = LLMCallRecord(
+            attempt=attempt,
+            latency_ms=_elapsed_ms(started),
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            total_tokens=getattr(usage, "total_tokens", None),
+            ratelimit_remaining_tokens=ratelimit_remaining_tokens(raw.headers),
+            tool_calls=len(message.tool_calls or []),
+        )
+        records.append(record)
+        log_call(record, log_enabled)
+        return response
     raise RuntimeError("AI volání selhalo po několika pokusech.") from last_exc
 
 
@@ -606,12 +643,44 @@ def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str) -> None:
         )
 
 
+AUTO_MEMORIES_CALL_ID = "auto_get_memories"
+
+
+def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
+    """Planner začíná get_goals; chybí-li get_memories, přidá ho server do STEJNÉHO kola.
+
+    Model get_memories často vynechá; připomínka by stála celé další LLM kolo (~3k tokenů) a v reálném
+    běhu přetáhla TPM limit. Takhle model data z paměti dostane bez dalšího volání.
+    """
+    names = {tc.function.name for tc in round_calls}
+    if "get_goals" not in names or "get_memories" in names or "get_memories" in called_tools:
+        return round_calls
+    synthetic = types.SimpleNamespace(
+        id=AUTO_MEMORIES_CALL_ID, function=types.SimpleNamespace(name="get_memories", arguments="{}"),
+    )
+    return [*round_calls, synthetic]
+
+
+def _finalize_planner_answer(answer: str, evidence_texts: list[str]) -> tuple[str, int]:
+    """Odstraní z planner JSON bloku akce s nepodloženými projekty/částkami/daty/cíli."""
+    result = ground_planner_answer(answer, build_evidence(evidence_texts))
+    return result.answer, result.removed_actions
+
+
 def ask_ai(messages):
     db = SessionLocal()
+    request_started = time.monotonic()
+    call_log: list[LLMCallRecord] = []
+    tool_rounds = 0
+    planner_nudged = False
+    planner_memories_autoloaded = False
+    planner_actions_removed = 0
     try:
         _check_pending_expired(db)
 
-        system_prompt = build_system_prompt()
+        now = now_local()
+        date_block = current_date_block(now)
+        system_prompt = build_system_prompt(now)
         _warn_if_fixed_overhead_exceeds_budget(system_prompt)
         api_messages = [
             {
@@ -623,6 +692,11 @@ def ask_ai(messages):
         for message in messages:
             api_messages.append(_message_to_dict(message))
 
+        # „Evidence" pro planner grounding: co model v tomto requestu skutečně viděl jako data.
+        evidence_texts = [date_block] + [
+            str(m.get("content") or "") for m in api_messages[1:] if m.get("role") == "user"
+        ]
+        called_tools: set[str] = set()
         all_pending_actions = []
         MAX_TOOL_ROUNDS = 10
 
@@ -632,18 +706,29 @@ def ask_ai(messages):
                 tools=TOOLS,
                 tool_choice="auto",
                 temperature=0.2,
-                max_retries=2,
+                call_log=call_log,
             )
 
             choice = response.choices[0]
             assistant_msg = choice.message
 
             if not assistant_msg.tool_calls:
+                answer = assistant_msg.content or ""
+                if find_planner_block(answer) is not None:
+                    missing = missing_planner_tools(called_tools)
+                    if missing and not planner_nudged:
+                        # Planner přeskočil povinné tooly → jednou připomenout a nechat model pokračovat.
+                        planner_nudged = True
+                        api_messages.append({"role": "system", "content": planner_tools_nudge(missing)})
+                        continue
+                    answer, planner_actions_removed = _finalize_planner_answer(answer, evidence_texts)
                 return {
-                    "answer": assistant_msg.content or "",
+                    "answer": answer,
                     "pending_actions": all_pending_actions,
                 }
 
+            round_calls = _with_planner_memories(list(assistant_msg.tool_calls), called_tools)
+            planner_memories_autoloaded = planner_memories_autoloaded or len(round_calls) > len(assistant_msg.tool_calls)
             api_messages.append({
                 "role": "assistant",
                 "content": assistant_msg.content or "",
@@ -656,13 +741,16 @@ def ask_ai(messages):
                             "arguments": tc.function.arguments,
                         },
                     }
-                    for tc in assistant_msg.tool_calls
+                    for tc in round_calls
                 ],
             })
 
-            tool_messages, pending_actions = _run_tool_calls(db, assistant_msg.tool_calls)
+            tool_rounds += 1
+            called_tools.update(tc.function.name for tc in round_calls)
+            tool_messages, pending_actions = _run_tool_calls(db, round_calls)
             all_pending_actions.extend(pending_actions)
             api_messages.extend(tool_messages)
+            evidence_texts.extend(m["content"] for m in tool_messages)
 
         return {
             "answer": (
@@ -672,6 +760,12 @@ def ask_ai(messages):
             "pending_actions": all_pending_actions,
         }
     finally:
+        log_request_summary(
+            call_log, tool_rounds, _elapsed_ms(request_started),
+            planner_actions_removed=planner_actions_removed, planner_nudged=planner_nudged,
+            planner_memories_autoloaded=planner_memories_autoloaded,
+            enabled=LLM_SETTINGS.usage_logging,
+        )
         db.close()
 
 

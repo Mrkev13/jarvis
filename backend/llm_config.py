@@ -16,6 +16,10 @@ DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 # prostor pro kontext, historii, tool výsledky a odpověď.
 DEFAULT_MAX_FIXED_TOKENS = 3500
 DEFAULT_MAX_CONTEXT_TOKENS = 2500
+# Retry: SDK vlastní retry vypnuto (0), aby každý 429/5xx prošel aplikační smyčkou a byl vidět v logu.
+DEFAULT_SDK_MAX_RETRIES = 0
+DEFAULT_LLM_MAX_ATTEMPTS = 3
+DEFAULT_RETRY_MAX_WAIT_SECONDS = 20
 
 
 @dataclass(frozen=True)
@@ -25,9 +29,13 @@ class LLMSettings:
     groq_summary_model: str
     max_fixed_tokens: int
     max_context_tokens: int  # rozpočet pro injektovaný kontext (využije A3/A4)
+    sdk_max_retries: int = DEFAULT_SDK_MAX_RETRIES
+    llm_max_attempts: int = DEFAULT_LLM_MAX_ATTEMPTS
+    retry_max_wait_seconds: int = DEFAULT_RETRY_MAX_WAIT_SECONDS
+    usage_logging: bool = True
 
 
-def _int_env(env: dict, name: str, default: int) -> int:
+def _int_env(env: dict, name: str, default: int, *, min_value: int = 1) -> int:
     raw = (env.get(name) or "").strip()
     if not raw:
         return default
@@ -35,9 +43,16 @@ def _int_env(env: dict, name: str, default: int) -> int:
         value = int(raw)
     except ValueError:
         raise ValueError(f"{name} musí být celé číslo, je '{raw}'") from None
-    if value <= 0:
-        raise ValueError(f"{name} musí být kladné, je {value}")
+    if value < min_value:
+        raise ValueError(f"{name} musí být >= {min_value}, je {value}")
     return value
+
+
+def _bool_env(env: dict, name: str, default: bool) -> bool:
+    raw = (env.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
 
 
 def load_llm_settings(env: dict | None = None) -> LLMSettings:
@@ -49,6 +64,10 @@ def load_llm_settings(env: dict | None = None) -> LLMSettings:
         groq_summary_model=(env.get("GROQ_SUMMARY_MODEL") or "").strip() or model,
         max_fixed_tokens=_int_env(env, "AI_MAX_FIXED_TOKENS", DEFAULT_MAX_FIXED_TOKENS),
         max_context_tokens=_int_env(env, "AI_MAX_CONTEXT_TOKENS", DEFAULT_MAX_CONTEXT_TOKENS),
+        sdk_max_retries=_int_env(env, "GROQ_SDK_MAX_RETRIES", DEFAULT_SDK_MAX_RETRIES, min_value=0),
+        llm_max_attempts=_int_env(env, "AI_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS),
+        retry_max_wait_seconds=_int_env(env, "AI_LLM_RETRY_MAX_WAIT_SECONDS", DEFAULT_RETRY_MAX_WAIT_SECONDS),
+        usage_logging=_bool_env(env, "AI_USAGE_LOG", True),
     )
 
 

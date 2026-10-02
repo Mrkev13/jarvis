@@ -43,6 +43,13 @@ PLANNER_MODE_WEEKLY = "weekly"
 PLANNER_MODE_GOAL_REVIEW = "goal_review"
 
 
+DATE_TIME_QUESTION_SIGNALS = (
+    "datum", "kolikátého", "kolikateho", "kolik je hodin", "kolik je čas",
+    "jaký je dnes den", "jaký je den", "jaky je dnes den", "jaky je den", "který den", "ktery den",
+    "what date", "what time", "what day",
+)
+
+
 def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
     if not prompt:
         return None
@@ -51,6 +58,10 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
 
     def has(*words):
         return any(w in t_norm for w in words)
+
+    # Explicitní dotaz na datum/čas jde vždy na model (zná aktuální pražské datum), ne do planneru.
+    if has(*DATE_TIME_QUESTION_SIGNALS):
+        return None
 
     goal_review_signals = (
         has("cíl", "cíle", "cil", "cile", "goal", "goals")
@@ -63,16 +74,8 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
     if goal_review_signals:
         return PLANNER_MODE_GOAL_REVIEW, "Níže je přehled stavu cílů a jejich pokroku."
 
-    daily_signals_raw = [
-        (["dnes", "dneska", "dnes večer", "dneska večer"], ["dělat", "udělat", "udělej", "uplatnit", "plán", "plan", "priority", "priorita", "co"]),
-        (["co mám dělat", "co budu dělat", "co dnes dělat"],),
-        (["daily", "denní plán", "denni plan", "dnešní plán", "dnesní plan"],),
-        (["co je na programu", "program na dnes", "agenda dnes", "agenda na dnes"],),
-    ]
-    for sigs in daily_signals_raw:
-        if all(has(*s) for s in sigs):
-            return PLANNER_MODE_DAILY, "Níže je plán na dnes s nejdůležitějšími akcemi."
-
+    # Týden se kontroluje PŘED obecnými denními frázemi: „co mám dělat tento týden" obsahuje
+    # denní signál „co mám dělat" a „týdenní plán" obsahuje podřetězec „denní plán".
     weekly_signals_raw = [
         (["tento týden", "tenhle týden", "tento tyden", "tenhle tyden", "týden", "tyden", "weekly"],
          ["plán", "plan", "priority", "priorit", "dělat", "co"]),
@@ -83,14 +86,24 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
         if all(has(*s) for s in sigs):
             return PLANNER_MODE_WEEKLY, "Níže je plán na tento týden s prioritami."
 
+    daily_signals_raw = [
+        (["dnes", "dneska", "dnes večer", "dneska večer"], ["dělat", "udělat", "udělej", "uplatnit", "plán", "plan", "priority", "priorita", "co"]),
+        (["co mám dělat", "co budu dělat", "co dnes dělat"],),
+        (["daily", "denní plán", "denni plan", "dnešní plán", "dnesní plan"],),
+        (["co je na programu", "program na dnes", "agenda dnes", "agenda na dnes"],),
+    ]
+    for sigs in daily_signals_raw:
+        if all(has(*s) for s in sigs):
+            return PLANNER_MODE_DAILY, "Níže je plán na dnes s nejdůležitějšími akcemi."
+
     if has("plán", "plan", "planner") and has("goal", "cíl", "cil", "cíle", "cile"):
         return PLANNER_MODE_GOAL_REVIEW, "Níže je přehled cílů."
 
-    if has("dnes") and (has("co", "dělat", "udělat") or len(t_norm.split()) <= 8):
-        return PLANNER_MODE_DAILY, "Plán na dnes:"
-
     if (has("týden"  , "tyden") or has("tento týden", "tenhle týden")) and len(t_norm.split()) <= 10:
         return PLANNER_MODE_WEEKLY, "Plán na tento týden:"
+
+    if has("dnes") and (has("co", "dělat", "udělat") or len(t_norm.split()) <= 8):
+        return PLANNER_MODE_DAILY, "Plán na dnes:"
 
     return None
 

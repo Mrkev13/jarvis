@@ -168,12 +168,16 @@ class LLMSettingsTestCase(unittest.TestCase):
 
     def test_llm_call_uses_configured_model(self):
         calls = []
+        response = types.SimpleNamespace(
+            usage=None, choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="ok", tool_calls=None))]
+        )
+        raw = types.SimpleNamespace(headers={}, parse=lambda: response)
         fake_client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(
-            create=lambda **kw: calls.append(kw) or "response"
+            with_raw_response=types.SimpleNamespace(create=lambda **kw: calls.append(kw) or raw)
         )))
-        custom = dataclasses.replace(ai.LLM_SETTINGS, groq_model="custom/model")
+        custom = dataclasses.replace(ai.LLM_SETTINGS, groq_model="custom/model", usage_logging=False)
         with patch.object(ai, "client", fake_client), patch.object(ai, "LLM_SETTINGS", custom):
-            self.assertEqual(ai._llm_create_with_retry([{"role": "user", "content": "x"}], tools=ai.TOOLS), "response")
+            self.assertIs(ai._llm_create_with_retry([{"role": "user", "content": "x"}], tools=ai.TOOLS), response)
         self.assertEqual(calls[0]["model"], "custom/model")
         self.assertIs(calls[0]["tools"], ai.TOOLS)
 
