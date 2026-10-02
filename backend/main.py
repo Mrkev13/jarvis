@@ -1,5 +1,6 @@
 import os
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
@@ -7,7 +8,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta
 
-from database import Base, engine
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
@@ -93,8 +93,6 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
 
     return None
 
-Base.metadata.create_all(bind=engine)
-
 
 def _derive_conversation_title(prompt: str) -> str:
     text = (prompt or "").strip()
@@ -146,43 +144,59 @@ def _seed_default_subjects():
         db.close()
 
 
-_seed_default_subjects()
-
-
+BACKEND_DIR = Path(__file__).resolve().parent
 RUN_ALEMBIC_UPGRADE_AT_STARTUP = (os.environ.get("RUN_ALEMBIC_UPGRADE_AT_STARTUP", "true").lower() in ("1", "true", "yes"))
-if RUN_ALEMBIC_UPGRADE_AT_STARTUP:
+
+
+def run_migrations() -> None:
+    """Upgrade schéma na Alembic head. Chyba je fatální – žádný create_all fallback."""
+    from alembic.config import Config as AlembicConfig
+    from alembic import command as alembic_command
+
+    cfg = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
+    # Absolutní cesty, aby upgrade fungoval bez ohledu na cwd procesu.
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.set_main_option("version_locations", str(BACKEND_DIR / "alembic" / "versions"))
+    alembic_command.upgrade(cfg, "head")
+
+
+def _recover_pending_actions() -> None:
+    db = SessionLocal()
     try:
-        from alembic.config import Config as _AlembicCfg
-        from alembic import command as _alembic_cmd
-        _alembic_ini = str(Path(__file__).parent / "alembic.ini")
-        if Path(_alembic_ini).exists():
-            _cfg = _AlembicCfg(_alembic_ini)
-            _alembic_cmd.upgrade(_cfg, "head")
-    except Exception as _alembic_err:
-        import warnings as _w
-        _w.warn(f"Alembic startup upgrade selhalo: {_alembic_err}")
-
-try:
-    _recovery_db = SessionLocal()
-    expired_count = _check_pending_expired(_recovery_db)
-    if expired_count:
-        print(f"[recovery] {expired_count} pending označen jako expired při startu")
-    from models import PendingAction as _PA
-    from sqlalchemy import update as _upd
-    _cutoff = datetime.utcnow() - timedelta(minutes=15)
-    _stuck = _recovery_db.execute(
-        _upd(_PA).where(_PA.status == "executing").where(_PA.created_at < _cutoff).values(status="failed")
-    )
-    if _stuck.rowcount:
-        _recovery_db.commit()
-        print(f"[recovery] {_stuck.rowcount} executing označen jako failed")
-    _recovery_db.close()
-except Exception as _rec_err:
-    pass
+        expired_count = _check_pending_expired(db)
+        if expired_count:
+            print(f"[recovery] {expired_count} pending označen jako expired při startu")
+        from models import PendingAction as _PA
+        from sqlalchemy import update as _upd
+        cutoff = datetime.utcnow() - timedelta(minutes=15)
+        stuck = db.execute(
+            _upd(_PA).where(_PA.status == "executing").where(_PA.created_at < cutoff).values(status="failed")
+        )
+        if stuck.rowcount:
+            db.commit()
+            print(f"[recovery] {stuck.rowcount} executing označen jako failed")
+    except Exception as exc:
+        db.rollback()
+        print(f"[recovery] pending recovery selhalo: {exc}")
+    finally:
+        db.close()
 
 
-from scheduler_service import start_scheduler
-start_scheduler()
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from scheduler_service import start_scheduler, stop_scheduler
+
+    if RUN_ALEMBIC_UPGRADE_AT_STARTUP:
+        run_migrations()
+    else:
+        print("[startup] RUN_ALEMBIC_UPGRADE_AT_STARTUP=false – schéma musí být na head (alembic upgrade head).")
+    _seed_default_subjects()
+    _recover_pending_actions()
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
 
 
 frontend_origins = os.getenv(
@@ -195,7 +209,7 @@ allowed_origins = [
     if origin.strip()
 ]
 
-app = FastAPI(title="Standa Hub API")
+app = FastAPI(title="Standa Hub API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,

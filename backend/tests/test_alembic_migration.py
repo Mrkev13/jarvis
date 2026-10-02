@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import unittest
 import tempfile
@@ -159,6 +160,97 @@ class AlembicMigrationTestCase(unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
         self.assertEqual(tables_second, tables_first)
+
+
+class StartupSchemaTestCase(unittest.TestCase):
+    """Schéma spravuje výhradně Alembic, spouštěný v lifespan (ne při importu)."""
+
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False, dir=str(BACKEND_DIR))
+        tmp.close()
+        self._db_path = Path(tmp.name)
+        self.db_url = f"sqlite+pysqlite:///{self._db_path}"
+        self._orig_database_url = os.environ.get("DATABASE_URL")
+
+    def tearDown(self):
+        if self._orig_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = self._orig_database_url
+        try:
+            self._db_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _subprocess_env(self) -> dict:
+        return dict(
+            os.environ,
+            DATABASE_URL=self.db_url,
+            SCHEDULER_ENABLED="false",
+            PYTHONDONTWRITEBYTECODE="1",
+        )
+
+    def test_alembic_library_importable_from_backend_dir(self):
+        # `python -m uvicorn` z backend/ dává cwd na sys.path[0]; lokální složka
+        # alembic/ nesmí zastínit knihovnu (dřív alembic/__init__.py → ModuleNotFoundError).
+        r = subprocess.run(
+            [sys.executable, "-c", "import alembic.config, alembic.command"],
+            cwd=str(BACKEND_DIR), env=self._subprocess_env(),
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+
+    def test_import_main_does_not_touch_schema(self):
+        r = subprocess.run(
+            [sys.executable, "-c", "import main"],
+            cwd=str(BACKEND_DIR), env=self._subprocess_env(),
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        engine = create_engine(self.db_url)
+        try:
+            with engine.connect() as conn:
+                tables = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                ).fetchall()
+            self.assertEqual(tables, [])
+        finally:
+            engine.dispose()
+
+    def test_lifespan_migrates_fresh_db_to_head_then_seeds(self):
+        from sqlalchemy.orm import sessionmaker
+        from alembic.script import ScriptDirectory
+        from fastapi.testclient import TestClient
+        import main
+        import scheduler_service
+        from models import Subject
+
+        os.environ["DATABASE_URL"] = self.db_url  # čte alembic/env.py
+        engine = create_engine(self.db_url)
+        orig_session_local = main.SessionLocal
+        orig_scheduler_enabled = scheduler_service.SCHEDULER_ENABLED
+        main.SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        scheduler_service.SCHEDULER_ENABLED = False
+        try:
+            with TestClient(main.app):
+                pass
+
+            head = ScriptDirectory.from_config(_make_cfg_for_memory_engine(engine)).get_current_head()
+            with engine.connect() as conn:
+                version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+                tables = _sqlite_tables(conn)
+            self.assertEqual(version, head)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA)
+
+            db = main.SessionLocal()
+            try:
+                self.assertEqual(db.query(Subject).count(), 4)
+            finally:
+                db.close()
+        finally:
+            main.SessionLocal = orig_session_local
+            scheduler_service.SCHEDULER_ENABLED = orig_scheduler_enabled
+            engine.dispose()
 
 
 if __name__ == "__main__":
