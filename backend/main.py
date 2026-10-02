@@ -209,7 +209,28 @@ allowed_origins = [
     if origin.strip()
 ]
 
-app = FastAPI(title="Standa Hub API", lifespan=lifespan)
+# Cesty dostupné bez session (login flow + health check).
+AUTH_PUBLIC_PATHS = frozenset({"/", "/auth/login", "/auth/logout", "/auth/session/validate"})
+
+
+def require_auth(request: Request) -> dict:
+    """Globální FastAPI dependency. Pokud auth_enabled a žádná platná session → 401."""
+    if request.url.path in AUTH_PUBLIC_PATHS:
+        return {"is_authenticated": False, "public_path": True}
+    if not auth_enabled():
+        return {"is_authenticated": True, "auth_disabled": True}
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    info = validate_session_token(token)
+    if not info or not info.get("is_authenticated"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return info
+
+
+app = FastAPI(
+    title="Standa Hub API",
+    lifespan=lifespan,
+    dependencies=[Depends(require_auth)],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -229,17 +250,6 @@ def _get_client_ip(request: Request) -> str:
         except Exception:
             return "unknown"
     return "unknown"
-
-
-def require_auth(request: Request) -> dict:
-    """FastAPI dependency. Pokud auth_enabled a žádná platná session → 401."""
-    if not auth_enabled():
-        return {"is_authenticated": True, "auth_disabled": True}
-    token = request.cookies.get(AUTH_COOKIE_NAME)
-    info = validate_session_token(token)
-    if not info or not info.get("is_authenticated"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return info
 
 
 class ChatMessage(BaseModel):
@@ -748,7 +758,7 @@ def ai_execute(request: ExecutePendingRequest):
     return execute_confirm_action(request.pending_id)
 
 
-@app.get("/ai/reject/{pending_id}")
+@app.post("/ai/reject/{pending_id}")
 def ai_reject(pending_id: str):
     db = SessionLocal()
     try:

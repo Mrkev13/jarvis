@@ -238,6 +238,11 @@ class PendingEndpointFiltersTestCase(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
         self.db = Session()
+        # Endpoint filtry testujeme bez auth; vynucení auth pokrývá test_auth_enforcement.py.
+        # Bez toho by výsledek závisel na AUTH_PIN_HASH v lokálním backend/.env.
+        import auth_service
+        self._orig_auth_pin_hash = auth_service.AUTH_PIN_HASH
+        auth_service.AUTH_PIN_HASH = ""
         from main import app
         from fastapi.testclient import TestClient
         self.client = TestClient(app)
@@ -245,6 +250,8 @@ class PendingEndpointFiltersTestCase(unittest.TestCase):
         _SL.configure(bind=self.engine)
 
     def tearDown(self):
+        import auth_service
+        auth_service.AUTH_PIN_HASH = self._orig_auth_pin_hash
         self.db.close()
         self.engine.dispose()
 
@@ -286,6 +293,69 @@ class PendingEndpointFiltersTestCase(unittest.TestCase):
         self.assertEqual(r_limit.status_code, 200)
         data_limit = r_limit.json()
         self.assertEqual(len(data_limit["items"]), 3)
+
+
+class RejectEndpointTestCase(unittest.TestCase):
+    """/ai/reject mění stav → musí být POST; GET nesmí pending zamítnout."""
+
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        import auth_service
+        import main
+        self._orig_auth_pin_hash = auth_service.AUTH_PIN_HASH
+        self._orig_main_session_local = main.SessionLocal
+        auth_service.AUTH_PIN_HASH = ""
+        main.SessionLocal = self.Session
+        from fastapi.testclient import TestClient
+        self.client = TestClient(main.app)
+
+        db = self.Session()
+        now = datetime.utcnow()
+        pa = PendingAction(
+            tool="add_work_session",
+            arguments=_json.dumps({"hours": 8}),
+            status="pending",
+            created_at=now,
+            expires_at=now + timedelta(minutes=30),
+        )
+        db.add(pa)
+        db.commit()
+        self.pending_id = pa.id
+        db.close()
+
+    def tearDown(self):
+        import auth_service
+        import main
+        auth_service.AUTH_PIN_HASH = self._orig_auth_pin_hash
+        main.SessionLocal = self._orig_main_session_local
+        self.engine.dispose()
+
+    def _status(self) -> str:
+        db = self.Session()
+        try:
+            return db.query(PendingAction).filter(PendingAction.id == self.pending_id).one().status
+        finally:
+            db.close()
+
+    def test_post_rejects_pending_action(self):
+        r = self.client.post(f"/ai/reject/{self.pending_id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "rejected")
+        self.assertEqual(self._status(), "rejected")
+
+        r_again = self.client.post(f"/ai/reject/{self.pending_id}")
+        self.assertEqual(r_again.status_code, 409)
+
+    def test_get_is_not_allowed_and_leaves_state_untouched(self):
+        r = self.client.get(f"/ai/reject/{self.pending_id}")
+        self.assertEqual(r.status_code, 405)
+        self.assertEqual(self._status(), "pending")
 
 
 if __name__ == "__main__":
