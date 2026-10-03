@@ -7,6 +7,7 @@ import {
   confirmActionBody,
   describePreview,
   isUndoAvailable,
+  outcomeMotionClass,
   UNDO_PATH,
   undoActionBody,
   normalizePendingActions,
@@ -1961,7 +1962,7 @@ export default function AiPage() {
                 {actionOutcomes.map((o) => (
                   <div
                     key={o.key}
-                    className={`motion-outcome mx-2 rounded-2xl border px-4 py-3 text-sm flex items-center gap-2 ${
+                    className={`${outcomeMotionClass(o.undoActionId)} mx-2 rounded-2xl border px-4 py-3 text-sm flex items-center gap-2 ${
                       o.kind === "success"
                         ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
                         : "border-zinc-700 bg-zinc-800/60 text-zinc-300"

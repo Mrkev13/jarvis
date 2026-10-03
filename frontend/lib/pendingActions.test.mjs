@@ -2,6 +2,7 @@
 // backend vrací `id`) → backend vracel 422 a žádnou akci nešlo z UI potvrdit; zamítnutí
 // se na server vůbec neposílalo. Spuštění: `npm test` (node --test, bez dalších závislostí).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -10,6 +11,7 @@ import {
   isUndoAvailable,
   normalizePendingActions,
   normalizePreview,
+  outcomeMotionClass,
   rejectActionPath,
   UNDO_PATH,
   undoActionBody,
@@ -176,4 +178,23 @@ test("undo pending card renders through the generic preview", () => {
   ]);
   assert.deepEqual(confirmActionBody(action), { action_id: "90" });
   assert.equal(rejectActionPath(action), "/ai/reject/90");
+});
+
+// Regrese (live Phase C A/C): „Vrátit" byl uvnitř .motion-outcome (pointer-events: none + fade-out za 1,6 s)
+// → tlačítko zmizelo po pár sekundách a nešlo na něj kliknout, přestože nabídka měla trvat 20 s.
+test("outcomes offering undo use a persistent, clickable motion class", () => {
+  assert.equal(outcomeMotionClass("16"), "motion-outcome-undo");
+  assert.equal(outcomeMotionClass(undefined), "motion-outcome");
+  assert.equal(outcomeMotionClass(""), "motion-outcome");
+});
+
+test("the undo outcome CSS neither fades out nor blocks clicks", () => {
+  const css = readFileSync(new URL("../app/motion.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/\.motion-outcome-undo\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(rules.length >= 1, "chybí pravidlo .motion-outcome-undo");
+  for (const body of rules) {
+    assert.ok(!body.includes("motion-fade-out"), "undo karta nesmí po chvíli zmizet");
+    assert.ok(!/pointer-events:\s*none/.test(body), "Vrátit musí jít kliknout");
+  }
+  assert.match(rules[0], /pointer-events:\s*auto/);
 });

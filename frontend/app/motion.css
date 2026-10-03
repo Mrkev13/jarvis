@@ -227,6 +227,12 @@
     motion-fade-out var(--motion-highlight-duration) ease-in forwards;
 }
 
+/* Stavová karta s nabídkou „Vrátit": zůstává viditelná a klikatelná, dokud ji nabídka (20 s) neodebere. */
+.motion-outcome-undo {
+  pointer-events: auto;
+  animation: motion-pop var(--motion-normal) var(--motion-ease);
+}
+
 /* Streak plamen */
 .motion-flame {
   display: inline-block;
@@ -261,6 +267,9 @@
   /* Stavová karta zůstane krátce viditelná bez pohybu (informace se neztratí). */
   .motion-outcome {
     animation: motion-fade-out var(--motion-highlight-duration) step-end forwards !important;
+  }
+  .motion-outcome-undo {
+    animation: none !important;
   }
   /* Barvy se mění dál (nejde o pohyb), jen bez transformací a bez plynulé šířky/posunu. */
   .motion-progress,

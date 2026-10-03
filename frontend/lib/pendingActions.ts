@@ -158,6 +158,14 @@ export function undoActionBody(actionId: string): { action_id: string } {
   return { action_id: actionId };
 }
 
+/**
+ * Motion třída stavové karty: s nabídkou „Vrátit" musí zůstat viditelná a klikatelná po celou dobu nabídky
+ * (běžná .motion-outcome po chvíli zmizí a nepřijímá kliknutí).
+ */
+export function outcomeMotionClass(undoActionId?: string): string {
+  return undoActionId ? "motion-outcome-undo" : "motion-outcome";
+}
+
 /** Potvrzená akce jde vrátit, jen když to backend výslovně řekne (result.undo_available === true). */
 export function isUndoAvailable(confirmResponse: unknown): boolean {
   if (!isRecord(confirmResponse) || confirmResponse.ok !== true) return false;
