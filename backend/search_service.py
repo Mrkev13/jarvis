@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, MffCharacter, Reminder, Subject, WorkSession, WotGrind
 from reminder_service import describe_recurrence, format_local
 from statuses import REMINDER_ACTIVE_STATUSES, is_assignment_done
-from text_utils import format_czk_cz, format_date_cz, format_hours_cz, format_num_cz
+from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_hours_cz, format_num_cz
 
 MIN_QUERY = 2
 MAX_QUERY = 100
@@ -106,10 +106,10 @@ def _candidates(db: Session, q: str):
         yield "work_session", w.id, title, sub, f"{w.description or ''} prace", "work", f"/work?session={w.id}"
     for t in db.query(FinanceTransaction).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(ROW_LIMIT).all():
         kind = "Příjem" if t.transaction_type == "income" else "Výdaj"
-        category = "Práce" if (t.category or "").lower() == "work" else (t.category or "")
+        category = finance_category_label_cz(t.category)
         title = t.description or category or kind
         sub = _join(kind, format_czk_cz(t.amount), category if t.description else "", format_date_cz(t.created_at) if t.created_at else "")
-        yield "transaction", t.id, title, sub, f"{category} {kind}", "finance", f"/finance?transaction={t.id}"
+        yield "transaction", t.id, title, sub, f"{category} {t.category or ''} {kind}", "finance", f"/finance?transaction={t.id}"
     for g in db.query(Goal).limit(ROW_LIMIT).all():
         sub = _join("Cíl", _GOAL_STATUS.get((g.status or "").lower(), ""), f"{g.progress or 0} %", f"do {format_date_cz(g.target_date)}" if g.target_date else "")
         yield "goal", g.id, g.title, sub, f"{g.description or ''} cil", "goals", f"/goals?goal={g.id}"

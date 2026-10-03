@@ -204,3 +204,22 @@ def planner_action_line(idx: int, action: dict) -> str:
     title = str(action.get("title") or "").strip()
     area = area_label_cz(action.get("area"))
     return f"{idx}. {title} ({area})" if area else f"{idx}. {title}"
+
+
+# Roadmap 4D: zobrazovací popisky kategorií transakcí – stejné jako frontend lib/labels.ts financeCategoryLabel
+# (výsledky vyhledávání vypadají jako stránka Finance). Uložené kategorie se nemění; neznámé → s velkým písmenem.
+FINANCE_CATEGORY_LABELS_CZ = {
+    "work": "Práce", "salary": "Výplata", "income": "Příjem", "food": "Jídlo", "groceries": "Potraviny",
+    "rent": "Nájem", "housing": "Bydlení", "utilities": "Energie", "energy": "Energie", "transport": "Doprava",
+    "travel": "Cestování", "entertainment": "Zábava", "fun": "Zábava", "shopping": "Nákupy", "health": "Zdraví",
+    "sport": "Sport", "education": "Vzdělání", "school": "Škola", "subscriptions": "Předplatné",
+    "subscription": "Předplatné", "gifts": "Dárky", "savings": "Spoření", "investment": "Investice",
+    "bills": "Účty", "other": "Ostatní",
+}
+
+
+def finance_category_label_cz(category) -> str:
+    c = str(category or "").strip()
+    if not c:
+        return ""
+    return FINANCE_CATEGORY_LABELS_CZ.get(c.lower(), c[:1].upper() + c[1:])

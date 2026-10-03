@@ -116,6 +116,9 @@ class SearchTestCase(unittest.TestCase):
         self.assertEqual(exam["subtitle"], "Test · Fyzika · 3. 10. 2026")
         income = [r for r in self._search("prace")["results"] if r["type"] == "transaction"][0]
         self.assertIn("Práce", income["title"])  # systémová kategorie „work" česky
+        obed = self._search("obed")["results"][0]
+        self.assertEqual(obed["subtitle"], "Výdaj · 189,90\u00a0Kč · Jídlo · 2. 10. 2026")
+        self.assertEqual(self._search("food")["results"][0]["type"], "transaction", "hledá i podle uložené kategorie")
         memory = self._search("fyziky")["results"][0]
         self.assertEqual(memory["subtitle"], "Paměť · Plán · Škola")
 
