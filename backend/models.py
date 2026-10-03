@@ -476,3 +476,49 @@ class Reminder(Base):
 
 
 Index("ix_reminders_status_due", Reminder.status, Reminder.due_at)
+
+
+class PushSubscription(Base):
+    """Odběr Web Push jednoho prohlížeče/zařízení (Phase E). Endpoint je tajemství schopnosti – nelogovat."""
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    endpoint_hash = Column(String(64), nullable=False)  # sha256(endpoint) – unikátní klíč bez logování URL
+    endpoint = Column(Text, nullable=False)
+    p256dh = Column(String(200), nullable=False)
+    auth = Column(String(100), nullable=False)
+    user_agent = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_success_at = Column(DateTime, nullable=True)
+    disabled_at = Column(DateTime, nullable=True)  # push služba řekla 404/410 → už neposílat
+    failure_count = Column(Integer, default=0, nullable=False)
+
+
+Index("ix_push_subscriptions_endpoint_hash", PushSubscription.endpoint_hash, unique=True)
+
+
+class Delivery(Base):
+    """Externí doručení jedné notifikace jedním kanálem na jeden cíl (Phase E).
+
+    status: pending (čeká / další pokus v next_attempt_at) → sending (rozpracováno) → sent | failed | skipped.
+    dedupe_key = <dedupe notifikace>|<kanál>|<cíl> (unikátní) → výskyt připomínky nejvýš jednou na cíl.
+    """
+    __tablename__ = "deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    notification_id = Column(Integer, nullable=False)
+    channel = Column(String(30), nullable=False)
+    target_id = Column(Integer, nullable=True)
+    dedupe_key = Column(String(250), nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    next_attempt_at = Column(DateTime, nullable=False)
+    last_attempt_at = Column(DateTime, nullable=True)
+    last_error = Column(String(120), nullable=True)  # jen kategorie chyby, nikdy obsah / tajemství
+    provider_message_id = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+
+
+Index("ix_deliveries_dedupe_key", Delivery.dedupe_key, unique=True)
+Index("ix_deliveries_status_next", Delivery.status, Delivery.next_attempt_at)

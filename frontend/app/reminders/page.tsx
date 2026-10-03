@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import PushSettings from "@/components/PushSettings";
 import { staggerStyle } from "@/lib/motion";
 import {
   createBody,
@@ -263,6 +264,8 @@ export default function RemindersPage() {
           {error}
         </div>
       )}
+
+      <PushSettings />
 
       <form onSubmit={create} className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6 space-y-4">
         <div className="grid gap-3 md:grid-cols-[1fr_auto]">

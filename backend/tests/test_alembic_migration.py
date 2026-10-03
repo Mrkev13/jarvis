@@ -52,6 +52,7 @@ STEP_0004_EXTRA = {"activity_logs", "pending_actions"}
 STEP_0005_EXTRA = {"activity_logs", "pending_actions", "backup_logs"}
 STEP_0006_EXTRA = {"activity_logs", "pending_actions", "backup_logs", "auth_sessions"}
 STEP_0009_EXTRA = {"reminders"}
+STEP_0010_EXTRA = {"push_subscriptions", "deliveries"}
 
 
 def _sqlite_tables(conn):
@@ -160,7 +161,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -262,6 +263,25 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertIn("reminders", _sqlite_tables(self.conn))
 
+    def test_0010_adds_delivery_tables_and_downgrades_cleanly(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0009_reminders")
+        self.conn.execute(text(
+            "INSERT INTO reminders (title, due_at, status, recurrence, fire_count, created_at, updated_at) "
+            "VALUES ('fyzio', '2026-10-05 06:00:00', 'scheduled', 'none', 0, "
+            "'2026-10-04 10:00:00', '2026-10-04 10:00:00')"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0010_push_delivery")
+        self.assertTrue(STEP_0010_EXTRA <= _sqlite_tables(self.conn))
+        uniques = {ix["name"] for ix in inspect(self.conn).get_indexes("deliveries") if ix["unique"]}
+        self.assertIn("ix_deliveries_dedupe_key", uniques)
+        alembic_cmd.downgrade(self.cfg, "0009_reminders")
+        self.assertFalse(STEP_0010_EXTRA & _sqlite_tables(self.conn))
+        self.assertEqual(self.conn.execute(text("SELECT title FROM reminders")).scalar(), "fyzio")
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertTrue(STEP_0010_EXTRA <= _sqlite_tables(self.conn))
+
     def test_0007_downgrade_restores_0006_shape(self):
         alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
         before = self._schema_snapshot()
@@ -351,7 +371,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA)
 
             db = main.SessionLocal()
             try:

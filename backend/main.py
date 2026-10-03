@@ -39,6 +39,7 @@ from goal_history_service import ensure_goal_progress_snapshot, compute_goal_pro
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
 from planner_service import generate_plan
 import reminder_service
+import delivery_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
@@ -418,6 +419,15 @@ class ReminderUpdateRequest(BaseModel):
     recurrence: str | None = None
     weekdays: str | list[int] | None = None
     time_local: str | None = None
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str
+    keys: dict[str, str]
+
+
+class PushEndpointRequest(BaseModel):
+    endpoint: str
 
 
 class ReminderSnoozeRequest(BaseModel):
@@ -1712,6 +1722,87 @@ def reminders_cancel(reminder_id: int):
         _reminder_call(lambda: reminder_service.cancel(db, item))
         db.commit()
         return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
+# ===== EXTERNÍ DORUČENÍ / WEB PUSH (Phase E) =====
+# Veřejný VAPID klíč je veřejný; privátní nikdy neopouští backend. Endpointy chrání globální session auth.
+
+@app.get("/push/config")
+def push_config():
+    provider = delivery_service.WebPushProvider()
+    problem = provider.config_problem()
+    enabled = delivery_service.external_delivery_enabled()
+    return {
+        "enabled": enabled,
+        "available": enabled and problem is None,
+        "reason": None if enabled and problem is None else ("disabled" if not enabled else problem),
+        "public_key": provider.public_key if problem is None else None,
+    }
+
+
+@app.post("/push/subscriptions")
+def push_subscribe(request: PushSubscriptionRequest, http_request: Request):
+    db = SessionLocal()
+    try:
+        try:
+            sub = delivery_service.upsert_subscription(
+                db, request.endpoint, request.keys, http_request.headers.get("user-agent"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        db.commit()
+        return {"ok": True, "subscription": delivery_service.subscription_view(sub)}
+    finally:
+        db.close()
+
+
+@app.post("/push/unsubscribe")
+def push_unsubscribe(request: PushEndpointRequest):
+    db = SessionLocal()
+    try:
+        removed = delivery_service.remove_subscription(db, request.endpoint)
+        db.commit()
+        return {"ok": True, "removed": removed}
+    finally:
+        db.close()
+
+
+@app.post("/push/test")
+def push_test(request: PushEndpointRequest):
+    """Testovací zpráva na TOTO zařízení (podle jeho endpointu); nezapisuje se do fronty doručení."""
+    provider = delivery_service.WebPushProvider()
+    if not delivery_service.external_delivery_enabled() or not provider.is_configured():
+        return {"ok": False, "error": "not_configured"}
+    db = SessionLocal()
+    try:
+        sub = delivery_service.find_subscription(db, request.endpoint)
+        if sub is None or sub.disabled_at is not None:
+            return {"ok": False, "error": "not_subscribed"}
+        message = {"title": "⏰ Standa Hub – test", "body": "Upozornění mimo aplikaci fungují.",
+                   "url": "/reminders", "tag": "standa-test", "ts": None}
+        result = provider.send(db, sub.id, message, f"test|{sub.id}")
+        if result.ok:
+            sub.last_success_at = datetime.utcnow()
+        elif result.target_gone:
+            sub.disabled_at = datetime.utcnow()
+        db.commit()
+        delivery_service.logger.info("test push subscription=%s ok=%s error=%s", sub.id, result.ok, result.error or "-")
+        return {"ok": result.ok, "error": result.error}
+    finally:
+        db.close()
+
+
+@app.get("/push/status")
+def push_status():
+    from models import PushSubscription
+    db = SessionLocal()
+    try:
+        subs = db.query(PushSubscription).order_by(PushSubscription.id).all()
+        return {
+            "subscriptions": [delivery_service.subscription_view(s) for s in subs],
+            "recent_deliveries": delivery_service.delivery_summary(db),
+        }
     finally:
         db.close()
 
