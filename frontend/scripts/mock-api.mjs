@@ -34,6 +34,9 @@ const GET_ROUTES = {
   "/wot/grinds": () => fixture("wot-grinds"),
   "/wot/resources": () => fixture("wot-resources"),
   "/activity": () => fixture("activity"),
+  // Roadmap 4G: GET /today ze skutečného today_service (ne 11. 10. 2026 14:30 Praha). Prázdný den a částečnou
+  // chybu (fixtures/today-empty.json, today-partial.json) podstrkuje ui-check přes page.route.
+  "/today": () => fixture("today"),
 };
 
 function send(res, req, status, body, extraHeaders = {}) {
