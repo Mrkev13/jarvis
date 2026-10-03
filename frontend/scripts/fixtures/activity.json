@@ -1,0 +1,137 @@
+{
+ "items": [
+  {
+   "id": 2,
+   "timestamp": "2026-10-11T14:00:00",
+   "area": "school",
+   "action_type": "create",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Úkol přidán: Laboratorní protokol č. 3",
+   "user_context": "manual"
+  },
+  {
+   "id": 3,
+   "timestamp": "2026-10-11T07:00:00",
+   "area": "finance",
+   "action_type": "create",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Výdaj 350 Kč: Doprava",
+   "user_context": "manual"
+  },
+  {
+   "id": 4,
+   "timestamp": "2026-10-11T00:00:00",
+   "area": "work",
+   "action_type": "create",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Práce 5 h – Klient ABC",
+   "user_context": "manual"
+  },
+  {
+   "id": 5,
+   "timestamp": "2026-10-10T17:00:00",
+   "area": "goals",
+   "action_type": "update",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Cíl upraven: Přečíst 12 knih (pozastaven)",
+   "user_context": "manual"
+  },
+  {
+   "id": 6,
+   "timestamp": "2026-10-10T10:00:00",
+   "area": "reminders",
+   "action_type": "complete",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Připomínka hotová: Koupit lístky",
+   "user_context": "manual"
+  },
+  {
+   "id": 7,
+   "timestamp": "2026-10-10T03:00:00",
+   "area": "memory",
+   "action_type": "create",
+   "entity_type": null,
+   "entity_id": null,
+   "summary": "Paměť: Nejlíp se učím ráno",
+   "user_context": "manual"
+  },
+  {
+   "id": 1,
+   "timestamp": "2026-10-08T17:00:00",
+   "area": "school",
+   "action_type": "complete",
+   "entity_type": "Assignment",
+   "entity_id": 2,
+   "summary": "Dokončeno (AI): Esej",
+   "user_context": null
+  },
+  {
+   "id": 13,
+   "timestamp": "2026-10-03T12:22:48.727288",
+   "area": "reminders",
+   "action_type": "complete",
+   "entity_type": "Reminder",
+   "entity_id": 5,
+   "summary": "Připomínka hotová: Koupit lístky · so 10. 10. 2026 09:00",
+   "user_context": "manual"
+  },
+  {
+   "id": 12,
+   "timestamp": "2026-10-03T12:22:48.668079",
+   "area": "reminders",
+   "action_type": "create",
+   "entity_type": "Reminder",
+   "entity_id": 5,
+   "summary": "Připomínka: Koupit lístky · so 10. 10. 2026 09:00",
+   "user_context": "manual"
+  },
+  {
+   "id": 11,
+   "timestamp": "2026-10-03T12:22:48.660577",
+   "area": "reminders",
+   "action_type": "create",
+   "entity_type": "Reminder",
+   "entity_id": 4,
+   "summary": "Připomínka: Ranní protažení · denně v 07:00",
+   "user_context": "manual"
+  },
+  {
+   "id": 10,
+   "timestamp": "2026-10-03T12:22:48.659965",
+   "area": "reminders",
+   "action_type": "create",
+   "entity_type": "Reminder",
+   "entity_id": 3,
+   "summary": "Připomínka: Odeslat fakturu · st 14. 10. 2026 10:00",
+   "user_context": "manual"
+  },
+  {
+   "id": 9,
+   "timestamp": "2026-10-03T12:22:48.659172",
+   "area": "reminders",
+   "action_type": "create",
+   "entity_type": "Reminder",
+   "entity_id": 2,
+   "summary": "Připomínka: Zalít květiny · po 12. 10. 2026 08:00",
+   "user_context": "manual"
+  },
+  {
+   "id": 8,
+   "timestamp": "2026-10-03T12:22:48.658367",
+   "area": "reminders",
+   "action_type": "create",
+   "entity_type": "Reminder",
+   "entity_id": 1,
+   "summary": "Připomínka: Fyzioterapie · ne 11. 10. 2026 18:30",
+   "user_context": "manual"
+  }
+ ],
+ "total": 13,
+ "limit": 50,
+ "offset": 0
+}

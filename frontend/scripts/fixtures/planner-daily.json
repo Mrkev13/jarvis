@@ -1,0 +1,16 @@
+{
+ "mode": "daily",
+ "summary": "Denní plán: nejdůležitější věci podle deadlinů, práce a stagnace.",
+ "actions": [
+  {
+   "priority": 1,
+   "area": "school",
+   "title": "Dokončit úkol po termínu: Sada",
+   "reason": "Stále platí: Termín byl 2. 10. 2026 (po termínu)."
+  }
+ ],
+ "meta": {
+  "history_created": 0,
+  "memories": []
+ }
+}

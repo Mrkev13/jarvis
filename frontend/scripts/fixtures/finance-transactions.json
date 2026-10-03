@@ -1,0 +1,66 @@
+[
+ {
+  "id": 5,
+  "amount": 350.0,
+  "category": "Doprava",
+  "description": "Jízdenka",
+  "transaction_type": "expense",
+  "created_at": "2026-10-10T17:00:00"
+ },
+ {
+  "id": 1,
+  "amount": 1200.0,
+  "category": "Jídlo",
+  "description": "",
+  "transaction_type": "expense",
+  "created_at": "2026-10-09T17:00:00"
+ },
+ {
+  "id": 2,
+  "amount": 300.0,
+  "category": "Doprava",
+  "description": "",
+  "transaction_type": "expense",
+  "created_at": "2026-10-08T17:00:00"
+ },
+ {
+  "id": 4,
+  "amount": 1400.0,
+  "category": "Práce",
+  "description": "",
+  "transaction_type": "income",
+  "created_at": "2026-10-07T17:00:00"
+ },
+ {
+  "id": 6,
+  "amount": 2200.0,
+  "category": "Bydlení",
+  "description": "Energie",
+  "transaction_type": "expense",
+  "created_at": "2026-10-06T17:00:00"
+ },
+ {
+  "id": 7,
+  "amount": 15000.0,
+  "category": "Výplata",
+  "description": "Září",
+  "transaction_type": "income",
+  "created_at": "2026-10-05T17:00:00"
+ },
+ {
+  "id": 3,
+  "amount": 400.0,
+  "category": "Jídlo",
+  "description": "",
+  "transaction_type": "expense",
+  "created_at": "2026-10-02T17:00:00"
+ },
+ {
+  "id": 8,
+  "amount": 640.0,
+  "category": "Zábava",
+  "description": "Kino + večeře",
+  "transaction_type": "expense",
+  "created_at": "2026-09-29T17:00:00"
+ }
+]

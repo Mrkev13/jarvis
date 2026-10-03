@@ -4,8 +4,8 @@ import Link from "next/link";
 import DailyBriefingCard from "@/components/DailyBriefingCard";
 import WeeklyReviewCard from "@/components/WeeklyReviewCard";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
-import { areaMeta } from "@/components/PlannerCards";
 import {
+  AreaBadge,
   Button,
   Card,
   CardHeader,
@@ -126,16 +126,6 @@ type DashboardPayload = {
 
 const fmt0 = (v: number) => formatNumber(v, 0);
 const fmt1 = (v: number) => formatNumber(v, 1);
-
-/** Oblast = identita (barva podle oblasti), ne stav. */
-function AreaBadge({ area }: { area: string }) {
-  const meta = areaMeta(area);
-  return (
-    <span className={cx("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4", meta.bg, meta.border, meta.text)}>
-      {meta.label}
-    </span>
-  );
-}
 
 function TodayRow({ a }: { a: TodayAction }) {
   const top = Number(a.priority) === 1;
@@ -269,11 +259,65 @@ export default function Home() {
         <div className="min-w-0 xl:col-span-2">
           <DailyBriefingCard index={0} />
         </div>
-        <WeeklyReviewCard index={1} />
+        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-1">
+          <WeeklyReviewCard index={1} />
+          <Card index={2} aria-labelledby="attention-title">
+            <CardHeader
+              title={<span id="attention-title">Vyžaduje pozornost</span>}
+              icon="🔔"
+              actions={
+                notifications && notifications.unread > 0 ? (
+                  <StatusBadge tone={notifications.important > 0 ? "danger" : "warning"}>
+                    {notifications.unread} nepřečtených
+                  </StatusBadge>
+                ) : undefined
+              }
+            />
+            {loading ? (
+              <LoadingState lines={2} />
+            ) : notifications?.preview?.length ? (
+              <ul className="space-y-2">
+                {notifications.preview.slice(0, 3).map((n) => {
+                  const sev = severityTone(n.severity);
+                  const href = n.action_url && n.action_url.startsWith("/") ? n.action_url : null;
+                  const body = (
+                    <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <StatusBadge tone={sev.tone} dot>
+                          {sev.label}
+                        </StatusBadge>
+                        <AreaBadge area={n.area} />
+                      </div>
+                      <div className="break-words text-sm font-medium text-ink">{n.title}</div>
+                      {n.message ? <div className="mt-0.5 line-clamp-2 break-words text-xs text-ink-muted">{n.message}</div> : null}
+                    </div>
+                  );
+                  return (
+                    <li key={n.id}>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className="block rounded-[var(--radius-control)] motion-hover-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                        >
+                          {body}
+                        </Link>
+                      ) : (
+                        body
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : data ? (
+              <EmptyState compact>Žádná neřešená upozornění.</EmptyState>
+            ) : null}
+          </Card>
+
+        </div>
       </div>
 
       {/* Klíčová čísla */}
-      <section aria-label="Klíčová čísla" className="motion-card" style={staggerStyle(2)}>
+      <section aria-label="Klíčová čísla" className="motion-card" style={staggerStyle(3)}>
         {loading ? (
           <StatGrid>
             {[0, 1, 2, 3].map((i) => (
@@ -306,7 +350,7 @@ export default function Home() {
       </section>
 
       {/* Dnes podle plánovače */}
-      <Card index={3} aria-labelledby="today-title">
+      <Card index={4} aria-labelledby="today-title">
         <CardHeader
           title={<span id="today-title">Dnes</span>}
           icon="☀️"
@@ -326,60 +370,8 @@ export default function Home() {
         ) : null}
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
-        {/* Vyžaduje pozornost */}
-        <Card index={4} aria-labelledby="attention-title">
-          <CardHeader
-            title={<span id="attention-title">Vyžaduje pozornost</span>}
-            icon="🔔"
-            actions={
-              notifications && notifications.unread > 0 ? (
-                <StatusBadge tone={notifications.important > 0 ? "danger" : "warning"}>
-                  {notifications.unread} nepřečtených
-                </StatusBadge>
-              ) : undefined
-            }
-          />
-          {loading ? (
-            <LoadingState lines={2} />
-          ) : notifications?.preview?.length ? (
-            <ul className="space-y-2">
-              {notifications.preview.slice(0, 3).map((n) => {
-                const sev = severityTone(n.severity);
-                const href = n.action_url && n.action_url.startsWith("/") ? n.action_url : null;
-                const body = (
-                  <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <StatusBadge tone={sev.tone} dot>
-                        {sev.label}
-                      </StatusBadge>
-                      <AreaBadge area={n.area} />
-                    </div>
-                    <div className="break-words text-sm font-medium text-ink">{n.title}</div>
-                    {n.message ? <div className="mt-0.5 line-clamp-2 break-words text-xs text-ink-muted">{n.message}</div> : null}
-                  </div>
-                );
-                return (
-                  <li key={n.id}>
-                    {href ? (
-                      <Link
-                        href={href}
-                        className="block rounded-[var(--radius-control)] motion-hover-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                      >
-                        {body}
-                      </Link>
-                    ) : (
-                      body
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : data ? (
-            <EmptyState compact>Žádná neřešená upozornění.</EmptyState>
-          ) : null}
-        </Card>
-
+      {/* Cíle · Nadcházející · Práce/Finance/Hry – karty se neroztahují na výšku sousedů */}
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
         {/* Cíle */}
         <Card index={5} aria-labelledby="goals-title">
           <CardHeader
@@ -401,7 +393,7 @@ export default function Home() {
         </Card>
 
         {/* Nadcházející */}
-        <Card index={6} aria-labelledby="upcoming-title" className="md:col-span-2 xl:col-span-1">
+        <Card index={6} aria-labelledby="upcoming-title">
           <CardHeader
             title={<span id="upcoming-title">Nadcházející</span>}
             icon="📅"
@@ -436,120 +428,122 @@ export default function Home() {
           ) : null}
         </Card>
 
-        {/* Práce */}
-        <Card index={7} aria-labelledby="work-title">
-          <CardHeader title={<span id="work-title">Práce</span>} icon="💼" actions={<TextLink href="/work">Práce →</TextLink>} />
-          {loading ? (
-            <LoadingState lines={2} />
-          ) : work ? (
-            <>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-xs text-ink-muted">Celkem odpracováno</dt>
-                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_hours, 1)} h</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-ink-muted">Celkem vyděláno</dt>
-                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_earnings, 0)} Kč</dd>
-                </div>
-              </dl>
-              <GoalProgressBlock goal={work.goal} unit="h" fallbackTitle="Měsíční hodinový cíl" current={work.this_month_hours} />
-            </>
-          ) : null}
-        </Card>
-
-        {/* Finance */}
-        <Card index={8} aria-labelledby="finance-title">
-          <CardHeader
-            title={<span id="finance-title">Finance</span>}
-            icon="💰"
-            actions={<TextLink href="/finance">Finance →</TextLink>}
-          />
-          {loading ? (
-            <LoadingState lines={2} />
-          ) : finance ? (
-            <>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-xs text-ink-muted">Příjem tento měsíc</dt>
-                  <dd className="font-semibold tabular-nums text-success">{formatNumber(finance.this_month_income, 0)} Kč</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-ink-muted">Výdaje tento měsíc</dt>
-                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(finance.this_month_expenses, 0)} Kč</dd>
-                </div>
-              </dl>
-              <GoalProgressBlock goal={finance.goal} unit="Kč" fallbackTitle="Cíl bilance" current={finance.balance} />
-            </>
-          ) : null}
-        </Card>
-
-        {/* Hry */}
-        <Card index={9} aria-labelledby="games-title">
-          <CardHeader
-            title={<span id="games-title">Hry</span>}
-            icon="🎮"
-            actions={
+        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:gap-6 xl:col-span-1 xl:grid-cols-1">
+          {/* Práce */}
+          <Card index={7} aria-labelledby="work-title">
+            <CardHeader title={<span id="work-title">Práce</span>} icon="💼" actions={<TextLink href="/work">Práce →</TextLink>} />
+            {loading ? (
+              <LoadingState lines={2} />
+            ) : work ? (
               <>
-                <TextLink href="/wot">WoT →</TextLink>
-                <TextLink href="/mff">MFF →</TextLink>
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-ink-muted">Celkem odpracováno</dt>
+                    <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_hours, 1)} h</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-ink-muted">Celkem vyděláno</dt>
+                    <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_earnings, 0)} Kč</dd>
+                  </div>
+                </dl>
+                <GoalProgressBlock goal={work.goal} unit="h" fallbackTitle="Měsíční hodinový cíl" current={work.this_month_hours} />
               </>
-            }
-          />
-          {loading ? (
-            <LoadingState lines={2} />
-          ) : (
-            <div className="space-y-3 text-sm">
-              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="font-medium text-ink">World of Tanks</span>
-                  {wot?.credits !== undefined && wot.credits !== null ? (
-                    <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
-                  ) : null}
+            ) : null}
+          </Card>
+
+          {/* Finance */}
+          <Card index={8} aria-labelledby="finance-title">
+            <CardHeader
+              title={<span id="finance-title">Finance</span>}
+              icon="💰"
+              actions={<TextLink href="/finance">Finance →</TextLink>}
+            />
+            {loading ? (
+              <LoadingState lines={2} />
+            ) : finance ? (
+              <>
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-ink-muted">Příjem tento měsíc</dt>
+                    <dd className="font-semibold tabular-nums text-success">{formatNumber(finance.this_month_income, 0)} Kč</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-ink-muted">Výdaje tento měsíc</dt>
+                    <dd className="font-semibold tabular-nums text-ink">{formatNumber(finance.this_month_expenses, 0)} Kč</dd>
+                  </div>
+                </dl>
+                <GoalProgressBlock goal={finance.goal} unit="Kč" fallbackTitle="Cíl bilance" current={finance.balance} />
+              </>
+            ) : null}
+          </Card>
+
+          {/* Hry */}
+          <Card index={9} aria-labelledby="games-title">
+            <CardHeader
+              title={<span id="games-title">Hry</span>}
+              icon="🎮"
+              actions={
+                <>
+                  <TextLink href="/wot">WoT →</TextLink>
+                  <TextLink href="/mff">MFF →</TextLink>
+                </>
+              }
+            />
+            {loading ? (
+              <LoadingState lines={2} />
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="font-medium text-ink">World of Tanks</span>
+                    {wot?.credits !== undefined && wot.credits !== null ? (
+                      <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
+                    ) : null}
+                  </div>
+                  {wot?.top_grinds?.length ? (
+                    wot.top_grinds.slice(0, 2).map((g) => (
+                      <div key={g.id} className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
+                        <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
+                  )}
                 </div>
-                {wot?.top_grinds?.length ? (
-                  wot.top_grinds.slice(0, 2).map((g) => (
-                    <div key={g.id} className="flex justify-between gap-2">
-                      <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
-                      <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
-                )}
-              </div>
-              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="font-medium text-ink">Marvel Future Fight</span>
-                  {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
+                <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="font-medium text-ink">Marvel Future Fight</span>
+                    {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
+                  </div>
+                  {mff ? (
+                    <>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-ink-muted">T4 postavy</span>
+                        <span className="tabular-nums text-ink">{mff.t4_count}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-ink-muted">Vysoká priorita</span>
+                        <span className="tabular-nums text-ink">{mff.priority_count}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-3">
+                        <Progress
+                          size="sm"
+                          value={mff.average_build_completeness}
+                          label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
+                          className="flex-1"
+                        />
+                        <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-ink-muted">Žádné postavy.</p>
+                  )}
                 </div>
-                {mff ? (
-                  <>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-ink-muted">T4 postavy</span>
-                      <span className="tabular-nums text-ink">{mff.t4_count}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-ink-muted">Vysoká priorita</span>
-                      <span className="tabular-nums text-ink">{mff.priority_count}</span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-3">
-                      <Progress
-                        size="sm"
-                        value={mff.average_build_completeness}
-                        label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
-                        className="flex-1"
-                      />
-                      <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-ink-muted">Žádné postavy.</p>
-                )}
               </div>
-            </div>
-          )}
-        </Card>
+            )}
+          </Card>
+        </div>
       </div>
 
       {/* Rychlé akce */}

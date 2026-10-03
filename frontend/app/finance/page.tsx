@@ -1,11 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import { formatNumber } from "@/lib/format";
-import ConfirmDialog from "@/components/ConfirmDialog";
+import { useState } from "react";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  ErrorState,
+  FormField,
+  fieldClass,
+  HudLabel,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  PageSection,
+  StatGrid,
+} from "@/components/ui";
+import { useApiResource } from "@/hooks/useApiResource";
+import { apiJson, jsonBody } from "@/lib/api";
+import { formatCzk, formatDate, formatSigned, plural } from "@/lib/format";
 import { staggerStyle, useNewIds } from "@/lib/motion";
+import { cx, type Tone } from "@/lib/ui";
 
 type FinanceSummary = {
   income: number;
@@ -24,81 +42,70 @@ type FinanceTransaction = {
 };
 
 type FormType = "income" | "expense" | null;
+type FieldErrors = { amount?: string; category?: string };
 
+const FORM_ID = "finance-form";
+const LOAD_ERROR = "Nepodařilo se načíst finanční data z backendu.";
+const EMPTY_FORM = { amount: "", category: "", description: "" };
 
-function formatDate(value?: string) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("cs-CZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/** Zůstatek: záporný se skutečným minus, kladný bez „+". */
+function formatBalance(value: number): string {
+  return value < 0 ? formatSigned(value, formatCzk(value)) : formatCzk(value);
+}
+
+function balanceTone(value: number | undefined): Tone {
+  if (value === undefined || value === 0) return "neutral";
+  return value > 0 ? "success" : "danger";
 }
 
 export default function FinancePage() {
-  const [summary, setSummary] = useState<FinanceSummary | null>(null);
-  const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
-  // Nově přidané transakce krátce zvýraznit (souhrn a seznam se načítají spolu → summary = ready).
+  const summary = useApiResource<FinanceSummary>("/finance/summary");
+  const txs = useApiResource<FinanceTransaction[]>("/finance/transactions");
+  const transactions = txs.data ?? [];
+  // Nově přidané transakce krátce zvýraznit (první načtený seznam se nezvýrazňuje).
   const newTxIds = useNewIds(
     transactions.map((tx) => tx.id),
-    summary !== null,
+    txs.data !== null,
   );
 
   const [formType, setFormType] = useState<FormType>(null);
-  const [form, setForm] = useState({
-    amount: "",
-    category: "",
-    description: "",
-  });
-
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deletingTx, setDeletingTx] = useState<FinanceTransaction | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      const [sumRes, txRes] = await Promise.all([
-        apiFetch("/finance/summary"),
-        apiFetch("/finance/transactions"),
-      ]);
-      if (!sumRes.ok || !txRes.ok) {
-        throw new Error("Failed to load finance data");
-      }
-      const sumJson = (await sumRes.json()) as FinanceSummary;
-      const txJson = (await txRes.json()) as FinanceTransaction[];
-      setSummary(sumJson);
-      setTransactions(txJson);
-      setError(null);
-    } catch {
-      setError("Nepodařilo se načíst finanční data z backendu.");
-    }
-  }, []);
+  const loading = summary.loading || txs.loading;
+  const loadFailed = summary.status === "error" || txs.status === "error";
+  const refreshFailed = !loadFailed && Boolean(summary.error || txs.error);
+  const refreshing = summary.refreshing || txs.refreshing;
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      void loadData().catch(() => {});
-    });
-  }, [loadData]);
+  async function loadData() {
+    await Promise.all([summary.reload(), txs.reload()]);
+  }
 
   function openForm(type: "income" | "expense") {
     setFormType(type);
-    setForm({ amount: "", category: "", description: "" });
+    setForm(EMPTY_FORM);
+    setFieldErrors({});
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!formType) return;
-    if (!form.amount || Number(form.amount) <= 0 || !form.category.trim()) {
-      setError("Vyplň částku a kategorii.");
+    if (!formType || submitting) return;
+    const amountBad = !form.amount || Number(form.amount) <= 0;
+    const categoryBad = !form.category.trim();
+    if (amountBad || categoryBad) {
+      setFieldErrors({
+        amount: amountBad ? "Zadej kladnou částku." : undefined,
+        category: categoryBad ? "Vyplň kategorii." : undefined,
+      });
       return;
     }
 
+    setFieldErrors({});
     setSubmitting(true);
-    setError(null);
+    setActionError(null);
     try {
       const body = {
         amount: Number(form.amount),
@@ -106,19 +113,14 @@ export default function FinancePage() {
         description: form.description.trim(),
         transaction_type: formType,
       };
-      const res = await apiFetch("/finance/transaction", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error("Failed to save transaction");
+      await apiJson("/finance/transaction", jsonBody("POST", body));
 
       setFormType(null);
-      setForm({ amount: "", category: "", description: "" });
+      setForm(EMPTY_FORM);
       await loadData();
     } catch (err) {
       console.error(err);
-      setError("Nepodařilo se uložit transakci.");
+      setActionError("Nepodařilo se uložit transakci.");
     } finally {
       setSubmitting(false);
     }
@@ -126,308 +128,238 @@ export default function FinancePage() {
 
   async function confirmDeleteTx() {
     if (!deletingTx) return;
+    setActionError(null);
     try {
-      const res = await apiFetch(`/finance/transaction/${deletingTx.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete transaction");
+      await apiJson(`/finance/transaction/${deletingTx.id}`, { method: "DELETE" });
       await loadData();
     } catch (err) {
       console.error(err);
-      setError("Nepodařilo se smazat transakci.");
+      setActionError("Nepodařilo se smazat transakci.");
     } finally {
       setDeletingTx(null);
     }
   }
 
+  const s = summary.data;
+  const count = transactions.length;
+
   return (
-    <main className="p-4 md:p-8 max-w-6xl mx-auto space-y-8 md:space-y-10">
-      <header>
-        <h1 className="text-2xl md:text-4xl font-bold">Finance</h1>
-        <p className="text-zinc-400 mt-2">
-          Balance, income, expenses and transactions.
-        </p>
-      </header>
-
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
-
-      {/* ===== SUMMARY CARDS ===== */}
-      <section id="summary">
-        <div className="motion-card bg-gradient-to-br from-zinc-900 to-zinc-900/40 border border-zinc-800 rounded-3xl p-5 md:p-8 mb-4 md:mb-6">
-          <div className="text-sm text-zinc-400">Current balance</div>
-          <div className="text-3xl md:text-5xl font-bold mt-2">
-            <AnimatedNumber value={summary?.balance} format={formatNumber} /> Kč
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6" style={staggerStyle(1)}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm text-zinc-400">Income</div>
-              <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-green-500/15 text-green-400 border-green-500/30">
-                +
-              </span>
-            </div>
-            <div className="text-2xl md:text-3xl font-semibold text-green-400">
-              <AnimatedNumber value={summary?.income} format={formatNumber} /> Kč
-            </div>
-          </div>
-
-          <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6" style={staggerStyle(2)}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm text-zinc-400">Expenses</div>
-              <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-red-500/15 text-red-400 border-red-500/30">
-                -
-              </span>
-            </div>
-            <div className="text-2xl md:text-3xl font-semibold text-red-400">
-              <AnimatedNumber value={summary?.expenses} format={formatNumber} /> Kč
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-3 mt-4 md:mt-6">
-          <button
-            type="button"
-            onClick={() => openForm("income")}
-            className="bg-green-500 text-white text-sm font-medium px-4 md:px-5 py-2.5 rounded-lg hover:bg-green-600 transition-colors"
-          >
-            + Add income
-          </button>
-          <button
-            type="button"
-            onClick={() => openForm("expense")}
-            className="bg-red-500 text-white text-sm font-medium px-4 md:px-5 py-2.5 rounded-lg hover:bg-red-600 transition-colors"
-          >
-            - Add expense
-          </button>
-        </div>
-      </section>
-
-      {/* ===== TRANSACTION FORM ===== */}
-      {formType && (
-        <form
-          onSubmit={handleSubmit}
-          className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6"
-        >
-          <h3 className="text-lg font-semibold mb-4">
-            {formType === "income" ? "Add income" : "Add expense"}
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">
-                Amount (Kč)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.amount}
-                onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                placeholder="např. 12500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">
-                Category
-              </label>
-              <input
-                type="text"
-                value={form.category}
-                onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                placeholder={formType === "income" ? "např. Work / Stipendium" : "např. Food / Transport"}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">
-                Description (volitelné)
-              </label>
-              <input
-                type="text"
-                value={form.description}
-                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                placeholder="poznámka"
-              />
-            </div>
-          </div>
-          <div className="flex gap-3 mt-5">
-            <button
-              type="submit"
-              disabled={submitting}
-              className={`font-medium px-5 py-2 rounded-lg disabled:opacity-50 ${
-                formType === "income"
-                  ? "bg-green-500 hover:bg-green-600 text-white"
-                  : "bg-red-500 hover:bg-red-600 text-white"
-              }`}
-            >
-              {submitting ? "Ukládám..." : "Uložit"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormType(null)}
-              className="bg-zinc-800 text-white font-medium px-5 py-2 rounded-lg hover:bg-zinc-700"
-            >
-              Zrušit
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* ===== RECENT TRANSACTIONS ===== */}
-      <section id="transactions">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl md:text-2xl font-semibold">Recent transactions</h2>
-          <span className="text-sm text-zinc-400">
-            {transactions.length} celkem
-          </span>
-        </div>
-
-        {transactions.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center text-zinc-400">
-            Zatím žádné transakce.
-          </div>
-        ) : (
+    <ContentContainer>
+      <PageHeader
+        eyebrow={<HudLabel>Modul · finance</HudLabel>}
+        title="Finance"
+        subtitle="Zůstatek, příjmy, výdaje a transakce."
+        actions={
           <>
-            {/* === Mobil: karty === */}
-            <div className="md:hidden space-y-3">
-              {transactions.map((tx) => {
-                const isIncome = tx.transaction_type === "income";
-                return (
-                  <div
-                    key={tx.id}
-                    className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-4 ${newTxIds.has(String(tx.id)) ? "motion-highlight" : ""}`}
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">
-                          {tx.description || tx.category}
-                        </div>
-                        <div className="text-xs text-zinc-400 mt-0.5">
-                          {tx.category}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5 shrink-0">
-                        <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border ${
-                            isIncome
-                              ? "bg-green-500/15 text-green-400 border-green-500/30"
-                              : "bg-red-500/15 text-red-400 border-red-500/30"
-                          }`}
-                        >
-                          {isIncome ? "Income" : "Expense"}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingTx(tx)}
-                          className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2 py-1 rounded transition-colors"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-zinc-400">
-                        {formatDate(tx.created_at)}
-                      </div>
-                      <div
-                        className={`text-lg font-semibold ${
-                          isIncome ? "text-green-400" : "text-red-400"
-                        }`}
-                      >
-                        {isIncome ? "+" : "-"} {formatNumber(tx.amount)} Kč
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* === Desktop: tabulka === */}
-            <div className="hidden md:block bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-zinc-800 text-zinc-400 text-sm">
-                      <th className="px-5 py-3 font-medium">Popis / Kategorie</th>
-                      <th className="px-5 py-3 font-medium">Typ</th>
-                      <th className="px-5 py-3 font-medium text-right">Částka</th>
-                      <th className="px-5 py-3 font-medium text-right">
-                        Datum
-                      </th>
-                      <th className="px-5 py-3 font-medium text-right">Akce</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transactions.map((tx) => {
-                      const isIncome = tx.transaction_type === "income";
-                      return (
-                        <tr
-                          key={tx.id}
-                          className={`border-b border-zinc-800/70 last:border-0 hover:bg-zinc-800/30 ${newTxIds.has(String(tx.id)) ? "motion-highlight-row" : ""}`}
-                        >
-                          <td className="px-5 py-4">
-                            <div className="font-medium">
-                              {tx.description || tx.category}
-                            </div>
-                            <div className="text-sm text-zinc-400 mt-0.5">
-                              {tx.category}
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span
-                              className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border ${
-                                isIncome
-                                  ? "bg-green-500/15 text-green-400 border-green-500/30"
-                                  : "bg-red-500/15 text-red-400 border-red-500/30"
-                              }`}
-                            >
-                              {isIncome ? "Income" : "Expense"}
-                            </span>
-                          </td>
-                          <td
-                            className={`px-5 py-4 text-right font-semibold ${
-                              isIncome ? "text-green-400" : "text-red-400"
-                            }`}
-                          >
-                            {isIncome ? "+" : "-"} {formatNumber(tx.amount)} Kč
-                          </td>
-                          <td className="px-5 py-4 text-right text-sm text-zinc-400">
-                            {formatDate(tx.created_at)}
-                          </td>
-                          <td className="px-5 py-4 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setDeletingTx(tx)}
-                              className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded-md transition-colors"
-                            >
-                              🗑️
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <Button
+              variant="secondary"
+              onClick={() => openForm("income")}
+              aria-expanded={formType === "income"}
+              aria-controls={formType ? FORM_ID : undefined}
+            >
+              + Přidat příjem
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => openForm("expense")}
+              aria-expanded={formType === "expense"}
+              aria-controls={formType ? FORM_ID : undefined}
+            >
+              − Přidat výdaj
+            </Button>
           </>
-        )}
-      </section>
+        }
+      />
+
+      {actionError ? <ErrorState message={actionError} /> : null}
+
+      {formType && (
+        <Card as="section" id={FORM_ID} aria-labelledby="finance-form-title" index={0}>
+          <CardHeader
+            title={<span id="finance-form-title">{formType === "income" ? "Nový příjem" : "Nový výdaj"}</span>}
+          />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <FormField label="Částka (Kč)" error={fieldErrors.amount}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={form.amount}
+                    onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    className={cx(fieldClass, "tabular-nums")}
+                    placeholder="např. 12500"
+                  />
+                )}
+              </FormField>
+              <FormField label="Kategorie" error={fieldErrors.category}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="text"
+                    value={form.category}
+                    onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                    className={fieldClass}
+                    placeholder={formType === "income" ? "např. Práce / Stipendium" : "např. Jídlo / Doprava"}
+                  />
+                )}
+              </FormField>
+              <FormField label="Poznámka" hint="Nepovinné">
+                {(p) => (
+                  <input
+                    {...p}
+                    type="text"
+                    value={form.description}
+                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="primary" busy={submitting} busyLabel="Ukládám…">
+                {formType === "income" ? "Uložit příjem" : "Uložit výdaj"}
+              </Button>
+              <Button variant="ghost" onClick={() => setFormType(null)} disabled={submitting}>
+                Zrušit
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {loading ? (
+        <LoadingState lines={5} label="Načítám finance…" />
+      ) : loadFailed ? (
+        <ErrorState message={LOAD_ERROR} onRetry={() => void loadData()} retrying={refreshing} />
+      ) : (
+        <>
+          {refreshFailed ? <ErrorState message={`Obnovení selhalo. ${LOAD_ERROR}`} onRetry={() => void loadData()} /> : null}
+
+          <section aria-label="Souhrn" aria-busy={summary.refreshing || undefined}>
+            <StatGrid cols={3}>
+              <MetricCard
+                className="col-span-2 md:col-span-1"
+                label="Zůstatek"
+                tone={balanceTone(s?.balance)}
+                value={<AnimatedNumber value={s?.balance} format={formatBalance} fallback="–" />}
+              />
+              <MetricCard
+                label="Příjmy"
+                tone="success"
+                value={<AnimatedNumber value={s?.income} format={formatCzk} fallback="–" />}
+              />
+              <MetricCard
+                label="Výdaje"
+                value={<AnimatedNumber value={s?.expenses} format={formatCzk} fallback="–" />}
+              />
+            </StatGrid>
+          </section>
+
+          <PageSection
+            labelledBy="finance-transactions"
+            title="Poslední transakce"
+            actions={
+              <span className="text-sm text-ink-muted tabular-nums">
+                {count} {plural(count, "transakce", "transakce", "transakcí")}
+              </span>
+            }
+          >
+            {count === 0 ? (
+              <EmptyState
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => openForm("expense")}>
+                    Přidat výdaj
+                  </Button>
+                }
+              >
+                Zatím žádné transakce.
+              </EmptyState>
+            ) : (
+              <Card flush as="div" aria-busy={txs.refreshing || undefined}>
+                <ul aria-label="Transakce" className="divide-y divide-line-subtle">
+                  {transactions.map((tx, idx) => (
+                    <TransactionRow
+                      key={tx.id}
+                      tx={tx}
+                      index={idx}
+                      highlight={newTxIds.has(String(tx.id))}
+                      onDelete={() => setDeletingTx(tx)}
+                    />
+                  ))}
+                </ul>
+              </Card>
+            )}
+          </PageSection>
+        </>
+      )}
 
       <ConfirmDialog
         open={deletingTx != null}
         title={`Smazat transakci ${deletingTx?.description || deletingTx?.category || ""}?`}
-        message="Tato akce je nevratná. Transakce bude odstraněna a balance se přepočítá."
+        message="Tato akce je nevratná. Transakce bude odstraněna a zůstatek se přepočítá."
+        confirmLabel="Smazat"
+        busyLabel="Mažu…"
         onConfirm={confirmDeleteTx}
         onCancel={() => setDeletingTx(null)}
       />
-    </main>
+    </ContentContainer>
+  );
+}
+
+function TransactionRow({
+  tx,
+  index,
+  highlight,
+  onDelete,
+}: {
+  tx: FinanceTransaction;
+  index: number;
+  highlight: boolean;
+  onDelete: () => void;
+}) {
+  const isIncome = tx.transaction_type === "income";
+  // Výdaj se zobrazí jako záporná částka (skutečné minus); příjem zeleně s „+".
+  const signed = isIncome ? tx.amount : -tx.amount;
+  const title = tx.description || tx.category;
+  return (
+    <li
+      style={highlight ? undefined : staggerStyle(index)}
+      className={cx(
+        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2.5 md:px-4",
+        highlight ? "motion-highlight" : "motion-card",
+      )}
+    >
+      <div className="min-w-0">
+        <div className="break-words font-medium text-ink">{title}</div>
+        <div className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-ink-muted">
+          <span className="tabular-nums">{formatDate(tx.created_at)}</span>
+          {tx.description ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="break-words">{tx.category}</span>
+            </>
+          ) : null}
+          <span aria-hidden="true">·</span>
+          <span>{isIncome ? "Příjem" : "Výdaj"}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-1 sm:gap-2">
+        <span
+          className={cx(
+            "whitespace-nowrap text-right font-semibold tabular-nums",
+            isIncome ? "text-success" : "text-ink",
+          )}
+        >
+          {formatSigned(signed, formatCzk(tx.amount))}
+        </span>
+        <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat transakci ${title}`}>
+          Smazat
+        </Button>
+      </div>
+    </li>
   );
 }

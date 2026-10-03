@@ -1,0 +1,69 @@
+{
+ "mode": "weekly",
+ "summary": "Týdenní plán: priority podle deadlinů, práce, cílů a relevantních memory. Memory: 4 relevantních položek.",
+ "actions": [
+  {
+   "priority": 1,
+   "area": "school",
+   "title": "Dokončit úkol po termínu: Sada",
+   "reason": "Termín byl 2. 10. 2026 (po termínu)."
+  },
+  {
+   "priority": 2,
+   "area": "school",
+   "title": "Připravit se na zkoušku: Zkouška fyzika",
+   "reason": "Termín 15. 10. 2026 (zbývá 12 dní)."
+  },
+  {
+   "priority": 3,
+   "area": "school",
+   "title": "Připravit/odevzdat úkol: Laboratorní protokol č. 3",
+   "reason": "Termín 16. 10. 2026 (zbývá 13 dní)."
+  },
+  {
+   "priority": 4,
+   "area": "school",
+   "title": "Připravit/odevzdat úkol: Laboratoř",
+   "reason": "Termín 14. 10. 2026 (zbývá 11 dní)."
+  },
+  {
+   "priority": 5,
+   "area": "school",
+   "title": "Připravit/odevzdat úkol: Projekt",
+   "reason": "Termín 13. 10. 2026 (zbývá 10 dní)."
+  }
+ ],
+ "meta": {
+  "history_created": 6,
+  "memories": [
+   {
+    "id": 3,
+    "area": "finance",
+    "category": "goal",
+    "content": "Chci mít rezervu na 3 měsíce výdajů.",
+    "importance": 9
+   },
+   {
+    "id": 1,
+    "area": "school",
+    "category": "preference",
+    "content": "Nejlíp se učím ráno do 10:00.",
+    "importance": 8
+   },
+   {
+    "id": 2,
+    "area": "work",
+    "category": "context",
+    "content": "Klient ABC platí do 14 dnů od faktury.",
+    "importance": 6
+   },
+   {
+    "id": 4,
+    "area": "general",
+    "category": "context",
+    "content": "Fyzioterapie je každou neděli.",
+    "importance": 5
+   }
+  ]
+ }
+}

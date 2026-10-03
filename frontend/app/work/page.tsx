@@ -1,42 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import { formatNumber } from "@/lib/format";
-import ConfirmDialog from "@/components/ConfirmDialog";
+import { useMemo, useState } from "react";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  ErrorState,
+  FormField,
+  fieldClass,
+  HudLabel,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  PageSection,
+  StatGrid,
+  StatusBadge,
+} from "@/components/ui";
+import { useApiResource } from "@/hooks/useApiResource";
+import { apiJson, errorMessage, jsonBody } from "@/lib/api";
+import { formatCzk, formatDate, formatHours, plural } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle, useNewIds } from "@/lib/motion";
+import { cx } from "@/lib/ui";
+import {
+  estimateEarnings,
+  financeSyncMeta,
+  groupSessionsByDay,
+  type WorkSessionItem,
+  type WorkSummary,
+} from "@/lib/work";
 
-type WorkSummary = {
-  total_hours: number;
-  total_earnings: number;
-  this_month_hours: number;
-  this_month_earnings: number;
-};
-
-type WorkSessionItem = {
-  id: number;
-  date: string;
-  hours: number;
-  project: string;
-  description: string;
-  hourly_rate: number;
-  earnings: number;
-  finance_transaction_id?: number | null;
-  sync_to_finance?: boolean | null;
-};
-
-const dateFormatter = new Intl.DateTimeFormat("cs-CZ", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
-
-function formatHours(value: number) {
-  const fixed = value % 1 === 0 ? value.toFixed(0) : value.toFixed(1);
-  return `${fixed} h`;
-}
+const FORM_ID = "work-session-form";
+const VALIDATION_MESSAGE = "Vyplň platné datum a kladný počet hodin.";
 
 function todayIso() {
   const d = new Date();
@@ -47,15 +45,22 @@ function todayIso() {
 }
 
 export default function WorkPage() {
-  const [summary, setSummary] = useState<WorkSummary | null>(null);
-  const [sessions, setSessions] = useState<WorkSessionItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  // Nově přidané session krátce zvýraznit (ne při prvním načtení).
+  const sessionsRes = useApiResource<WorkSessionItem[]>("/work/sessions");
+  const summaryRes = useApiResource<WorkSummary>("/work/summary");
+  const sessions = useMemo(() => sessionsRes.data ?? [], [sessionsRes.data]);
+  const summary = summaryRes.data;
+  const days = useMemo(() => groupSessionsByDay(sessions), [sessions]);
+  const firstLoad = sessionsRes.loading || summaryRes.loading;
+  const refreshing = sessionsRes.refreshing || summaryRes.refreshing;
+
+  // Nově přidané záznamy krátce zvýraznit (ne při prvním načtení).
   const newSessionIds = useNewIds(
     sessions.map((s) => s.id),
-    summary !== null && !loading,
+    sessionsRes.data !== null && !firstLoad,
   );
-  const [error, setError] = useState<string | null>(null);
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [validationField, setValidationField] = useState<"date" | "hours" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingSession, setDeletingSession] = useState<WorkSessionItem | null>(null);
 
@@ -67,48 +72,28 @@ export default function WorkPage() {
   const [hourlyRate, setHourlyRate] = useState("");
   const [syncToFinance, setSyncToFinance] = useState(true);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [sRes, sumRes] = await Promise.all([
-        apiFetch("/work/sessions"),
-        apiFetch("/work/summary"),
-      ]);
-      if (!sRes.ok || !sumRes.ok) throw new Error();
-      const s = (await sRes.json()) as WorkSessionItem[];
-      const sum = (await sumRes.json()) as WorkSummary;
-      setSessions(s);
-      setSummary(sum);
-    } catch {
-      setError("Nepodařilo se načíst pracovní data.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const estimate = estimateEarnings(hours, hourlyRate);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      void loadData().catch(() => {});
-    });
-  }, [loadData]);
+  async function reloadAll() {
+    await Promise.all([sessionsRes.reload(), summaryRes.reload()]);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const hoursNum = parseFloat(hours);
     if (!date || !isFinite(hoursNum) || hoursNum <= 0) {
-      setError("Vyplň platné datum a kladný počet hodin.");
+      setValidationField(!date ? "date" : "hours");
       return;
     }
+    setValidationField(null);
     const rate = hourlyRate ? parseFloat(hourlyRate) : 0;
 
     setSubmitting(true);
-    setError(null);
+    setActionError(null);
     try {
-      const res = await apiFetch("/work/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await apiJson(
+        "/work/session",
+        jsonBody("POST", {
           date,
           hours: hoursNum,
           project: project.trim(),
@@ -116,18 +101,16 @@ export default function WorkPage() {
           hourly_rate: isFinite(rate) ? rate : 0,
           sync_to_finance: syncToFinance,
         }),
-      });
-      if (!res.ok) throw new Error();
+      );
       setHours("");
       setProject("");
       setDescription("");
       setHourlyRate("");
       setSyncToFinance(true);
       setShowForm(false);
-      await loadData();
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se uložit session.");
+      setActionError(errorMessage(err, "Nepodařilo se uložit záznam práce."));
     } finally {
       setSubmitting(false);
     }
@@ -135,300 +118,292 @@ export default function WorkPage() {
 
   async function confirmDeleteSession() {
     if (!deletingSession) return;
+    setActionError(null);
     try {
-      const res = await apiFetch(`/work/session/${deletingSession.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete session");
-      await loadData();
+      await apiJson(`/work/session/${deletingSession.id}`, { method: "DELETE" });
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se smazat pracovní session.");
+      setActionError(errorMessage(err, "Nepodařilo se smazat záznam práce."));
     } finally {
       setDeletingSession(null);
     }
   }
 
+  const loadError =
+    sessionsRes.status === "error" || summaryRes.status === "error"
+      ? sessionsRes.error || summaryRes.error || "Nepodařilo se načíst pracovní data."
+      : null;
+
   return (
-    <main className="p-4 md:p-8 max-w-5xl mx-auto">
-      <header className="mb-6 md:mb-8">
-        <h1 className="text-2xl md:text-4xl font-bold">Work</h1>
-        <p className="text-zinc-400 mt-2">
-          Sledování odpracovaných hodin, projektů a výdělku.
-        </p>
-      </header>
-
-      {error && (
-        <div className="mb-6 bg-red-950/50 border border-red-900 text-red-200 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
-
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-          <div className="text-sm text-zinc-400 mb-4">This month</div>
-          <div className="space-y-3">
-            <div className="flex justify-between items-baseline gap-4">
-              <span className="text-zinc-400">Hodiny</span>
-              <span className="text-3xl font-bold">
-                {loading && !summary
-                  ? "…"
-                  : <AnimatedNumber value={summary?.this_month_hours ?? 0} format={formatHours} />}
-              </span>
-            </div>
-            <div className="flex justify-between items-baseline gap-4">
-              <span className="text-zinc-400">Výdělek</span>
-              <span className="text-2xl font-semibold text-green-400">
-                {loading && !summary
-                  ? "…"
-                  : <><AnimatedNumber value={summary?.this_month_earnings ?? 0} format={formatNumber} /> Kč</>}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-6" style={staggerStyle(1)}>
-          <div className="text-sm text-zinc-400 mb-4">Total</div>
-          <div className="space-y-3">
-            <div className="flex justify-between items-baseline gap-4">
-              <span className="text-zinc-400">Hodiny</span>
-              <span className="text-3xl font-bold">
-                {loading && !summary
-                  ? "…"
-                  : <AnimatedNumber value={summary?.total_hours ?? 0} format={formatHours} />}
-              </span>
-            </div>
-            <div className="flex justify-between items-baseline gap-4">
-              <span className="text-zinc-400">Výdělek</span>
-              <span className="text-2xl font-semibold text-green-400">
-                {loading && !summary
-                  ? "…"
-                  : <><AnimatedNumber value={summary?.total_earnings ?? 0} format={formatNumber} /> Kč</>}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Add work session</h2>
-          {!showForm ? (
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              className="bg-white text-black font-medium px-5 py-2.5 rounded-xl hover:bg-zinc-200 transition-colors"
-            >
-              + Add work session
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="text-sm text-zinc-400 hover:text-zinc-200"
-            >
-              Zavřít
-            </button>
-          )}
-        </div>
-
-        {showForm && (
-          <form
-            onSubmit={handleSubmit}
-            className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 md:p-6"
+    <ContentContainer>
+      <PageHeader
+        eyebrow={<HudLabel>Modul · práce</HudLabel>}
+        title="Práce"
+        subtitle="Odpracované hodiny, projekty a výdělek."
+        actions={
+          <Button
+            variant={showForm ? "secondary" : "primary"}
+            aria-expanded={showForm}
+            aria-controls={FORM_ID}
+            onClick={() => setShowForm((v) => !v)}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Hours
-                </label>
-                <input
-                  type="number"
-                  min="0.25"
-                  step="0.25"
-                  placeholder="např. 7.5"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Project
-                </label>
-                <input
-                  type="text"
-                  placeholder="např. Servind"
-                  value={project}
-                  onChange={(e) => setProject(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Hourly rate (Kč)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="např. 325"
-                  value={hourlyRate}
-                  onChange={(e) => setHourlyRate(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Popis práce…"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none resize-none focus:border-zinc-500"
-                />
-              </div>
-              <div className="md:col-span-2 flex items-start gap-2">
+            {showForm ? "Zavřít formulář" : "Přidat záznam"}
+          </Button>
+        }
+      />
+
+      {actionError ? <ErrorState message={actionError} /> : null}
+
+      {showForm && (
+        <Card as="section" aria-labelledby="work-form-title">
+          <CardHeader title={<span id="work-form-title">Nový záznam práce</span>} />
+          <form id={FORM_ID} onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Datum" error={validationField === "date" ? VALIDATION_MESSAGE : undefined}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <FormField label="Hodiny" error={validationField === "hours" ? VALIDATION_MESSAGE : undefined}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="number"
+                    inputMode="decimal"
+                    min="0.25"
+                    step="0.25"
+                    placeholder="např. 7.5"
+                    value={hours}
+                    onChange={(e) => setHours(e.target.value)}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <FormField label="Projekt" hint="Nepovinné">
+                {(p) => (
+                  <input
+                    {...p}
+                    type="text"
+                    placeholder="např. Servind"
+                    value={project}
+                    onChange={(e) => setProject(e.target.value)}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <FormField label="Hodinová sazba (Kč)" hint="Nepovinné">
+                {(p) => (
+                  <input
+                    {...p}
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    placeholder="např. 325"
+                    value={hourlyRate}
+                    onChange={(e) => setHourlyRate(e.target.value)}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <FormField label="Popis" hint="Nepovinné" className="sm:col-span-2">
+                {(p) => (
+                  <textarea
+                    {...p}
+                    rows={2}
+                    placeholder="Popis práce…"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className={cx(fieldClass, "resize-none")}
+                  />
+                )}
+              </FormField>
+              <div className="flex items-start gap-3 sm:col-span-2">
                 <input
                   id="sync-finance"
                   type="checkbox"
                   checked={syncToFinance}
                   onChange={(e) => setSyncToFinance(e.target.checked)}
-                  className="mt-1 w-4 h-4 rounded bg-zinc-800 border-zinc-700"
+                  aria-describedby="sync-finance-hint"
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-accent [color-scheme:dark]"
                 />
-                <label htmlFor="sync-finance" className="text-sm text-zinc-300 select-none">
-                  ☑ Zapsat výdělek také do Finance (vytvoří záznam <code className="text-green-400">income / work</code>)
-                </label>
+                <div className="min-w-0">
+                  <label htmlFor="sync-finance" className="text-sm text-ink select-none">
+                    Zapsat výdělek také do Financí
+                  </label>
+                  <p id="sync-finance-hint" className="text-xs text-ink-muted">
+                    Vytvoří příjem v kategorii „work“.
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <div className="text-sm text-zinc-400">
-                {hours && hourlyRate && !isNaN(parseFloat(hours)) && !isNaN(parseFloat(hourlyRate)) && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-ink-muted" aria-live="polite">
+                {estimate !== null ? (
                   <>
-                    Odhad výdělku:{" "}
-                    <span className="text-green-400 font-medium">
-                      {formatNumber(parseFloat(hours) * parseFloat(hourlyRate))} Kč
-                    </span>
+                    Odhad výdělku: <span className="font-medium tabular-nums text-ink">{formatCzk(estimate)}</span>
                   </>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition-colors"
-                >
+                ) : null}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={() => setShowForm(false)}>
                   Storno
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || loading}
-                  className="bg-white text-black font-medium px-5 py-2.5 rounded-xl disabled:opacity-50 hover:bg-zinc-200 transition-colors"
-                >
-                  {submitting ? "Ukládám…" : "Uložit"}
-                </button>
+                </Button>
+                <Button type="submit" variant="primary" busy={submitting} busyLabel="Ukládám…" disabled={firstLoad}>
+                  Uložit
+                </Button>
               </div>
             </div>
           </form>
-        )}
-      </section>
+        </Card>
+      )}
 
-      <section>
-        <h2 className="text-xl font-semibold mb-4">Recent sessions</h2>
+      {firstLoad ? (
+        <LoadingState lines={5} label="Načítám pracovní data…" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void reloadAll()} retrying={refreshing} />
+      ) : (
+        <>
+          {sessionsRes.error || summaryRes.error ? (
+            <ErrorState message={`Obnovení selhalo: ${sessionsRes.error || summaryRes.error}`} />
+          ) : null}
 
-        {loading && sessions.length === 0 ? (
-          <div className="text-zinc-500 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            Načítám…
-          </div>
-        ) : sessions.length === 0 ? (
-          <div className="text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            Zatím žádné pracovní session. Přidej první!
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {sessions.map((s, si) => (
-              <div
-                key={s.id}
-                className={`motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col md:flex-row md:items-center gap-4 md:justify-between ${
-                  newSessionIds.has(String(s.id)) ? "motion-highlight" : ""
-                }`}
-                style={staggerStyle(Math.min(si + 2, MAX_STAGGER))}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className="text-sm text-zinc-400">
-                      {dateFormatter.format(new Date(`${s.date}T00:00:00`))}
-                    </span>
-                    {s.project && (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-zinc-800 border border-zinc-700 text-zinc-200">
-                        {s.project}
-                      </span>
-                    )}
-                    {s.finance_transaction_id ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/10 border border-green-500/30 text-green-400">
-                        💰 Finance
-                      </span>
-                    ) : s.sync_to_finance && s.earnings > 0 ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                        Finance: nevyužito
-                      </span>
-                    ) : null}
-                  </div>
-                  {s.description && (
-                    <p className="text-zinc-300 leading-relaxed break-words">
-                      {s.description}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-3 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setDeletingSession(s)}
-                    className="self-end text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded transition-colors"
-                  >
-                    🗑️
-                  </button>
-                  <div className="flex md:flex-col items-end gap-4">
-                    <div className="text-right">
-                      <div className="text-sm text-zinc-500">Hodiny</div>
-                      <div className="text-xl font-semibold">
-                        {formatHours(s.hours)}
+          <PageSection title="Přehled" labelledBy="work-overview">
+            <div aria-busy={refreshing || undefined}>
+              <StatGrid cols={4}>
+                <MetricCard
+                  label="Hodiny · tento měsíc"
+                  value={<AnimatedNumber value={summary?.this_month_hours} format={formatHours} fallback="–" />}
+                />
+                <MetricCard
+                  label="Výdělek · tento měsíc"
+                  value={<AnimatedNumber value={summary?.this_month_earnings} format={formatCzk} fallback="–" />}
+                />
+                <MetricCard
+                  label="Hodiny · celkem"
+                  value={<AnimatedNumber value={summary?.total_hours} format={formatHours} fallback="–" />}
+                />
+                <MetricCard
+                  label="Výdělek · celkem"
+                  value={<AnimatedNumber value={summary?.total_earnings} format={formatCzk} fallback="–" />}
+                />
+              </StatGrid>
+            </div>
+          </PageSection>
+
+          <PageSection title="Historie práce" labelledBy="work-history" description="Nejnovější dny nahoře.">
+            <div aria-busy={refreshing || undefined}>
+              {days.length === 0 ? (
+                <EmptyState
+                  action={
+                    showForm ? undefined : (
+                      <Button variant="secondary" aria-controls={FORM_ID} aria-expanded={false} onClick={() => setShowForm(true)}>
+                        Přidat záznam
+                      </Button>
+                    )
+                  }
+                >
+                  Zatím žádná odpracovaná práce.
+                </EmptyState>
+              ) : (
+                <ol className="space-y-5" aria-label="Záznamy práce po dnech">
+                  {days.map((day, di) => (
+                    <li key={day.date} className="min-w-0">
+                      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                        <h3 className="text-sm font-semibold text-ink">{formatDate(day.date)}</h3>
+                        <p className="text-xs text-ink-muted tabular-nums">
+                          {day.sessions.length > 1
+                            ? `${day.sessions.length} ${plural(day.sessions.length, "záznam", "záznamy", "záznamů")} · `
+                            : null}
+                          {formatHours(day.hours)} · {formatCzk(day.earnings)}
+                        </p>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm text-zinc-500">Výdělek</div>
-                      <div className="text-xl font-semibold text-green-400">
-                        {formatNumber(s.earnings)} Kč
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+                      <ul className="space-y-2 border-l border-line pl-3 md:pl-4">
+                        {day.sessions.map((s) => (
+                          <SessionRow
+                            key={s.id}
+                            session={s}
+                            fresh={newSessionIds.has(String(s.id))}
+                            staggerIndex={Math.min(di, MAX_STAGGER)}
+                            onDelete={() => setDeletingSession(s)}
+                          />
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </PageSection>
+        </>
+      )}
 
       <ConfirmDialog
         open={deletingSession != null}
-        title={`Smazat session ${deletingSession?.project || deletingSession?.date || ""}?`}
-        message="Tato akce je nevratná. Změny se projeví v Work statistikách."
+        title={`Smazat záznam ${deletingSession?.project || (deletingSession ? formatDate(deletingSession.date) : "")}?`}
+        message="Tato akce je nevratná. Změny se projeví ve statistikách práce."
+        confirmLabel="Smazat"
+        cancelLabel="Ponechat"
+        busyLabel="Mažu…"
         onConfirm={confirmDeleteSession}
         onCancel={() => setDeletingSession(null)}
       />
-    </main>
+    </ContentContainer>
+  );
+}
+
+function SessionRow({
+  session: s,
+  fresh,
+  staggerIndex,
+  onDelete,
+}: {
+  session: WorkSessionItem;
+  fresh: boolean;
+  staggerIndex: number;
+  onDelete: () => void;
+}) {
+  const finance = financeSyncMeta(s);
+  return (
+    <li
+      style={staggerStyle(staggerIndex)}
+      className={cx(
+        "motion-card relative rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 px-3 py-3 md:px-4",
+        fresh && "motion-highlight",
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="absolute top-5 -left-[calc(0.75rem+4.5px)] h-2 w-2 rounded-full border border-line bg-surface md:-left-[calc(1rem+4.5px)]"
+      />
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+        <div className="min-w-14 shrink-0 text-lg font-semibold tabular-nums text-ink">{formatHours(s.hours)}</div>
+        <div className="min-w-0 flex-1 basis-40">
+          <div className="break-words font-medium text-ink">{s.project || "Bez projektu"}</div>
+          {s.description ? <p className="mt-0.5 break-words text-sm text-ink-2">{s.description}</p> : null}
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+            {s.hourly_rate > 0 ? <span className="tabular-nums">{formatCzk(s.hourly_rate)}/h</span> : null}
+            {finance ? <StatusBadge tone={finance.tone}>{finance.label}</StatusBadge> : null}
+          </div>
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <span className="text-base font-semibold tabular-nums text-ink">{formatCzk(s.earnings)}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onDelete}
+            aria-label={`Smazat záznam ${s.project || ""} ${formatDate(s.date)}`.replace(/\s+/g, " ")}
+          >
+            Smazat
+          </Button>
+        </div>
+      </div>
+    </li>
   );
 }

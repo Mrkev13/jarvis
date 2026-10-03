@@ -14,8 +14,8 @@ const VARIANT: Record<ButtonVariant, string> = {
 };
 
 const SIZE: Record<ButtonSize, string> = {
-  sm: "min-h-9 px-3 text-sm",
-  md: "min-h-10 px-4 text-sm",
+  sm: "min-h-9 px-3 text-sm pointer-coarse:min-h-11",
+  md: "min-h-10 px-4 text-sm pointer-coarse:min-h-11",
 };
 
 export function buttonClass(variant: ButtonVariant = "secondary", size: ButtonSize = "md", className?: string) {
@@ -73,12 +73,17 @@ export function ButtonLink({
   );
 }
 
-/** Textový odkaz „Škola →" v hlavičkách karet. */
+/** Textový odkaz „Škola →" v hlavičkách karet; dotyková plocha je větší než text. */
 export function TextLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
       href={href}
-      className="rounded text-sm text-ink-muted transition-colors hover:text-accent-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+      className={cx(
+        "relative inline-flex items-center rounded text-sm text-ink-muted transition-colors hover:text-accent-strong",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
+        // neviditelná zvětšená plocha pro dotyk (~44 px) bez změny vzhledu a rozložení
+        "after:absolute after:-inset-x-2 after:-inset-y-3 after:content-['']",
+      )}
     >
       {children}
     </Link>

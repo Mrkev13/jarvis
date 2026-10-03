@@ -12,6 +12,11 @@ import {
   formatPercent,
   formatRelativeDays,
   formatSigned,
+  parseApiInstant,
+  pragueDayEndIso,
+  pragueDayKey,
+  pragueDayStartIso,
+  formatTime,
   plural,
 } from "./format.ts";
 
@@ -61,4 +66,25 @@ test("instants are shown in Prague time (summer and winter)", () => {
   assert.equal(formatDateTime("2026-10-05T06:05:00Z"), "5. 10. 8:05");
   assert.equal(formatDateTime("2026-12-05T23:30:00Z"), "6. 12. 0:30");
   assert.equal(formatDate("2026-12-31T23:30:00Z"), "1. 1. 2027");
+});
+
+test("naive API timestamps are UTC, not browser-local time", () => {
+  // backend: naive UTC isoformat() bez zóny → 17:00 UTC = 19:00 v Praze (SELČ)
+  assert.equal(formatDateTime("2026-10-11T17:00:00"), "11. 10. 19:00");
+  assert.equal(formatDateTime("2026-10-11 17:00:00.123456"), "11. 10. 19:00");
+  assert.equal(formatDateTime("2026-10-11T17:00:00+02:00"), "11. 10. 17:00");
+  assert.equal(parseApiInstant("2026-12-01T10:00:00").toISOString(), "2026-12-01T10:00:00.000Z");
+});
+
+test("Prague day keys and day bounds (summer, winter, DST switch)", () => {
+  assert.equal(formatTime("2026-10-11T05:05:00"), "7:05");
+  assert.equal(pragueDayKey("2026-10-10T22:30:00"), "2026-10-11"); // 00:30 v Praze
+  assert.equal(pragueDayKey("2026-12-31T22:59:00Z"), "2026-12-31");
+  assert.equal(pragueDayStartIso("2026-10-11"), "2026-10-10T22:00:00.000Z");
+  assert.equal(pragueDayEndIso("2026-10-11"), "2026-10-11T21:59:59.999Z");
+  assert.equal(pragueDayStartIso("2026-12-01"), "2026-11-30T23:00:00.000Z");
+  // 25. 10. 2026 končí letní čas: den má 25 hodin
+  assert.equal(pragueDayStartIso("2026-10-25"), "2026-10-24T22:00:00.000Z");
+  assert.equal(pragueDayEndIso("2026-10-25"), "2026-10-25T22:59:59.999Z");
+  assert.equal(pragueDayStartIso("nope"), null);
 });

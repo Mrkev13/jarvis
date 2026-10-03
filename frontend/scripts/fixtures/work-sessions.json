@@ -1,0 +1,79 @@
+[
+ {
+  "id": 5,
+  "date": "2026-10-09",
+  "hours": 5.0,
+  "project": "Klient ABC",
+  "description": "Úpravy webu",
+  "hourly_rate": 250.0,
+  "earnings": 1250.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 2,
+  "date": "2026-10-08",
+  "hours": 3.0,
+  "project": "",
+  "description": "",
+  "hourly_rate": 200.0,
+  "earnings": 600.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 1,
+  "date": "2026-10-06",
+  "hours": 4.0,
+  "project": "",
+  "description": "",
+  "hourly_rate": 200.0,
+  "earnings": 800.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 6,
+  "date": "2026-10-02",
+  "hours": 6.5,
+  "project": "Klient ABC",
+  "description": "Analýza",
+  "hourly_rate": 250.0,
+  "earnings": 1625.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 4,
+  "date": "2026-09-30",
+  "hours": 5.0,
+  "project": "",
+  "description": "",
+  "hourly_rate": 200.0,
+  "earnings": 1000.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 3,
+  "date": "2026-09-29",
+  "hours": 6.0,
+  "project": "",
+  "description": "",
+  "hourly_rate": 200.0,
+  "earnings": 1200.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ },
+ {
+  "id": 7,
+  "date": "2026-09-24",
+  "hours": 4.0,
+  "project": "Interní",
+  "description": "Dokumentace",
+  "hourly_rate": 250.0,
+  "earnings": 1000.0,
+  "finance_transaction_id": null,
+  "sync_to_finance": true
+ }
+]

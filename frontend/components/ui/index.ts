@@ -1,8 +1,11 @@
-// Sdílená UI primitiva (Roadmap 4A) – viz docs/design-system.md.
+// Sdílená UI primitiva (Roadmap 4A/4B) – viz docs/design-system.md.
+export { AreaBadge } from "./AreaBadge";
 export { Button, ButtonLink, TextLink, buttonClass } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { default as ConfirmDialog } from "./ConfirmDialog";
+export { Drawer } from "./Drawer";
 export { EntityList, EntityRow } from "./EntityRow";
+export { FilterBar, FilterChips, FilterSelect } from "./FilterBar";
 export { FormField, fieldClass } from "./forms";
 export { AccentLine, HudFrame, HudLabel, StatusPulse } from "./hud";
 export { ContentContainer, PageHeader, PageSection, SectionHeader } from "./layout";

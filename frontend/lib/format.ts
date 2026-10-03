@@ -66,7 +66,7 @@ export function formatDate(value: string | null | undefined, withYear = true): s
     const [, y, mo, d] = m;
     return withYear ? `${Number(d)}. ${Number(mo)}. ${y}` : `${Number(d)}. ${Number(mo)}.`;
   }
-  const date = new Date(value);
+  const date = parseApiInstant(value);
   if (Number.isNaN(date.getTime())) return value;
   const parts = new Intl.DateTimeFormat(LOCALE, {
     timeZone: PRAGUE_TZ, day: "numeric", month: "numeric", ...(withYear ? { year: "numeric" } : {}),
@@ -75,16 +75,69 @@ export function formatDate(value: string | null | undefined, withYear = true): s
   return withYear ? `${get("day")}. ${get("month")}. ${get("year")}` : `${get("day")}. ${get("month")}.`;
 }
 
-/** Okamžik (ISO s offsetem / Z) → „5. 10. 8:05" v pražském čase. */
+/**
+ * Okamžik z API → Date. Backend ukládá naive UTC a často vrací ISO bez zóny („2026-10-11T17:00:00");
+ * `new Date()` by ho četl jako místní čas prohlížeče (posun o 1–2 h). Bez zóny = UTC.
+ */
+export function parseApiInstant(value: string): Date {
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const isDateTime = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value);
+  return new Date(isDateTime && !hasZone ? `${value.replace(" ", "T")}Z` : value);
+}
+
+/** Okamžik (ISO s offsetem / Z, nebo naive UTC z API) → „5. 10. 8:05" v pražském čase. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return EMPTY;
-  const date = new Date(value);
+  const date = parseApiInstant(value);
   if (Number.isNaN(date.getTime())) return value;
   const parts = new Intl.DateTimeFormat(LOCALE, {
     timeZone: PRAGUE_TZ, day: "numeric", month: "numeric", hour: "numeric", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(date);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   return `${get("day")}. ${get("month")}. ${get("hour")}:${get("minute")}`;
+}
+
+/** Okamžik z API → „8:05" (pražský čas). */
+export function formatTime(value: string | null | undefined): string {
+  if (!value) return EMPTY;
+  const date = parseApiInstant(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(LOCALE, { timeZone: PRAGUE_TZ, hour: "numeric", minute: "2-digit", hourCycle: "h23" }).format(date);
+}
+
+/** Pražský kalendářní den okamžiku → „2026-10-05" (pro seskupení po dnech). */
+export function pragueDayKey(value: string | Date): string {
+  const date = typeof value === "string" ? parseApiInstant(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  // en-CA dává ISO pořadí YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", { timeZone: PRAGUE_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function pragueOffsetMs(utcMs: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PRAGUE_TZ, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric",
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second")) - (utcMs - (utcMs % 1000));
+}
+
+/** Začátek pražského dne „YYYY-MM-DD" jako UTC ISO (pro filtry od–do); neplatné → null. */
+export function pragueDayStartIso(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) return null;
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  let utc = wall - pragueOffsetMs(wall);
+  utc = wall - pragueOffsetMs(utc);
+  return new Date(utc).toISOString();
+}
+
+/** Konec pražského dne (poslední milisekunda) jako UTC ISO. */
+export function pragueDayEndIso(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) return null;
+  const next = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1)).toISOString().slice(0, 10);
+  const start = pragueDayStartIso(next);
+  return start ? new Date(Date.parse(start) - 1).toISOString() : null;
 }
 
 /** „dnes", „zítra", „za 3 dny", „před 2 dny" podle počtu dní (z backendu, ne z hodin prohlížeče). */

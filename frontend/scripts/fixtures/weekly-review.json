@@ -47,7 +47,7 @@
   "concerns": [
    {
     "ref": "metric:finance_expense",
-    "text": "Výdaje 1 500 Kč, minulý týden 400 Kč",
+    "text": "Výdaje: 4 050 Kč (minulý týden 1 040 Kč; +3 010 Kč (+289 %))",
     "kind": "metric",
     "url": "/finance",
     "metric": {
@@ -55,15 +55,15 @@
      "key": "finance_expense",
      "label": "Výdaje",
      "unit": "Kč",
-     "cur": 1500.0,
-     "prev": 400.0,
+     "cur": 4050.0,
+     "prev": 1040.0,
      "prev_label": "minulý týden",
-     "delta": 1100.0,
-     "pct": null,
+     "delta": 3010.0,
+     "pct": 289,
      "trend": "worse",
-     "cur_text": "1 500 Kč",
-     "prev_text": "400 Kč",
-     "delta_text": "+1 100 Kč",
+     "cur_text": "4 050 Kč",
+     "prev_text": "1 040 Kč",
+     "delta_text": "+3 010 Kč (+289 %)",
      "note": "",
      "url": "/finance"
     }
@@ -81,7 +81,7 @@
   "comparisons": [
    {
     "ref": "metric:work_hours",
-    "text": "Práce 7 h místo 11 h",
+    "text": "Odpracováno: 12 h (minulý týden 17,5 h; −5,5 h (−31 %))",
     "kind": "metric",
     "url": "/work",
     "metric": {
@@ -89,22 +89,22 @@
      "key": "work_hours",
      "label": "Odpracováno",
      "unit": "h",
-     "cur": 7.0,
-     "prev": 11.0,
+     "cur": 12.0,
+     "prev": 17.5,
      "prev_label": "minulý týden",
-     "delta": -4.0,
-     "pct": -36,
+     "delta": -5.5,
+     "pct": -31,
      "trend": "down",
-     "cur_text": "7 h",
-     "prev_text": "11 h",
-     "delta_text": "−4 h (−36 %)",
+     "cur_text": "12 h",
+     "prev_text": "17,5 h",
+     "delta_text": "−5,5 h (−31 %)",
      "note": "",
      "url": "/work"
     }
    },
    {
     "ref": "metric:finance_expense",
-    "text": "Výdaje +1 100 Kč",
+    "text": "Výdaje: 4 050 Kč (minulý týden 1 040 Kč; +3 010 Kč (+289 %))",
     "kind": "metric",
     "url": "/finance",
     "metric": {
@@ -112,15 +112,15 @@
      "key": "finance_expense",
      "label": "Výdaje",
      "unit": "Kč",
-     "cur": 1500.0,
-     "prev": 400.0,
+     "cur": 4050.0,
+     "prev": 1040.0,
      "prev_label": "minulý týden",
-     "delta": 1100.0,
-     "pct": null,
+     "delta": 3010.0,
+     "pct": 289,
      "trend": "worse",
-     "cur_text": "1 500 Kč",
-     "prev_text": "400 Kč",
-     "delta_text": "+1 100 Kč",
+     "cur_text": "4 050 Kč",
+     "prev_text": "1 040 Kč",
+     "delta_text": "+3 010 Kč (+289 %)",
      "note": "",
      "url": "/finance"
     }
@@ -146,15 +146,15 @@
      "key": "next_week_deadlines",
      "label": "Termíny úkolů a zkoušek příští týden",
      "unit": "",
-     "cur": 4,
+     "cur": 5,
      "prev": 1,
      "prev_label": "tento týden",
-     "delta": 3,
+     "delta": 4,
      "pct": null,
      "trend": "up",
-     "cur_text": "4",
+     "cur_text": "5",
      "prev_text": "1",
-     "delta_text": "+3",
+     "delta_text": "+4",
      "note": "nejvíc středa 14. 10. (2)",
      "url": "/school"
     }
@@ -172,12 +172,14 @@
      "assignment:3",
      "assignment:4",
      "assignment:5",
+     "assignment:6",
      "exam:1"
     ],
     "basis_labels": [
      "Projekt · termín úterý 13. 10.",
      "Referát · termín středa 14. 10.",
      "Laboratoř · termín středa 14. 10.",
+     "Laboratorní protokol č. 3 · termín pátek 16. 10.",
      "Zkouška fyzika · zkouška čtvrtek 15. 10."
     ]
    }

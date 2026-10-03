@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NotificationsBell from "@/components/NotificationsBell";
+import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
-import { lockScroll } from "@/lib/dialog";
+import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
 interface SidebarProps {
-  onNavigate?: () => void;
+  onNavigate?: (href: string) => void;
 }
 
 // Česká navigace (Roadmap 4A); vlastní jména her zůstávají.
@@ -44,7 +45,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           <Link
             key={link.href}
             href={link.href}
-            onClick={onNavigate}
+            onClick={() => onNavigate?.(link.href)}
             aria-current={active ? "page" : undefined}
             className={cx(
               "relative block rounded-lg px-3 py-2.5 text-sm transition-colors",
@@ -84,17 +85,28 @@ function Brand({ as: Tag = "div" }: { as?: "div" | "p" }) {
 
 export function MobileHeader() {
   const [open, setOpen] = useState(false);
+  // Po navigaci z menu se fokus nevrací na ☰, ale přesune do obsahu nové stránky.
+  // navFrom = cesta, ze které uživatel v menu klikl (null = menu se zavřelo jinak).
+  const [navFrom, setNavFrom] = useState<string | null>(null);
   const pathname = usePathname();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
 
   useEffect(() => {
     queueMicrotask(() => setOpen(false));
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!open) return;
-    return lockScroll();
-  }, [open]);
+    if (navFrom === null || pathname === navFrom) return;
+    // Nová stránka se může vykreslit až po přechodu – <main> hledáme krátce opakovaně.
+    let tries = 0;
+    const t = window.setInterval(() => {
+      const main = document.getElementById(MAIN_CONTENT_ID);
+      tries += 1;
+      if (main || tries > 20) {
+        window.clearInterval(t);
+        main?.focus({ preventScroll: true });
+        setNavFrom(null);
+      }
+    }, 50);
+    return () => window.clearInterval(t);
+  }, [pathname, navFrom]);
 
   return (
     <>
@@ -107,6 +119,7 @@ export function MobileHeader() {
             type="button"
             aria-label="Otevřít menu"
             aria-expanded={open}
+            aria-haspopup="dialog"
             onClick={() => setOpen(true)}
             className="grid h-10 w-10 place-items-center rounded-lg text-xl text-ink-2 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
@@ -115,28 +128,24 @@ export function MobileHeader() {
         </div>
       </header>
 
-      {open && (
-        <div className="md:hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={() => setOpen(false)}>
-          <aside
-            aria-label="Menu"
-            className="absolute right-0 top-0 h-full w-72 max-w-[85%] overflow-y-auto border-l border-line bg-app p-5 shadow-[var(--shadow-elevated)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-6 flex items-center justify-between">
-              <Brand />
-              <button
-                type="button"
-                aria-label="Zavřít menu"
-                onClick={() => setOpen(false)}
-                className="grid h-10 w-10 place-items-center rounded-lg text-xl text-ink-2 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-              >
-                ×
-              </button>
-            </div>
-            <Sidebar onNavigate={() => setOpen(false)} />
-          </aside>
+      <Drawer
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Menu"
+        width="sm"
+        restoreFocus={navFrom === null}
+        initialFocus={() => document.querySelector<HTMLElement>('[data-drawer-nav] a[aria-current="page"]')}
+      >
+        <div className="p-4" data-drawer-nav>
+          <Sidebar
+            onNavigate={(href) => {
+              // klik na aktuální stránku = jen zavřít (fokus zpět na ☰)
+              if (href !== pathname) setNavFrom(pathname);
+              setOpen(false);
+            }}
+          />
         </div>
-      )}
+      </Drawer>
     </>
   );
 }

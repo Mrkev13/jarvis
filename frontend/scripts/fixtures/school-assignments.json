@@ -1,0 +1,72 @@
+[
+ {
+  "id": 7,
+  "title": "Referát: průmyslová revoluce",
+  "description": "",
+  "due_date": "2026-09-25",
+  "priority": "low",
+  "status": "done",
+  "subject_id": 3,
+  "subject_name": "Dějepis"
+ },
+ {
+  "id": 1,
+  "title": "Sada",
+  "description": "",
+  "due_date": "2026-10-02",
+  "priority": "medium",
+  "status": "todo",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ },
+ {
+  "id": 2,
+  "title": "Esej",
+  "description": "",
+  "due_date": "2026-10-08",
+  "priority": "medium",
+  "status": "done",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ },
+ {
+  "id": 3,
+  "title": "Projekt",
+  "description": "",
+  "due_date": "2026-10-13",
+  "priority": "medium",
+  "status": "todo",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ },
+ {
+  "id": 4,
+  "title": "Referát",
+  "description": "",
+  "due_date": "2026-10-14",
+  "priority": "medium",
+  "status": "todo",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ },
+ {
+  "id": 5,
+  "title": "Laboratoř",
+  "description": "",
+  "due_date": "2026-10-14",
+  "priority": "medium",
+  "status": "todo",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ },
+ {
+  "id": 6,
+  "title": "Laboratorní protokol č. 3",
+  "description": "Měření kyvadla",
+  "due_date": "2026-10-16",
+  "priority": "high",
+  "status": "in_progress",
+  "subject_id": 2,
+  "subject_name": "Fyzika"
+ }
+]

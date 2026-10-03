@@ -1,4 +1,11 @@
-import React from "react";
+// Barvy oblastí žijí v lib/areas.ts (sdílené s dashboardem, zvonkem a cíli).
+import { areaMeta } from "@/lib/areas";
+import { formatDate, formatNumber, formatPercent, formatRelativeDays } from "@/lib/format";
+import { goalPaceMeta, goalTrackingLabel } from "@/lib/goals";
+import { clampPercent, cx, priorityTone } from "@/lib/ui";
+import { AreaBadge, Card, EmptyState, HudLabel, Progress, StatusBadge } from "@/components/ui";
+
+export { areaMeta };
 
 export type PlannerAction = {
   priority: number;
@@ -50,288 +57,154 @@ export type PlannerCard =
   | { card_type: "daily" | "weekly"; payload: PlannerPlan }
   | { card_type: "goal_review"; payload: GoalReview };
 
-const AREA_STYLES: Record<string, { bg: string; border: string; text: string; label: string }> = {
-  school:   { bg: "bg-indigo-500/10",    border: "border-indigo-400/30",    text: "text-indigo-200",    label: "Škola" },
-  work:     { bg: "bg-emerald-500/10",  border: "border-emerald-400/30",  text: "text-emerald-200",  label: "Práce" },
-  finance:  { bg: "bg-amber-500/10",    border: "border-amber-400/30",    text: "text-amber-200",    label: "Finance" },
-  wot:      { bg: "bg-orange-500/10",   border: "border-orange-400/30",   text: "text-orange-200",   label: "World of Tanks" },
-  mff:      { bg: "bg-purple-500/10",   border: "border-purple-400/30",   text: "text-purple-200",   label: "Marvel FF" },
-  personal: { bg: "bg-pink-500/10",     border: "border-pink-400/30",     text: "text-pink-200",     label: "Osobní" },
-  fitness:  { bg: "bg-green-500/10",    border: "border-green-400/30",    text: "text-green-200",    label: "Fitness" },
-  hobby:    { bg: "bg-rose-500/10",     border: "border-rose-400/30",     text: "text-rose-200",     label: "Hobby" },
-  travel:   { bg: "bg-teal-500/10",     border: "border-teal-400/30",     text: "text-teal-200",     label: "Cestování" },
-  general:  { bg: "bg-zinc-500/10",     border: "border-zinc-400/30",     text: "text-zinc-200",     label: "Obecné" },
-  reminders: { bg: "bg-sky-500/10",     border: "border-sky-400/30",      text: "text-sky-200",      label: "Připomínky" },
-  briefing: { bg: "bg-cyan-500/10",     border: "border-cyan-400/30",     text: "text-cyan-200",     label: "Přehled" },
-  review:   { bg: "bg-violet-500/10",   border: "border-violet-400/30",   text: "text-violet-200",   label: "Týdenní přehled" },
-};
 
-export function areaMeta(area: string | undefined | null) {
-  return (
-    AREA_STYLES[String(area ?? "").toLowerCase()] ?? {
-      bg: "bg-zinc-500/10",
-      border: "border-zinc-400/30",
-      text: "text-zinc-200",
-      label: String(area ?? "Obecné"),
-    }
-  );
-}
-
-function progressBarColor(progress: number, stagnating: boolean, on_track: string) {
-  if (stagnating) return "from-rose-500/40 to-red-500/30";
-  if (on_track === "behind") return "from-amber-500/40 to-orange-500/30";
-  if (progress >= 80) return "from-emerald-500/40 to-green-500/30";
-  if (progress >= 50) return "from-lime-500/40 to-emerald-500/30";
-  if (progress >= 20) return "from-yellow-500/40 to-amber-500/30";
-  return "from-zinc-500/40 to-zinc-400/30";
-}
-
+/**
+ * Karty Planneru (Roadmap 4B): klidná karta systému, oblast jako štítek, priorita číslem.
+ * Používá je stránka /planner i chat AI (compact). `headingLevel` drží správnou hierarchii nadpisů.
+ */
 function PlanCardShell(props: {
-  icon: string;
-  modeLabel: string;
-  accent: string;
+  label: string;
   summary: string;
   children: React.ReactNode;
   compact?: boolean;
+  headingLevel?: "h2" | "h3";
 }) {
+  const Heading = props.headingLevel ?? "h3";
   return (
-    <div className="my-3 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 overflow-hidden shadow">
-      <div className={`px-4 md:px-5 py-3 md:py-4 bg-gradient-to-r ${props.accent} border-b border-zinc-800`}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white/10 grid place-items-center text-lg shrink-0">
-            {props.icon}
-          </div>
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-white/70 font-semibold">
-              {props.modeLabel}
-            </div>
-            <div className="mt-0.5 text-zinc-100 font-semibold leading-snug break-words">
-              {props.summary}
-            </div>
-          </div>
-        </div>
+    <Card as="article" flush className={cx("overflow-hidden", props.compact ? "my-2" : null)}>
+      <div className={cx("border-b border-line-subtle", props.compact ? "px-3 py-2.5" : "px-4 py-3 md:px-5 md:py-4")}>
+        <HudLabel>{props.label}</HudLabel>
+        <Heading className="mt-1 break-words font-semibold leading-snug text-ink">{props.summary}</Heading>
       </div>
-      <div className={`${props.compact ? "px-3 py-2.5 space-y-2" : "px-4 py-3 md:px-5 md:py-4 space-y-2.5 md:space-y-3"}`}>
-        {props.children}
-      </div>
-    </div>
+      <div className={props.compact ? "p-3" : "p-4 md:p-5"}>{props.children}</div>
+    </Card>
   );
 }
 
 function ActionItem(props: { action: PlannerAction; idx: number; compact?: boolean }) {
   const { action, idx, compact } = props;
-  const meta = areaMeta(action.area);
   const priority = Number.isFinite(action.priority) ? action.priority : idx + 1;
   const isTop = priority === 1;
   return (
-    <div
-      className={
-        "group rounded-xl border p-3 transition-all " +
-        meta.border +
-        " " +
-        meta.bg +
-        (isTop ? " ring-1 ring-amber-400/30" : "")
-      }
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={
-            "shrink-0 w-9 h-9 rounded-full grid place-items-center font-bold text-sm border " +
-            (isTop
-              ? "bg-amber-400/90 text-zinc-950 border-amber-300"
-              : "bg-white/5 text-zinc-100 border-white/10")
-          }
-        >
-          {priority}
+    <li className="flex items-start gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+      <span
+        aria-label={`Priorita ${priority}`}
+        className={cx(
+          "grid h-8 w-8 shrink-0 place-items-center rounded-full border font-mono text-sm font-semibold tabular-nums",
+          isTop ? "border-accent/50 bg-accent/10 text-accent-strong" : "border-line bg-surface text-ink-2",
+        )}
+      >
+        {priority}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          <AreaBadge area={action.area} />
+          {isTop ? <StatusBadge tone="accent">Nejvyšší priorita</StatusBadge> : null}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-1.5">
-            <span
-              className={
-                "inline-flex items-center px-2 py-0.5 rounded-md text-[11px] uppercase tracking-wider font-semibold border " +
-                meta.bg +
-                " " +
-                meta.border +
-                " " +
-                meta.text
-              }
-            >
-              {meta.label}
-            </span>
-            {isTop && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-400/10 text-amber-300 border border-amber-400/25">
-                🔥 Nejvyšší priorita
-              </span>
-            )}
+        <div className="break-words font-medium leading-snug text-ink">{action.title}</div>
+        {action.reason ? (
+          <p className={cx("mt-1 break-words leading-snug text-ink-muted", compact ? "text-xs" : "text-sm")}>{action.reason}</p>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function ActionList({ plan, compact, empty }: { plan: PlannerPlan; compact?: boolean; empty: string }) {
+  const sorted = [...(plan.actions || [])].sort((a, b) => a.priority - b.priority);
+  if (!sorted.length) return <EmptyState compact={compact}>{empty}</EmptyState>;
+  return (
+    <ol className="space-y-2" aria-label="Doporučené kroky">
+      {sorted.map((a, i) => (
+        <ActionItem key={`${a.priority}-${a.title}-${i}`} action={a} idx={i} compact={compact} />
+      ))}
+    </ol>
+  );
+}
+
+export function DailyPlanCard({ plan, compact, headingLevel }: { plan: PlannerPlan; compact?: boolean; headingLevel?: "h2" | "h3" }) {
+  return (
+    <PlanCardShell label="Denní plán" summary={plan.summary} compact={compact} headingLevel={headingLevel}>
+      <ActionList plan={plan} compact={compact} empty="Na dnes nic nového k doporučení." />
+    </PlanCardShell>
+  );
+}
+
+export function WeeklyPlanCard({ plan, compact, headingLevel }: { plan: PlannerPlan; compact?: boolean; headingLevel?: "h2" | "h3" }) {
+  return (
+    <PlanCardShell label="Týdenní plán" summary={plan.summary} compact={compact} headingLevel={headingLevel}>
+      <ActionList plan={plan} compact={compact} empty="Na tento týden nic nového k doporučení." />
+    </PlanCardShell>
+  );
+}
+
+function GoalReviewRow({ goal: g }: { goal: GoalReviewItem }) {
+  const pct = clampPercent(g.progress);
+  const pace = goalPaceMeta(g.stagnating, g.on_track);
+  const prio = priorityTone(g.priority);
+  const sinceDays = g.days_since_last_positive == null ? null : Math.max(0, g.days_since_last_positive);
+  return (
+    <li className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3 md:p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            <AreaBadge area={g.area} />
+            {prio.tone !== "neutral" ? <StatusBadge tone={prio.tone}>Priorita: {prio.label.toLowerCase()}</StatusBadge> : null}
+            {pace ? <StatusBadge tone={pace.tone} dot>{pace.label}</StatusBadge> : null}
           </div>
-          <div className="text-zinc-100 font-semibold leading-snug break-words">
-            {action.title}
-          </div>
-          {action.reason && (
-            <div className={`mt-1 ${compact ? "text-xs" : "text-sm"} text-zinc-400 leading-snug break-words`}>
-              <span className="text-zinc-500 mr-1">Důvod:</span>
-              {action.reason}
+          <div className="break-words font-medium text-ink">{g.title}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-xl font-semibold tabular-nums text-ink">{formatPercent(pct)}</div>
+          {g.current_value != null || g.target_value != null ? (
+            <div className="text-xs tabular-nums text-ink-muted">
+              {formatNumber(g.current_value)} / {formatNumber(g.target_value)}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
-    </div>
+      <Progress
+        className="mt-3"
+        value={pct}
+        label={`Průběh cíle ${g.title}`}
+        tone={pace?.tone === "danger" || pace?.tone === "warning" ? pace.tone : undefined}
+      />
+      <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-muted">
+        {g.target_date ? (
+          <div className="flex gap-1.5">
+            <dt>Cíl do</dt>
+            <dd className="tabular-nums text-ink-2">{formatDate(g.target_date)}</dd>
+          </div>
+        ) : null}
+        {sinceDays != null ? (
+          <div className="flex gap-1.5">
+            <dt>Poslední pokrok</dt>
+            <dd className={g.stagnating ? "text-danger" : "text-ink-2"}>{formatRelativeDays(-sinceDays)}</dd>
+          </div>
+        ) : null}
+        <div className="flex gap-1.5">
+          <dt>Sledování</dt>
+          <dd className="text-ink-2">{goalTrackingLabel(g.tracking_type, g.source)}</dd>
+        </div>
+      </dl>
+    </li>
   );
 }
 
-export function DailyPlanCard({ plan, compact }: { plan: PlannerPlan; compact?: boolean }) {
-  const sorted = [...(plan.actions || [])].sort((a, b) => a.priority - b.priority);
-  return (
-    <PlanCardShell
-      icon="☀️"
-      modeLabel="Daily plan"
-      accent="from-sky-600/25 via-blue-600/20 to-indigo-600/20"
-      summary={plan.summary}
-      compact={compact}
-    >
-      {sorted.length === 0 && (
-        <div className="text-sm text-zinc-500 italic">Žádné akce k doporučení pro dnes.</div>
-      )}
-      {sorted.map((a, i) => (
-        <ActionItem key={`${a.priority}-${a.title}-${i}`} action={a} idx={i} compact={compact} />
-      ))}
-    </PlanCardShell>
-  );
-}
-
-export function WeeklyPlanCard({ plan, compact }: { plan: PlannerPlan; compact?: boolean }) {
-  const sorted = [...(plan.actions || [])].sort((a, b) => a.priority - b.priority);
-  return (
-    <PlanCardShell
-      icon="📅"
-      modeLabel="Weekly plan"
-      accent="from-indigo-600/30 via-violet-600/20 to-fuchsia-600/20"
-      summary={plan.summary}
-      compact={compact}
-    >
-      {sorted.length === 0 && (
-        <div className="text-sm text-zinc-500 italic">Žádné akce k doporučení pro tento týden.</div>
-      )}
-      {sorted.map((a, i) => (
-        <ActionItem key={`${a.priority}-${a.title}-${i}`} action={a} idx={i} compact={compact} />
-      ))}
-    </PlanCardShell>
-  );
-}
-
-export function GoalReviewCard({ plan, compact }: { plan: GoalReview; compact?: boolean }) {
+export function GoalReviewCard({ plan, compact, headingLevel }: { plan: GoalReview; compact?: boolean; headingLevel?: "h2" | "h3" }) {
   const goals = plan.goals || [];
   return (
-    <div className="my-3 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 overflow-hidden shadow">
-      <div className="px-4 md:px-5 py-3 md:py-4 bg-gradient-to-r from-emerald-600/25 via-teal-600/20 to-cyan-600/20 border-b border-zinc-800">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-white/10 grid place-items-center text-lg shrink-0">🎯</div>
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-white/70 font-semibold">
-              Goal review
-            </div>
-            <div className="mt-0.5 text-zinc-100 font-semibold leading-snug break-words">
-              {plan.summary}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className={`overflow-x-auto ${compact ? "px-2 py-2" : "px-4 py-4"}`}>
-        {goals.length === 0 ? (
-          <div className="text-sm text-zinc-500 italic px-2 py-4">Žádné relevantní cíle.</div>
-        ) : (
-          <div className="space-y-3">
-            {goals.map((g) => {
-              const meta = areaMeta(g.area);
-              const pct = Math.max(0, Math.min(100, Number(g.progress) || 0));
-              return (
-                <div
-                  key={g.id}
-                  className={`rounded-xl border ${meta.border} ${meta.bg} p-3 md:p-4`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                        <span className={`px-2 py-0.5 rounded-md border text-[11px] font-semibold uppercase tracking-wider ${meta.bg} ${meta.border} ${meta.text}`}>
-                          {meta.label}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
-                          (g.priority || "").toLowerCase() === "high"
-                            ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                            : (g.priority || "").toLowerCase() === "medium"
-                              ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
-                              : "bg-zinc-500/15 text-zinc-300 border border-zinc-500/30"
-                        } border`}>
-                          {(g.priority || "medium").toUpperCase()}
-                        </span>
-                        {g.stagnating && (
-                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-red-500/15 text-red-300 border border-red-500/30">
-                            ⚠️ Stagnuje
-                          </span>
-                        )}
-                        {g.on_track === "behind" && !g.stagnating && (
-                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-orange-500/15 text-orange-300 border border-orange-500/30">
-                            ⏳ Zaostává
-                          </span>
-                        )}
-                        {g.on_track === "on_track" && (
-                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            ✓ Na cestě
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-semibold text-zinc-100 break-words">
-                        {g.title}
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 min-w-[96px]">
-                      <div className="text-xs text-zinc-500">Progress</div>
-                      <div className="text-2xl font-bold text-white tabular-nums">{pct} %</div>
-                      {(g.current_value != null || g.target_value != null) && (
-                        <div className="text-xs text-zinc-400 tabular-nums mt-0.5">
-                          {g.current_value ?? "–"} / {g.target_value ?? "–"}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
-                      <div
-                        className={`h-full bg-gradient-to-r ${progressBarColor(pct, g.stagnating, g.on_track)} transition-[width] duration-500 rounded-full`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-zinc-400">
-                    {g.target_date && (
-                      <div>
-                        <span className="text-zinc-500 mr-1.5">Cíl do:</span>
-                        <span className="text-zinc-300 font-medium">{g.target_date}</span>
-                      </div>
-                    )}
-                    {g.days_since_last_positive != null && (
-                      <div>
-                        <span className="text-zinc-500 mr-1.5">Poslední pokrok:</span>
-                        <span className={g.stagnating ? "text-red-300 font-medium" : "text-zinc-300 font-medium"}>
-                          {g.days_since_last_positive} dní zpět
-                        </span>
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-zinc-500 mr-1.5">Tracking:</span>
-                      <span className="text-zinc-300 font-medium">
-                        {(g.tracking_type || "manual").toLowerCase()}
-                        {g.source ? ` · ${g.source}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+    <PlanCardShell label="Přehled cílů" summary={plan.summary} compact={compact} headingLevel={headingLevel}>
+      {goals.length === 0 ? (
+        <EmptyState compact={compact}>Žádné aktivní cíle k přehledu.</EmptyState>
+      ) : (
+        <ul className="space-y-2.5" aria-label="Cíle">
+          {goals.map((g) => (
+            <GoalReviewRow key={g.id} goal={g} />
+          ))}
+        </ul>
+      )}
+    </PlanCardShell>
   );
 }
 

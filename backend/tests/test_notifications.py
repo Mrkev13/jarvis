@@ -82,9 +82,9 @@ class NotificationsTestCase(unittest.TestCase):
         now_dt = datetime.combine(today, datetime.min.time()).replace(hour=9)
         items = list_notifications(self.db, now=now_dt)
         by_title = {it["title"]: it for it in items}
-        self.assertEqual(by_title["Deadline: A14"]["severity"], "info")
-        self.assertEqual(by_title["Deadline: A7"]["severity"], "warning")
-        self.assertEqual(by_title["Deadline: A3"]["severity"], "important")
+        self.assertEqual(by_title["Termín: A14"]["severity"], "info")
+        self.assertEqual(by_title["Termín: A7"]["severity"], "warning")
+        self.assertEqual(by_title["Termín: A3"]["severity"], "important")
 
     def test_overdue(self):
         today = date(2026, 9, 11)

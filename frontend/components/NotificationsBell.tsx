@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { AreaBadge, Button, Drawer, EmptyState, ErrorState, LoadingState, StatusBadge } from "@/components/ui";
+import { apiFetch, apiJson, errorMessage } from "@/lib/api";
+import { formatDateTime, parseApiInstant } from "@/lib/format";
 import { useIncreaseSignal } from "@/lib/motion";
+import { cx, severityTone } from "@/lib/ui";
 
 type NotificationItem = {
   id: number;
@@ -23,40 +27,20 @@ type NotificationSummary = {
   info: number;
 };
 
-function formatTime(value?: string | null) {
-  if (!value) return "–";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("cs-CZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+const EMPTY_SUMMARY: NotificationSummary = { unread: 0, important: 0, warning: 0, info: 0 };
 
-function severityBadge(severity: string) {
-  const s = severity.toLowerCase();
-  if (s === "important") {
-    return "bg-red-500/15 border-red-500/40 text-red-300";
-  }
-  if (s === "warning") {
-    return "bg-yellow-500/15 border-yellow-500/40 text-yellow-300";
-  }
-  return "bg-sky-500/15 border-sky-500/40 text-sky-300";
-}
-
+/**
+ * Zvonek notifikací + boční panel (Roadmap 4B: Drawer – fokus, Escape, návrat fokusu).
+ * Souhrn se obnovuje každých 30 s; seznam se načítá při otevření panelu.
+ */
 export default function NotificationsBell() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [summary, setSummary] = useState<NotificationSummary>({
-    unread: 0,
-    important: 0,
-    warning: 0,
-    info: 0,
-  });
+  const [summary, setSummary] = useState<NotificationSummary>(EMPTY_SUMMARY);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | "all" | null>(null);
 
   // UI-only: první úspěšné načtení souhrnu (puls badge až při dalším nárůstu, ne při načtení stránky).
   const [summaryLoaded, setSummaryLoaded] = useState(false);
@@ -66,7 +50,7 @@ export default function NotificationsBell() {
   const refreshSummary = useCallback(async () => {
     try {
       const res = await apiFetch("/notifications/summary");
-      if (!res.ok) return;
+      if (!res.ok) return; // souhrn je doplňková informace – tichá chyba
       const data = (await res.json()) as NotificationSummary;
       setSummary({
         unread: Number(data.unread) || 0,
@@ -80,95 +64,61 @@ export default function NotificationsBell() {
     }
   }, []);
 
-  async function refreshList() {
-    try {
-      const res = await apiFetch("/notifications");
-      if (!res.ok) return;
-      const data = (await res.json()) as NotificationItem[];
-      setItems(Array.isArray(data) ? data : []);
-    } catch {
-      return;
-    }
-  }
-
-  async function ensureGenerated() {
-    try {
-      await apiFetch("/notifications/generate", { method: "POST" });
-    } catch {
-      return;
-    }
-  }
+  const refreshList = useCallback(async () => {
+    const data = await apiJson<NotificationItem[]>("/notifications");
+    setItems(Array.isArray(data) ? data : []);
+  }, []);
 
   async function openPanel() {
     setOpen(true);
     setLoading(true);
+    setError(null);
     try {
-      await ensureGenerated();
+      await apiFetch("/notifications/generate", { method: "POST" }).catch(() => undefined);
       await Promise.all([refreshSummary(), refreshList()]);
+    } catch (err) {
+      setError(errorMessage(err, "Notifikace se nepodařilo načíst."));
     } finally {
       setLoading(false);
     }
   }
 
-  async function markRead(id: number) {
+  async function act(id: number | "all", path: string) {
+    setBusyId(id);
+    setError(null);
     try {
-      await apiFetch(`/notifications/${id}/read`, { method: "PATCH" });
+      await apiJson(path, { method: "PATCH" });
       await Promise.all([refreshSummary(), refreshList()]);
-    } catch {
-      return;
-    }
-  }
-
-  async function resolve(id: number) {
-    try {
-      await apiFetch(`/notifications/${id}/resolve`, { method: "PATCH" });
-      await Promise.all([refreshSummary(), refreshList()]);
-    } catch {
-      return;
-    }
-  }
-
-  async function readAll() {
-    try {
-      await apiFetch("/notifications/read-all", { method: "PATCH" });
-      await Promise.all([refreshSummary(), refreshList()]);
-    } catch {
-      return;
+    } catch (err) {
+      setError(errorMessage(err, "Akce se nepovedla."));
+    } finally {
+      setBusyId(null);
     }
   }
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void refreshSummary();
-    });
-    const t = window.setInterval(() => {
-      void refreshSummary();
-    }, 30000);
+    queueMicrotask(() => void refreshSummary());
+    const t = window.setInterval(() => void refreshSummary(), 30000);
     return () => window.clearInterval(t);
   }, [refreshSummary]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open]);
-
-  const sorted = useMemo(() => {
-    return [...items].sort((a, b) => {
-      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return bt - at;
-    });
-  }, [items]);
+  const sorted = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const at = a.created_at ? parseApiInstant(a.created_at).getTime() : 0;
+        const bt = b.created_at ? parseApiInstant(b.created_at).getTime() : 0;
+        return bt - at;
+      }),
+    [items],
+  );
 
   return (
     <>
       <button
         type="button"
         aria-label={unread > 0 ? `Notifikace, ${unread} nepřečtených` : "Notifikace"}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={() => (open ? setOpen(false) : void openPanel())}
         className="motion-press relative grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface text-sm transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
       >
@@ -185,121 +135,92 @@ export default function NotificationsBell() {
         )}
       </button>
 
-      {open && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
-          onClick={() => setOpen(false)}
-        >
-          <div
-            className="absolute right-0 top-0 h-full w-full md:h-auto md:top-16 md:right-6 md:w-[520px] bg-zinc-950 border border-zinc-800 md:rounded-2xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-              <div>
-                <div className="text-sm font-semibold">Notifikace</div>
-                <div className="text-xs text-zinc-500">
-                  Unread: {summary.unread} · Important: {summary.important} · Warning:{" "}
-                  {summary.warning}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={readAll}
-                  className="text-xs px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                >
-                  Přečíst vše
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="text-xs px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                >
-                  Zavřít
-                </button>
-              </div>
-            </div>
-
-            <div className="max-h-[calc(100vh-120px)] md:max-h-[70vh] overflow-y-auto p-3 space-y-2">
-              {loading && (
-                <div className="text-sm text-zinc-500 px-2 py-3">Načítám…</div>
-              )}
-              {!loading && sorted.length === 0 && (
-                <div className="text-sm text-zinc-500 px-2 py-6">
-                  Zatím žádné aktivní notifikace.
-                </div>
-              )}
-
-              {sorted.map((n) => (
-                <div
-                  key={n.id}
-                  className={`border rounded-2xl p-4 ${
-                    n.read ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-700 bg-zinc-900"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`px-2 py-0.5 text-xs rounded-full border ${severityBadge(
-                            n.severity,
-                          )}`}
-                        >
-                          {String(n.severity).toUpperCase()}
+      <Drawer
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Notifikace"
+        description={
+          <span className="flex flex-wrap gap-x-2">
+            <span>{summary.unread} nepřečtených</span>
+            {summary.important ? <span className="text-danger">{summary.important} důležitých</span> : null}
+            {summary.warning ? <span className="text-warning">{summary.warning} varování</span> : null}
+          </span>
+        }
+        actions={
+          summary.unread > 0 ? (
+            <Button size="sm" variant="ghost" busy={busyId === "all"} busyLabel="…" onClick={() => void act("all", "/notifications/read-all")}>
+              Přečíst vše
+            </Button>
+          ) : null
+        }
+      >
+        <div className="space-y-3 p-4" aria-busy={loading}>
+          {error ? <ErrorState message={error} onRetry={() => void openPanel()} /> : null}
+          {loading && !items.length ? (
+            <LoadingState lines={3} label="Načítám notifikace…" />
+          ) : !error && sorted.length === 0 ? (
+            <EmptyState>Žádné aktivní notifikace.</EmptyState>
+          ) : (
+            <ul className="space-y-2" aria-label="Seznam notifikací">
+              {sorted.map((n) => {
+                const sev = severityTone(n.severity);
+                const href = n.action_url && n.action_url.startsWith("/") ? n.action_url : null;
+                const busy = busyId === n.id;
+                return (
+                  <li
+                    key={n.id}
+                    aria-busy={busy || undefined}
+                    className={cx(
+                      "rounded-[var(--radius-control)] border p-3",
+                      n.read ? "border-line-subtle bg-surface/60" : "border-line bg-surface-2",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      {!n.read ? (
+                        <span className="inline-flex items-center gap-1 font-medium text-accent-strong">
+                          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />
+                          Nové
                         </span>
-                        <span className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
-                          {n.area}
-                        </span>
-                        <span className="text-xs text-zinc-500">{formatTime(n.created_at)}</span>
-                        {!n.read && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-white text-black font-semibold">
-                            UNREAD
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-semibold mt-2">{n.title}</div>
-                      <div className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">
-                        {n.message}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2 shrink-0">
-                      {!n.read && (
-                        <button
-                          type="button"
-                          onClick={() => void markRead(n.id)}
-                          className="text-xs px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                        >
-                          Přečteno
-                        </button>
+                      ) : (
+                        <span className="text-ink-muted">Přečteno</span>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => void resolve(n.id)}
-                        className="text-xs px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                      >
-                        Vyřešit
-                      </button>
-                      {n.action_url && (
-                        <button
-                          type="button"
+                      <StatusBadge tone={sev.tone}>{sev.label}</StatusBadge>
+                      <AreaBadge area={n.area} />
+                      <time className="ml-auto tabular-nums text-ink-muted" dateTime={n.created_at ?? undefined}>
+                        {formatDateTime(n.created_at)}
+                      </time>
+                    </div>
+                    <div className={cx("mt-1.5 break-words font-medium", n.read ? "text-ink-2" : "text-ink")}>{n.title}</div>
+                    {n.message ? <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-ink-muted">{n.message}</p> : null}
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      {href ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
                           onClick={() => {
-                            window.location.href = String(n.action_url);
                             setOpen(false);
+                            router.push(href);
                           }}
-                          className="text-xs px-3 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
                         >
                           Otevřít
-                        </button>
-                      )}
+                        </Button>
+                      ) : null}
+                      {!n.read ? (
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(n.id, `/notifications/${n.id}/read`)}>
+                          Přečteno
+                        </Button>
+                      ) : null}
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(n.id, `/notifications/${n.id}/resolve`)}>
+                        Vyřešit
+                      </Button>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-      )}
+      </Drawer>
     </>
   );
 }

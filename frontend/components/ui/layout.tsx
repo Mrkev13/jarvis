@@ -1,3 +1,4 @@
+import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
 /** Obsah stránky: jednotná šířka, okraje a rozestupy sekcí. */
@@ -12,8 +13,10 @@ export function ContentContainer({
 }) {
   return (
     <main
+      id={MAIN_CONTENT_ID}
+      tabIndex={-1}
       className={cx(
-        "mx-auto w-full px-4 py-5 md:px-8 md:py-8 space-y-6 md:space-y-8",
+        "mx-auto w-full focus:outline-none px-4 py-5 md:px-8 md:py-8 space-y-6 md:space-y-8",
         width === "narrow" ? "max-w-[var(--page-max-narrow)]" : "max-w-[var(--page-max)]",
         className,
       )}
