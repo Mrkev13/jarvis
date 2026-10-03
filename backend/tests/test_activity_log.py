@@ -282,3 +282,21 @@ class ActivityListEndpointTestCase(unittest.TestCase):
         # 2. 10. 10:00 UTC až 3. 10. 10:00 UTC (konce včetně)
         res = activity_list(from_date="2026-10-02T10:00:00.000Z", to_date="2026-10-03T10:00:00.000Z")
         self.assertEqual([i["summary"] for i in res["items"]], ["Row 2", "Row 1"])
+
+    def test_aware_bounds_compare_as_naive_utc(self):
+        """Regrese: aware hranice se porovnávaly v časové zóně DB, ne v UTC (posun Pražského dne o 1–2 h)."""
+        from main import _parse_iso_dt, activity_list
+
+        self.assertEqual(_parse_iso_dt("2026-10-03T00:00:00+02:00"), datetime(2026, 10, 2, 22, 0))
+        self.assertIsNone(_parse_iso_dt("2026-10-03T00:00:00Z").tzinfo)
+        # 22:30 UTC 2. 10. = 00:30 Praha 3. 10. → patří do pražského 3. 10.
+        Session = sessionmaker(bind=self.engine)
+        db = Session()
+        db.add(ActivityLog(timestamp=datetime(2026, 10, 2, 22, 30), area="memory", action_type="create",
+                           summary="Těsně po půlnoci", user_context="t", dedupe_key="e:midnight"))
+        db.commit()
+        db.close()
+        res = activity_list(area="memory", from_date="2026-10-03T00:00:00+02:00", to_date="2026-10-03T23:59:59+02:00")
+        self.assertEqual([i["summary"] for i in res["items"]], ["Těsně po půlnoci"])
+        res = activity_list(area="memory", from_date="2026-10-02T00:00:00+02:00", to_date="2026-10-02T23:59:59+02:00")
+        self.assertEqual(res["total"], 0)

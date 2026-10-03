@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
@@ -2347,9 +2347,14 @@ def _parse_iso_dt(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
+    # Sloupce jsou naive UTC. Aware hodnotu by PostgreSQL porovnal přes časovou zónu session (Europe/Prague),
+    # takže by se filtr Aktivity posunul o 1–2 h – proto převod na naive UTC.
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 @app.get("/activity")
