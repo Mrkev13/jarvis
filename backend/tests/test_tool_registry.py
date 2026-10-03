@@ -37,10 +37,10 @@ class ToolRegistryTestCase(unittest.TestCase):
 
     def test_schema_params_exist_on_the_callable(self):
         for spec in reg.TOOL_SPECS:
-            params = inspect.signature(spec.func).parameters
+            params = inspect.signature(spec.resolver or spec.func).parameters
             for name in spec.schema["function"]["parameters"]["properties"]:
                 self.assertIn(name, params, f"{spec.name}: parametr {name} chybí ve funkci")
-            if spec.takes_db:
+            if spec.takes_db or spec.resolver is not None:
                 self.assertEqual(next(iter(params)), "db")
 
     def test_schemas_keep_registry_order(self):

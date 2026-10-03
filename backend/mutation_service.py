@@ -687,3 +687,15 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
         raise
     finally:
         db.close()
+
+
+# ===== vstupy pro tool registry (modify_records) =====
+
+def propose_modify_records(db: Session, entity: str, action: str, target: dict, changes: dict | None = None) -> dict:
+    """Resolver AI toolu modify_records: plán pro pending akci, nebo MutationRefused."""
+    return resolve_mutation(db, entity, action, target, changes)
+
+
+def execute_modify_records(plan: dict, user_context: str = "manual") -> dict:
+    """Executor po potvrzení pending akce (volá ho execute_confirm_action s uloženým plánem)."""
+    return apply_mutation_plan(plan, user_context=user_context)
