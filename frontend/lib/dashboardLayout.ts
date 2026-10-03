@@ -1,0 +1,259 @@
+/**
+ * Řídicí centrum na míru (Roadmap 4F) – čistá logika rozložení bez Reactu (testy: dashboardLayout.test.mjs).
+ *
+ * Registr widgetů je EXPLICITNÍ seznam (žádné objevování modulů za běhu). Uložené rozložení obsahuje jen
+ * sémantiku – id, viditelnost, pořadí, velikost – nikdy pixely ani CSS. Každá breakpointová podoba se z něj
+ * odvozuje: mobil 1 sloupec v pořadí, tablet 2 sloupce, desktop 6 jednotek (packDesktop).
+ */
+
+export type WidgetSize = "small" | "medium" | "large" | "full";
+
+export const WIDGET_SIZES: WidgetSize[] = ["small", "medium", "large", "full"];
+
+export const SIZE_LABELS: Record<WidgetSize, string> = {
+  small: "Malý",
+  medium: "Střední",
+  large: "Velký",
+  full: "Celá šířka",
+};
+
+/** Šířka na desktopu v jednotkách ze 6: třetina, polovina, dvě třetiny, celý řádek. */
+export const DESKTOP_UNITS: Record<WidgetSize, number> = { small: 2, medium: 3, large: 4, full: 6 };
+export const DESKTOP_COLUMNS = 6;
+/** Tablet: 2 sloupce – malý a střední = 1, velký a celá šířka = 2. */
+export const TABLET_SPAN: Record<WidgetSize, 1 | 2> = { small: 1, medium: 1, large: 2, full: 2 };
+
+/** Id widgetů v registru (stabilní, ukládají se natrvalo). Komponenty: components/dashboard/widgets.tsx. */
+export const WIDGET_IDS = [
+  "daily_briefing",
+  "weekly_review",
+  "today",
+  "attention",
+  "key_metrics",
+  "goals",
+  "upcoming",
+  "work",
+  "finance",
+  "games",
+  "quick_actions",
+] as const;
+export type WidgetId = (typeof WIDGET_IDS)[number];
+
+export interface WidgetDef {
+  /** Stabilní sémantické id – ukládá se natrvalo, nikdy ho neměnit ani nepoužívat indexy. */
+  id: string;
+  title: string;
+  area: string | null;
+  defaultVisible: boolean;
+  defaultOrder: number;
+  defaultSize: WidgetSize;
+  allowedSizes: WidgetSize[];
+  /** Widget čte společný payload GET /dashboard (skrytím všech takových se dotaz vůbec nepošle). */
+  usesDashboardData: boolean;
+}
+
+export const WIDGETS: WidgetDef[] = [
+  { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 10, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
+  { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 20, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
+  { id: "today", title: "Dnes", area: null, defaultVisible: true, defaultOrder: 30, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
+  { id: "attention", title: "Vyžaduje pozornost", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
+  { id: "key_metrics", title: "Klíčová čísla", area: null, defaultVisible: true, defaultOrder: 50, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: true },
+  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
+  { id: "upcoming", title: "Nadcházející", area: "school", defaultVisible: true, defaultOrder: 70, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
+  { id: "work", title: "Práce", area: "work", defaultVisible: true, defaultOrder: 80, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true },
+  { id: "finance", title: "Finance", area: "finance", defaultVisible: true, defaultOrder: 90, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true },
+  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
+  { id: "quick_actions", title: "Rychlé akce", area: null, defaultVisible: true, defaultOrder: 110, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: false },
+];
+
+export const LAYOUT_VERSION = 1;
+export const LAYOUT_STORAGE_KEY = "standa-hub:dashboard-layout:v1";
+
+export interface WidgetLayout {
+  id: string;
+  visible: boolean;
+  order: number;
+  size: WidgetSize;
+}
+
+export interface DashboardLayout {
+  version: typeof LAYOUT_VERSION;
+  widgets: WidgetLayout[];
+}
+
+const ORDER_STEP = 10;
+
+function byDefaultOrder(defs: WidgetDef[]): WidgetDef[] {
+  return [...defs].sort((a, b) => a.defaultOrder - b.defaultOrder);
+}
+
+/** Pořadí přečíslované 10, 20, 30… (seřazeno podle `order`). */
+function renumber(widgets: WidgetLayout[]): WidgetLayout[] {
+  return [...widgets]
+    .sort((a, b) => a.order - b.order)
+    .map((w, i) => ({ ...w, order: (i + 1) * ORDER_STEP }));
+}
+
+export function defaultLayout(defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  return {
+    version: LAYOUT_VERSION,
+    widgets: renumber(byDefaultOrder(defs).map((d) => ({ id: d.id, visible: d.defaultVisible, order: d.defaultOrder, size: d.defaultSize }))),
+  };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Uložené rozložení → platné rozložení. Nikdy nevyhodí výjimku:
+ * - jiná verze / nesmyslná struktura → výchozí rozložení;
+ * - neznámá (zastaralá) id a duplicity (platí první výskyt) se zahodí;
+ * - neplatná velikost → výchozí velikost widgetu; neplatná viditelnost / pořadí → výchozí hodnota;
+ * - widget, který v uloženém rozložení chybí (např. nový), se vloží za svého předchůdce ve výchozím pořadí.
+ */
+export function normalizeLayout(raw: unknown, defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  if (!isRecord(raw) || raw.version !== LAYOUT_VERSION || !Array.isArray(raw.widgets)) return defaultLayout(defs);
+  const defById = new Map(defs.map((d) => [d.id, d]));
+  const seen = new Set<string>();
+  const kept: WidgetLayout[] = [];
+  raw.widgets.forEach((item, index) => {
+    if (!isRecord(item) || typeof item.id !== "string") return;
+    const def = defById.get(item.id);
+    if (!def || seen.has(item.id)) return;
+    seen.add(item.id);
+    const size = WIDGET_SIZES.includes(item.size as WidgetSize) && def.allowedSizes.includes(item.size as WidgetSize) ? (item.size as WidgetSize) : def.defaultSize;
+    kept.push({
+      id: def.id,
+      visible: typeof item.visible === "boolean" ? item.visible : def.defaultVisible,
+      // nečíselné pořadí → pozice v poli (stabilní řazení zachová zbytek)
+      order: typeof item.order === "number" && Number.isFinite(item.order) ? item.order : (index + 1) * ORDER_STEP,
+      size,
+    });
+  });
+  if (kept.length === 0) return defaultLayout(defs);
+
+  // Chybějící widgety: za předchůdce ve výchozím pořadí, jinak na začátek.
+  let ordered = renumber(kept);
+  const defaults = byDefaultOrder(defs);
+  for (const def of defaults) {
+    if (seen.has(def.id)) continue;
+    const before = defaults.slice(0, defaults.indexOf(def)).reverse().find((d) => seen.has(d.id));
+    const at = before ? ordered.findIndex((w) => w.id === before.id) + 1 : 0;
+    ordered = [...ordered.slice(0, at), { id: def.id, visible: def.defaultVisible, order: 0, size: def.defaultSize }, ...ordered.slice(at)];
+    ordered = ordered.map((w, i) => ({ ...w, order: (i + 1) * ORDER_STEP }));
+    seen.add(def.id);
+  }
+  return { version: LAYOUT_VERSION, widgets: ordered };
+}
+
+/** localStorage řetězec → rozložení (poškozený JSON / nic → výchozí). */
+export function parseStoredLayout(raw: string | null, defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  if (!raw) return defaultLayout(defs);
+  try {
+    return normalizeLayout(JSON.parse(raw), defs);
+  } catch {
+    return defaultLayout(defs);
+  }
+}
+
+export function serializeLayout(layout: DashboardLayout): string {
+  return JSON.stringify({ version: layout.version, widgets: layout.widgets.map(({ id, visible, order, size }) => ({ id, visible, order, size })) });
+}
+
+export function isDefaultLayout(layout: DashboardLayout, defs: WidgetDef[] = WIDGETS): boolean {
+  return serializeLayout(layout) === serializeLayout(defaultLayout(defs));
+}
+
+export function visibleWidgets(layout: DashboardLayout): WidgetLayout[] {
+  return layout.widgets.filter((w) => w.visible);
+}
+
+export function hiddenWidgets(layout: DashboardLayout): WidgetLayout[] {
+  return layout.widgets.filter((w) => !w.visible);
+}
+
+/**
+ * Posun mezi VIDITELNÝMI widgety (skryté pořadí nemění „mezeru" – prohodí se s nejbližším viditelným sousedem).
+ * Na okraji se nic nestane (vrací stejný objekt).
+ */
+export function moveWidget(layout: DashboardLayout, id: string, direction: -1 | 1): DashboardLayout {
+  const list = renumber(layout.widgets);
+  const from = list.findIndex((w) => w.id === id);
+  if (from < 0 || !list[from].visible) return layout;
+  let to = from + direction;
+  while (to >= 0 && to < list.length && !list[to].visible) to += direction;
+  if (to < 0 || to >= list.length) return layout;
+  const next = [...list];
+  [next[from], next[to]] = [next[to], next[from]];
+  return { version: LAYOUT_VERSION, widgets: next.map((w, i) => ({ ...w, order: (i + 1) * ORDER_STEP })) };
+}
+
+export function setWidgetVisible(layout: DashboardLayout, id: string, visible: boolean): DashboardLayout {
+  if (!layout.widgets.some((w) => w.id === id)) return layout;
+  return { ...layout, widgets: layout.widgets.map((w) => (w.id === id ? { ...w, visible } : w)) };
+}
+
+/** Jen povolená velikost widgetu; jinak beze změny. */
+export function setWidgetSize(layout: DashboardLayout, id: string, size: WidgetSize, defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  const def = defs.find((d) => d.id === id);
+  if (!def || !def.allowedSizes.includes(size)) return layout;
+  return { ...layout, widgets: layout.widgets.map((w) => (w.id === id ? { ...w, size } : w)) };
+}
+
+/** Pozice mezi viditelnými (1-based) – pro hlášení čtečce a zakázání tlačítek na okraji. */
+export function visiblePosition(layout: DashboardLayout, id: string): { index: number; count: number } {
+  const visible = renumber(layout.widgets).filter((w) => w.visible);
+  return { index: visible.findIndex((w) => w.id === id) + 1, count: visible.length };
+}
+
+export function needsDashboardData(layout: DashboardLayout, defs: WidgetDef[] = WIDGETS): boolean {
+  const uses = new Set(defs.filter((d) => d.usesDashboardData).map((d) => d.id));
+  return layout.widgets.some((w) => w.visible && uses.has(w.id));
+}
+
+// ---------- desktopové bloky ----------
+
+export interface DesktopBlock {
+  /** šířky sloupců v jednotkách (součet ≤ 6) */
+  columns: { units: number; ids: string[] }[];
+}
+
+/**
+ * Desktop (6 jednotek): řádky se plní v pořadí; další řádek se NEPŘIDÁ pod ten předchozí jako nový řádek,
+ * ale do jeho sloupců, pokud jeho velikosti odpovídají konci předchozího řádku (stejné šířky zprava).
+ * Tím vznikne výchozí vyvážení z Roadmap 4B.1: [Denní přehled | Týdenní přehled] + [Dnes | Pozornost] →
+ * levý sloupec přehled + Dnes, pravý týden + pozornost; [Cíle | Nadcházející | Práce] + [Finance] → Finance
+ * pod Prací. Karty ve sloupci se skládají pod sebe bez děr, nic se neroztahuje.
+ */
+export function packDesktop(widgets: { id: string; size: WidgetSize }[]): DesktopBlock[] {
+  const rows: { id: string; units: number }[][] = [];
+  let row: { id: string; units: number }[] = [];
+  let used = 0;
+  for (const w of widgets) {
+    const units = DESKTOP_UNITS[w.size];
+    if (used + units > DESKTOP_COLUMNS && row.length) {
+      rows.push(row);
+      row = [];
+      used = 0;
+    }
+    row.push({ id: w.id, units });
+    used += units;
+  }
+  if (row.length) rows.push(row);
+
+  const blocks: DesktopBlock[] = [];
+  for (const r of rows) {
+    const last = blocks[blocks.length - 1];
+    if (last && r.length < last.columns.length + 1) {
+      const offset = last.columns.length - r.length;
+      const fits = offset >= 0 && r.every((item, i) => last.columns[offset + i].units === item.units);
+      if (fits) {
+        r.forEach((item, i) => last.columns[offset + i].ids.push(item.id));
+        continue;
+      }
+    }
+    blocks.push({ columns: r.map((item) => ({ units: item.units, ids: [item.id] })) });
+  }
+  return blocks;
+}

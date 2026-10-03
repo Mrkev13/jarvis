@@ -67,11 +67,25 @@ Only when the module has a record people create often from one sentence; otherwi
       real parser and a ui-check case.
 - [ ] No undo promise for creates; no LLM call for unknown text.
 
-## 8. Future surfaces (design for, do not build early)
-- [ ] Dashboard widget: a compact summary endpoint or reuse of existing queries.
+## 8. Dashboard widget integration (Roadmap 4F – Command Center)
+Only when the module has a compact, glanceable summary; otherwise skip.
+- [ ] Data: extend `GET /dashboard` (one shared request) with a small summary, or – for a widget with its own
+      lifecycle – a separate endpoint fetched by the page only while the widget is visible (like
+      `/briefing/today`). Widgets never fetch on their own.
+- [ ] Component in `components/dashboard/widgets.tsx` taking `WidgetProps`; keeps its own Loading/Error/Empty
+      states; must render well at every allowed size (mobile is always one column).
+- [ ] Registry: add the id to `WIDGET_IDS` and an entry to `WIDGETS` – stable semantic snake_case id (persisted
+      forever, never renamed or reused), `defaultOrder` between existing ones, `defaultSize`, `allowedSizes`,
+      `defaultVisible`, `usesDashboardData`; add it to `WIDGET_COMPONENTS`.
+- [ ] Existing users get the new widget automatically after its default predecessor (`normalizeLayout`); check the
+      default desktop packing still balances (`packDesktop` test).
+- [ ] Tests: registry uniqueness test still passes, default order assertion updated, a ui-check screenshot.
+- [ ] No runtime plugin loading; no pixel positions.
+
+## 9. Future surfaces (design for, do not build early)
 - [ ] Today Mode: what "today" means for the module (Prague date semantics).
 
-## 9. Operations and quality
+## 10. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
 - [ ] Scheduler work (if any) as an isolated, idempotent, bounded job.
 - [ ] Logs without secrets or private content.
