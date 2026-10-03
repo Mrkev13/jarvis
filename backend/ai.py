@@ -15,7 +15,7 @@ from activity_service import log_activity
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
-from text_utils import WEEKDAYS_CZ
+from text_utils import WEEKDAYS_CZ, ai_action_label, ai_action_summary
 from context_service import CurrentContext, build_current_context
 from llm_budget import estimate_fixed_overhead, estimate_tool_schema_tokens
 from llm_config import LLM_SETTINGS
@@ -812,7 +812,7 @@ def execute_confirm_action(action_id: str):
             try:
                 log_activity(
                     db, "system", "error",
-                    f"Potvrzení akce selhalo: action_id {action_id} - {he.detail}",
+                    f"Potvrzení akce AI #{action_id} selhalo: {he.detail}",
                     entity_type="PendingAction",
                     entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
@@ -883,14 +883,8 @@ def execute_confirm_action(action_id: str):
                 _finalize_pending_status(db, action_id, "executed")
 
             try:
-                plan_preview = (arguments.get("plan") or {}).get("preview") if isinstance(arguments.get("plan"), dict) else None
-                if plan_preview:
-                    args_preview = f"{plan_preview.get('title')}, záznamů {plan_preview.get('count')}"
-                else:
-                    args_preview = ", ".join(f"{k}={v}" for k, v in list(arguments.items())[:3])
-                    if len(arguments) > 3:
-                        args_preview += ", ..."
-                summary = f"Potvrzena akce {tool_name} ({args_preview})"[:480]
+                # Roadmap 4C: lidský text místo „Potvrzena akce add_work_session (date_value=…)".
+                summary = ai_action_summary(tool_name, arguments)[:480]
                 log_activity(
                     db, "ai", "approve", summary,
                     entity_type=tool_name,
@@ -912,7 +906,7 @@ def execute_confirm_action(action_id: str):
             try:
                 log_activity(
                     db, "ai", "reject",
-                    f"Chyba při {tool_name}: {type(exc).__name__}: {str(exc)[:120]}",
+                    f"Akci AI se nepodařilo provést – {ai_action_label(tool_name)}: {str(exc)[:120]}",
                     entity_type=tool_name,
                     entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
