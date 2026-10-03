@@ -1,6 +1,6 @@
 {
  "mode": "weekly",
- "summary": "Týdenní plán: priority podle deadlinů, práce, cílů a relevantních memory. Memory: 4 relevantních položek.",
+ "summary": "Týdenní plán: priority podle termínů, práce, cílů a poznámek v paměti. Zohledněno 5 poznámek z paměti.",
  "actions": [
   {
    "priority": 1,
@@ -49,6 +49,13 @@
     "category": "preference",
     "content": "Nejlíp se učím ráno do 10:00.",
     "importance": 8
+   },
+   {
+    "id": 5,
+    "area": "school",
+    "category": "plan",
+    "content": "Zkoušku z fyziky dát v prvním termínu.",
+    "importance": 7
    },
    {
     "id": 2,

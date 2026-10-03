@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
-from text_utils import days_left_cz, format_date_cz
+from text_utils import days_left_cz, format_date_cz, format_hours_cz, memory_count_cz
 from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
@@ -236,7 +236,7 @@ def _work_behind_actions(mode: str, db: Session, today: date) -> list[PlannerAct
                 mode=mode,
                 area="work",
                 title=f"Zvýšit pracovní tempo: {g.title}",
-                reason=f"Aktuálně {float(current_value):.1f} h, očekávaně ~{expected:.1f} h.",
+                reason=f"Aktuálně {format_hours_cz(current_value, 1)}, očekávaně ~{format_hours_cz(expected, 1)}.",
                 priority=3 if mode == "daily" else 4,
                 recommendation_key=f"work:behind:{g.id}",
             )
@@ -407,12 +407,12 @@ def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
 
     memories = _relevant_memories(db) if m == "weekly" else []
     summary = (
-        "Denní plán: nejdůležitější věci podle deadlinů, práce a stagnace."
+        "Denní plán: nejdůležitější věci podle termínů, práce a stagnujících cílů."
         if m == "daily"
-        else "Týdenní plán: priority podle deadlinů, práce, cílů a relevantních memory."
+        else "Týdenní plán: priority podle termínů, práce, cílů a poznámek v paměti."
     )
     if memories:
-        summary += f" Memory: {len(memories)} relevantních položek."
+        summary += f" {memory_count_cz(len(memories))}."
 
     return {
         "mode": m,

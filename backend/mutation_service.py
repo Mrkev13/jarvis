@@ -30,7 +30,7 @@ from database import SessionLocal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
 from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
-from text_utils import clip
+from text_utils import clip, finance_category_cz, format_num_cz
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -66,9 +66,7 @@ class StaleTarget(Exception):
 def _num(value) -> str:
     if value is None:
         return "–"
-    f = float(value)
-    s = f"{f:,.2f}".rstrip("0").rstrip(".") if f % 1 else f"{f:,.0f}"
-    return s.replace(",", " ")
+    return format_num_cz(value, 2).replace("\u00a0", " ")
 
 
 def _d(value) -> str:
@@ -203,7 +201,7 @@ class EntityDef:
 def _finance_desc(t: FinanceTransaction) -> str:
     sign = "+" if (t.transaction_type or "") == "income" else "−"
     desc = f" ({_short(t.description, 40)})" if t.description else ""
-    return f"{sign}{_num(t.amount)} Kč {t.category or ''}{desc} · {_d(t.created_at)}"
+    return f"{sign}{_num(t.amount)} Kč {finance_category_cz(t.category)}{desc} · {_d(t.created_at)}"
 
 
 def _work_desc(s: WorkSession) -> str:

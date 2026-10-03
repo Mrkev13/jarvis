@@ -9,8 +9,8 @@
  {
   "id": 2,
   "tank": "Kranvagn",
-  "xp_remaining": 64000.0,
-  "priority": "medium",
+  "xp_remaining": 52000.0,
+  "priority": "high",
   "status": "active"
  },
  {

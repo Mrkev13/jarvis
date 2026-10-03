@@ -12,7 +12,7 @@
   "source": null,
   "current_value": null,
   "target_date": null,
-  "created_at": "2026-10-03T12:22:48.642171"
+  "created_at": "2026-10-03T15:01:29.276599"
  },
  {
   "id": 1,
@@ -42,7 +42,7 @@
   "source": null,
   "current_value": null,
   "target_date": "2026-12-20",
-  "created_at": "2026-10-03T12:22:48.641889"
+  "created_at": "2026-10-03T15:01:29.276180"
  },
  {
   "id": 4,
@@ -51,13 +51,13 @@
   "description": "",
   "status": "active",
   "priority": "medium",
-  "progress": 23,
+  "progress": 32,
   "tracking_type": "automatic",
   "target_value": 50000.0,
   "source": "finance_balance",
-  "current_value": 11310.0,
+  "current_value": 15995.1,
   "target_date": "2026-12-31",
-  "created_at": "2026-10-03T12:22:48.650783"
+  "created_at": "2026-10-03T15:01:29.288258"
  },
  {
   "id": 5,
@@ -72,7 +72,7 @@
   "source": null,
   "current_value": null,
   "target_date": null,
-  "created_at": "2026-10-03T12:22:48.651174"
+  "created_at": "2026-10-03T15:01:29.289178"
  },
  {
   "id": 6,
@@ -87,6 +87,6 @@
   "source": null,
   "current_value": null,
   "target_date": null,
-  "created_at": "2026-10-03T12:22:48.651177"
+  "created_at": "2026-10-03T15:01:29.289181"
  }
 ]

@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { formatCzkExact } from "./format.ts";
+
 import { estimateEarnings, financeSyncMeta, groupSessionsByDay } from "./work.ts";
 
 const s = (id, date, hours, earnings, extra = {}) => ({
@@ -42,4 +44,12 @@ test("earnings estimate", () => {
   assert.equal(estimateEarnings("7.5", "300"), 2250);
   assert.equal(estimateEarnings("", "300"), null);
   assert.equal(estimateEarnings("2", "abc"), null);
+});
+
+test("day total and rows reconcile when shown with formatCzkExact (Roadmap 4B.1)", () => {
+  const s = { project: "XYZ", description: "", hourly_rate: 375, hours: 6.5, earnings: 2437.5, date: "2026-10-10" };
+  const [day] = groupSessionsByDay([{ ...s, id: 1 }, { ...s, id: 2 }]);
+  const nb = (x) => x.replace(/ /g, " ");
+  assert.deepEqual(day.sessions.map((x) => nb(formatCzkExact(x.earnings))), ["2 437,50 Kč", "2 437,50 Kč"]);
+  assert.equal(nb(formatCzkExact(day.earnings)), "4 875 Kč");
 });

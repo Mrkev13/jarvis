@@ -1,6 +1,6 @@
 {
  "today": {
-  "summary": "Denní plán: nejdůležitější věci podle deadlinů, práce a stagnace.",
+  "summary": "Denní plán: nejdůležitější věci podle termínů, práce a stagnujících cílů.",
   "actions": [
    {
     "priority": 1,
@@ -115,25 +115,25 @@
   "count": 3
  },
  "work": {
-  "total_hours": 33.5,
-  "total_earnings": 7475.0,
-  "this_month_hours": 18.5,
-  "this_month_earnings": 4275.0,
+  "total_hours": 46.5,
+  "total_earnings": 12350.0,
+  "this_month_hours": 31.5,
+  "this_month_earnings": 9150.0,
   "goal": null
  },
  "finance": {
-  "balance": 11310.0,
-  "income": 16400.0,
-  "expenses": 5090.0,
-  "this_month_income": 16400.0,
-  "this_month_expenses": 4450.0,
-  "transactions_count": 8,
+  "balance": 15995.1,
+  "income": 21275.0,
+  "expenses": 5279.9,
+  "this_month_income": 21275.0,
+  "this_month_expenses": 4639.9,
+  "transactions_count": 11,
   "goal": {
    "id": 4,
    "title": "Finanční rezerva 50 000 Kč",
-   "current_value": 11310.0,
+   "current_value": 15995.1,
    "target_value": 50000.0,
-   "progress": 23,
+   "progress": 32,
    "target_date": "2026-12-31"
   }
  },
@@ -187,17 +187,17 @@
  "wot": {
   "top_grinds": [
    {
-    "id": 1,
-    "tank": "Object 279 (e)",
-    "xp_remaining": 128000.0,
+    "id": 2,
+    "tank": "Kranvagn",
+    "xp_remaining": 52000.0,
     "priority": "high",
     "status": "active"
    },
    {
-    "id": 2,
-    "tank": "Kranvagn",
-    "xp_remaining": 64000.0,
-    "priority": "medium",
+    "id": 1,
+    "tank": "Object 279 (e)",
+    "xp_remaining": 128000.0,
+    "priority": "high",
     "status": "active"
    }
   ],

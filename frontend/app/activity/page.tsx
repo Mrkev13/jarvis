@@ -30,6 +30,7 @@ import {
 import { apiJson, errorMessage } from "@/lib/api";
 import { areaMeta } from "@/lib/areas";
 import { countActiveFilters, toggleInList } from "@/lib/filters";
+import { activitySourceLabel, entityRefLabel, fieldLabel, fieldValueLabel } from "@/lib/labels";
 import { formatNumber, formatTime, plural, pragueDayKey } from "@/lib/format";
 import { cx, type Tone } from "@/lib/ui";
 
@@ -57,26 +58,29 @@ function actionTone(actionType: string): Tone {
   return "neutral";
 }
 
-/** Změna z auditu: {pole: {old, new}} jako tabulka, jinak JSON. */
-function DeltaView({ delta }: { delta: unknown }) {
+/**
+ * Změna z auditu: {pole: {old, new}} jako „Pole: stará → nová", jiný objekt jako „Pole: hodnota", ostatní JSON.
+ * Názvy polí a hodnoty překládá lib/labels.ts (jen prezentace).
+ */
+function DeltaView({ delta, entityType }: { delta: unknown; entityType: string | null }) {
   if (delta == null) return <p className="text-xs text-ink-muted">Záznam neobsahuje podrobnosti o změně.</p>;
   const entries = typeof delta === "object" && !Array.isArray(delta) ? Object.entries(delta as Record<string, unknown>) : [];
-  const isDiff = entries.length > 0 && entries.every(([, v]) => v && typeof v === "object" && ("old" in v || "new" in v));
-  if (!isDiff) {
+  if (!entries.length) {
     return (
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] bg-app p-3 font-mono text-xs text-ink-2">
         {JSON.stringify(delta, null, 2)}
       </pre>
     );
   }
-  const show = (v: unknown) => (v == null || v === "" ? "–" : typeof v === "object" ? JSON.stringify(v) : String(v));
+  const isDiff = entries.every(([, v]) => v && typeof v === "object" && ("old" in v || "new" in v));
   return (
     <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
       {entries.map(([field, v]) => {
-        const { old, new: next } = v as { old?: unknown; new?: unknown };
+        const { old, new: next } = isDiff ? (v as { old?: unknown; new?: unknown }) : { old: undefined, new: v };
+        const show = (x: unknown) => fieldValueLabel(field, x, entityType);
         return (
           <div key={field} className="contents">
-            <dt className="font-mono text-ink-muted">{field}</dt>
+            <dt className="text-ink-muted">{fieldLabel(field)}</dt>
             <dd className="min-w-0 break-words text-ink-2">
               {old !== undefined && show(old) !== show(next) ? (
                 <>
@@ -127,10 +131,10 @@ function ActivityRow({ item }: { item: ActivityItem }) {
           </div>
           <p className="break-words text-sm text-ink">{item.summary}</p>
           {item.entity_type || item.user_context ? (
-            <p className="mt-0.5 break-words font-mono text-[11px] text-ink-faint">
-              {item.entity_type ? `${item.entity_type}${item.entity_id != null ? ` #${item.entity_id}` : ""}` : null}
+            <p className="mt-0.5 break-words text-xs text-ink-faint">
+              {item.entity_type ? entityRefLabel(item.entity_type, item.entity_id) : null}
               {item.entity_type && item.user_context ? " · " : null}
-              {item.user_context ? `zdroj: ${item.user_context === "manual" ? "ručně" : item.user_context}` : null}
+              {item.user_context ? `zdroj: ${activitySourceLabel(item.user_context)}` : null}
             </p>
           ) : null}
         </div>
@@ -145,7 +149,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
           ) : detail.status === "error" ? (
             <ErrorState message={detail.error} onRetry={() => void loadDetail()} />
           ) : (
-            <DeltaView delta={detail.data?.delta} />
+            <DeltaView delta={detail.data?.delta} entityType={item.entity_type} />
           )}
         </div>
       ) : null}

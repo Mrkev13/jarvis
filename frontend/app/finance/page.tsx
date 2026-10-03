@@ -20,8 +20,9 @@ import {
   StatGrid,
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
+import { financeCategoryLabel } from "@/lib/labels";
 import { apiJson, jsonBody } from "@/lib/api";
-import { formatCzk, formatDate, formatSigned, plural } from "@/lib/format";
+import { formatCzkExact, formatDate, formatSigned, plural } from "@/lib/format";
 import { staggerStyle, useNewIds } from "@/lib/motion";
 import { cx, type Tone } from "@/lib/ui";
 
@@ -50,7 +51,7 @@ const EMPTY_FORM = { amount: "", category: "", description: "" };
 
 /** Zůstatek: záporný se skutečným minus, kladný bez „+". */
 function formatBalance(value: number): string {
-  return value < 0 ? formatSigned(value, formatCzk(value)) : formatCzk(value);
+  return value < 0 ? formatSigned(value, formatCzkExact(value)) : formatCzkExact(value);
 }
 
 function balanceTone(value: number | undefined): Tone {
@@ -250,11 +251,11 @@ export default function FinancePage() {
               <MetricCard
                 label="Příjmy"
                 tone="success"
-                value={<AnimatedNumber value={s?.income} format={formatCzk} fallback="–" />}
+                value={<AnimatedNumber value={s?.income} format={formatCzkExact} fallback="–" />}
               />
               <MetricCard
                 label="Výdaje"
-                value={<AnimatedNumber value={s?.expenses} format={formatCzk} fallback="–" />}
+                value={<AnimatedNumber value={s?.expenses} format={formatCzkExact} fallback="–" />}
               />
             </StatGrid>
           </section>
@@ -299,7 +300,7 @@ export default function FinancePage() {
 
       <ConfirmDialog
         open={deletingTx != null}
-        title={`Smazat transakci ${deletingTx?.description || deletingTx?.category || ""}?`}
+        title={`Smazat transakci ${deletingTx?.description || (deletingTx ? financeCategoryLabel(deletingTx.category) : "")}?`}
         message="Tato akce je nevratná. Transakce bude odstraněna a zůstatek se přepočítá."
         confirmLabel="Smazat"
         busyLabel="Mažu…"
@@ -324,7 +325,7 @@ function TransactionRow({
   const isIncome = tx.transaction_type === "income";
   // Výdaj se zobrazí jako záporná částka (skutečné minus); příjem zeleně s „+".
   const signed = isIncome ? tx.amount : -tx.amount;
-  const title = tx.description || tx.category;
+  const title = tx.description || financeCategoryLabel(tx.category);
   return (
     <li
       style={highlight ? undefined : staggerStyle(index)}
@@ -340,7 +341,7 @@ function TransactionRow({
           {tx.description ? (
             <>
               <span aria-hidden="true">·</span>
-              <span className="break-words">{tx.category}</span>
+              <span className="break-words">{financeCategoryLabel(tx.category)}</span>
             </>
           ) : null}
           <span aria-hidden="true">·</span>
@@ -354,7 +355,7 @@ function TransactionRow({
             isIncome ? "text-success" : "text-ink",
           )}
         >
-          {formatSigned(signed, formatCzk(tx.amount))}
+          {formatSigned(signed, formatCzkExact(tx.amount))}
         </span>
         <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat transakci ${title}`}>
           Smazat

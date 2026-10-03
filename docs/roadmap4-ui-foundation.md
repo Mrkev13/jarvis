@@ -47,6 +47,17 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ⏳ still open (touches auth) |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4B.1 (polish)
+
+| Item | Status |
+|---|---|
+| Dashboard column balance (Dnes under the briefing on xl, Hry as a full-width strip, no stretched rows on tablet) | ✅ |
+| Backend copy: work/memory/finance activity summaries, planner weekly summary, work-behind texts | ✅ `text_utils.py` |
+| Presentation mapping layer `lib/labels.ts` (entities, fields, values, categories, sources) | ✅ used by Activity, Finance, Memory |
+| Work/Finance amounts reconcile (`formatCzkExact`) | ✅ |
+| WoT "Připravujeme" placeholder | ✅ removed |
+| AI approval summaries ("Potvrzena akce add_work_session (date=…)") | ⏳ AI Assistant phase |
+
 ## What existed before 4A
 
 - Dark theme by convention (`bg-zinc-950` body, `bg-zinc-900 border-zinc-800 rounded-2xl` cards) — but the card

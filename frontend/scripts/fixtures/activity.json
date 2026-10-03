@@ -71,8 +71,98 @@
    "user_context": null
   },
   {
+   "id": 22,
+   "timestamp": "2026-10-03T15:01:29.469816",
+   "area": "wot",
+   "action_type": "update",
+   "entity_type": "WotGrind",
+   "entity_id": 2,
+   "summary": "Grind Kranvagn upraven – zbývá 52 000 XP",
+   "user_context": "manual"
+  },
+  {
+   "id": 21,
+   "timestamp": "2026-10-03T15:01:29.458470",
+   "area": "memory",
+   "action_type": "delete",
+   "entity_type": "Memory",
+   "entity_id": 6,
+   "summary": "Poznámka v paměti trvale smazána: Dočasná poznámka",
+   "user_context": "manual"
+  },
+  {
+   "id": 20,
+   "timestamp": "2026-10-03T15:01:29.451859",
+   "area": "memory",
+   "action_type": "create",
+   "entity_type": "Memory",
+   "entity_id": 6,
+   "summary": "Poznámka přidána do paměti: Dočasná poznámka",
+   "user_context": "manual"
+  },
+  {
+   "id": 19,
+   "timestamp": "2026-10-03T15:01:29.445449",
+   "area": "memory",
+   "action_type": "create",
+   "entity_type": "Memory",
+   "entity_id": 5,
+   "summary": "Poznámka přidána do paměti: Zkoušku z fyziky dát v prvním termínu.",
+   "user_context": "manual"
+  },
+  {
+   "id": 18,
+   "timestamp": "2026-10-03T15:01:29.431504",
+   "area": "finance",
+   "action_type": "create",
+   "entity_type": "FinanceTransaction",
+   "entity_id": 11,
+   "summary": "Výdaj 189,90 Kč · food (Oběd)",
+   "user_context": "manual"
+  },
+  {
+   "id": 17,
+   "timestamp": "2026-10-03T15:01:29.420579",
+   "area": "finance",
+   "action_type": "sync",
+   "entity_type": "FinanceTransaction",
+   "entity_id": 10,
+   "summary": "Zapsáno z Práce: příjem 2 437,50 Kč – Workshop",
+   "user_context": "manual"
+  },
+  {
+   "id": 16,
+   "timestamp": "2026-10-03T15:01:29.419953",
+   "area": "work",
+   "action_type": "create",
+   "entity_type": "WorkSession",
+   "entity_id": 9,
+   "summary": "Práce 6,5 h – Klient XYZ (Workshop)",
+   "user_context": "manual"
+  },
+  {
+   "id": 15,
+   "timestamp": "2026-10-03T15:01:29.405028",
+   "area": "finance",
+   "action_type": "sync",
+   "entity_type": "FinanceTransaction",
+   "entity_id": 9,
+   "summary": "Zapsáno z Práce: příjem 2 437,50 Kč – Workshop",
+   "user_context": "manual"
+  },
+  {
+   "id": 14,
+   "timestamp": "2026-10-03T15:01:29.404330",
+   "area": "work",
+   "action_type": "create",
+   "entity_type": "WorkSession",
+   "entity_id": 8,
+   "summary": "Práce 6,5 h – Klient XYZ (Workshop)",
+   "user_context": "manual"
+  },
+  {
    "id": 13,
-   "timestamp": "2026-10-03T12:22:48.727288",
+   "timestamp": "2026-10-03T15:01:29.382407",
    "area": "reminders",
    "action_type": "complete",
    "entity_type": "Reminder",
@@ -82,7 +172,7 @@
   },
   {
    "id": 12,
-   "timestamp": "2026-10-03T12:22:48.668079",
+   "timestamp": "2026-10-03T15:01:29.315672",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -92,7 +182,7 @@
   },
   {
    "id": 11,
-   "timestamp": "2026-10-03T12:22:48.660577",
+   "timestamp": "2026-10-03T15:01:29.303830",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -102,7 +192,7 @@
   },
   {
    "id": 10,
-   "timestamp": "2026-10-03T12:22:48.659965",
+   "timestamp": "2026-10-03T15:01:29.302776",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -112,7 +202,7 @@
   },
   {
    "id": 9,
-   "timestamp": "2026-10-03T12:22:48.659172",
+   "timestamp": "2026-10-03T15:01:29.301730",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -122,7 +212,7 @@
   },
   {
    "id": 8,
-   "timestamp": "2026-10-03T12:22:48.658367",
+   "timestamp": "2026-10-03T15:01:29.300314",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -131,7 +221,7 @@
    "user_context": "manual"
   }
  ],
- "total": 13,
+ "total": 22,
  "limit": 50,
  "offset": 0
 }
