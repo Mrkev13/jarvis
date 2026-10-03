@@ -680,3 +680,40 @@ print(_hash_pin("123456"))
 - Testy: `test_webpush.py`, `test_delivery.py`, `test_push_api.py`, migrace v `test_alembic_migration.py`,
   frontend `lib/push.test.mjs`.
 
+
+## 22. Denní přehled (Phase F, `briefing_snapshot.py`, `briefing_service.py`, migrace 0011)
+
+- **Princip**: nejdřív deterministický **snímek** reálných dat (`build_snapshot`), teprve pak jedno volání LLM
+  **bez toolů a bez historie konverzace**. LLM jen shrnuje a řadí; nic nemění v databázi.
+- **Snímek**: sekce today / overdue / soon / attention / goals / finance / changes. Každá položka má `ref`
+  (`assignment:12`, `exam:3`, `reminder:5`, `goal:2`, `notification:9`, `finance:2026-10`, `activity:…`),
+  štítek, termín (pražský), odkaz `url` a příznak NOVÉ (oproti minulému přehledu). Stropy položek na sekci
+  + strop 1200 tokenů (ořez od nejméně důležitých sekcí). Klidný den (nic v today/overdue/soon/attention)
+  → přehled bez LLM (`model="deterministic"`).
+- **Uzemnění** (`ground`): odkazy jen na existující položky snímku (bez duplicit, jen akční druhy), text
+  s neověřitelnými čísly/daty/jmény (`planner_guard`) se nahradí štítkem ze snímku, nepodložené „proč"
+  a poznámka se zahodí, souhrn spadne na deterministický. Nezbude-li nic → `grounding_rejected`.
+  Počet oprav → `grounding_removed`.
+- **Tabulka** `daily_briefings` (migrace `0011_daily_briefings`): unikátní `briefing_date` (pražský den),
+  `status` generating/ready/failed, `trigger` scheduler/catchup/manual, `attempts`, `next_retry_at`,
+  `error_category`, `content` (JSON), `source_hash`, `source_refs`, tokeny/latence/model, `regenerated_count`.
+  Claim je podmíněný UPDATE → žádné duplicitní generování; `generating` starší 10 min se převezme.
+- **Scheduler**: vlastní job `standa_hub_briefing` (každých `DAILY_BRIEFING_CHECK_SECONDS`, první běh hned
+  po startu = dohnání po restartu). Generuje jen pro **dnešní** pražský den a až po `DAILY_BRIEFING_TIME`
+  (DST bezpečné – porovnává se pražský čas). Pozdě o >30 min → `trigger=catchup`. Chyby: denní limit Groq
+  → další pokus za 3 h, rate limit/provider 15 min, neplatná odpověď/uzemnění 30 min; max 4 pokusy/den.
+  Chyba přehledu nikdy neovlivní připomínky (oddělený job, try/except).
+- **Doručení**: úspěšný (ne ruční) přehled vytvoří jednu notifikaci `daily_briefing` na den (dedupe
+  `briefing:<datum>`, starší se uzavřou, platnost do konce dne). Web Push ji pošle stávající frontou z Phase E
+  (`deliverable_types`), žádné druhé doručování; `DAILY_BRIEFING_PUSH=false` = jen zvonek. Odesílá ji
+  reminder job → potřebuje `REMINDERS_CHECK_ENABLED=true`.
+- **API** (session auth): `GET /briefing/today` (stav + obsah, bez AI přehledu deterministický náhled
+  `fallback`), `POST /briefing/today/generate` `{regenerate}` (jen dnešek; 409 při běžícím generování;
+  nepovedené přegenerování ponechá předchozí verzi s `error_category=regenerate_failed:*`).
+- **Logy** (`standa_hub.briefing`): jen čísla a kategorie (datum, trigger, položky, tokeny, latence,
+  opravy), nikdy prompt ani obsah snímku.
+- **Frontend**: `components/DailyBriefingCard.tsx` nahoře na dashboardu, logika v `lib/briefing.ts`
+  (+ `briefing.test.mjs`).
+- **Konfigurace**: `DAILY_BRIEFING_ENABLED` (true), `DAILY_BRIEFING_TIME` (07:00), `DAILY_BRIEFING_PUSH`
+  (true), `DAILY_BRIEFING_CHECK_SECONDS` (300, min 60).
+- Testy: `test_briefing.py` (falešné hodiny i LLM, žádný reálný Groq), migrace v `test_alembic_migration.py`.
