@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NotificationsBell from "@/components/NotificationsBell";
+import { QuickAddButton } from "@/components/quick-add/QuickAddButton";
 import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
@@ -102,6 +103,7 @@ export function MobileHeader() {
         <Brand />
         <div className="flex items-center gap-1">
           {/* Jen jeden zvonek v celé aplikaci (dřív se mobilní i desktopový dotazovaly zároveň). */}
+          <QuickAddButton variant="icon" />
           <SearchButton variant="icon" />
           {isDesktop === false ? <NotificationsBell /> : null}
           <button
@@ -147,8 +149,9 @@ export function DesktopSidebar() {
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}
       </div>
-      <div className="mb-4">
+      <div className="mb-4 space-y-2">
         <SearchButton variant="field" />
+        <QuickAddButton variant="field" />
       </div>
       <Sidebar />
     </aside>
