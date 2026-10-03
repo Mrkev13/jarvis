@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -44,6 +45,32 @@ _GOAL_INACTIVE = {"completed", "cancelled", "paused"}
 _ATTENTION_TYPES = ("goal_stagnation", "work_behind", "finance_goal_stagnation")
 _WEEKDAYS = ("po", "út", "st", "čt", "pá", "so", "ne")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+# Technický audit bez hodnoty pro člověka (sekce „změny"): automatické vedlejší zápisy a provoz.
+_NOISE_AREAS = {"ai", "system", "auth", "backup", "scheduler", "maintenance", "migration"}
+_NOISE_ACTIONS = {"snapshot", "sync", "sync_to_finance", "error", "cleanup", "maintenance", "migration",
+                  "migrate", "backup", "restore", "seed", "purge"}
+_NOISE_CONTEXTS = {"test", "unit_test", "tests", "cleanup", "maintenance", "migration", "system", "scheduler",
+                   "verify", "verification", "seed"}
+_NOISE_SUMMARY = re.compile(r"\[(?:test|verify|verification|e2e|qa)\]|__test|\btest[ _-]?cleanup\b", re.I)
+
+
+def _is_noise(log: ActivityLog) -> bool:
+    ctx = (log.user_context or "").strip().lower()
+    return ((log.area or "").lower() in _NOISE_AREAS
+            or (log.action_type or "").lower() in _NOISE_ACTIONS
+            or ctx in _NOISE_CONTEXTS or ctx.startswith("test")
+            or bool(_NOISE_SUMMARY.search(log.summary or "")))
+
+
+def meaningful_activity(logs: list[ActivityLog]) -> list[ActivityLog]:
+    """Jen změny, které člověka zajímají. Záznam vytvořený i smazaný v rámci okna (typicky úklid po testu
+    / ověřování) nemá čistý dopad → vypadnou oba. Smazání ani úprava existujících dat se neskrývá."""
+    kept = [lg for lg in logs if not _is_noise(lg)]
+    created = {(lg.entity_type, lg.entity_id) for lg in kept if lg.action_type == "create" and lg.entity_id is not None}
+    deleted = {(lg.entity_type, lg.entity_id) for lg in kept if lg.action_type == "delete" and lg.entity_id is not None}
+    transient = created & deleted
+    return [lg for lg in kept if (lg.entity_type, lg.entity_id) not in transient]
 
 
 def _short(text, limit: int = LABEL_CHARS) -> str:
@@ -249,9 +276,9 @@ def build_snapshot(
 
     # --- změny od minulého přehledu ---
     since = changes_since or (now_utc - timedelta(hours=24))
-    logs = (db.query(ActivityLog)
-            .filter(ActivityLog.timestamp >= since, ActivityLog.area.notin_(("ai", "system")))
-            .order_by(ActivityLog.timestamp.desc()).all())
+    logs = meaningful_activity(db.query(ActivityLog)
+                               .filter(ActivityLog.timestamp >= since)
+                               .order_by(ActivityLog.timestamp.desc()).all())
     counts: dict[str, int] = {}
     for lg in logs:
         counts[lg.area] = counts.get(lg.area, 0) + 1
