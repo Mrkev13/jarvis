@@ -16,6 +16,11 @@ export const AREA_STYLES: Record<string, { bg: string; border: string; text: str
   reminders: { bg: "bg-sky-500/10",     border: "border-sky-400/30",      text: "text-sky-200",      label: "Připomínky" },
   briefing: { bg: "bg-cyan-500/10",     border: "border-cyan-400/30",     text: "text-cyan-200",     label: "Přehled" },
   review:   { bg: "bg-violet-500/10",   border: "border-violet-400/30",   text: "text-violet-200",   label: "Týdenní přehled" },
+  // oblasti auditu (Aktivita)
+  goals:    { bg: "bg-sky-500/10",      border: "border-sky-400/30",      text: "text-sky-200",      label: "Cíle" },
+  memory:   { bg: "bg-zinc-500/10",     border: "border-zinc-400/30",     text: "text-zinc-200",     label: "Paměť" },
+  ai:       { bg: "bg-violet-500/10",   border: "border-violet-400/30",   text: "text-violet-200",   label: "AI" },
+  system:   { bg: "bg-zinc-500/10",     border: "border-zinc-400/30",     text: "text-zinc-200",     label: "Systém" },
 };
 
 export function areaMeta(area: string | undefined | null) {

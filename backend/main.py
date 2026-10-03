@@ -2373,7 +2373,10 @@ def activity_list(
         conditions = []
 
         if area:
-            conditions.append(ActivityLog.area == area)
+            # více oblastí čárkou („finance,work") – filtr Aktivity umožňuje vybrat několik najednou
+            areas = [a.strip() for a in area.split(",") if a.strip()]
+            if areas:
+                conditions.append(ActivityLog.area.in_(areas))
         if action_type:
             conditions.append(ActivityLog.action_type == action_type)
         if q:

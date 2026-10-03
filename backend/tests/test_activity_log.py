@@ -238,3 +238,47 @@ class ActivityLogUtilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ActivityListEndpointTestCase(unittest.TestCase):
+    """Roadmap 4B: filtr Aktivity – více oblastí čárkou a rozsah from_date/to_date (UTC)."""
+
+    def setUp(self):
+        from unittest import mock
+
+        self.engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=self.engine)
+        Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        db = Session()
+        base = datetime(2026, 10, 1, 10, 0, 0)
+        for i, area in enumerate(["finance", "work", "school", "finance", "wot"]):
+            db.add(ActivityLog(timestamp=base + timedelta(days=i), area=area, action_type="create",
+                               summary=f"Row {i}", user_context="t", dedupe_key=f"e:{i}"))
+        db.commit()
+        db.close()
+        self.patch = mock.patch("main.SessionLocal", Session)
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+        self.engine.dispose()
+
+    def test_multiple_areas_comma_separated(self):
+        from main import activity_list
+
+        res = activity_list(area="finance,work")
+        self.assertEqual(res["total"], 3)
+        self.assertEqual({i["area"] for i in res["items"]}, {"finance", "work"})
+        self.assertEqual(activity_list(area="school")["total"], 1)
+        self.assertEqual(activity_list(area=" , ")["total"], 5)
+
+    def test_date_range_utc_bounds(self):
+        from main import activity_list
+
+        # 2. 10. 10:00 UTC až 3. 10. 10:00 UTC (konce včetně)
+        res = activity_list(from_date="2026-10-02T10:00:00.000Z", to_date="2026-10-03T10:00:00.000Z")
+        self.assertEqual([i["summary"] for i in res["items"]], ["Row 2", "Row 1"])
