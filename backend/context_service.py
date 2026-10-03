@@ -17,6 +17,7 @@ from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, Notification, WorkSession, WotGrind, WotResource
+from read_queries import ASSIGNMENT_DONE_STATUSES
 from time_utils import local_month_bounds_utc, now_local
 
 CONTEXT_TARGET_TOKENS = DEFAULT_CONTEXT_TARGET_TOKENS
@@ -33,7 +34,7 @@ AREA_MFF = "mff"
 # Phase D: připomínky (časové dotazy je zahrnují stejně jako školu a cíle).
 AREA_REMINDERS = "reminders"
 
-_DONE_STATUSES = {"completed", "hotovo", "done", "closed", "finished"}
+_DONE_STATUSES = ASSIGNMENT_DONE_STATUSES  # kanonická definice (read_queries)
 _EXAM_OPEN_STATUSES = {"upcoming", "scheduled", ""}
 _INACTIVE_GOAL_STATUSES = {"completed", "paused", "cancelled"}
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}

@@ -740,3 +740,63 @@ print(_hash_pin("123456"))
   (true), `DAILY_BRIEFING_CHECK_SECONDS` (300, min 60).
 - Testy: `test_briefing.py` (falešné hodiny i LLM; reálná cesta přes OpenAI SDK proti lokálnímu fake HTTP
   – `httpx.MockTransport`, žádný reálný Groq), migrace v `test_alembic_migration.py`.
+
+## 23. Týdenní přehled (Phase G, `weekly_snapshot.py`, `weekly_review_service.py`, migrace 0012)
+
+- **Princip** (jako Phase F): nejdřív deterministický **snímek**, pak jedno LLM volání přes sdílené
+  `structured_llm.py` (strict JSON Schema, `reasoning_effort="low"`, `max_completion_tokens=1600`, bez toolů
+  a bez historie). LLM jen vybírá, řadí a formuluje; nic nepočítá a nic nemění.
+- **Týden**: pondělí 00:00 → neděle 24:00 Europe/Prague, `week_start` = pondělí (unikátní). Hranice přes
+  `time_utils` (DST: týden má 167/168/169 h). Plánovaně `WEEKLY_REVIEW_DAY` + `WEEKLY_REVIEW_TIME` (default
+  neděle 19:00) → přehled shrnuje týden **do okamžiku generování** (`period_end`, v UI „data do …").
+  **Srovnání je like-for-like**: minulý týden ve stejném rozsahu (pondělí 00:00 → neděle 19:00, posun o 7
+  pražských dní). Data bez času (práce, termíny) se berou po celých dnech do posledního zahrnutého dne.
+- **Aktuální týden** (`due_week`): tento týden po plánovaném čase, jinak minulý týden. Scheduler i ruční
+  generování pracují jen s ním → další týden nikdy dřív; když přehled minulého týdne chybí (server neběžel),
+  dožene se po startu za **celý** týden (`trigger=catchup`). Starší týdny jsou jen ke čtení.
+- **Snímek** (`build_weekly_snapshot`): metriky `metric:*` (tento | minulý týden | změna | lepší/horší jen
+  u veličin s polaritou; drobné změny < 200 Kč / 1 h = beze změny; procenta jen nad základem 500 Kč):
+  dokončené / nové úkoly, úkoly po termínu začátek → konec týdne, hodiny a výdělek z práce (+ „neobvykle"
+  proti souvislé 3týdenní historii), příjmy / výdaje / bilance (příjem z práce v financích jen jednou –
+  „z toho práce"), výrazné změny kategorií výdajů (≥ 500 Kč a ≥ 30 %), cíle s posunem, zazněné připomínky
+  (hotovo / odloženo), termíny příštího týdne vs. tento týden (+ nejvytíženější den). Položky s odkazy:
+  škola (dokončené, po termínu, zkoušky týdne s výsledkem), cíle (posun z `goal_progress_history`, splněné,
+  stagnace ≥ 14 dní, po cílovém datu), nevyřízené připomínky, aktivita (sdílený filtr šumu z Phase F),
+  příští týden (otevřené úkoly, otevřené zkoušky, jednorázové připomínky, cílová data).
+  WoT/MFF nejsou zahrnuté – nemají historii postupu (v aktivitě se jen počítají).
+- **Odkud jsou „dokončené" úkoly**: úkoly nemají časová razítka; dokončení = záznam v `activity_logs`
+  (`complete` nebo `status` → done) v daném týdnu **a** úkol je dnes pořád hotový (vrácená dokončení se
+  nepočítají). Stav úkolů po termínu na začátku týdne je rekonstruovaný (dnes otevřené + během týdne
+  dokončené, bez úkolů založených až během týdne).
+- **Odhady** (`forecast:*`) připravuje snímek, LLM je jen vybírá a smí přeformulovat. Jistota je pravidlo:
+  `high` = známé termíny (≥ 3 termíny příští týden, nebo žádné po vytíženém týdnu), `moderate`/`low` =
+  tempo výdajů v měsíci (≥ 7 dní dat, moderate od 14 dní), cíl s blízkým termínem a nedostatečným tempem
+  (moderate při ≥ 21 dnech historie), trend hodin práce 3 týdny po sobě (low), růst backlogu (low).
+  Nikdy: zdraví, nálada, motivace, výsledky zkoušek, kariéra, nepodložený příjem. Málo dat → žádný odhad.
+- **Málo dat**: `signals` = uživatelská aktivita (bez šumu) + zazněné připomínky + zkoušky týdne + závazky
+  příštího týdne + cíle s posunem; méně než 4 → deterministický přehled bez LLM („Klidný týden – málo dat").
+- **Grounding** (`ground`): odkazy jen do snímku; tón musí sedět (úspěch = lepší metrika / dokončeno /
+  posun, starost = horší / po termínu / stagnace; jeden ref nesmí být obojí); srovnání jen `metric:*`
+  s minulou hodnotou; příští týden jen z jeho sekce; odhady jen kandidáti (jistota a podklad vždy ze
+  snímku). Text: čísla s jednotkou nebo ≥ 100 musí ve snímku být **přímo** (žádné dopočty), data jen ze
+  snímku, jména s tolerancí skloňování; fakta a souhrn bez kauzality („kvůli", „protože"…); zakázaná témata
+  vždy; odhad s „určitě/jistě" → deterministický text kandidáta. Interní odkazy se z textu odstraní.
+  Víc než polovina položek s neplatným odkazem, nebo nic použitelného → `grounding_rejected`.
+- **Tabulka** `weekly_reviews` (migrace `0012_weekly_reviews`, ověřeno i na PostgreSQL 16): `week_start`
+  (unikátní), `period_end`, `status`, `trigger`, `attempts`, `next_retry_at`, `error_category`, `content`
+  (JSON), `snapshot_hash`, `snapshot_tokens`, tokeny/latence/model, `grounding_fixes`, `regenerated_count`.
+  Prompt ani snímek se neukládají.
+- **Scheduler**: job `standa_hub_weekly_review` (`WEEKLY_REVIEW_CHECK_SECONDS`, default 900 s, první běh
+  po startu). Claim přes podmíněný UPDATE, `generating` starší 10 min se převezme, max 4 pokusy, odstupy jako
+  Phase F (denní limit 3 h, output_limit 6 h…). Chyba nikdy neovlivní připomínky ani Denní přehled.
+- **Notifikace**: jedna `weekly_review` na týden (dedupe `weekly_review:<pondělí>`, odkaz `/review`), jen
+  u plánovaného/dohnaného přehledu. Web Push stávající frontou (`deliverable_types`, `WEEKLY_REVIEW_PUSH`).
+- **API** (session auth): `GET /weekly-review` (aktuální týden + deterministický náhled `fallback`),
+  `GET /weekly-review/history`, `GET /weekly-review/week/{pondělí}` (jen čtení), `POST /weekly-review/generate`
+  `{regenerate}` (jen aktuální týden; 409 při běžícím generování).
+- **Frontend**: `/review` (aktuální týden, historie, odhady vizuálně oddělené jako „Odhad / Forecast"
+  s jistotou a podkladem), karta `WeeklyReviewCard` na dashboardu, logika v `lib/weeklyReview.ts`.
+- **Rozpočet**: systémový prompt ~430 tokenů, schéma ~350; snímek: klidný ~100 (bez LLM), běžný ~550,
+  rušný ~810, nejhorší ořezaný ~1650 (strop 2200) → požadavek vč. stropu výstupu ≈ 2,9k / 3,2k / 4,0k.
+- Testy: `test_weekly_review.py` (falešné hodiny/LLM, reálná cesta SDK proti lokálnímu fake HTTP),
+  migrace v `test_alembic_migration.py`, frontend `lib/weeklyReview.test.mjs`.

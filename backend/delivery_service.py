@@ -61,9 +61,17 @@ DEFAULT_PUSH_HOSTS = (
 
 
 def deliverable_types() -> tuple[str, ...]:
-    """Typy notifikací, které jdou i ven: připomínky (Phase D) a Denní přehled (Phase F, DAILY_BRIEFING_PUSH)."""
-    briefing = os.environ.get("DAILY_BRIEFING_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
-    return ("reminder", "daily_briefing") if briefing else ("reminder",)
+    """Typy notifikací, které jdou i ven: připomínky (Phase D), Denní přehled (Phase F, DAILY_BRIEFING_PUSH)
+    a Týdenní přehled (Phase G, WEEKLY_REVIEW_PUSH)."""
+    def on(name: str) -> bool:
+        return os.environ.get(name, "true").strip().lower() in ("1", "true", "yes", "on")
+
+    types = ["reminder"]
+    if on("DAILY_BRIEFING_PUSH"):
+        types.append("daily_briefing")
+    if on("WEEKLY_REVIEW_PUSH"):
+        types.append("weekly_review")
+    return tuple(types)
 
 
 def external_delivery_enabled() -> bool:

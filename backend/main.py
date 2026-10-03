@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
+from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -41,6 +42,7 @@ from planner_service import generate_plan
 import reminder_service
 import delivery_service
 import briefing_service
+import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
@@ -428,6 +430,10 @@ class PushSubscriptionRequest(BaseModel):
 
 
 class BriefingGenerateRequest(BaseModel):
+    regenerate: bool = False
+
+
+class WeeklyReviewGenerateRequest(BaseModel):
     regenerate: bool = False
 
 
@@ -1756,6 +1762,55 @@ def briefing_generate(request: BriefingGenerateRequest):
         db.close()
 
 
+# ===== TÝDENNÍ PŘEHLED (Phase G) =====
+# Jen čtení historie; AI generování/přegenerování jen pro aktuální týden (`due_week`), ne pro staré týdny.
+
+@app.get("/weekly-review")
+def weekly_review_current():
+    db = SessionLocal()
+    try:
+        return weekly_review_service.payload(db)
+    finally:
+        db.close()
+
+
+@app.get("/weekly-review/history")
+def weekly_review_history(limit: int = 26):
+    db = SessionLocal()
+    try:
+        return {"items": weekly_review_service.history(db, limit=max(1, min(limit, 104)))}
+    finally:
+        db.close()
+
+
+@app.get("/weekly-review/week/{week_start}")
+def weekly_review_week(week_start: date):
+    if week_start.weekday() != 0:
+        raise HTTPException(status_code=422, detail="week_start musí být pondělí.")
+    db = SessionLocal()
+    try:
+        if week_start != weekly_review_service.due_week(weekly_review_service.utc_now()) and \
+                weekly_review_service.get_for_week(db, week_start) is None:
+            raise HTTPException(status_code=404, detail="Pro tento týden přehled není.")
+        return weekly_review_service.week_payload(db, week_start)
+    finally:
+        db.close()
+
+
+@app.post("/weekly-review/generate")
+def weekly_review_generate(request: WeeklyReviewGenerateRequest):
+    """Ruční vytvoření / přegenerování přehledu aktuálního týdne (ne historických týdnů)."""
+    db = SessionLocal()
+    try:
+        try:
+            weekly_review_service.generate(db, trigger="manual", regenerate=request.regenerate)
+        except weekly_review_service.WeeklyReviewInProgress:
+            raise HTTPException(status_code=409, detail="Přehled se právě generuje.") from None
+        return weekly_review_service.payload(db)
+    finally:
+        db.close()
+
+
 # ===== EXTERNÍ DORUČENÍ / WEB PUSH (Phase E) =====
 # Veřejný VAPID klíč je veřejný; privátní nikdy neopouští backend. Endpointy chrání globální session auth.
 
@@ -2082,8 +2137,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
     entries: list[dict] = []
     assignments = db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
     for it in assignments:
-        st = (it.status or "").lower()
-        if st in ("completed", "done"):
+        if (it.status or "").strip().lower() in ASSIGNMENT_DONE_STATUSES:
             continue
         days = (it.due_date - today_use).days
         entries.append({
@@ -2097,8 +2151,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
         })
     exams = db.query(Exam).filter(Exam.exam_date.is_not(None)).all()
     for it in exams:
-        st = (it.status or "").lower()
-        if st in ("completed", "done", "passed"):
+        if (it.status or "").strip().lower() not in EXAM_OPEN_STATUSES:
             continue
         days = (it.exam_date - today_use).days
         entries.append({
@@ -2434,7 +2487,8 @@ def pending_list(status: str | None = None, limit: int = 50):
 def scheduler_status():
     from scheduler_service import (
         DAILY_BRIEFING_CHECK_SECONDS, DAILY_BRIEFING_ENABLED, REMINDERS_CHECK_ENABLED, REMINDERS_CHECK_SECONDS,
-        SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS, SINGLE_WORKER_ASSUMPTION_DOC,
+        SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS, SINGLE_WORKER_ASSUMPTION_DOC, WEEKLY_REVIEW_CHECK_SECONDS,
+        WEEKLY_REVIEW_ENABLED,
     )
     return {
         "enabled": SCHEDULER_ENABLED,
@@ -2444,6 +2498,9 @@ def scheduler_status():
         "briefing_enabled": DAILY_BRIEFING_ENABLED,
         "briefing_interval_seconds": DAILY_BRIEFING_CHECK_SECONDS,
         "briefing_time": briefing_service.briefing_time().strftime("%H:%M"),
+        "weekly_review_enabled": WEEKLY_REVIEW_ENABLED,
+        "weekly_review_interval_seconds": WEEKLY_REVIEW_CHECK_SECONDS,
+        "weekly_review_schedule": weekly_review_service._schedule_label(),
         "doc": SINGLE_WORKER_ASSUMPTION_DOC,
     }
 
