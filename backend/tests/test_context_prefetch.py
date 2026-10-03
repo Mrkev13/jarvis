@@ -61,7 +61,7 @@ def _seed_basic(db):
 
 class AreaSelectionTestCase(unittest.TestCase):
     def test_keyword_areas(self):
-        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications"})
+        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
         self.assertEqual(classify_areas("kolik jsem utratil za jídlo"), {"finance", "goals"})
         self.assertEqual(classify_areas("kolik mám kreditů ve WoT?"), {"wot"})
         self.assertEqual(classify_areas("ahoj"), set())
@@ -75,7 +75,7 @@ class AreaSelectionTestCase(unittest.TestCase):
         for question in ("co mám dělat tento týden", "co mám dneska dělat", "naplánuj mi zítřek", "jaké mám priority"):
             self.assertTrue({"work", "finance", "school", "goals", "notifications"} <= classify_areas(question), question)
         # Čistě časový dotaz bez plánovacího záměru zůstává úzký.
-        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications"})
+        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
 
     def test_weekly_plan_context_covers_planner_reads_within_budget(self):
         engine, Session = _session()
