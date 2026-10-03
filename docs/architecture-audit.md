@@ -35,12 +35,12 @@ AI layer
 Cross-cutting (Roadmap 3.5): statuses · env_config · time_utils · text_utils
 scheduler_service: APScheduler BackgroundScheduler, single worker; jobs hourly (off by default), reminders+delivery
                    (60 s), daily briefing (300 s), weekly review (900 s); each job isolated
-alembic: 13 revisions (0001–0012), additive since 0007
+alembic: 12 revisions (0001–0012), additive since 0007
 ```
 
 ### Frontend (Next.js 16 App Router, React 19, Tailwind 4)
 
-- 14 routes, all client components; biggest: `/ai` 2150 lines, `/mff` 1124, `/school` 945, `/goals` 910,
+- 15 page routes (incl. `/login` and the dev-only `/dev/motion`), all client components; biggest: `/ai` 2150 lines, `/mff` 1124, `/school` 945, `/goals` 910,
   dashboard 773.
 - Data access: `lib/api.ts apiFetch` (credentials, 401 → /login). Every page re-implements the
   load/loading/error pattern (`useCallback` + `queueMicrotask` in `useEffect`).
@@ -77,7 +77,7 @@ alembic: 13 revisions (0001–0012), additive since 0007
 | F6 | Pending confirm claim only flushed, not committed, before execution | **FIX NOW** ✅ | low | commit claim, test |
 | F7 | Audit `entity_id = hash(action_id)` changes every process start | **FIX NOW** ✅ | low | use PendingAction id |
 | F8 | LLM error classification by Czech message text (3 places) | **FIX NOW** ✅ | low | `LLMRateLimitError` |
-| F9 | Private cross-module imports; 4× clip, 6× weekday tuples | **FIX NOW** ✅ | low | `text_utils`, `strict_text_problems`, `schedule_label` |
+| F9 | Private cross-module imports (greatly reduced; 2 older ones remain, see L13); 4× clip, 6× weekday tuples | **FIX NOW** ✅ | low | `text_utils`, `strict_text_problems`, `schedule_label` |
 | F10 | Briefing JSON parser duplicated `parse_json_object`; leftover aliases | **FIX NOW** ✅ | low | reuse shared parser |
 | F11 | Dead helpers + unused imports | **DELETE** ✅ | low | removed (list below) |
 | F12 | Test modules import fakes from other test modules | **FIX NOW** ✅ | low | `tests/fakes.py` |
@@ -104,6 +104,8 @@ alembic: 13 revisions (0001–0012), additive since 0007
 | L10 | Unused endpoints `GET /ai/confirm/{id}`, `POST /ai/execute` | LATER (delete) | low | remove after confirming no external client |
 | L11 | `classify_areas` matches "test" as school (follow-up #1) | LATER | low | heuristic tuning + test |
 | L12 | `DATABASE_URL` default differs (database.py none vs backup/alembic sqlite) | LATER | low | one default in env_config |
+| L13 | Two older private cross-module imports remain: `main.py` ← `ai._get_pending_action` / `ai._check_pending_expired`; `reminder_actions.py` ← `mutation_service._find_targets` / `_snapshot` | LATER | low | public names when L2 / reminders are touched |
+| L14 | Hard-coded status literals in `main.py`: goal lists `("completed", "cancelled", "paused")` (~l. 2057, 2107, duplicate `GOAL_INACTIVE_STATUSES`) and WoT grind `("completed", "done", "cancelled")` (~l. 2205) | LATER | low | use `statuses.py` (consistency follow-up) |
 | D1 | Single `ZoneInfo` in `time_utils`, tool registry/router, mutation plan/stale/undo design, delivery layering, structured_llm core | LEAVE | – | coherent, well tested |
 | D2 | Scheduler boilerplate (4 small jobs) | LEAVE | – | no job framework (YAGNI) |
 | D3 | Separate daily vs weekly snapshot modules; different grounding strictness | LEAVE | – | intentional |
@@ -126,7 +128,8 @@ alembic: 13 revisions (0001–0012), additive since 0007
   `executing` (P9, P11). Test: `tests/test_pending_claim.py` (file DB, separate sessions).
 - **F7 audit ids** – `hash()` of a string is randomised per process (P14).
 - **F8 errors** – `/chat` returned 429 only if the message contained "Rate limit"/"překročen" (P6).
-- **F9/F10** – P4 (public interfaces), P3.
+- **F9/F10** – P4 (public interfaces), P3. Private cross-module imports are greatly reduced, not gone: the two
+  older ones listed in L13 remain.
 - **F12** – `tests/fakes.py`: `FakeGroq`, `completion`, `groq_error`, `FakeProvider`.
 - **F13** – unlayered CSS beats Tailwind 4 layers; verified with Chromium in light and dark scheme.
 
@@ -135,7 +138,8 @@ alembic: 13 revisions (0001–0012), additive since 0007
 `auth_service._bcrypt_hash_pin`, `database.get_db`, `notifications_service.ALLOWED_SEVERITIES`,
 `planner_guard.PLANNER_AREAS`, `reminder_service.today_bounds_local`, `tools.get_automatic_goal_current_value`,
 `tools.create_weekly_plan` (never registered as a tool), `ai` re-export of `tool_registry._tool`,
-`briefing_service._classify_call_error/_usage_from`, unused imports (pyflakes now clean),
+`briefing_service._classify_call_error/_usage_from`, unused imports (pyflakes is clean on application code; the remaining `pyflakes backend` findings are only
+in older tests and migration `0004`),
 `frontend/public/{file,globe,next,vercel,window}.svg`. Each had zero references in code, tests and docs.
 
 ### Do NOT refactor (now)
@@ -150,8 +154,9 @@ alembic: 13 revisions (0001–0012), additive since 0007
 
 ## 3. Status of specific audit areas
 
-- **Statuses:** canonical (F1). Remaining literal lists are *choice enums* in tool schemas / mutation field
-  definitions (what the AI may set) — intentionally explicit.
+- **Statuses:** canonical (F1). Most remaining literal lists are *choice enums* in tool schemas / mutation field
+  definitions (what the AI may set) — intentionally explicit. Not yet canonical: the goal / WoT status literals
+  in `main.py` (L14, later consistency follow-up).
 - **Time:** one `ZoneInfo`; no manual offsets; server-local dates removed (F3). `datetime.utcnow()` remains as
   naive-UTC storage helper usage (L9).
 - **AI layer:** one retry loop (`_llm_create_with_retry`), one structured-call path; classification by type (F8);
@@ -162,6 +167,7 @@ alembic: 13 revisions (0001–0012), additive since 0007
 - **Pending/undo:** design coherent; claim commit fixed (F6); state-machine ownership split across ai/main/
   mutation_service (L2).
 - **Frontend API access / components:** see R1–R10 and [roadmap4-ui-foundation.md](roadmap4-ui-foundation.md).
-- **Config:** all variables documented in `.env.template` / AGENTS.md (AUTH_SESSION_TTL_HOURS,
-  AUTH_COOKIE_NAME, WEEKLY_REVIEW_ENABLED added).
+- **Config:** variables documented in `.env.template` / AGENTS.md. The template sets the session lifetime via
+  `AUTH_SESSION_TTL_MINUTES`; the optional `AUTH_SESSION_TTL_HOURS` override is documented only in
+  `backend/AGENTS.md`. `AUTH_COOKIE_NAME` and `WEEKLY_REVIEW_ENABLED` were added to both.
 - **Tests:** cross-test imports removed (F12); DB setup duplication is L8.

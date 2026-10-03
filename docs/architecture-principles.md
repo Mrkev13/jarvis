@@ -48,7 +48,7 @@ stay separate modules).
 - **Single responsibility:** a module has one reason to change. Snapshot = deterministic data; service = state
   machine + persistence; route = HTTP.
 - **Clear interfaces:** modules import each other's *public* names. No `from x import _private` across modules
-  (tests may reach into internals).
+  (tests may reach into internals). Two older exceptions still exist — see audit L13.
 - **Dependency direction:** `routes (main.py) → services → domain helpers (statuses, time_utils, text_utils)
   → models`. Domain/service code must not raise `HTTPException`; leaf modules import nothing app-specific.
 

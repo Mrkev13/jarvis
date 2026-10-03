@@ -52,6 +52,10 @@ Podrobnosti a klasifikace: `docs/architecture-audit.md` (L1–L12, R1–R10). Kr
 - **L10** nepoužívané endpointy `GET /ai/confirm/{id}` a `POST /ai/execute` – smazat po ověření, že je nic
   nevolá (frontend ne).
 - **L12** sjednotit default `DATABASE_URL` (database.py nemá žádný, backup/alembic mají sqlite).
+- **L13** zbývající privátní importy mezi moduly: `main.py` ← `ai._get_pending_action` / `_check_pending_expired`,
+  `reminder_actions.py` ← `mutation_service._find_targets` / `_snapshot` → veřejná jména (spolu s L2).
+- **L14** natvrdo zapsané stavy v `main.py`: cíle `("completed", "cancelled", "paused")` (2×, duplikát
+  `GOAL_INACTIVE_STATUSES`) a WoT grind `("completed", "done", "cancelled")` → `statuses.py`.
 
 ## Frontend (Roadmap 4)
 Viz `docs/roadmap4-ui-foundation.md` – sdílený data-fetching hook, primitivy, ConfirmDialog s busy stavem,
