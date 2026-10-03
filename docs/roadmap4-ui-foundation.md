@@ -47,6 +47,20 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4F (Custom Dashboard / Command Center)
+
+| Item | Status |
+|---|---|
+| Explicit typed widget registry (11 widgets, stable ids) | ✅ design-system §16 |
+| Layout `{version, widgets[{id, visible, order, size}]}` + validation | ✅ `lib/dashboardLayout.ts`, tests |
+| Persistence | ✅ localStorage `standa-hub:dashboard-layout:v1` (no backend preference store exists) |
+| Customize mode: reorder (buttons), hide/restore, semantic sizes, reset with confirm | ✅ |
+| Default layout identical to the 4B.1 balance (desktop, tablet, mobile) | ✅ before/after screenshots |
+| No refetch on edits; hidden widgets fetch nothing | ✅ |
+| Dashboard widget integration step for modules | ✅ `module-integration-checklist.md` §8 |
+| Drag and drop | ⏳ not in 4F (buttons cover mouse, touch, keyboard) |
+| Dashboard presets / backend-synced layout | ⏳ later |
+
 ## Status after Roadmap 4E (Smart Quick Add)
 
 | Item | Status |

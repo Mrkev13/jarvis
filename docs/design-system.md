@@ -364,3 +364,77 @@ přidání" (`lib/labels.ts`); the executor skips the "AI approve" log because i
 an explicit user action ("Zeptat se AI") on the "unknown" state that hands the text to the AI assistant, whose
 proposals still go through pending actions; the deterministic parser stays first and authoritative.
 
+## 16. Custom Dashboard / Command Center (Roadmap 4F)
+
+**What it is** – the dashboard (`/`) is built from an explicit widget registry and a per-user layout:
+which widgets are visible, in what order, at what size. With no customization it looks exactly like the 4B.1
+dashboard.
+
+**Widget registry** (`frontend/lib/dashboardLayout.ts`, `WIDGETS`) – typed, explicit, no runtime discovery:
+`{id, title, area, defaultVisible, defaultOrder, defaultSize, allowedSizes, usesDashboardData}`. Components
+live in `components/dashboard/widgets.tsx` as `WIDGET_COMPONENTS: Record<WidgetId, …>` (TypeScript fails the
+build if an id has no component). Current ids (stable, persisted – never rename, never reuse):
+
+| id | widget | default | allowed |
+|---|---|---|---|
+| `daily_briefing` | Denní přehled | large | medium, large, full |
+| `weekly_review` | Týdenní přehled | small | small, medium |
+| `today` | Dnes | large | medium, large, full |
+| `attention` | Vyžaduje pozornost | small | small, medium, large |
+| `key_metrics` | Klíčová čísla | full | large, full |
+| `goals` | Cíle | small | small, medium, large |
+| `upcoming` | Nadcházející | small | small, medium, large |
+| `work` | Práce | small | small, medium |
+| `finance` | Finance | small | small, medium |
+| `games` | Hry | full | medium, large, full |
+| `quick_actions` | Rychlé akce | full | large, full |
+
+**Layout schema** – `{version: 1, widgets: [{id, visible, order, size}]}`. Semantic only: no pixels, no CSS,
+no per-breakpoint layouts, no free placement.
+
+**Persistence** – `localStorage` key `standa-hub:dashboard-layout:v1`. The backend has no user-preference
+storage and a single-user app does not justify a schema change for this; moving to a backend preference later
+only needs a new storage adapter behind `useDashboardLayout`. Reads go through `useSyncExternalStore`: the
+server and the hydration pass render a skeleton, then the *stored* layout appears (no flash of the default,
+no hydration mismatch). Storage unavailable (private window) → layout works in memory until reload.
+
+**Validation** (`normalizeLayout`, never throws) – other/missing version or malformed JSON → default layout;
+unknown (obsolete) ids dropped; duplicates keep the first; invalid size → the widget's default size; invalid
+visibility → default; widgets missing from the stored layout (e.g. added in a later release) are inserted after
+their predecessor in the default order. Valid user choices are always kept.
+
+**Sizes and responsive behaviour** – one DOM for all widths:
+- desktop (xl): 6 units – small = 1/3, medium = 1/2, large = 2/3, full = whole row. Rows fill in order; a
+  following row whose sizes match the end of the previous row stacks into its columns (`packDesktop`). This keeps
+  the 4B.1 balance: Denní přehled + Dnes on the left, Týdenní přehled + Pozornost on the right; Finance under
+  Práce. Cards never stretch; columns stack without holes.
+- tablet (md): 2 columns, small/medium = half, large/full = whole row, dense packing (small cards pair up).
+- mobile: one column in the stored order.
+Block and column wrappers are `display: contents` below xl and items carry CSS `order`, so nothing is computed
+per breakpoint in JS.
+
+**Customize mode** – "Upravit dashboard" in the page header. Normal mode has no edit chrome at all. In edit mode:
+a "Režim úprav" note, a dashed accent outline around each widget with a compact toolbar (title, position "3/11",
+↑ / ↓, size select with only allowed sizes, "Skrýt"), widget content is `inert` and dimmed (no accidental
+navigation, Tab only through controls), a "Skryté widgety" card with restore buttons, and "Obnovit výchozí
+rozložení" (ConfirmDialog, disabled when already default) + "Hotovo".
+
+**Save behaviour** – changes apply and persist immediately (no draft, nothing to lose when leaving edit mode);
+"Hotovo" only ends the mode. Reset removes the stored key (future default changes then apply too).
+
+**Reorder** – move buttons only (no drag and drop in 4F: buttons work identically for mouse, touch, keyboard and
+screen readers; no DnD dependency). Moves skip hidden widgets; first/last buttons are disabled.
+
+**Accessibility** – each widget in edit mode is a `role=group` named by its title; buttons are named
+"Posunout nahoru: Finance", "Skrýt widget: Hry", "Zobrazit widget: Hry"; the size select has a label
+"Velikost: Finance"; focus stays on the control after a move (re-found after the widget moves between columns),
+moves to the restore button after hiding and back to "Skrýt" after restoring; a polite live region announces
+"Finance: pozice 3 z 11."; no global shortcuts are added (Ctrl+K, Ctrl+Shift+K untouched).
+
+**Empty state** – all widgets hidden → "Všechny widgety jsou skryté." with "Upravit dashboard".
+
+**Data fetching** – the page owns the three requests: `GET /dashboard` once for all widgets that read it (only if
+at least one is visible), `/briefing/today` only if Denní přehled is visible, `/weekly-review` only if Týdenní
+přehled is visible. Widgets are pure renderers, so moving, resizing or toggling edit mode never refetches.
+Loading / error / empty states stay inside each widget as before; a failing request does not affect editing.
+
