@@ -34,7 +34,9 @@ test("navigation: Czech names, keywords and diacritic-insensitive input", () => 
   assert.equal(searchNavigation("jarvis")[0].href, "/ai");
   assert.equal(searchNavigation("wot")[0].href, "/wot");
   assert.equal(searchNavigation("marvel")[0].href, "/mff");
-  assert.equal(searchNavigation("").length, 13);
+  assert.equal(searchNavigation("").length, 14);
+  assert.equal(searchNavigation("dnes")[0].href, "/today");
+  assert.equal(searchNavigation("today")[0].href, "/today");
   assert.deepEqual(searchNavigation("xyzxyz"), []);
   // název má přednost před klíčovým slovem jiné stránky
   assert.equal(searchNavigation("finance")[0].title, "Finance");
