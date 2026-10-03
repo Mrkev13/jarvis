@@ -46,6 +46,8 @@ class LLMSettings:
     llm_max_attempts: int = DEFAULT_LLM_MAX_ATTEMPTS
     retry_max_wait_seconds: int = DEFAULT_RETRY_MAX_WAIT_SECONDS
     usage_logging: bool = True
+    # A5: deterministický výběr menší sady toolů podle dotazu; False = vždy všechny tooly (dřívější chování).
+    tool_routing: bool = True
 
 
 def _int_env(env: dict, name: str, default: int, *, min_value: int = 1) -> int:
@@ -98,6 +100,7 @@ def load_llm_settings(env: dict | None = None) -> LLMSettings:
         llm_max_attempts=_int_env(env, "AI_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS),
         retry_max_wait_seconds=_int_env(env, "AI_LLM_RETRY_MAX_WAIT_SECONDS", DEFAULT_RETRY_MAX_WAIT_SECONDS),
         usage_logging=_bool_env(env, "AI_USAGE_LOG", True),
+        tool_routing=_bool_env(env, "AI_TOOL_ROUTING", True),
     )
 
 

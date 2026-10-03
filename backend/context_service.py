@@ -28,6 +28,8 @@ MEMORY_CHARS = 140
 
 AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS = "school", "goals", "notifications"
 AREA_FINANCE, AREA_WORK, AREA_WOT, AREA_MEMORY = "finance", "work", "wot", "memory"
+# MFF nemá CURRENT STATE sekci; oblast slouží routingu toolů (A5) a řazení paměti.
+AREA_MFF = "mff"
 
 _DONE_STATUSES = {"completed", "hotovo", "done", "closed", "finished"}
 _EXAM_OPEN_STATUSES = {"upcoming", "scheduled", ""}
@@ -41,13 +43,14 @@ _TIME_PLAN_WORDS = ("zitra", "dnes", "dneska", "tyden", "tydnu", "vikend", "pond
 # Plánovací záměr („co mám dělat", plán, priority): planner řadí i finance a práci → bez nich v kontextu
 # by si je model vždy dočítal extra tool kolem.
 _PLAN_INTENT_WORDS = ("delat", "plan", "priorit", "agenda", "program", "zamer", "soustred")
-_OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", "stav", "jak se mi dari", "co je noveho")
+_OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", " stav", "jak se mi dari", "co je noveho")
 _AREA_WORDS = {
     AREA_SCHOOL: ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test"),
     AREA_FINANCE: ("penez", "penize", "financ", "vydaj", "prijem", "prijm", "utrat", "bilanc", "uspor", "setr",
                    "rozpoc", " kc", "korun", "money", "zustatek"),
     AREA_WORK: ("prac", "odprac", "hodin", "smen", "vydelek", "vydelal", "sazb"),
     AREA_WOT: ("wot", "tank", "kredit", "gold", "grind", "free xp", "bond"),
+    AREA_MFF: ("mff", "marvel", "future fight", "uniform", " ctp", " uru", "iso-8", "iso8"),
     AREA_GOALS: ("cil", "cile", "goal", "progres"),
     AREA_NOTIFICATIONS: ("upozorn", "notifikac", "notifik"),
 }
@@ -89,6 +92,18 @@ def _fold(text: str) -> str:
 
 def _has(text: str, words) -> bool:
     return any(w in text for w in words)
+
+
+def fold_text(text: str) -> str:
+    """Veřejný alias _fold pro sdílené deterministické klasifikátory (tool_router)."""
+    return _fold(text)
+
+
+def is_planner_like(message: str) -> bool:
+    """Časový / plánovací / přehledový dotaz – stejné pravidlo, jakým prefetch rozhoduje o paměti."""
+    # Mezery kolem: slova jako " stav" se hledají od začátku slova („postav" není přehled).
+    folded = f" {_fold(message)} "
+    return _has(folded, _TIME_PLAN_WORDS) or _has(folded, _OVERVIEW_WORDS)
 
 
 def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bool = True) -> frozenset[str]:
@@ -269,8 +284,7 @@ def build_current_context(
     projects = [p for (p,) in db.query(WorkSession.project).distinct().all() if p]
     tanks = [t for (t,) in db.query(WotGrind.tank).all() if t]
     areas = classify_areas(message, projects, tanks)
-    folded = _fold(message)
-    planner_like = _has(folded, _TIME_PLAN_WORDS) or _has(folded, _OVERVIEW_WORDS)
+    planner_like = is_planner_like(message)
 
     tomorrow = today + timedelta(days=1)
     monday = today - timedelta(days=today.weekday())

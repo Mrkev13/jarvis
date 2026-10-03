@@ -49,9 +49,12 @@ class ToolSpec:
     areas: tuple[str, ...]
     schema: dict
     func: Callable
-    covered_by_context: bool = False  # CURRENT STATE nese stejná data → při pokrytí není třeba ho posílat
+    # Souhrn, který CURRENT STATE sekce oblasti nahrazuje: router ho nepošle, když kontext oblast pokryl
+    # a uživatel se na oblast výslovně neptá (jen implikovaná oblast, např. finance u plánování týdne).
+    covered_by_context: bool = False
     requires: tuple[str, ...] = ()  # tooly, bez kterých tento nejde smysluplně použít
     takes_db: bool = False  # funkce dostane db session AI requestu jako první argument
+    explicit_only: bool = False  # detailní tool: jen při výslovně zmíněné oblasti (nebo jako requires)
 
     @property
     def is_write(self) -> bool:
@@ -78,9 +81,10 @@ _MEMORY_AREA = {"type": "string", "description": "general, wot, finance, school,
 _LIMIT = {"type": "integer", "description": "default 20"}
 
 
-def _read(name, description, properties=None, required=None, *, func, areas, covered=False, requires=(), takes_db=False):
+def _read(name, description, properties=None, required=None, *, func, areas, covered=False, requires=(),
+          takes_db=False, explicit_only=False):
     return ToolSpec(name, READ, tuple(areas), _tool(name, description, properties, required), func,
-                    covered, tuple(requires), takes_db)
+                    covered, tuple(requires), takes_db, explicit_only)
 
 
 def _write(name, description, properties=None, required=None, *, func, areas, requires=()):
@@ -95,7 +99,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     _read("get_wot_grinds", "WoT tank grinds: XP remaining, priority, status.",
           func=get_wot_grinds, areas=[AREA_WOT]),
     _read("get_finance_summary", "Finance totals: income, expenses, balance, transaction count.",
-          func=get_finance_summary, areas=[AREA_FINANCE]),
+          func=get_finance_summary, areas=[AREA_FINANCE], covered=True),
     _read(
         "get_finance_transactions",
         "Finance transactions, newest first.",
@@ -109,7 +113,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         func=query_finance_transactions, areas=[AREA_FINANCE], takes_db=True,
     ),
     _read("get_school_subjects", "School subjects with IDs (source of subject_id).",
-          func=get_school_subjects, areas=[AREA_SCHOOL]),
+          func=get_school_subjects, areas=[AREA_SCHOOL], explicit_only=True),
     _read(
         "get_school_assignments",
         "School assignments by due date (default: open only).",
@@ -135,7 +139,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         func=query_school_exams, areas=[AREA_SCHOOL], takes_db=True,
     ),
     _read("get_work_summary", "Work hours and earnings: total and current month.",
-          func=get_work_summary, areas=[AREA_WORK]),
+          func=get_work_summary, areas=[AREA_WORK], covered=True),
     _read(
         "get_work_sessions",
         "Work sessions with earnings, newest first.",
@@ -147,7 +151,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     _read("get_mff_characters", "MFF tracked characters with build details.",
           func=get_mff_characters, areas=[AREA_MFF]),
     _read("get_goals_summary", "Goal counts by status.",
-          func=get_goals_summary, areas=[AREA_GOALS]),
+          func=get_goals_summary, areas=[AREA_GOALS], covered=True),
     _read(
         "get_goals",
         "Goals: area, status, priority, progress, target date.",
@@ -176,9 +180,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         func=get_notifications, areas=[AREA_NOTIFICATIONS],
     ),
     _read("get_notification_summary", "Notification counters by severity and unread.",
-          func=get_notification_summary, areas=[AREA_NOTIFICATIONS]),
+          func=get_notification_summary, areas=[AREA_NOTIFICATIONS], covered=True),
     _read("get_goal_progress_history", "Progress snapshots of one goal.", {"goal_id": _INT}, ["goal_id"],
-          func=get_goal_progress_history, areas=[AREA_GOALS], requires=["get_goals"]),
+          func=get_goal_progress_history, areas=[AREA_GOALS], requires=["get_goals"], explicit_only=True),
     _read(
         "get_recent_activity",
         "Recent app changes (activity log), newest first.",
