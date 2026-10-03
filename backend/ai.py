@@ -15,7 +15,7 @@ from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
 from context_service import CurrentContext, build_current_context
-from llm_budget import estimate_fixed_overhead
+from llm_budget import estimate_fixed_overhead, estimate_tool_schema_tokens
 from llm_config import LLM_SETTINGS
 from llm_usage import (
     LLMCallRecord,
@@ -26,6 +26,7 @@ from llm_usage import (
     ratelimit_remaining_tokens,
     retry_wait_seconds,
 )
+from tool_router import REASON_FALLBACK, ToolRoute, route_tools, widen_route
 from planner_guard import (
     build_evidence,
     find_planner_block,
@@ -238,7 +239,12 @@ def _message_to_dict(m):
     return {"role": m.role, "content": m.content}
 
 
-def _run_tool_calls(db, tool_calls):
+def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
+    """Provede read tooly a z write toolů udělá pending akce.
+
+    route (A5): write tool, který routing v tomto requestu nevystavil (žádný write záměr), se NEPROVEDE
+    ani nepřipraví – model dostane chybu. Read tooly mimo route se provedou (jen čtou data).
+    """
     tool_messages = []
     pending_actions = []
 
@@ -252,6 +258,18 @@ def _run_tool_calls(db, tool_calls):
             arguments = {}
             # Bez obsahu argumentů (mohou obsahovat uživatelská data).
             print(f"  [TOOL ERROR] invalid JSON args for {fn_name}")
+
+        if fn_name in WRITE_TOOL_NAMES and route is not None and not route.allows(fn_name):
+            print(f"  [TOOL BLOCKED] write tool {fn_name} not routed for this request")
+            tool_messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps({
+                    "error": "write_not_available",
+                    "detail": "No change was prepared. Ask the user to state the change explicitly.",
+                }, ensure_ascii=False),
+            })
+            continue
 
         if fn_name in WRITE_TOOL_NAMES:
             action_id = _store_pending_action(db, fn_name, arguments, ttl_minutes=30)
@@ -418,8 +436,8 @@ def _llm_create_with_retry(
     raise RuntimeError("AI volání selhalo po několika pokusech.") from last_exc
 
 
-def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str) -> None:
-    overhead = estimate_fixed_overhead(system_prompt, TOOLS)
+def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str, tools: list[dict] | None = None) -> None:
+    overhead = estimate_fixed_overhead(system_prompt, TOOLS if tools is None else tools)
     if overhead.total > LLM_SETTINGS.max_fixed_tokens:
         print(
             f"[ai] WARNING fixní režie ~{overhead.total} tokenů (prompt {overhead.prompt_tokens} + "
@@ -429,6 +447,35 @@ def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str) -> None:
 
 
 AUTO_MEMORIES_CALL_ID = "auto_get_memories"
+
+
+def _is_tool_validation_error(exc: Exception) -> bool:
+    """Groq 400 „tool call validation failed" (např. volání toolu, který request neobsahoval)."""
+    import openai as _openai
+
+    cause = exc.__cause__
+    return isinstance(cause, _openai.BadRequestError) and "tool" in str(cause).lower()
+
+
+def _route_for_request(user_texts: list[str], context: CurrentContext | None) -> ToolRoute:
+    return route_tools(
+        user_texts,
+        enabled=LLM_SETTINGS.tool_routing,
+        context_areas=context.areas if context is not None else frozenset(),
+        covered_tools=context.covered_tools if context is not None else frozenset(),
+    )
+
+
+def _route_tool_param(route: ToolRoute) -> list[dict] | None:
+    """Tooly pro LLM request: kill switch = přesně TOOLS (dřívější chování), prázdná sada = bez toolů."""
+    if not route.routed:
+        return TOOLS
+    return route.schemas or None
+
+
+def _route_schema_tokens(route: ToolRoute | None) -> int:
+    tools = _route_tool_param(route) if route is not None else None
+    return estimate_tool_schema_tokens(tools) if tools else 0
 
 
 def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
@@ -515,13 +562,14 @@ def ask_ai(messages):
     planner_actions_removed = 0
     context_tokens = 0
     context_sections = 0
+    tool_route: ToolRoute | None = None
+    route_widened = False
     try:
         _check_pending_expired(db)
 
         now = now_local()
         date_block = current_date_block(now)
         system_prompt = build_system_prompt(now)
-        _warn_if_fixed_overhead_exceeds_budget(system_prompt)
         api_messages = [
             {
                 "role": "system",
@@ -547,17 +595,34 @@ def ask_ai(messages):
             evidence_texts.append(context.text[: len(context.text) - len(context.memory_text)])
             memory_evidence = (context.memory_text,) if context.memory_text else ()
             called_tools |= context.covered_tools
+        # A5: sada toolů se vybere jednou před prvním voláním a platí pro všechna kola requestu.
+        tool_route = _route_for_request(user_texts, context)
+        _warn_if_fixed_overhead_exceeds_budget(system_prompt, _route_tool_param(tool_route) or [])
         all_pending_actions = []
         MAX_TOOL_ROUNDS = 10
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = _llm_create_with_retry(
-                api_messages=api_messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0.2,
-                call_log=call_log,
-            )
+            try:
+                response = _llm_create_with_retry(
+                    api_messages=api_messages,
+                    tools=_route_tool_param(tool_route),
+                    tool_choice="auto",
+                    temperature=0.2,
+                    call_log=call_log,
+                )
+            except RuntimeError as exc:
+                # Model chtěl tool mimo routovanou sadu → jednou rozšířit (všechny READ, WRITE jen při
+                # write záměru) a kolo zopakovat. Druhé selhání se hlásí jako dřív.
+                if not tool_route.routed or tool_route.reason == REASON_FALLBACK or not _is_tool_validation_error(exc):
+                    raise
+                tool_route, route_widened = widen_route(tool_route), True
+                response = _llm_create_with_retry(
+                    api_messages=api_messages,
+                    tools=_route_tool_param(tool_route),
+                    tool_choice="auto",
+                    temperature=0.2,
+                    call_log=call_log,
+                )
 
             choice = response.choices[0]
             assistant_msg = choice.message
@@ -565,7 +630,8 @@ def ask_ai(messages):
             if not assistant_msg.tool_calls:
                 answer = assistant_msg.content or ""
                 if find_planner_block(answer) is not None:
-                    missing = missing_planner_tools(called_tools)
+                    # Připomínat jen tooly, které model v tomto requestu opravdu má k dispozici.
+                    missing = [t for t in missing_planner_tools(called_tools) if tool_route.allows(t)]
                     if missing and not planner_nudged:
                         # Planner přeskočil povinné tooly → jednou připomenout a nechat model pokračovat.
                         planner_nudged = True
@@ -597,7 +663,7 @@ def ask_ai(messages):
 
             tool_rounds += 1
             called_tools.update(tc.function.name for tc in round_calls)
-            tool_messages, pending_actions = _run_tool_calls(db, round_calls)
+            tool_messages, pending_actions = _run_tool_calls(db, round_calls, tool_route)
             all_pending_actions.extend(pending_actions)
             api_messages.extend(tool_messages)
             evidence_texts.extend(m["content"] for m in tool_messages)
@@ -615,6 +681,10 @@ def ask_ai(messages):
             planner_actions_removed=planner_actions_removed, planner_nudged=planner_nudged,
             planner_memories_autoloaded=planner_memories_autoloaded,
             context_tokens=context_tokens, context_sections=context_sections,
+            tools_exposed=len(tool_route.names) if tool_route is not None else 0,
+            tool_schema_tokens=_route_schema_tokens(tool_route),
+            tool_route=tool_route.reason if tool_route is not None else "",
+            route_widened=route_widened,
             enabled=LLM_SETTINGS.usage_logging,
         )
         db.close()
