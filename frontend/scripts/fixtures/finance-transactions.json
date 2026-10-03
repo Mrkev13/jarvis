@@ -48,6 +48,30 @@
   "created_at": "2026-10-05T17:00:00"
  },
  {
+  "id": 11,
+  "amount": 189.9,
+  "category": "food",
+  "description": "Oběd",
+  "transaction_type": "expense",
+  "created_at": "2026-10-03T13:46:32.141260"
+ },
+ {
+  "id": 10,
+  "amount": 2437.5,
+  "category": "work",
+  "description": "Work: Klient XYZ – Workshop",
+  "transaction_type": "income",
+  "created_at": "2026-10-03T13:46:32.131749"
+ },
+ {
+  "id": 9,
+  "amount": 2437.5,
+  "category": "work",
+  "description": "Work: Klient XYZ – Workshop",
+  "transaction_type": "income",
+  "created_at": "2026-10-03T13:46:32.116262"
+ },
+ {
   "id": 3,
   "amount": 400.0,
   "category": "Jídlo",

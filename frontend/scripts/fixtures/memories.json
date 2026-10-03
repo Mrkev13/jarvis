@@ -7,7 +7,7 @@
   "importance": 9,
   "active": true,
   "created_at": "2026-10-05T17:00:00",
-  "updated_at": "2026-10-03T12:22:48.652221"
+  "updated_at": "2026-10-03T13:46:32.009131"
  },
  {
   "id": 1,
@@ -17,7 +17,17 @@
   "importance": 8,
   "active": true,
   "created_at": "2026-10-11T17:00:00",
-  "updated_at": "2026-10-03T12:22:48.652219"
+  "updated_at": "2026-10-03T13:46:32.009127"
+ },
+ {
+  "id": 5,
+  "area": "school",
+  "category": "plan",
+  "content": "Zkoušku z fyziky dát v prvním termínu.",
+  "importance": 7,
+  "active": true,
+  "created_at": "2026-10-03T13:46:32.152188",
+  "updated_at": "2026-10-03T13:46:32.152190"
  },
  {
   "id": 2,
@@ -27,7 +37,7 @@
   "importance": 6,
   "active": true,
   "created_at": "2026-10-08T17:00:00",
-  "updated_at": "2026-10-03T12:22:48.652221"
+  "updated_at": "2026-10-03T13:46:32.009130"
  },
  {
   "id": 4,
@@ -37,6 +47,6 @@
   "importance": 5,
   "active": true,
   "created_at": "2026-10-02T17:00:00",
-  "updated_at": "2026-10-03T12:22:48.652221"
+  "updated_at": "2026-10-03T13:46:32.009131"
  }
 ]

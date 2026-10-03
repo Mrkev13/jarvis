@@ -61,10 +61,8 @@ createServer((req, res) => {
     }
     const activityDetail = /^\/activity\/(\d+)$/.exec(url.pathname);
     if (activityDetail) {
-      const item = fixture("activity").items.find((i) => String(i.id) === activityDetail[1]);
-      return item
-        ? respond(200, { ...item, delta: { status: { old: "todo", new: "done" }, title: { old: item.summary, new: item.summary } } })
-        : respond(404, { detail: "ActivityLog not found" });
+      const item = fixture("activity-details")[activityDetail[1]];
+      return item ? respond(200, item) : respond(404, { detail: "ActivityLog not found" });
     }
     if (url.pathname.startsWith("/weekly-review/week/")) return respond(200, fixture("weekly-review"));
     const route = GET_ROUTES[url.pathname];

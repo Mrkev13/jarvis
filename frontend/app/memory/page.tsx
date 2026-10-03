@@ -89,7 +89,7 @@ function MemoryForm({
       }}
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormField label="Oblast" hint="Např. school, work, finance, general.">
+        <FormField label="Oblast" hint="Vyber ze seznamu, nebo napiš vlastní.">
           {(p) => (
             <>
               <input {...p} list={`${listId}-areas`} value={draft.area} onChange={(e) => onChange({ ...draft, area: e.target.value })} className={fieldClass} />
@@ -103,7 +103,7 @@ function MemoryForm({
             </>
           )}
         </FormField>
-        <FormField label="Kategorie" hint="Např. context, preference, goal.">
+        <FormField label="Kategorie" hint="Vyber ze seznamu, nebo napiš vlastní.">
           {(p) => (
             <>
               <input {...p} list={`${listId}-cats`} value={draft.category} onChange={(e) => onChange({ ...draft, category: e.target.value })} className={fieldClass} />
