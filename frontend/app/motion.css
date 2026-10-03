@@ -281,4 +281,14 @@
   .motion-done {
     transform: none !important;
   }
+  /*
+   * Tailwind animace (skeleton pulse, bounce teček „AI píše", spin, ping) – bez pohybu.
+   * Stav zůstává čitelný: skeleton je dál vidět jako šedý blok, nahrávání má aria-busy / text.
+   */
+  .animate-pulse,
+  .animate-bounce,
+  .animate-ping,
+  .animate-spin {
+    animation: none !important;
+  }
 }
