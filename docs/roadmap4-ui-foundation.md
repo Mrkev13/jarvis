@@ -47,6 +47,19 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4G (Today Mode)
+
+| Item | Status |
+|---|---|
+| `/today` focused view ("Dnes" nav item, Ctrl+K "dnes") | ✅ design-system §17 |
+| `GET /today` – deterministic Prague-day aggregation of existing sources | ✅ `today_service.py`, tests |
+| Timeline (timed / Během dne / Hotovo), next item, attention, planner priorities, Potom | ✅ |
+| One record in one section (timeline > attention > plan > potom) | ✅ tested |
+| Per-section partial failure, empty day, Quick Add entry | ✅ |
+| Today Mode integration step for modules | ✅ `module-integration-checklist.md` §9 |
+| Daily Briefing inside Today | ❌ by design (stays on the dashboard) |
+| Live clock / polling | ❌ by design (computed at load; reload or "Obnovit") |
+
 ## Status after Roadmap 4F (Custom Dashboard / Command Center)
 
 | Item | Status |

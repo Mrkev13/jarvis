@@ -438,3 +438,55 @@ at least one is visible), `/briefing/today` only if Denní přehled is visible, 
 přehled is visible. Widgets are pure renderers, so moving, resizing or toggling edit mode never refetches.
 Loading / error / empty states stay inside each widget as before; a failing request does not affect editing.
 
+## 17. Today Mode (Roadmap 4G)
+
+**Purpose** – `/today` ("Dnes" in the sidebar, right under Řídicí centrum) answers *"What needs my attention
+today?"*. The **dashboard** answers *"What is happening across my life?"* (all modules, customizable grid);
+**Today** is one focused column of what matters today only – no finance history, goals list, work totals,
+games or weekly review. It does not reuse the dashboard layout or customization and is not a second dashboard.
+
+**Architecture** – hybrid: a dedicated route fed by one deterministic `GET /today` (`backend/today_service.py`)
+that composes existing services – reminders (`reminder_service`), school status rules (`statuses.py`), the
+dashboard's attention source (unread unresolved notifications) and the daily planner (`generate_plan`, unchanged
+algorithm; actions now carry `ref`). One request instead of 4–5 frontend calls plus duplicated Prague-date and
+dedup logic. No LLM, no writes except the planner's existing recommendation history.
+
+**Date semantics** – today = 00:00–24:00 Europe/Prague via `time_utils` (`local_day_bounds_utc`; 23/25-hour DST
+days handled). Never the server or browser UTC date; the page shows the server's Prague date and time.
+
+**Item model** (`TodayItem`, only for this view) – `{id (ref "reminder:5"), type, title, subtitle, area, date,
+time (Prague HH:MM or null), status, priority (planner rank badge), severity (notification badge), href}`.
+Status: `upcoming` (later today), `due` (fired, still to handle), `past` (recurring occurrence already fired),
+`done`, `open` (date-only today), `overdue` (before today, not done). Always shown as a word, never by colour only.
+
+**Sections** (in this order)
+1. *Souhrn* – "Teď 14:30", "Další: Fyzioterapie v 18:30 · za 4 h" (first timed upcoming item, computed once at
+   load – no ticking clock), counts *zbývá dnes / pozornost / hotovo*.
+2. *Vyžaduje pozornost* – overdue assignments, past exams still open ("zapiš výsledek"), fired reminders from
+   before today, plus unread unresolved notifications (dashboard semantics). Notifications about a listed record
+   merge into it (keeping the higher severity). Max 8, most severe first.
+3. *Dnešní plán* – daily planner actions that are not already shown above or in the timeline.
+4. *Časová osa* – today's reminders (by time), then "Během dne" (exams and assignments due today, date only), then
+   a collapsed "Hotovo (n)". Past/finished rows are dimmed; the next item has a "Další" label, accent border and
+   `aria-current`.
+5. *Potom* – up to 3 items in the next 7 days not shown elsewhere.
+
+**Deduplication** – one record, one place: timeline > attention > plan > potom. Information from a dropped
+duplicate moves to the kept row as a badge ("Plán #2", "Důležité"). Tested in `tests/test_today.py`.
+
+**Navigation** – every row is a link with the existing deep links (`/school?assignment=1`, `/school?exam=3`,
+`/reminders?reminder=5`, `/goals?goal=7`) – the record opens focused and highlighted (`SearchHighlighter`).
+
+**Quick Add** – "+ Přidat" in the header (and in the empty state) opens the global Quick Add; no second implementation.
+
+**Empty day** – "Dnes nemáš nic naplánovaného." with "+ Přidat", "Plánovač →" and, if any, Potom.
+
+**Partial failure** – each section is computed separately on the server; a failing source returns
+`errors.<section>` and only that card shows an ErrorState. Whole request failed → page ErrorState with retry.
+
+**Daily Briefing** – deliberately not embedded: it stays the dashboard's AI summary; Today is deterministic.
+
+**Look** – narrow single column (`ContentContainer width="narrow"`), one accent-lined summary card, charcoal
+cards, mono times, semantic red/amber only for overdue/attention. Mobile: next item in the first viewport,
+rows ≥ 44 px, Quick Add in the header and page header.
+
