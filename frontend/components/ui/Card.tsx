@@ -49,7 +49,7 @@ export function CardHeader({
   as?: "h2" | "h3";
 }) {
   return (
-    <div className="mb-4 flex items-start justify-between gap-3">
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <div className="min-w-0">
         <Heading className="flex items-center gap-2 text-base md:text-lg font-semibold text-ink">
           {icon ? (

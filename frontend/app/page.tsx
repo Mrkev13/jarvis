@@ -254,12 +254,16 @@ export default function Home() {
         <ErrorState message={`Obnovení selhalo: ${dashboard.error}`} />
       ) : null}
 
-      {/* Přehledy: denní (hlavní živý panel) a týdenní */}
+      {/*
+        Přehledy + čísla + Dnes v jedné mřížce. Na mobilu/tabletu v pořadí DOM (přehled, týden + pozornost,
+        čísla, Dnes); na širokém displeji je „Dnes" pod denním přehledem vlevo a sloupec vpravo (týden +
+        pozornost) se tak vyrovná s levým bez prázdného místa. Čísla jsou pod tím přes celou šířku.
+      */}
       <div className="grid gap-4 md:gap-6 xl:grid-cols-3 xl:items-start">
-        <div className="min-w-0 xl:col-span-2">
+        <div className="min-w-0 xl:col-span-2 xl:col-start-1 xl:row-start-1">
           <DailyBriefingCard index={0} />
         </div>
-        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-1">
+        <div className="grid min-w-0 items-start gap-4 md:grid-cols-2 md:gap-6 xl:col-start-3 xl:row-span-2 xl:row-start-1 xl:grid-cols-1">
           <WeeklyReviewCard index={1} />
           <Card index={2} aria-labelledby="attention-title">
             <CardHeader
@@ -314,63 +318,63 @@ export default function Home() {
           </Card>
 
         </div>
+
+        {/* Klíčová čísla */}
+        <section aria-label="Klíčová čísla" className="motion-card min-w-0 xl:col-span-3 xl:row-start-3" style={staggerStyle(3)}>
+          {loading ? (
+            <StatGrid>
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-[92px] animate-pulse rounded-[var(--radius-control)] bg-surface" aria-hidden="true" />
+              ))}
+            </StatGrid>
+          ) : data ? (
+            <StatGrid>
+              <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
+              <MetricCard
+                label="Výdělek · měsíc"
+                value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />}
+                unit="Kč"
+              />
+              <MetricCard
+                label="Bilance"
+                value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
+                unit="Kč"
+                tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
+                hint={`${finance?.transactions_count ?? 0} transakcí`}
+              />
+              <MetricCard
+                label="Výdaje · měsíc"
+                value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
+                unit="Kč"
+                hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
+              />
+            </StatGrid>
+          ) : null}
+        </section>
+
+        {/* Dnes podle plánovače */}
+        <Card index={4} aria-labelledby="today-title" className="min-w-0 xl:col-span-2 xl:col-start-1 xl:row-start-2">
+          <CardHeader
+            title={<span id="today-title">Dnes</span>}
+            icon="☀️"
+            description={today?.summary}
+            actions={<TextLink href="/planner">Plánovač →</TextLink>}
+          />
+          {loading ? (
+            <LoadingState lines={3} label="Načítám dnešní plán…" />
+          ) : today && today.actions?.length ? (
+            <EntityList label="Dnešní priority">
+              {today.actions.slice(0, 3).map((a, i) => (
+                <TodayRow key={`${a.priority}-${i}-${a.title}`} a={a} />
+              ))}
+            </EntityList>
+          ) : data ? (
+            <EmptyState action={<TextLink href="/goals">Nastavit cíle →</TextLink>}>Dnes podle plánovače nic nehoří.</EmptyState>
+          ) : null}
+        </Card>
       </div>
 
-      {/* Klíčová čísla */}
-      <section aria-label="Klíčová čísla" className="motion-card" style={staggerStyle(3)}>
-        {loading ? (
-          <StatGrid>
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-[92px] animate-pulse rounded-[var(--radius-control)] bg-surface" aria-hidden="true" />
-            ))}
-          </StatGrid>
-        ) : data ? (
-          <StatGrid>
-            <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
-            <MetricCard
-              label="Výdělek · měsíc"
-              value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />}
-              unit="Kč"
-            />
-            <MetricCard
-              label="Bilance"
-              value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
-              unit="Kč"
-              tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
-              hint={`${finance?.transactions_count ?? 0} transakcí`}
-            />
-            <MetricCard
-              label="Výdaje · měsíc"
-              value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
-              unit="Kč"
-              hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
-            />
-          </StatGrid>
-        ) : null}
-      </section>
-
-      {/* Dnes podle plánovače */}
-      <Card index={4} aria-labelledby="today-title">
-        <CardHeader
-          title={<span id="today-title">Dnes</span>}
-          icon="☀️"
-          description={today?.summary}
-          actions={<TextLink href="/planner">Plánovač →</TextLink>}
-        />
-        {loading ? (
-          <LoadingState lines={3} label="Načítám dnešní plán…" />
-        ) : today && today.actions?.length ? (
-          <EntityList label="Dnešní priority">
-            {today.actions.slice(0, 3).map((a, i) => (
-              <TodayRow key={`${a.priority}-${i}-${a.title}`} a={a} />
-            ))}
-          </EntityList>
-        ) : data ? (
-          <EmptyState action={<TextLink href="/goals">Nastavit cíle →</TextLink>}>Dnes podle plánovače nic nehoří.</EmptyState>
-        ) : null}
-      </Card>
-
-      {/* Cíle · Nadcházející · Práce/Finance/Hry – karty se neroztahují na výšku sousedů */}
+      {/* Cíle · Nadcházející · Práce/Finance; Hry jako široký pruh pod nimi (dřív třetí karta ve sloupci → sloupec o ~400 px vyšší) */}
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
         {/* Cíle */}
         <Card index={5} aria-labelledby="goals-title">
@@ -428,7 +432,7 @@ export default function Home() {
           ) : null}
         </Card>
 
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:gap-6 xl:col-span-1 xl:grid-cols-1">
+        <div className="grid items-start gap-4 md:col-span-2 md:grid-cols-2 md:gap-6 xl:col-span-1 xl:grid-cols-1">
           {/* Práce */}
           <Card index={7} aria-labelledby="work-title">
             <CardHeader title={<span id="work-title">Práce</span>} icon="💼" actions={<TextLink href="/work">Práce →</TextLink>} />
@@ -477,73 +481,74 @@ export default function Home() {
             ) : null}
           </Card>
 
-          {/* Hry */}
-          <Card index={9} aria-labelledby="games-title">
-            <CardHeader
-              title={<span id="games-title">Hry</span>}
-              icon="🎮"
-              actions={
-                <>
-                  <TextLink href="/wot">WoT →</TextLink>
-                  <TextLink href="/mff">MFF →</TextLink>
-                </>
-              }
-            />
-            {loading ? (
-              <LoadingState lines={2} />
-            ) : (
-              <div className="space-y-3 text-sm">
-                <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <span className="font-medium text-ink">World of Tanks</span>
-                    {wot?.credits !== undefined && wot.credits !== null ? (
-                      <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
-                    ) : null}
-                  </div>
-                  {wot?.top_grinds?.length ? (
-                    wot.top_grinds.slice(0, 2).map((g) => (
-                      <div key={g.id} className="flex justify-between gap-2">
-                        <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
-                        <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
-                  )}
-                </div>
-                <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <span className="font-medium text-ink">Marvel Future Fight</span>
-                    {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
-                  </div>
-                  {mff ? (
-                    <>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-ink-muted">T4 postavy</span>
-                        <span className="tabular-nums text-ink">{mff.t4_count}</span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-ink-muted">Vysoká priorita</span>
-                        <span className="tabular-nums text-ink">{mff.priority_count}</span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-3">
-                        <Progress
-                          size="sm"
-                          value={mff.average_build_completeness}
-                          label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
-                          className="flex-1"
-                        />
-                        <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-xs text-ink-muted">Žádné postavy.</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
         </div>
+
+        {/* Hry */}
+        <Card index={9} aria-labelledby="games-title" className="md:col-span-2 xl:col-span-3">
+          <CardHeader
+            title={<span id="games-title">Hry</span>}
+            icon="🎮"
+            actions={
+              <>
+                <TextLink href="/wot">WoT →</TextLink>
+                <TextLink href="/mff">MFF →</TextLink>
+              </>
+            }
+          />
+          {loading ? (
+            <LoadingState lines={2} />
+          ) : (
+            <div className="grid gap-3 text-sm md:grid-cols-2">
+              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">World of Tanks</span>
+                  {wot?.credits !== undefined && wot.credits !== null ? (
+                    <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
+                  ) : null}
+                </div>
+                {wot?.top_grinds?.length ? (
+                  wot.top_grinds.slice(0, 2).map((g) => (
+                    <div key={g.id} className="flex justify-between gap-2">
+                      <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
+                      <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
+                )}
+              </div>
+              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">Marvel Future Fight</span>
+                  {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
+                </div>
+                {mff ? (
+                  <>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-ink-muted">T4 postavy</span>
+                      <span className="tabular-nums text-ink">{mff.t4_count}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-ink-muted">Vysoká priorita</span>
+                      <span className="tabular-nums text-ink">{mff.priority_count}</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <Progress
+                        size="sm"
+                        value={mff.average_build_completeness}
+                        label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
+                        className="flex-1"
+                      />
+                      <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-ink-muted">Žádné postavy.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Rychlé akce */}
