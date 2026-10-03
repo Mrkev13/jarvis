@@ -573,3 +573,35 @@ print(_hash_pin("123456"))
 - Testy: `test_mutation_service.py`, `test_ai_mutations.py`, router v `test_tool_router.py`,
   frontend `lib/pendingActions.test.mjs`.
 
+---
+
+## 19. Undo potvrzené AI změny (Phase C, `mutation_service.py`, tool `undo_change`)
+
+- **Data pro undo se ukládají při provedení**: `apply_mutation_plan` vrátí undo záznam a `execute_confirm_action`
+  ho uloží do původní pending akce (`arguments["undo"]`) ve stejném commitu jako stav `executed`:
+  `{version, executed_at, entity, action, title, supported, items[{id, label, before, after, row?,
+  unlinked_work_sessions?, linked_income?}]}`. `before` = snímek z plánu (Phase B), `after` = snímek po změně,
+  `row` = celý řádek u tvrdého smazání. UI dostane jen `result.undo_available`.
+- **Undo je pending akce** (`undo_change`, plán `{version, kind: "undo", original_action_id, entity, action,
+  preview}`) se stejným potvrzením / zamítnutím / expirací. Vzniká z chatu („vrať poslední změnu", „undo",
+  „vrať poslední změnu ve financích") nebo tlačítkem **Vrátit** (`POST /actions/undo {action_id}` → nová
+  pending karta). Model nikdy nerekonstruuje staré hodnoty.
+- **Výběr (`resolve_undo`)**: jen provedené `modify_records` akce s undo záznamem z posledních
+  `UNDO_WINDOW_HOURS` (24 h), volitelně podle oblasti. Víc kandidátů bez „poslední" → `ambiguous_target` +
+  kandidáti, žádná pending akce. Už vrácené (`already_undone`), nepodporované, prošlé a zastaralé
+  (`stale_target`: aktuální stav ≠ snímek po změně) se odmítnou už při návrhu.
+- **Provedení (`apply_undo_plan`)**: podmíněný `UPDATE pending_actions SET status='undone' WHERE id=… AND
+  status='executed'` ve stejné transakci jako obnovení → nejvýš jednou; každá položka znovu ověřena
+  (stav = snímek po změně, u smazání id volné + vazby existují); jakákoli chyba = rollback, nic se nezmění.
+  Smazané řádky se obnoví i s původním id a vazbami (pracovní session ↔ příjem).
+- **Audit**: za každou položku `action_type="undo"` s `delta.undo_of_action=<id původní akce>` + souhrnný
+  záznam `area="ai", action_type="undo", entity_type="PendingAction", entity_id=<id původní akce>`;
+  původní akce dostane `undo.undone_at`.
+- **Podporováno**: úprava (vše z Phase B), dokončení (úkol, cíl vč. ručního progresu), dávkové dokončení úkolů
+  (atomicky), smazání transakce / pracovního záznamu / úkolu / zkoušky / WoT grindu, deaktivace paměti.
+- **Nepodporováno**: smazání cíle (kaskádově maže historii progresu), create akce (`add_*`, `upsert_*`,
+  `save_memory`, `update_wot_resource` – neukládají stav před změnou), undo undo, akce provedené před Phase C
+  (nemají undo záznam), změny starší než 24 h.
+- **Bez migrace**: `undone` je nová hodnota existujícího sloupce `pending_actions.status`.
+- Testy: `test_undo.py`, router v `test_tool_router.py`, frontend `lib/pendingActions.test.mjs`.
+
