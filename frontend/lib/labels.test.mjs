@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  activitySourceLabel,
   entityRefLabel,
   entityTypeLabel,
   fallbackLabel,
@@ -20,8 +21,8 @@ test("entity types from the audit log", () => {
   assert.equal(entityTypeLabel("Reminder"), "Připomínka");
   assert.equal(entityRefLabel("WotGrind", 6), "Grind #6");
   assert.equal(entityRefLabel("Goal", null), "Cíl");
-  // název nástroje AI apod. zůstává (žádné ztracené informace)
-  assert.equal(entityTypeLabel("add_reminder"), "add_reminder");
+  // neznámý typ zůstává (žádné ztracené informace)
+  assert.equal(entityTypeLabel("SomethingNew"), "SomethingNew");
 });
 
 test("field names", () => {
@@ -60,4 +61,14 @@ test("field values in change details", () => {
   assert.equal(fieldValueLabel("category", "food", "Goal"), "food");
   assert.equal(fieldValueLabel("title", "Esej"), "Esej");
   assert.equal(fieldValueLabel("title", null), "–");
+});
+
+test("AI tool names, memory AI categories and activity sources", () => {
+  assert.equal(entityTypeLabel("add_work_session"), "Zápis práce");
+  assert.equal(entityTypeLabel("undo_change"), "Vrácení změny");
+  assert.equal(memoryCategoryLabel("decision"), "Rozhodnutí");
+  assert.equal(memoryCategoryLabel("constraint"), "Omezení");
+  assert.equal(activitySourceLabel("manual"), "ručně");
+  assert.equal(activitySourceLabel("ai_confirm"), "AI, potvrzeno");
+  assert.equal(activitySourceLabel("cron_x"), "cron_x");
 });

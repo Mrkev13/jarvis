@@ -33,6 +33,21 @@ const ENTITY_LABELS: Record<string, string> = {
   mffcharacter: "Postava",
   pendingaction: "Návrh AI",
   toolregistry: "Nástroj AI",
+  // akce AI (audit „ai" ukládá jako typ entity název nástroje – backend tool_registry WRITE_SPECS)
+  add_work_session: "Zápis práce",
+  add_finance_transaction: "Zápis transakce",
+  add_school_subject: "Nový předmět",
+  add_school_assignment: "Nový úkol",
+  add_school_exam: "Nová zkouška",
+  update_wot_resource: "Zdroje WoT",
+  upsert_wot_grind: "Grind",
+  upsert_mff_character: "Postava MFF",
+  upsert_goal: "Cíl",
+  save_memory: "Paměť",
+  modify_records: "Úprava záznamů",
+  add_reminder: "Nová připomínka",
+  manage_reminder: "Správa připomínky",
+  undo_change: "Vrácení změny",
 };
 
 /** „WotGrind" → „Grind"; neznámé (např. název nástroje AI) zůstává beze změny. */
@@ -44,6 +59,19 @@ export function entityTypeLabel(entityType: string | null | undefined): string {
 export function entityRefLabel(entityType: string | null | undefined, entityId: number | null | undefined): string {
   const label = entityTypeLabel(entityType);
   return entityId == null ? label : `${label} #${entityId}`;
+}
+
+/** Odkud změna přišla (activity_log.user_context). */
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "ručně",
+  ai_confirm: "AI, potvrzeno",
+  ai: "AI",
+  scheduler: "plánovač",
+  system: "systém",
+};
+
+export function activitySourceLabel(source: string | null | undefined): string {
+  return SOURCE_LABELS[key(source)] ?? String(source ?? "").trim();
 }
 
 // ---------- názvy polí v detailu změny (delta) ----------
@@ -139,6 +167,9 @@ const MEMORY_CATEGORY_LABELS: Record<string, string> = {
   context: "Kontext",
   preference: "Preference",
   plan: "Plán",
+  decision: "Rozhodnutí",
+  routine: "Rutina",
+  constraint: "Omezení",
   goal: "Cíl",
   fact: "Fakt",
   habit: "Zvyk",

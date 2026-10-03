@@ -30,7 +30,7 @@ import {
 import { apiJson, errorMessage } from "@/lib/api";
 import { areaMeta } from "@/lib/areas";
 import { countActiveFilters, toggleInList } from "@/lib/filters";
-import { entityRefLabel, fieldLabel, fieldValueLabel } from "@/lib/labels";
+import { activitySourceLabel, entityRefLabel, fieldLabel, fieldValueLabel } from "@/lib/labels";
 import { formatNumber, formatTime, plural, pragueDayKey } from "@/lib/format";
 import { cx, type Tone } from "@/lib/ui";
 
@@ -131,10 +131,10 @@ function ActivityRow({ item }: { item: ActivityItem }) {
           </div>
           <p className="break-words text-sm text-ink">{item.summary}</p>
           {item.entity_type || item.user_context ? (
-            <p className="mt-0.5 break-words font-mono text-[11px] text-ink-faint">
+            <p className="mt-0.5 break-words text-xs text-ink-faint">
               {item.entity_type ? entityRefLabel(item.entity_type, item.entity_id) : null}
               {item.entity_type && item.user_context ? " · " : null}
-              {item.user_context ? `zdroj: ${item.user_context === "manual" ? "ručně" : item.user_context}` : null}
+              {item.user_context ? `zdroj: ${activitySourceLabel(item.user_context)}` : null}
             </p>
           ) : null}
         </div>
