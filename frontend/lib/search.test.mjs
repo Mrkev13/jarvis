@@ -26,6 +26,10 @@ test("ranking: exact > prefix > word > substring > all words > other fields", ()
 test("navigation: Czech names, keywords and diacritic-insensitive input", () => {
   assert.equal(searchNavigation("prace")[0].href, "/work");
   assert.equal(searchNavigation("pripominky")[0].href, "/reminders");
+  // jednotné číslo bez diakritiky (dřív „pripominka" → nic)
+  assert.equal(searchNavigation("pripominka")[0].href, "/reminders");
+  assert.equal(searchNavigation("poznamka")[0].href, "/memory");
+  assert.equal(searchNavigation("vydaj")[0].href, "/finance");
   assert.equal(searchNavigation("dashboard")[0].href, "/");
   assert.equal(searchNavigation("jarvis")[0].href, "/ai");
   assert.equal(searchNavigation("wot")[0].href, "/wot");
