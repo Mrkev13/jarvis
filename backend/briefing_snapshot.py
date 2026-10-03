@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from models import ActivityLog, Assignment, Exam, FinanceTransaction, Goal, Notification, Reminder
+from read_queries import ASSIGNMENT_DONE_STATUSES
 from time_utils import local_day_bounds_utc, local_month_bounds_utc, to_local
 
 SECTION_ORDER = ("today", "overdue", "soon", "attention", "goals", "finance", "changes")
@@ -39,7 +40,7 @@ EXAM_SOON_DAYS = 14
 GOAL_SOON_DAYS = 14
 LABEL_CHARS = 70
 
-_DONE = {"done", "completed", "hotovo", "closed", "finished"}
+_DONE = ASSIGNMENT_DONE_STATUSES  # kanonická definice (read_queries)
 _EXAM_OPEN = {"upcoming", "scheduled", ""}
 _GOAL_INACTIVE = {"completed", "cancelled", "paused"}
 _ATTENTION_TYPES = ("goal_stagnation", "work_behind", "finance_goal_stagnation")

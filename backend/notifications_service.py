@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
-from read_queries import EXAM_OPEN_STATUSES
+from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
 
 
 ALLOWED_SEVERITIES = {"info", "warning", "important"}
@@ -150,6 +150,8 @@ def _clean_expired(db: Session, now: datetime) -> int:
 def _deadline_candidates_for_assignment(it: Assignment, today: date) -> NotificationCandidate | None:
     if not it.due_date:
         return None
+    if (it.status or "").strip().lower() in ASSIGNMENT_DONE_STATUSES:
+        return None  # hotový úkol: žádný deadline (starý se vyřeší jako „no longer relevant")
     days_left = (it.due_date - today).days
     if days_left < 0:
         dedupe_key = f"assignment_overdue:{it.id}"

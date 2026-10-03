@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
+from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -2136,8 +2137,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
     entries: list[dict] = []
     assignments = db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
     for it in assignments:
-        st = (it.status or "").lower()
-        if st in ("completed", "done"):
+        if (it.status or "").strip().lower() in ASSIGNMENT_DONE_STATUSES:
             continue
         days = (it.due_date - today_use).days
         entries.append({
@@ -2151,8 +2151,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
         })
     exams = db.query(Exam).filter(Exam.exam_date.is_not(None)).all()
     for it in exams:
-        st = (it.status or "").lower()
-        if st in ("completed", "done", "passed"):
+        if (it.status or "").strip().lower() not in EXAM_OPEN_STATUSES:
             continue
         days = (it.exam_date - today_use).days
         entries.append({
