@@ -167,6 +167,37 @@ def _clip(text, limit: int) -> str:
     return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
 
 
+# Interní odkazy snímku („exam:2", „[activity:117]") slouží uzemnění a odkazům, ne textu pro uživatele.
+_REF = r"\[?(?<![\w-])(?:assignment|exam|reminder|goal|notification|finance|activity):[0-9A-Za-z_-]+\]?"
+_REF_GROUP_RE = re.compile(rf"\s*[(\[]\s*(?:{_REF}\s*(?:[,;]|\ba\b|\band\b)?\s*)+[)\]]")
+_REF_RE = re.compile(rf"\s*{_REF}")
+
+
+def _strip_refs(text: str) -> str:
+    """Odstraní interní odkazy z viditelného textu; text bez odkazů vrátí beze změny."""
+    t = str(text or "")
+    if not _REF_RE.search(t):
+        return t
+    t = _REF_GROUP_RE.sub("", t)
+    t = _REF_RE.sub("", t)
+    t = re.sub(r"\s+([,.;:!?])", r"\1", t)
+    t = re.sub(r"([,;])(?:\s*[,;])+", r"\1", t)
+    t = re.sub(r"[,;]\s*(?=[.!?]|$)", "", t)
+    return " ".join(t.split()).strip(" ,;")
+
+
+def _clean_visible(content: dict) -> dict:
+    """Uložený přehled pro zobrazení: viditelné texty bez interních odkazů (i u přehledů z doby před opravou)."""
+    out = dict(content)
+    for key in ("summary", "note"):
+        if isinstance(out.get(key), str):
+            out[key] = _strip_refs(out[key]) or None if key == "note" else _strip_refs(out[key])
+    for key in ("priorities", "watch", "upcoming"):
+        out[key] = [{**i, **{f: _strip_refs(i[f]) for f in ("text", "why") if isinstance(i.get(f), str)}}
+                    for i in out.get(key) or [] if isinstance(i, dict)]
+    return out
+
+
 def ground(data: dict, snap: Snapshot) -> tuple[dict, int]:
     """Odkazy jen na položky snímku, bez duplicit; neověřitelný text → štítek ze snímku. Vrací (obsah, oprav)."""
     by_ref = snap.by_ref()
@@ -187,14 +218,14 @@ def ground(data: dict, snap: Snapshot) -> tuple[dict, int]:
                 fixes += 1
                 continue
             used.add(ref)
-            text = _clip(entry.get(text_key), 140)
+            text = _clip(_strip_refs(entry.get(text_key)), 140)
             if not text_ok(text):
                 fixes += int(bool(text))
                 text = src.label
             item = {"ref": ref, "kind": src.kind, "text": text, "label": src.label, "when": src.when,
                     "url": src.url, "detail": src.detail, "new": src.new}
             if text_key == "title":
-                why = _clip(entry.get("why"), 200)
+                why = _clip(_strip_refs(entry.get("why")), 200)
                 if why and not text_ok(why):
                     fixes += 1
                     why = ""
@@ -206,11 +237,12 @@ def ground(data: dict, snap: Snapshot) -> tuple[dict, int]:
     priorities = items(data.get("priorities") or [], "title", MAX_PRIORITIES, actionable)
     watch = items(data.get("watch") or [], "text", MAX_LIST, actionable)
     upcoming = items(data.get("upcoming") or [], "text", MAX_LIST, actionable)
-    summary = _clip(data.get("summary"), 400)
+    summary = _clip(_strip_refs(data.get("summary")), 400)
     if not text_ok(summary):
         fixes += 1
         summary = deterministic_summary(snap)
-    note = _clip(data.get("note"), 200) if data.get("note") else None
+    note = _clip(_strip_refs(data.get("note")), 200) if data.get("note") else None
+    note = note or None
     if note and not text_ok(note):
         fixes += 1
         note = None
@@ -506,7 +538,7 @@ def payload(db: Session, now: datetime | None = None) -> dict:
     if row and row.error_category:
         out["error_text"] = ERROR_TEXT.get(row.error_category.split(":")[-1], ERROR_TEXT["internal"])
     if row and row.content and row.generated_at:
-        out["briefing"] = json.loads(row.content)
+        out["briefing"] = _clean_visible(json.loads(row.content))
         out["generated_at"] = row.generated_at.isoformat() + "Z"
         out["generated_label"] = to_local(row.generated_at).strftime("%H:%M")
     if out["briefing"] is None:
