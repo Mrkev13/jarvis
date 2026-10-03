@@ -69,6 +69,28 @@ class AreaSelectionTestCase(unittest.TestCase):
         self.assertEqual(classify_areas("jak jde Servind", project_names=["Servind"]), {"work", "finance", "goals"})
         self.assertIn("wot", classify_areas("kolik zbývá na VZ.55", tank_names=["VZ.55"]))
 
+    def test_planning_questions_include_work_and_finance(self):
+        # Regrese (live A3 C): planner priority řadí finance a práci, ale kontext je nenesl →
+        # každý týdenní plán potřeboval extra kolo get_finance_summary + get_work_summary (a 429 TPM).
+        for question in ("co mám dělat tento týden", "co mám dneska dělat", "naplánuj mi zítřek", "jaké mám priority"):
+            self.assertTrue({"work", "finance", "school", "goals", "notifications"} <= classify_areas(question), question)
+        # Čistě časový dotaz bez plánovacího záměru zůstává úzký.
+        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications"})
+
+    def test_weekly_plan_context_covers_planner_reads_within_budget(self):
+        engine, Session = _session()
+        db = Session()
+        try:
+            _seed_basic(db)
+            ctx = build_current_context(db, "co mám dělat tento týden", now_utc=NOW_UTC)
+            self.assertTrue({"get_work_summary", "get_finance_summary"} <= ctx.covered_tools)
+            self.assertIn("work", ctx.sections)
+            self.assertIn("finance", ctx.sections)
+            self.assertLessEqual(ctx.estimated_tokens, CONTEXT_TARGET_TOKENS)
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_context_contains_only_selected_areas(self):
         engine, Session = _session()
         db = Session()

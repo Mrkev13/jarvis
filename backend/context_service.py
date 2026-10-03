@@ -38,6 +38,9 @@ _WEEKDAYS = ("po", "út", "st", "čt", "pá", "so", "ne")
 # Klíčová slova (bez diakritiky, podřetězce) → oblasti.
 _TIME_PLAN_WORDS = ("zitra", "dnes", "dneska", "tyden", "tydnu", "vikend", "pondeli", "utery", "streda", "ctvrtek",
                     "patek", "sobota", "nedele", "datum", "co mam", "plan", "priorit", "myslet", "program", "agenda")
+# Plánovací záměr („co mám dělat", plán, priority): planner řadí i finance a práci → bez nich v kontextu
+# by si je model vždy dočítal extra tool kolem.
+_PLAN_INTENT_WORDS = ("delat", "plan", "priorit", "agenda", "program", "zamer", "soustred")
 _OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", "stav", "jak se mi dari", "co je noveho")
 _AREA_WORDS = {
     AREA_SCHOOL: ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test"),
@@ -103,6 +106,8 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
         return frozenset(areas)
     if _has(t, _TIME_PLAN_WORDS):
         areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS}
+    if _has(t, _PLAN_INTENT_WORDS):
+        areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_WORK, AREA_FINANCE}
     if _has(t, _OVERVIEW_WORDS):
         areas |= {AREA_GOALS, AREA_NOTIFICATIONS, AREA_SCHOOL, AREA_WORK, AREA_FINANCE}
     if AREA_WORK in areas:
