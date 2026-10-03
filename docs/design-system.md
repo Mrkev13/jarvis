@@ -129,6 +129,37 @@ User-facing UI is Czech. Allowed English: proper names (World of Tanks, Marvel F
 where deliberate, and the bilingual forecast label "Odhad / Forecast". Backend-generated text (e.g. planner reasons)
 is shown as delivered — fix copy at the source.
 
+### Internal values vs. user-facing labels (Roadmap 4B.1)
+
+- **Stored values never change for presentation.** Database values, API fields, enum values, dedupe keys and
+  payloads stay as they are; only the label shown to the user is translated.
+- **One mapping per kind of value, in `lib/labels.ts`:** `entityTypeLabel`/`entityRefLabel` (audit entity types and
+  AI tool names), `fieldLabel` + `fieldValueLabel` (change-detail fields and values), `financeCategoryLabel`,
+  `memoryCategoryLabel`, `activitySourceLabel`. Module-specific enums keep their helpers in `lib/<module>.ts`
+  (`goals.ts`, `school.ts`, `wot.ts`, `mff.ts`). Pages never hardcode their own copies.
+- **Unknown values fall back gracefully:** shown trimmed with a capital first letter (categories) or unchanged
+  (entity types) — never dropped, never "undefined".
+- **Free text the user typed is data, not an internal value** (e.g. a finance category "food" typed by the user is
+  translated in the UI for convenience, but kept as typed in backend activity text). System-generated values
+  (category `work` from the Work → Finance sync) are named in Czech at the source.
+- **Backend copy** (activity summaries, planner reasons, notifications) is built with `backend/text_utils.py`:
+  `format_num_cz`, `format_hours_cz`, `format_czk_cz`, `finance_summary_cz`, `memory_count_cz`, `plural_cz`,
+  `format_date_cz` — decimal comma, correct plurals, no ISO dates, no English module names. Existing audit rows keep
+  the text they were written with.
+
+### Rounding & display consistency
+
+- If rows on a screen add up to a visible total, show amounts so they reconcile: `formatCzkExact` (whole crowns
+  without decimals, otherwise to the haléř: 2 437,50 + 2 437,50 = 4 875 Kč). Used on Work and Finance.
+- Aggregates shown alone (dashboard metrics) may use `formatCzk` (rounded to whole crowns ≥ 100 Kč).
+- Never round stored values or recompute business numbers in the UI — formatting only.
+
+### Unfinished UI
+
+Hide sections that have no real functionality yet instead of showing large placeholders ("Připravujeme" tiles,
+empty panels, fake data). A feature appears in the UI when it works. A one-line hint is acceptable only when it
+helps the user act now.
+
 ## 9. Migration conventions (Roadmap 4B)
 
 Every migrated page follows the same skeleton:
