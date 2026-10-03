@@ -3,13 +3,13 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta
 
 from database import SessionLocal
-from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
+from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
@@ -21,7 +21,6 @@ from auth_service import (
     cookie_params,
     AUTH_COOKIE_NAME,
 )
-from tools import get_finance_transactions
 from tools import get_school_subjects, get_school_assignments, get_school_exams
 from tools import get_work_sessions, get_work_summary
 from tools import get_mff_characters, get_mff_summary, upsert_mff_character
@@ -2363,7 +2362,7 @@ def activity_list(
     to_date: str | None = None,
     q: str | None = None,
 ):
-    from sqlalchemy import and_, or_
+    from sqlalchemy import and_
 
     limit_val = max(1, min(int(limit or 50), 500))
     offset_val = max(0, int(offset or 0))

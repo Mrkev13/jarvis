@@ -491,10 +491,3 @@ def list_reminders(db: Session, status: str | None = "active", limit: int = 100,
     # Splatné nahoře, pak podle příštího výskytu.
     items.sort(key=lambda i: (i["state"] != "due", i["next_label"] == "–", i["due_at"]))
     return items
-
-
-def today_bounds_local(now: datetime | None = None) -> tuple[datetime, datetime]:
-    local_day = to_local(now or utc_now()).date()
-    return local_to_utc(datetime.combine(local_day, time.min)), local_to_utc(datetime.combine(local_day + timedelta(days=1), time.min))
-
-

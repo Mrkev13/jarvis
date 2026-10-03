@@ -106,7 +106,7 @@ def _backup_postgres(dst: Path) -> tuple[bool, str]:
             err = stderr_b.decode("utf-8", errors="replace") if stderr_b else "unknown"
             return False, f"pg_dump failed ({proc.returncode}): {err[:500]}"
         return True, ""
-    except FileNotFoundError as _nf:
+    except FileNotFoundError:
         try:
             dst.unlink(missing_ok=True)
         except Exception:

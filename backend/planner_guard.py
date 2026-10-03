@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from itertools import product
 
 PLANNER_REQUIRED_TOOLS = ("get_goals", "get_memories")
-PLANNER_AREAS = frozenset({"school", "work", "finance", "wot", "mff", "personal", "fitness", "hobby", "travel", "general"})
 NO_GROUNDED_ACTIONS_NOTE = (
     "Z dostupných dat teď nedokážu sestavit konkrétní ověřené akce – doplň prosím cíle, úkoly nebo práci."
 )

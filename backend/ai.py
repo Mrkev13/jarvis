@@ -10,8 +10,8 @@ from fastapi import HTTPException
 from openai import OpenAI
 from sqlalchemy import update as _sql_update
 
-from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS, _tool  # noqa: F401 (_tool: zpětná kompatibilita)
-from activity_service import log_activity, delta_dict
+from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS
+from activity_service import log_activity
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local

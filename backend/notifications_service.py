@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, time
 import calendar
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
@@ -13,7 +13,6 @@ from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
 
-ALLOWED_SEVERITIES = {"info", "warning", "important"}
 
 
 @dataclass(frozen=True)

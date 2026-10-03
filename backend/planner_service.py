@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import calendar
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation

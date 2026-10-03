@@ -59,11 +59,6 @@ def auth_enabled() -> bool:
 def _hash_session_token(token_plaintext: str) -> str:
     return hashlib.sha256(token_plaintext.encode("utf-8")).hexdigest()
 
-def _bcrypt_hash_pin(pin: str) -> str:
-    """For setup script; production uses pre-computed AUTH_PIN_HASH."""
-    hashed = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
-    return hashed.decode("utf-8")
-
 def _bcrypt_verify_pin(pin_candidate: str) -> bool:
     if not AUTH_PIN_HASH:
         return False
