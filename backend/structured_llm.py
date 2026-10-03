@@ -10,6 +10,8 @@ import json
 import re
 import time
 
+from text_utils import clip as text_clip
+
 
 class StructuredLLMError(Exception):
     def __init__(self, category: str, usage: dict | None = None):
@@ -30,7 +32,9 @@ def request_params(schema_name: str, schema: dict, max_completion_tokens: int, r
 
 def classify_call_error(exc: RuntimeError, records: list) -> str:
     """RuntimeError z ai._llm_create_with_retry → kategorie. Původní výjimka SDK je v __cause__."""
-    if any(r.rate_limited for r in records) or "Rate limit" in str(exc):
+    import ai
+
+    if isinstance(exc, ai.LLMRateLimitError) or any(r.rate_limited for r in records):
         return "rate_limit"
     cause = exc.__cause__
     status = getattr(cause, "status_code", None)
@@ -115,9 +119,7 @@ def parse_json_object(text: str) -> dict:
     return data
 
 
-def clip(text, limit: int) -> str:
-    t = " ".join(str(text or "").split())
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+clip = text_clip  # re-export (briefing/weekly ho importují odsud)
 
 
 def make_ref_stripper(kinds: tuple[str, ...]):

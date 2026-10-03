@@ -32,13 +32,14 @@ from statuses import REMINDER_ACTIVE_STATUSES
 from context_service import fold_text
 from models import Notification, Reminder
 from time_utils import local_to_utc, to_local, utc_now
+from text_utils import WEEKDAYS_CZ_SHORT
 
 STATUS_SCHEDULED, STATUS_FIRED, STATUS_DONE, STATUS_CANCELLED = "scheduled", "fired", "done", "cancelled"
 ACTIVE_STATUSES = REMINDER_ACTIVE_STATUSES  # (STATUS_SCHEDULED, STATUS_FIRED), statuses.py
 RECURRENCES = ("none", "daily", "weekly")
 LATE_AFTER = timedelta(minutes=15)  # zpoždění po výpadku, které se v notifikaci výslovně uvede
 MAX_TITLE = 255
-_WEEKDAY_SHORT = ("po", "út", "st", "čt", "pá", "so", "ne")
+_WEEKDAY_SHORT = WEEKDAYS_CZ_SHORT
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 

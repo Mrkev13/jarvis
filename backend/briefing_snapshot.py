@@ -20,6 +20,7 @@ from llm_budget import estimate_tokens
 from models import ActivityLog, Assignment, Exam, FinanceTransaction, Goal, Notification, Reminder
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_day_bounds_utc, local_month_bounds_utc, to_local
+from text_utils import WEEKDAYS_CZ_SHORT, clip
 
 SECTION_ORDER = ("today", "overdue", "soon", "attention", "goals", "finance", "changes")
 SECTION_TITLES = {
@@ -44,7 +45,7 @@ _DONE = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
 _EXAM_OPEN = EXAM_OPEN_STATUSES
 _GOAL_INACTIVE = GOAL_INACTIVE_STATUSES
 _ATTENTION_TYPES = ("goal_stagnation", "work_behind", "finance_goal_stagnation")
-_WEEKDAYS = ("po", "út", "st", "čt", "pá", "so", "ne")
+_WEEKDAYS = WEEKDAYS_CZ_SHORT
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 # Technický audit bez hodnoty pro člověka (sekce „změny"): automatické vedlejší zápisy a provoz.
@@ -75,8 +76,7 @@ def meaningful_activity(logs: list[ActivityLog]) -> list[ActivityLog]:
 
 
 def _short(text, limit: int = LABEL_CHARS) -> str:
-    t = " ".join(str(text or "").split())
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+    return clip(text, limit)
 
 
 def _day_label(d: date, today: date) -> str:

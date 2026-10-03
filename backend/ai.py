@@ -15,6 +15,7 @@ from activity_service import log_activity, delta_dict
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
+from text_utils import WEEKDAYS_CZ
 from context_service import CurrentContext, build_current_context
 from llm_budget import estimate_fixed_overhead, estimate_tool_schema_tokens
 from llm_config import LLM_SETTINGS
@@ -90,7 +91,7 @@ AFFORDABILITY: get current resources, compare with the cost, state the exact sur
 LANGUAGE: the user writes Czech; reply in Czech unless the user switches language.
 """
 
-_CZECH_WEEKDAYS = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
+_CZECH_WEEKDAYS = WEEKDAYS_CZ
 
 
 def current_date_block(now: datetime | None = None) -> str:
@@ -416,7 +417,11 @@ PENDING_CONFIRMATION_ANSWER = "Připravil jsem změnu k potvrzení."
 DAILY_LIMIT_KINDS = frozenset({"TPD", "RPD"})
 
 
-class DailyLimitError(RuntimeError):
+class LLMRateLimitError(RuntimeError):
+    """Provider odmítl kvůli limitu (429). Volající rozhodují podle typu, ne podle textu zprávy."""
+
+
+class DailyLimitError(LLMRateLimitError):
     """Vyčerpaný denní limit (TPD/RPD) – krátké čekání nepomůže; /chat podle typu volí text pro uživatele."""
 
 
@@ -487,7 +492,7 @@ def _llm_create_with_retry(
                 log_retry(attempt, attempts, wait_s, "429", log_enabled)
                 time.sleep(wait_s)
                 continue
-            raise RuntimeError(
+            raise LLMRateLimitError(
                 "AI provider nedisponuje (Rate limit 8 000 tokenů/minutu byl překročen). "
                 "Zkus to prosím za 10-20 sekund znovu, nebo zjednoduš otázku."
             ) from last_exc

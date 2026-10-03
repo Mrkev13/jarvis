@@ -30,7 +30,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 
 
-from ai import DailyLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
+from ai import DailyLimitError, LLMRateLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
 import ai as _ai_module
 from history_service import prepare_conversation_history, window_client_messages
 from llm_config import LLM_SETTINGS
@@ -646,9 +646,7 @@ def chat(request: ChatRequest):
     except RuntimeError as exc:
         from fastapi.responses import JSONResponse
         msg = str(exc)
-        status = 503
-        if "Rate limit" in msg or "překročen" in msg:
-            status = 429
+        status = 429 if isinstance(exc, LLMRateLimitError) else 503
         # Denní limit (TPD/RPD) se během sekund neobnoví → neslibovat krátké čekání.
         retry_hint = (
             "Denní limit se během pár sekund neobnoví – zkus to prosím později."
@@ -2499,7 +2497,7 @@ def scheduler_status():
         "briefing_time": briefing_service.briefing_time().strftime("%H:%M"),
         "weekly_review_enabled": WEEKLY_REVIEW_ENABLED,
         "weekly_review_interval_seconds": WEEKLY_REVIEW_CHECK_SECONDS,
-        "weekly_review_schedule": weekly_review_service._schedule_label(),
+        "weekly_review_schedule": weekly_review_service.schedule_label(),
         "doc": SINGLE_WORKER_ASSUMPTION_DOC,
     }
 

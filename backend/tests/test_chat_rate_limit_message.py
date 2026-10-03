@@ -34,7 +34,7 @@ class ChatRateLimitMessageTestCase(unittest.TestCase):
         self.assertEqual(body["pending_actions"], [])
 
     def test_per_minute_rate_limit_keeps_short_retry_message(self):
-        status, body = _chat_error(RuntimeError("AI provider nedisponuje (Rate limit 8 000 tokenů/minutu byl překročen)."))
+        status, body = _chat_error(ai.LLMRateLimitError("AI provider nedisponuje (Rate limit 8 000 tokenů/minutu byl překročen)."))
         self.assertEqual(status, 429)
         self.assertIn(SHORT_RETRY, body["answer"])
 
@@ -42,6 +42,11 @@ class ChatRateLimitMessageTestCase(unittest.TestCase):
         status, body = _chat_error(RuntimeError("AI provider vrátil chybu (503). Zkus to prosím později znovu."))
         self.assertEqual(status, 503)
         self.assertIn(SHORT_RETRY, body["answer"])
+
+    def test_status_depends_on_error_type_not_message_text(self):
+        # Roadmap 3.5: žádné rozhodování podle českého textu zprávy.
+        status, _ = _chat_error(RuntimeError("Rate limit … překročen"))
+        self.assertEqual(status, 503)
 
     def test_daily_limit_error_is_still_a_runtime_error(self):
         # Volající, kteří chytají RuntimeError (beze změny chování), dál fungují.

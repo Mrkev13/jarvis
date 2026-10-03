@@ -30,6 +30,7 @@ from database import SessionLocal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
 from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
+from text_utils import clip
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -84,8 +85,7 @@ def _d(value) -> str:
 
 
 def _short(text, limit: int = 60) -> str:
-    t = " ".join(str(text or "").split())
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+    return clip(text, limit)
 
 
 def _plain(value):

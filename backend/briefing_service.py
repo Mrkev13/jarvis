@@ -24,8 +24,8 @@ from llm_budget import estimate_tokens
 from models import DailyBriefing, Notification
 from planner_guard import build_evidence, ungrounded_items
 from structured_llm import (
-    StructuredLLMError, call_structured, classify_call_error, clip, make_ref_stripper,
-    request_params as _structured_params, usage_from,
+    StructuredLLMError, call_structured, clip, make_ref_stripper, parse_json_object,
+    request_params as _structured_params,
 )
 from time_utils import local_day_bounds_utc, to_local, utc_now
 from env_config import env_bool
@@ -132,18 +132,12 @@ def briefing_time() -> dtime:
 # ===== LLM a validace =====
 
 def _strip_json(text: str) -> dict:
-    t = (text or "").strip()
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", t, re.S)
-    if fence:
-        t = fence.group(1)
-    start, end = t.find("{"), t.rfind("}")
-    if start < 0 or end <= start:
-        raise BriefingError("invalid_response")
+    """Defenzivní parsování (structured_llm.parse_json_object) + kontrola tvaru přehledu."""
     try:
-        data = json.loads(t[start:end + 1])
-    except ValueError:
+        data = parse_json_object(text)
+    except StructuredLLMError:
         raise BriefingError("invalid_response") from None
-    if not isinstance(data, dict) or not isinstance(data.get("summary"), str):
+    if not isinstance(data.get("summary"), str):
         raise BriefingError("invalid_response")
     for key in ("priorities", "watch", "upcoming"):
         value = data.get(key) or []
@@ -251,10 +245,6 @@ def build_messages(snap: Snapshot) -> list[dict]:
 def estimate_request_tokens(snap: Snapshot) -> int:
     schema = estimate_tokens(json.dumps(RESPONSE_SCHEMA))  # provider schéma vkládá do promptu
     return sum(estimate_tokens(m["content"]) for m in build_messages(snap)) + schema + MAX_OUTPUT_TOKENS
-
-
-_classify_call_error = classify_call_error
-_usage_from = usage_from
 
 
 def _call_llm(snap: Snapshot, llm=None) -> tuple[str, dict]:

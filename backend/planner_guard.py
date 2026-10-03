@@ -191,6 +191,38 @@ def ungrounded_items(text: str, evidence: Evidence) -> list[str]:
     return problems
 
 
+def strict_text_problems(text: str, ev: Evidence) -> list[str]:
+    """Přísnější varianta `ungrounded_items` pro přehledy (Weekly Review): metriky jsou spočítané předem,
+    takže číslo s jednotkou (nebo ≥ 100) musí ve snímku být přímo – žádné dopočty. Data jen ze snímku. Jména (velké písmeno uprostřed věty)
+    musí ve snímku být, s tolerancí českého skloňování (shoda kmene: „Sadu" ~ „Sada")."""
+    problems: list[str] = []
+    without_dates = _DATE_DM_RE.sub(" ", _ISO_DATE_RE.sub(" ", text))
+    for m in _NUMBER_RE.finditer(without_dates):
+        value, has_unit = _parse_number(m)
+        if (has_unit or value >= 100) and not any(
+                abs(value - n) <= 0.51 or (n and abs(value - n) / abs(n) <= 0.01) for n in ev.numbers):
+            problems.append("number")
+    for d, mo in _DATE_DM_RE.findall(text):
+        if (int(d), int(mo)) not in ev.day_months:
+            problems.append("date")
+    for _y, mo, d in _ISO_DATE_RE.findall(text):
+        if (int(d), int(mo)) not in ev.day_months:
+            problems.append("date")
+    words = text.split()
+    for i, word in enumerate(words):
+        if i == 0 or words[i - 1].endswith((".", "!", "?", ":")):
+            continue  # začátek věty
+        m = _CAPITALIZED_RE.match(word.strip("„\"'“”()"))
+        if not m:
+            continue
+        token = m.group(0).split("/")[0].rstrip(".-").lower()
+        if len(token) <= 1 or token in _KNOWN_TERMS or token in _STOPWORDS:
+            continue
+        if token not in ev.text and token[: max(3, len(token) - 2)] not in ev.text:
+            problems.append("name")
+    return problems
+
+
 def ground_planner_answer(answer: str, evidence: Evidence) -> GroundingResult:
     block = find_planner_block(answer)
     if block is None:
