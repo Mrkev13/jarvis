@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useEffect, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AccentLine, Button, Card, ErrorState, fieldClass, HudFrame, HudLabel, StatusPulse } from "@/components/ui";
 import { API_URL, readErrorDetail } from "@/lib/api";
+import { loginErrorMessage } from "@/lib/loginError";
 import { safeNextPath } from "@/lib/safeNext";
 import { cx } from "@/lib/ui";
 
@@ -92,7 +93,7 @@ function LoginInner() {
         goTo(next);
         return;
       }
-      setErr(body.error || (r.ok ? "Neplatný PIN." : await readErrorDetail(r)));
+      setErr(body.error || r.ok ? loginErrorMessage(body.error) : loginErrorMessage(await readErrorDetail(r)));
     } catch {
       setErr("Nepodařilo se spojit se serverem. Běží backend?");
     } finally {
