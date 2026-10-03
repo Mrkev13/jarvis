@@ -4,6 +4,8 @@
  * Neznámá hodnota se nikdy neztratí: vrátí se čitelně upravená původní hodnota. Testy: labels.test.mjs.
  */
 
+import { AREA_STYLES } from "./areas.ts";
+
 /** Klíč pro vyhledání: malá písmena, bez okrajových mezer. */
 const key = (value: string | null | undefined) => String(value ?? "").trim().toLowerCase();
 
@@ -227,6 +229,7 @@ export function fieldValueLabel(field: string, value: unknown, entityType?: stri
   if (typeof value === "object") return JSON.stringify(value);
   const f = key(field);
   const v = String(value);
+  if (f === "area") return AREA_STYLES[key(v)]?.label ?? fallbackLabel(v);
   if (f === "category") {
     const e = key(entityType);
     if (e === "financetransaction") return financeCategoryLabel(v);

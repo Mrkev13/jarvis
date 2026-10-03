@@ -58,6 +58,10 @@ test("field values in change details", () => {
   assert.equal(fieldValueLabel("hours", 0.5), "0,5");
   assert.equal(fieldValueLabel("category", "food", "FinanceTransaction"), "Jídlo");
   assert.equal(fieldValueLabel("category", "plan", "Memory"), "Plán");
+  // oblast v detailu (např. smazaná poznámka v paměti) – dřív zůstávalo „general"
+  assert.equal(fieldValueLabel("area", "general", "Memory"), "Obecné");
+  assert.equal(fieldValueLabel("area", "wot"), "World of Tanks");
+  assert.equal(fieldValueLabel("area", "zahrada"), "Zahrada");
   assert.equal(fieldValueLabel("category", "food", "Goal"), "food");
   assert.equal(fieldValueLabel("title", "Esej"), "Esej");
   assert.equal(fieldValueLabel("title", null), "–");
