@@ -54,6 +54,8 @@ const PAGES = [
   ["/memory", "memory"],
   ["/wot", "wot"],
   ["/mff", "mff"],
+  // Roadmap 4C
+  ["/ai", "ai"],
 ];
 const ONLY = process.env.UI_CHECK_PAGES ? process.env.UI_CHECK_PAGES.split(",") : null;
 const WIDTHS = [
@@ -380,6 +382,228 @@ for (const width of [1920, 1366]) {
   const text = await page.locator("main").innerText();
   check("wot: žádná sekce „Připravujeme“", !/Připravujeme/.test(text));
   check("wot: žádné prázdné zástupné dlaždice", (await page.locator("main .border-dashed").count()) === 0);
+  await ctx.close();
+}
+
+// 14) Roadmap 4C – AI asistent (mock /chat, žádný Groq).
+const RAW_AI = /\b(add_work_session|add_finance_transaction|upsert_\w+|update_wot_resource|save_memory|modify_records|manage_reminder|undo_change|date_value|hourly_rate|subject_id)\b/;
+async function aiSend(page, text) {
+  const box = page.getByLabel("Zpráva pro Standa AI");
+  await box.fill(text);
+  await box.press("Enter");
+}
+{
+  const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900 });
+  const box = page.getByLabel("Zpráva pro Standa AI");
+  check("ai: pole pro zprávu má popisek", (await box.count()) === 1);
+  const unlabeled = await page.evaluate(() =>
+    [...document.querySelectorAll("main textarea, main select, main input:not([type=hidden])")].filter((el) => {
+      const id = el.id;
+      return !(el.getAttribute("aria-label") || (id && document.querySelector(`label[for="${id}"]`)) || el.closest("label"));
+    }).length,
+  );
+  check("ai: žádné pole bez popisku", unlabeled === 0, String(unlabeled));
+  check("ai: odeslat zakázané bez textu", await page.getByRole("button", { name: "Odeslat" }).isDisabled());
+
+  // Shift+Enter = nový řádek, Enter = odeslat
+  await box.fill("první");
+  await box.press("Shift+Enter");
+  await box.pressSequentially("druhý");
+  check("ai: Shift+Enter vloží nový řádek", (await box.inputValue()) === "první\ndruhý");
+  await box.fill("");
+
+  // přepnutí konverzace (prázdný stav ověřuje „nový chat“ níže – mock si pamatuje zprávy z dřívějších běhů)
+  const rail = page.getByRole("complementary", { name: "Konverzace" });
+  await rail.getByRole("button", { name: /^Finance – září/ }).click();
+  await page.waitForTimeout(600);
+  check("ai: přepnutí konverzace načte její zprávy", (await page.getByText("Kolik jsem utratil v září?").count()) === 1);
+  check("ai: aktivní konverzace označená (aria-current)", (await rail.locator('[aria-current="true"]').innerText()).includes("Finance"));
+
+  // nový chat
+  const before = await rail.locator("li").count();
+  await rail.getByRole("button", { name: "+ Nový chat" }).click();
+  await page.waitForTimeout(800);
+  check("ai: nový chat přibyl v seznamu", (await rail.locator("li").count()) === before + 1);
+  check("ai: nový chat je prázdný", (await page.getByRole("heading", { name: "Na co se chceš zeptat?" }).count()) === 1);
+  check("ai: po založení fokus v poli pro zprávu", await box.evaluate((el) => el === document.activeElement));
+
+  // odeslání: busy + přemýšlí, pak odpověď s Markdownem
+  await aiSend(page, "Ahoj, jak se máš?");
+  await page.waitForTimeout(200);
+  check("ai: během odesílání busy tlačítko", (await page.locator('button[aria-busy="true"]', { hasText: "Odesílám" }).count()) === 1);
+  check("ai: indikátor přemýšlení (role=status)", (await page.getByText("Standa AI přemýšlí…").count()) === 1);
+  check("ai: pole se po odeslání vyprázdní", (await box.inputValue()) === "");
+  await page.waitForTimeout(1200);
+  check("ai: odpověď vykreslená (Markdown nadpis)", (await page.getByRole("heading", { name: "Odpověď" }).count()) === 1);
+
+  // plán v chatu = karta Planneru
+  await aiSend(page, "Jaký mám plán na tento týden?");
+  await page.waitForTimeout(1500);
+  check("ai: plán v chatu jako karta Planneru", (await page.getByText("Týdenní plán", { exact: true }).count()) >= 1);
+  await page.screenshot({ path: `${OUT}ai-planner.png` });
+
+  // pending akce: náhled → potvrzení → výsledek s Vrátit → vrácení jako nová karta → zamítnutí
+  await aiSend(page, "Zapiš práci 6,5 h pro Klient XYZ");
+  await page.waitForTimeout(1500);
+  const card = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
+  check("ai: karta akce s českým titulkem", (await card.getByRole("heading", { name: "Přidat pracovní záznam" }).count()) === 1);
+  const cardText = await card.innerText();
+  check("ai: karta ukazuje hodnoty a výdělek", /10\. 10\. 2026/.test(cardText) && /6,5 h/.test(cardText) && /2\s437,50 Kč/.test(cardText), cardText.replace(/\n/g, " | ").slice(0, 160));
+  await page.screenshot({ path: `${OUT}ai-pending.png` });
+  await card.getByRole("button", { name: "Potvrdit" }).click();
+  await page.waitForTimeout(150);
+  check("ai: potvrzení – busy stav", (await card.locator('button[aria-busy="true"]').count()) === 1);
+  await page.waitForTimeout(1100);
+  const outcome = page.getByRole("list", { name: "Výsledky akcí" });
+  check("ai: výsledek „Hotovo“ s nabídkou Vrátit", (await outcome.getByRole("button", { name: /^Vrátit změnu/ }).count()) === 1);
+  check("ai: zpráva o provedení v historii", (await page.getByText("Přidán pracovní záznam.").count()) >= 1);
+  await outcome.getByRole("button", { name: /^Vrátit změnu/ }).click();
+  await page.waitForTimeout(700);
+  const undoCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
+  check("ai: vrácení = nová karta k potvrzení", (await undoCard.getByText("Vrácení změny").count()) >= 1);
+  await undoCard.getByRole("button", { name: "Zamítnout" }).click();
+  await page.waitForTimeout(400);
+  check("ai: zamítnutí – karta zmizí a zpráva v historii", (await page.getByRole("list", { name: "Akce čekající na potvrzení" }).count()) === 0 && (await page.getByText("Akce byla zrušena: Vrátit změnu.").count()) === 1);
+
+  // dávka: počet, skryté položky, upozornění; první potvrzení selže → Zkusit znovu → projde
+  await aiSend(page, "Smaž všechny obědy");
+  await page.waitForTimeout(1500);
+  const batch = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator(":scope > li").first();
+  const batchText = await batch.innerText();
+  check("ai: dávka ukazuje počet, další a upozornění", /12 záznamů/.test(batchText) && /a dalších 2/.test(batchText) && /nepůjde obnovit/.test(batchText));
+  await batch.getByRole("button", { name: "Potvrdit" }).click();
+  await page.waitForTimeout(1200);
+  const failedCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator(":scope > li").first();
+  check("ai: selhání potvrzení – Zkusit znovu", (await failedCard.getByRole("button", { name: "Zkusit znovu" }).count()) === 1);
+  await failedCard.getByRole("button", { name: "Zkusit znovu" }).click();
+  await page.waitForTimeout(1200);
+  check("ai: druhý pokus projde", (await page.getByRole("list", { name: "Akce čekající na potvrzení" }).count()) === 0);
+
+  // chyby: rate limit (zkusit znovu), denní limit (bez zkusit znovu), 500
+  await aiSend(page, "test limit");
+  await page.waitForTimeout(1300);
+  check("ai: rate limit – upozornění se Zkusit znovu", (await page.getByRole("alert").filter({ hasText: "vytížená" }).getByRole("button", { name: "Zkusit znovu" }).count()) === 1);
+  await page.screenshot({ path: `${OUT}ai-ratelimit.png` });
+  await aiSend(page, "denní limit");
+  await page.waitForTimeout(1300);
+  const daily = page.getByRole("alert").filter({ hasText: "Denní limit" });
+  check("ai: denní limit – bez Zkusit znovu", (await daily.count()) === 1 && (await daily.getByRole("button", { name: "Zkusit znovu" }).count()) === 0);
+  await aiSend(page, "chyba");
+  await page.waitForTimeout(1300);
+  check("ai: chyba serveru – upozornění", (await page.getByRole("alert").filter({ hasText: "AI backend vrátil chybu" }).count()) === 1);
+
+  const text = await page.locator("main").innerText();
+  check("ai: žádné interní názvy toolů / klíčů", !RAW_AI.test(text), (text.match(RAW_AI) || [""])[0]);
+  check("ai: právě jeden h1", (await page.locator("h1").count()) === 1);
+  check("ai: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
+// přejmenování na místě a smazání přes ConfirmDialog
+{
+  const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
+  const rail = page.getByRole("complementary", { name: "Konverzace" });
+  await rail.getByRole("button", { name: "+ Nový chat" }).click();
+  await page.waitForTimeout(800);
+  await rail.getByRole("button", { name: /^Přejmenovat chat Nový chat/ }).first().click();
+  const input = rail.getByLabel("Nový název chatu");
+  check("ai: přejmenování – pole s fokusem", await input.evaluate((el) => el === document.activeElement));
+  await input.fill("Testovací chat");
+  await input.press("Enter");
+  await page.waitForTimeout(600);
+  check("ai: přejmenování uloženo", (await rail.getByRole("button", { name: /^Testovací chat/ }).count()) === 1);
+  await rail.getByRole("button", { name: "Smazat chat Testovací chat" }).click();
+  const dialog = page.getByRole("dialog");
+  check("ai: smazání chatu přes ConfirmDialog", (await dialog.count()) === 1 && (await dialog.getAttribute("aria-modal")) === "true");
+  await dialog.getByRole("button", { name: "Smazat chat" }).click();
+  await page.waitForTimeout(900);
+  check("ai: chat smazán", (await rail.getByRole("button", { name: /^Testovací chat/ }).count()) === 0);
+  await ctx.close();
+}
+
+// mobil: konverzace v Draweru (fokus, Escape, návrat fokusu, výběr zavře)
+{
+  const { ctx, page, errors } = await open("/ai", { width: 390, height: 844 });
+  check("ai mobil: bez postranního panelu konverzací", !(await page.getByRole("complementary", { name: "Konverzace" }).isVisible()));
+  const opener = page.getByRole("button", { name: "Konverzace" });
+  await opener.click();
+  const drawer = page.getByRole("dialog", { name: "Konverzace" });
+  check("ai mobil: Drawer konverzací", (await drawer.count()) === 1);
+  await page.waitForTimeout(80);
+  check("ai mobil: fokus v Draweru", await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]'))));
+  await page.screenshot({ path: `${OUT}ai-drawer-mobile.png` });
+  await page.keyboard.press("Escape");
+  check("ai mobil: Escape zavře", (await drawer.count()) === 0);
+  await page.waitForTimeout(60);
+  check("ai mobil: fokus zpět na tlačítko", await opener.evaluate((el) => el === document.activeElement));
+  await opener.click();
+  await drawer.getByRole("button", { name: /^Plán na týden/ }).click();
+  await page.waitForTimeout(700);
+  check("ai mobil: výběr konverzace zavře Drawer", (await page.getByRole("dialog").count()) === 0);
+  await aiSend(page, "Zapiš práci 2 h");
+  await page.waitForTimeout(1500);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check("ai mobil: karta akce bez přetečení", overflow <= 0, `${overflow}px`);
+  const composerVisible = await page.getByLabel("Zpráva pro Standa AI").isVisible();
+  check("ai mobil: pole pro zprávu viditelné", composerVisible);
+  await page.screenshot({ path: `${OUT}ai-mobile-pending.png` });
+  check("ai mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
+// omezený pohyb: indikátor přemýšlení a odpočet „Vrátit" bez animace
+{
+  const { ctx, page } = await open("/ai", { reducedMotion: "reduce" });
+  await aiSend(page, "Zapiš práci 1 h");
+  await page.waitForTimeout(150);
+  const dots = await page.evaluate(() => {
+    const d = document.querySelector(".animate-bounce");
+    return d ? getComputedStyle(d).animationName : "missing";
+  });
+  check("ai reduced motion: indikátor bez animace", dots === "none", dots);
+  await page.waitForTimeout(1400);
+  await page.getByRole("button", { name: "Potvrdit" }).first().click();
+  await page.waitForTimeout(1100);
+  const timer = await page.evaluate(() => {
+    const t = document.querySelector(".motion-undo-timer");
+    return t ? getComputedStyle(t).animationName : "missing";
+  });
+  check("ai reduced motion: odpočet Vrátit bez animace", timer === "none", timer);
+  await ctx.close();
+}
+
+// 15) Roadmap 4C – proxy.ts (dříve middleware.ts) a login: skutečné přesměrování podle session cookie z mock API.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await ctx.addCookies([{ name: "standa_hub_session", value: "expired", domain: "127.0.0.1", path: "/" }]);
+  const page = await ctx.newPage();
+  const errors = [];
+  const requests = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("request", (r) => requests.push(new URL(r.url()).pathname));
+  await page.goto(`${BASE}/ai`, { waitUntil: "networkidle" });
+  const u = new URL(page.url());
+  check("proxy: chráněná stránka bez session → /login", u.pathname === "/login" && u.searchParams.get("next") === "/ai", page.url());
+  check("login: bez zvonku a navigace", (await page.locator('button[aria-label^="Notifikace"]').count()) === 0 && (await page.locator("nav").count()) === 0);
+  check("login: žádné dotazy na notifikace", !requests.some((r) => r.startsWith("/notifications")), requests.join(","));
+  await page.waitForTimeout(500);
+  check("login: bez smyčky přesměrování", new URL(page.url()).pathname === "/login");
+  const pin = page.getByLabel("PIN", { exact: true });
+  await pin.fill("0000");
+  await page.getByRole("button", { name: "Přihlásit" }).click();
+  await page.waitForTimeout(700);
+  const alert = page.locator("main").getByRole("alert"); // Next má vlastní route announcer s role=alert mimo <main>
+  check("login: neplatný PIN česky", (await alert.count()) === 1 && /Neplatný PIN/.test(await alert.innerText()), await alert.innerText().catch(() => ""));
+  await pin.fill("1234");
+  await page.getByRole("button", { name: "Přihlásit" }).click();
+  await page.waitForURL("**/ai", { timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(800);
+  check("login: úspěch → zpět na původní stránku", new URL(page.url()).pathname === "/ai", page.url());
+  check("login: po přihlášení aplikace se zvonkem", (await page.locator('button[aria-label^="Notifikace"]').count()) === 1);
+  await page.goto(`${BASE}/login?next=%2Ffinance`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  check("login: přihlášený uživatel na /login → přesměrován dál", new URL(page.url()).pathname === "/finance", page.url());
+  check("proxy/login: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
