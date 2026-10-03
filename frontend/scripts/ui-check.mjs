@@ -7,9 +7,10 @@
 //           jinak `import("playwright")`; prohlížeč: PLAYWRIGHT_CHROMIUM=/cesta/k/chromium volitelně)
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
 import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
-const OUT = new URL("./.ui-check/", import.meta.url).pathname;
+const OUT = fileURLToPath(new URL("./.ui-check/", import.meta.url));  // .pathname dává na Windows /C:/…
 mkdirSync(OUT, { recursive: true });
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
