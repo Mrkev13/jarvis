@@ -449,3 +449,30 @@ class AuthSession(Base):
     revoked = Column(Boolean, default=False, nullable=False)
 
 
+
+
+class Reminder(Base):
+    """Připomínka (Roadmap 3.0 Phase D). Časy jsou naive UTC jako všude; opakování v pražském čase.
+
+    status: scheduled (čeká) → fired (jednorázová zazněla, čeká na hotovo/odložení) → done; kdykoli cancelled.
+    Opakovaná zůstává scheduled a po zaznění se due_at posune na další výskyt (recurrence + weekdays +
+    local_time v Europe/Prague). snoozed_until = odložený jednorázový výskyt opakované připomínky.
+    """
+    __tablename__ = "reminders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    note = Column(Text, nullable=True)
+    due_at = Column(DateTime, nullable=False)
+    status = Column(String(20), default="scheduled", nullable=False)
+    recurrence = Column(String(20), default="none", nullable=False)
+    weekdays = Column(String(20), nullable=True)
+    local_time = Column(String(5), nullable=True)
+    snoozed_until = Column(DateTime, nullable=True)
+    last_fired_at = Column(DateTime, nullable=True)
+    fire_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+Index("ix_reminders_status_due", Reminder.status, Reminder.due_at)

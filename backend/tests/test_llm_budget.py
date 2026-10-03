@@ -19,7 +19,7 @@ from llm_config import DEFAULT_GROQ_MODEL, load_llm_settings
 from time_utils import now_local
 
 ALL_TOOL_FUNCTIONS = {**ai.READ_TOOL_FUNCTIONS, **ai.WRITE_TOOL_FUNCTIONS}
-WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_", "modify_", "undo_")
+WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_", "modify_", "undo_", "manage_")
 # Interní parametry funkcí, které LLM nesmí vidět ani nastavit (db = session AI requestu, A5 read_queries).
 INTERNAL_PARAMS = {"user_context", "db", "now_utc"}
 
@@ -53,7 +53,8 @@ class TokenEstimatorTestCase(unittest.TestCase):
 # Plná sada toolů (AI_TOOL_ROUTING=false / nouzový fallback) smí být nad AI_MAX_FIXED_TOKENS – běžné
 # requesty posílají jen routovanou podmnožinu (A5, test_tool_router.py hlídá AI_MAX_FIXED_TOKENS pro ni).
 # Phase B (modify_records + pravidlo v promptu) posunula plnou sadu na ~4 300 → strop 4 500.
-FULL_TOOL_SET_MAX_FIXED_TOKENS = 4500
+# Phase D (3 tooly připomínek + pravidlo) ~4 960 → strop 5 000; běžné routované requesty jsou ~1 400–2 800.
+FULL_TOOL_SET_MAX_FIXED_TOKENS = 5000
 
 
 class FixedOverheadBudgetTestCase(unittest.TestCase):

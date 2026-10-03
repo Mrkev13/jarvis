@@ -22,6 +22,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
     { href: "/mff", label: "Marvel Future Fight" },
     { href: "/goals", label: "Goals" },
     { href: "/planner", label: "Planner" },
+    { href: "/reminders", label: "⏰ Připomínky" },
     { href: "/memory", label: "Memory" },
     { href: "/ai", label: "AI Assistant" },
   ];

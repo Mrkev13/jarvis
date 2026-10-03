@@ -61,7 +61,7 @@ def _seed_basic(db):
 
 class AreaSelectionTestCase(unittest.TestCase):
     def test_keyword_areas(self):
-        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications"})
+        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
         self.assertEqual(classify_areas("kolik jsem utratil za jídlo"), {"finance", "goals"})
         self.assertEqual(classify_areas("kolik mám kreditů ve WoT?"), {"wot"})
         self.assertEqual(classify_areas("ahoj"), set())
@@ -75,7 +75,7 @@ class AreaSelectionTestCase(unittest.TestCase):
         for question in ("co mám dělat tento týden", "co mám dneska dělat", "naplánuj mi zítřek", "jaké mám priority"):
             self.assertTrue({"work", "finance", "school", "goals", "notifications"} <= classify_areas(question), question)
         # Čistě časový dotaz bez plánovacího záměru zůstává úzký.
-        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications"})
+        self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
 
     def test_weekly_plan_context_covers_planner_reads_within_budget(self):
         engine, Session = _session()
@@ -87,6 +87,35 @@ class AreaSelectionTestCase(unittest.TestCase):
             self.assertIn("work", ctx.sections)
             self.assertIn("finance", ctx.sections)
             self.assertLessEqual(ctx.estimated_tokens, CONTEXT_TARGET_TOKENS)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_active_reminder_title_marks_reminders_as_named_area(self):
+        # Regrese (Phase D): „posuň fyzio o hodinu" – název aktivní připomínky = výslovná oblast připomínek.
+        from models import Reminder
+
+        engine, Session = _session()
+        db = Session()
+        try:
+            _seed_basic(db)
+            now = datetime(2026, 10, 3, 6, 0)
+            db.add_all([
+                Reminder(title="fyzio", due_at=datetime(2026, 10, 4, 6, 0), status="scheduled", recurrence="none",
+                         fire_count=0, created_at=now, updated_at=now),
+                Reminder(title="rotoped", due_at=datetime(2026, 10, 4, 7, 0), status="cancelled", recurrence="none",
+                         fire_count=0, created_at=now, updated_at=now),
+            ])
+            db.commit()
+            ctx = build_current_context(db, "posuň fyzio o hodinu", now_utc=NOW_UTC)
+            self.assertIn("reminders", ctx.named_areas)
+            self.assertIn("reminders", ctx.areas)
+            self.assertNotIn("reminders", build_current_context(db, "posuň rotoped o hodinu", now_utc=NOW_UTC).named_areas,
+                             "zrušená připomínka se za zmínku nepočítá")
+            self.assertEqual(build_current_context(db, "kolik hodin jsem odpracoval", now_utc=NOW_UTC).named_areas,
+                             frozenset())
+            self.assertEqual(build_current_context(db, "byl jsem u fyzioterapeuta 2 hodiny", now_utc=NOW_UTC).named_areas,
+                             frozenset(), "jen celé slovo, ne část jiného slova")
         finally:
             db.close()
             engine.dispose()

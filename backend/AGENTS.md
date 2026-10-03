@@ -605,3 +605,37 @@ print(_hash_pin("123456"))
 - **Bez migrace**: `undone` je nová hodnota existujícího sloupce `pending_actions.status`.
 - Testy: `test_undo.py`, router v `test_tool_router.py`, frontend `lib/pendingActions.test.mjs`.
 
+---
+
+## 20. Připomínky (Phase D, `reminder_service.py`, `reminder_actions.py`, migrace 0009)
+
+- **Tabulka `reminders`** (migrace `0009_reminders`, jen nová tabulka): `title`, `note`, `due_at` (naive UTC =
+  příští výskyt), `status`, `recurrence` (none/daily/weekly), `weekdays` („0,6", po=0), `local_time` („HH:MM"
+  Praha), `snoozed_until`, `last_fired_at`, `fire_count`, časy; index `(status, due_at)`.
+- **Čas**: ukládá se UTC, zadává a zobrazuje Europe/Prague (`due_local` „YYYY-MM-DDTHH:MM"). Opakování drží
+  pražský nástěnný čas přes DST. Neexistující čas (jarní posun 02:00–03:00) se posune o mezeru vpřed
+  (02:30 → 03:30), dvojznačný (podzimní) bere první výskyt (letní čas). Relativní „za 2 hodiny" se přepočte na
+  absolutní čas při vytvoření / návrhu.
+- **Stavy**: `scheduled` → `fired` (jednorázová zazněla) → `done`; `cancelled` kdykoli. Opakovaná zůstává
+  `scheduled` a po zaznění posune `due_at`. Hotovo u opakované potvrdí jen aktuální výskyt. Odložení: jednorázová
+  = nový `due_at`; opakovaná = `snoozed_until` (extra výskyt, série běží dál).
+- **Zazvonění bez LLM** (`process_due_reminders`): podmíněný `UPDATE … WHERE due_at/snoozed_until = výskyt`
+  + notifikace (`notification_type="reminder"`, `area="reminders"`, `severity="important"`,
+  dedupe `reminder:<id>:<výskyt>`) v jedné transakci na připomínku → nejvýš jednou, chyba jedné neblokuje
+  ostatní a připomínka se při dalším běhu zkusí znovu. Po výpadku: jednorázová zazní jednou s textem
+  „Zpožděno…", opakovaná jednou a pak až další budoucí výskyt.
+- **Kdo zpracovává**: job `standa_hub_reminders` ve stávajícím APScheduleru (`REMINDERS_CHECK_ENABLED=true`,
+  `REMINDERS_CHECK_SECONDS=60`, běží i bez hodinového jobu) **a** lazy při `GET /notifications` a
+  `/notifications/summary` (zvonek se ptá každých 30 s). Obojí je idempotentní.
+- **REST** (session auth): `GET /reminders?status=active|all|done|cancelled`, `POST /reminders`,
+  `PATCH /reminders/{id}`, `POST /reminders/{id}/snooze {minutes|until_local}`, `/done`, `/cancel`.
+- **AI**: `get_reminders` (read; CURRENT STATE má řádek „Připomínky" se zazněnými a do 48 h, časové dotazy
+  ho zahrnují), `add_reminder` (create) a `manage_reminder` (update/snooze/complete/cancel) – obojí pending
+  akce s plánem (přesný čas / id + snímek) a náhledem; cíl přes Phase B resolver (nejednoznačný → doptat).
+  Router: „připomeň" = create, „odlož/posuň/zruš" = mutate; u zmínky připomínky jen tooly připomínek.
+  „co mám připomenout dnes" obchází planner fast-path. Undo (Phase C) se na připomínky nevztahuje.
+- **Frontend**: `/reminders` (Teď / Nadcházející / Hotové a zrušené, Hotovo, +15 min / +1 h / Zítra 8:00,
+  úprava, zrušení s potvrzením), zazněné i ve zvonku. `lib/reminders.ts` + testy.
+- Testy: `test_reminders.py`, `test_reminders_api.py`, `test_ai_reminders.py`, migrace v
+  `test_alembic_migration.py`, frontend `lib/reminders.test.mjs`.
+

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,8 @@ AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS = "school", "goals", "notifications"
 AREA_FINANCE, AREA_WORK, AREA_WOT, AREA_MEMORY = "finance", "work", "wot", "memory"
 # MFF nemá CURRENT STATE sekci; oblast slouží routingu toolů (A5) a řazení paměti.
 AREA_MFF = "mff"
+# Phase D: připomínky (časové dotazy je zahrnují stejně jako školu a cíle).
+AREA_REMINDERS = "reminders"
 
 _DONE_STATUSES = {"completed", "hotovo", "done", "closed", "finished"}
 _EXAM_OPEN_STATUSES = {"upcoming", "scheduled", ""}
@@ -51,10 +53,12 @@ _AREA_WORDS = {
     AREA_WORK: ("prac", "odprac", "hodin", "smen", "vydelek", "vydelal", "sazb"),
     AREA_WOT: ("wot", "tank", "kredit", "gold", "grind", "free xp", "bond"),
     AREA_MFF: ("mff", "marvel", "future fight", "uniform", " ctp", " uru", "iso-8", "iso8"),
+    AREA_REMINDERS: ("pripom", "upomin", "reminder"),
     AREA_GOALS: ("cil", "cile", "goal", "progres"),
     AREA_NOTIFICATIONS: ("upozorn", "notifikac", "notifik"),
 }
-_AREA_SECTIONS_ORDER = (AREA_SCHOOL, AREA_NOTIFICATIONS, AREA_GOALS, AREA_WORK, AREA_FINANCE, AREA_WOT)
+_AREA_SECTIONS_ORDER = (AREA_SCHOOL, AREA_REMINDERS, AREA_NOTIFICATIONS, AREA_GOALS, AREA_WORK, AREA_FINANCE,
+                        AREA_WOT)
 # Read tooly, jejichž informaci daná sekce pokrývá (planner pravidla, metriky).
 _COVERED_TOOLS = {
     AREA_SCHOOL: ("get_school_assignments", "get_school_exams"),
@@ -64,6 +68,7 @@ _COVERED_TOOLS = {
     AREA_FINANCE: ("get_finance_summary",),
     AREA_WOT: ("get_wot_resources", "get_wot_grinds"),
     AREA_MEMORY: ("get_memories",),
+    AREA_REMINDERS: ("get_reminders",),
 }
 _STOPWORDS = {"jsem", "mam", "mas", "jak", "kdy", "kde", "jaky", "jaka", "jake", "pro", "ktery", "ktera", "ten", "tento",
               "tohle", "neco", "nebo", "ale", "aby", "byl", "bude", "chci", "muj", "moje", "tom", "the", "and"}
@@ -77,6 +82,8 @@ class CurrentContext:
     estimated_tokens: int
     areas: frozenset[str] = field(default_factory=frozenset)
     memory_text: str = ""  # jen RELEVANT MEMORY – pro grounding NENÍ zdrojem čísel
+    # Oblasti výslovně zmíněné jménem záznamu z DB, které router sám nezná (název aktivní připomínky).
+    named_areas: frozenset[str] = field(default_factory=frozenset)
 
 
 def _split_memory(text: str) -> str:
@@ -120,7 +127,7 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     if not implied:
         return frozenset(areas)
     if _has(t, _TIME_PLAN_WORDS):
-        areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS}
+        areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_REMINDERS}
     if _has(t, _PLAN_INTENT_WORDS):
         areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_WORK, AREA_FINANCE}
     if _has(t, _OVERVIEW_WORDS):
@@ -231,6 +238,29 @@ def _finance_lines(db: Session, today: date) -> list[str]:
     ]
 
 
+def _reminder_lines(db: Session, local_now: datetime) -> list[str]:
+    """Aktivní připomínky: zazněné + nejbližší do 48 h (pražský čas)."""
+    from models import Reminder
+    from time_utils import to_local
+
+    now_utc = local_now.astimezone(timezone.utc).replace(tzinfo=None)
+    horizon = now_utc + timedelta(hours=48)
+    rows = db.query(Reminder).filter(Reminder.status.in_(("scheduled", "fired"))).all()
+
+    def due(r):
+        return r.snoozed_until if r.snoozed_until is not None and r.snoozed_until < r.due_at else r.due_at
+
+    fired = [r for r in rows if r.status == "fired" or due(r) <= now_utc]
+    upcoming = sorted((r for r in rows if r not in fired and due(r) <= horizon), key=due)
+
+    def fmt(r):
+        t = to_local(due(r))
+        return f"{_short(r.title, 40)} {_WEEKDAYS[t.weekday()]} {t:%d.%m. %H:%M}"
+
+    return [f"Připomínky: zazněné {_list_or_none([_short(r.title, 40) for r in fired[:MAX_ITEMS]], len(fired))}; "
+            f"do 48 h {_list_or_none([fmt(r) for r in upcoming[:MAX_ITEMS]], len(upcoming))}"]
+
+
 def _wot_lines(db: Session) -> list[str]:
     resources = ", ".join(f"{r.resource} {_fmt_num(float(r.amount or 0))}" for r in db.query(WotResource).all())
     grinds = [g for g in db.query(WotGrind).all() if (g.status or "").lower() == "active"]
@@ -271,6 +301,17 @@ def _render(header_lines: list[str], sections: list[tuple[str, list[str]]], memo
     return "\n".join(out)
 
 
+def _named_reminder_areas(db: Session, message: str) -> frozenset[str]:
+    """Zmínka názvu aktivní připomínky („posuň fyzio o hodinu") = výslovně oblast připomínek."""
+    from models import Reminder
+
+    titles = [_fold(t).strip() for (t,) in db.query(Reminder.title).filter(Reminder.status.in_(("scheduled", "fired"))).all() if t]
+    folded = _fold(message)
+    # Celá slova („fyzio" ano, „fyzioterapeut" ne) – název připomínky bývá obyčejné slovo.
+    hit = any(len(t) >= 3 and re.search(rf"(?<!\w){re.escape(t)}(?!\w)", folded) for t in titles)
+    return frozenset({AREA_REMINDERS}) if hit else frozenset()
+
+
 def build_current_context(
     db: Session,
     message: str,
@@ -283,7 +324,8 @@ def build_current_context(
     today = local.date()
     projects = [p for (p,) in db.query(WorkSession.project).distinct().all() if p]
     tanks = [t for (t,) in db.query(WotGrind.tank).all() if t]
-    areas = classify_areas(message, projects, tanks)
+    named = _named_reminder_areas(db, message)
+    areas = classify_areas(message, projects, tanks) | named
     planner_like = is_planner_like(message)
 
     tomorrow = today + timedelta(days=1)
@@ -299,10 +341,11 @@ def build_current_context(
         AREA_WORK: lambda: _work_lines(db, today),
         AREA_FINANCE: lambda: _finance_lines(db, today),
         AREA_WOT: lambda: _wot_lines(db),
+        AREA_REMINDERS: lambda: _reminder_lines(db, local),
     }
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
-    explicit = classify_areas(message, projects, tanks, implied=False)
-    ordered = sorted((k for k in _AREA_SECTIONS_ORDER if k in areas), key=lambda k: k not in explicit)
+    explicit = classify_areas(message, projects, tanks, implied=False) | named
+    ordered =sorted((k for k in _AREA_SECTIONS_ORDER if k in areas), key=lambda k: k not in explicit)
     sections = [(key, builders[key]()) for key in ordered]
 
     memories = rank_memories(db.query(Memory).filter(Memory.active.is_(True)).all(), message, areas, planner=planner_like)
@@ -312,7 +355,7 @@ def build_current_context(
     if not sections and not memory_lines:
         # Neznámý / obecný dotaz: jen datum (malý obecný souhrn), žádná data modulů.
         text = _render(header, [], [])
-        return CurrentContext(text, ("date",), frozenset(), estimate_tokens(text), areas)
+        return CurrentContext(text, ("date",), frozenset(), estimate_tokens(text), areas, named_areas=named)
 
     # Rozpočet: nejdřív zkrátit paměť, pak odebírat sekce od nejméně důležité (konec pořadí).
     text = _render(header, sections, memory_lines)
@@ -331,4 +374,5 @@ def build_current_context(
     if memory_checked and (memory_lines or planner_like):
         covered |= set(_COVERED_TOOLS[AREA_MEMORY])
     section_names = ("date", *included, *(("memory",) if memory_lines else ()))
-    return CurrentContext(text, section_names, frozenset(covered), estimate_tokens(text), areas, _split_memory(text))
+    return CurrentContext(text, section_names, frozenset(covered), estimate_tokens(text), areas, _split_memory(text),
+                          named_areas=named)

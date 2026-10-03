@@ -10,6 +10,11 @@ from goal_history_service import ensure_goal_progress_snapshot_for_all_active_au
 _scheduler: BackgroundScheduler | None = None
 SCHEDULER_ENABLED = (os.environ.get("SCHEDULER_ENABLED", "false").lower() in ("1", "true", "yes"))
 SCHEDULER_INTERVAL_SECONDS = int(os.environ.get("SCHEDULER_INTERVAL_SECONDS", "3600"))
+# Phase D: kontrola splatných připomínek – vlastní lehký job ve STEJNÉM scheduleru, defaultně zapnutý
+# i bez hodinového jobu. Zpracování je idempotentní (víc workerů / lazy kontrola při čtení notifikací
+# nic nezdvojí), takže krátký interval je bezpečný.
+REMINDERS_CHECK_ENABLED = (os.environ.get("REMINDERS_CHECK_ENABLED", "true").lower() in ("1", "true", "yes"))
+REMINDERS_CHECK_SECONDS = max(15, int(os.environ.get("REMINDERS_CHECK_SECONDS", "60")))
 SINGLE_WORKER_ASSUMPTION_DOC = (
     "Scheduler assumes single backend worker (uvicorn --workers 1). "
     "If you run multiple workers, scheduler will fire multiple times per hour."
@@ -50,6 +55,24 @@ def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job finished at {datetime.utcnow().isoformat()}")
 
 
+def _run_reminders_job() -> None:
+    from reminder_service import process_due_reminders
+
+    db = SessionLocal()
+    try:
+        stats = process_due_reminders(db)
+        if stats["fired"] or stats["failed"]:
+            print(f"[scheduler] reminders: {stats}")
+    except Exception as _rerr:  # noqa: BLE001 - job nesmí shodit scheduler
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[scheduler] reminders job failed: {type(_rerr).__name__}: {_rerr}")
+    finally:
+        db.close()
+
+
 def run_job_now() -> dict:
     _run_hourly_job()
     return {"ok": True, "ran_at": datetime.utcnow().isoformat(), "doc": SINGLE_WORKER_ASSUMPTION_DOC}
@@ -59,23 +82,37 @@ def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
-    if not SCHEDULER_ENABLED:
-        print(f"[scheduler] disabled (SCHEDULER_ENABLED={SCHEDULER_ENABLED}). "
+    if not SCHEDULER_ENABLED and not REMINDERS_CHECK_ENABLED:
+        print(f"[scheduler] disabled (SCHEDULER_ENABLED={SCHEDULER_ENABLED}, "
+              f"REMINDERS_CHECK_ENABLED={REMINDERS_CHECK_ENABLED}). "
               f"Single worker assumption: {SINGLE_WORKER_ASSUMPTION_DOC}")
         return None
     sched = BackgroundScheduler(daemon=True, timezone="UTC")
-    sched.add_job(
-        _run_hourly_job,
-        trigger=IntervalTrigger(seconds=SCHEDULER_INTERVAL_SECONDS),
-        id="standa_hub_hourly",
-        name="standa_hub_hourly",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        next_run_time=datetime.utcnow(),
-    )
+    if SCHEDULER_ENABLED:
+        sched.add_job(
+            _run_hourly_job,
+            trigger=IntervalTrigger(seconds=SCHEDULER_INTERVAL_SECONDS),
+            id="standa_hub_hourly",
+            name="standa_hub_hourly",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            next_run_time=datetime.utcnow(),
+        )
+    if REMINDERS_CHECK_ENABLED:
+        sched.add_job(
+            _run_reminders_job,
+            trigger=IntervalTrigger(seconds=REMINDERS_CHECK_SECONDS),
+            id="standa_hub_reminders",
+            name="standa_hub_reminders",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            next_run_time=datetime.utcnow(),
+        )
     sched.start()
-    print(f"[scheduler] started! interval={SCHEDULER_INTERVAL_SECONDS}s. "
+    print(f"[scheduler] started! hourly={'on' if SCHEDULER_ENABLED else 'off'} ({SCHEDULER_INTERVAL_SECONDS}s), "
+          f"reminders={'on' if REMINDERS_CHECK_ENABLED else 'off'} ({REMINDERS_CHECK_SECONDS}s). "
           f"Single worker: {SINGLE_WORKER_ASSUMPTION_DOC}")
     _scheduler = sched
     return sched
