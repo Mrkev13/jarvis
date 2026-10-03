@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from openai import OpenAI
 from sqlalchemy import update as _sql_update
 
-from tool_registry import READ_SPECS, TOOL_SPECS, WRITE_SPECS, _tool  # noqa: F401 (_tool: zpětná kompatibilita)
+from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS, _tool  # noqa: F401 (_tool: zpětná kompatibilita)
 from activity_service import log_activity, delta_dict
 from database import SessionLocal
 from models import PendingAction
@@ -291,7 +291,8 @@ def _run_tool_calls(db, tool_calls):
             }
         else:
             try:
-                result = function(**arguments)
+                spec = TOOLS_BY_NAME.get(fn_name)
+                result = function(db, **arguments) if spec is not None and spec.takes_db else function(**arguments)
             except Exception as exc:
                 result = {
                     "error": "tool_execution_failed",

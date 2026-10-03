@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+import types
 import unittest
 from datetime import date, datetime
 
@@ -15,6 +17,7 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
+import ai  # noqa: E402
 import read_queries as rq  # noqa: E402
 import tools  # noqa: E402
 from database import Base  # noqa: E402
@@ -144,6 +147,26 @@ class ReadQueriesTestCase(unittest.TestCase):
         r = rq.query_recent_activity(self.db, area="finance", days=90, now_utc=now)
         self.assertEqual([i["summary"] for i in r["items"]], ["Výdaj", "Stará"])
         self.assertEqual(rq.query_recent_activity(self.db, days=1000, now_utc=now)["filters"]["days"], rq.MAX_ACTIVITY_DAYS)
+
+
+    def test_ai_tool_call_runs_filtered_query_on_request_session(self):
+        """get_finance_transactions z LLM běží přes read_queries se session AI requestu a s filtry."""
+        self._finance()
+        call = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(
+            name="get_finance_transactions", arguments=json.dumps({"transaction_type": "income", "limit": 5}),
+        ))
+        tool_messages, pending = ai._run_tool_calls(self.db, [call])
+        self.assertEqual(pending, [])
+        result = json.loads(tool_messages[0]["content"])
+        self.assertEqual([i["amount"] for i in result["items"]], [9000])
+        self.assertEqual(result["filters"]["limit"], 5)
+
+    def test_bad_filter_value_becomes_tool_error_not_crash(self):
+        call = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(
+            name="get_work_sessions", arguments=json.dumps({"date_from": "minulý týden"}),
+        ))
+        tool_messages, _ = ai._run_tool_calls(self.db, [call])
+        self.assertEqual(json.loads(tool_messages[0]["content"])["error"], "tool_execution_failed")
 
 
 if __name__ == "__main__":

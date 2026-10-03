@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 from tools import get_wot_resources, get_wot_grinds
-from tools import get_finance_summary, get_finance_transactions
-from tools import get_school_subjects, get_school_assignments, get_school_exams
-from tools import get_work_summary, get_work_sessions
+from tools import get_finance_summary
+from tools import get_school_subjects
+from tools import get_work_summary
 from tools import get_mff_summary, get_mff_characters
-from tools import get_goals_summary, get_goals
+from tools import get_goals_summary
 from tools import get_memories
 from tools import get_notifications, get_notification_summary, get_goal_progress_history
 from tools import add_work_session, add_finance_transaction
@@ -25,6 +25,14 @@ from tools import add_school_subject, add_school_assignment, add_school_exam
 from tools import update_wot_resource, upsert_wot_grind
 from tools import upsert_mff_character, upsert_goal
 from tools import save_memory
+from read_queries import (
+    query_finance_transactions,
+    query_goals,
+    query_recent_activity,
+    query_school_assignments,
+    query_school_exams,
+    query_work_sessions,
+)
 
 READ, WRITE = "read", "write"
 
@@ -66,6 +74,8 @@ _DATE = {"type": "string", "description": "YYYY-MM-DD"}
 _PRIORITY = {"type": "string", "enum": ["high", "medium", "low"]}
 _MEMORY_CATEGORY = {"type": "string", "enum": ["preference", "decision", "context", "routine", "constraint", "plan"]}
 _MEMORY_AREA = {"type": "string", "description": "general, wot, finance, school, work, mff, personal, fitness, hobby, travel"}
+# Filtrované read tooly (read_queries.py): výsledek {items,total,returned,truncated}; default 20 položek.
+_LIMIT = {"type": "integer", "description": "default 20"}
 
 
 def _read(name, description, properties=None, required=None, *, func, areas, covered=False, requires=(), takes_db=False):
@@ -86,26 +96,68 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
           func=get_wot_grinds, areas=[AREA_WOT]),
     _read("get_finance_summary", "Finance totals: income, expenses, balance, transaction count.",
           func=get_finance_summary, areas=[AREA_FINANCE]),
-    _read("get_finance_transactions", "All finance transactions, newest first.",
-          func=get_finance_transactions, areas=[AREA_FINANCE]),
+    _read(
+        "get_finance_transactions",
+        "Finance transactions, newest first.",
+        {
+            "limit": _LIMIT,
+            "transaction_type": {"type": "string", "enum": ["income", "expense"]},
+            "category": _STR,
+            "date_from": _DATE,
+            "date_to": _DATE,
+        },
+        func=query_finance_transactions, areas=[AREA_FINANCE], takes_db=True,
+    ),
     _read("get_school_subjects", "School subjects with IDs (source of subject_id).",
           func=get_school_subjects, areas=[AREA_SCHOOL]),
-    _read("get_school_assignments", "School assignments: due date, priority, status, subject.",
-          func=get_school_assignments, areas=[AREA_SCHOOL]),
-    _read("get_school_exams", "School exams: date, status, subject.",
-          func=get_school_exams, areas=[AREA_SCHOOL]),
+    _read(
+        "get_school_assignments",
+        "School assignments by due date (default: open only).",
+        {
+            "limit": _LIMIT,
+            "status": {"type": "string", "enum": ["open", "done", "all"]},
+            "subject_id": _INT,
+            "due_from": _DATE,
+            "due_to": _DATE,
+        },
+        func=query_school_assignments, areas=[AREA_SCHOOL], takes_db=True,
+    ),
+    _read(
+        "get_school_exams",
+        "School exams by date (default: open only).",
+        {
+            "limit": _LIMIT,
+            "status": {"type": "string", "enum": ["open", "passed", "failed", "all"]},
+            "subject_id": _INT,
+            "date_from": _DATE,
+            "date_to": _DATE,
+        },
+        func=query_school_exams, areas=[AREA_SCHOOL], takes_db=True,
+    ),
     _read("get_work_summary", "Work hours and earnings: total and current month.",
           func=get_work_summary, areas=[AREA_WORK]),
-    _read("get_work_sessions", "Work sessions with earnings, newest first.",
-          func=get_work_sessions, areas=[AREA_WORK]),
+    _read(
+        "get_work_sessions",
+        "Work sessions with earnings, newest first.",
+        {"limit": _LIMIT, "project": _STR, "date_from": _DATE, "date_to": _DATE},
+        func=query_work_sessions, areas=[AREA_WORK], takes_db=True,
+    ),
     _read("get_mff_summary", "MFF summary: character counts by tier and priority.",
           func=get_mff_summary, areas=[AREA_MFF]),
     _read("get_mff_characters", "MFF tracked characters with build details.",
           func=get_mff_characters, areas=[AREA_MFF]),
     _read("get_goals_summary", "Goal counts by status.",
           func=get_goals_summary, areas=[AREA_GOALS]),
-    _read("get_goals", "Goals: area, status, priority, progress, target date.",
-          func=get_goals, areas=[AREA_GOALS]),
+    _read(
+        "get_goals",
+        "Goals: area, status, priority, progress, target date.",
+        {
+            "limit": _LIMIT,
+            "area": _STR,
+            "status": {"type": "string", "enum": ["all", "open", "paused", "completed"]},
+        },
+        func=query_goals, areas=[AREA_GOALS], takes_db=True,
+    ),
     _read(
         "get_memories",
         "Long-term user memories. Never a source of numbers or dates.",
@@ -127,6 +179,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
           func=get_notification_summary, areas=[AREA_NOTIFICATIONS]),
     _read("get_goal_progress_history", "Progress snapshots of one goal.", {"goal_id": _INT}, ["goal_id"],
           func=get_goal_progress_history, areas=[AREA_GOALS], requires=["get_goals"]),
+    _read(
+        "get_recent_activity",
+        "Recent app changes (activity log), newest first.",
+        {"limit": _LIMIT, "area": _STR, "days": {"type": "integer", "description": "default 7"}},
+        func=query_recent_activity, areas=[AREA_ACTIVITY], takes_db=True,
+    ),
     # ===== WRITE (jen příprava pending akce; provedení až po potvrzení v UI) =====
     _write(
         "add_work_session",
