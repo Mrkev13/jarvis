@@ -27,6 +27,26 @@ visual polish.
 | Notification panel (inside the bell), planner cards, `/activity` light-theme cards | ⏳ 4B |
 | Backend copy in English (e.g. planner "Vyřešit overdue úkol") | ⏳ fix at the source (backend) |
 
+## Status after Roadmap 4B
+
+| Item | Status |
+|---|---|
+| Login shell without navigation/bell/polling, labelled PIN | ✅ `components/AppShell.tsx`, `lib/shell.ts`, `app/login/page.tsx` |
+| Mobile menu: dialog, focus into menu, Escape + focus return, focus to content after navigation, skip link | ✅ `Sidebar.tsx`, `Drawer` |
+| `Drawer` (+ shared `useModal`, portal) | ✅ used by mobile menu and notification panel |
+| Notification panel in the design system | ✅ `NotificationsBell.tsx` |
+| `FilterBar` / `FilterSelect` / `FilterChips` | ✅ used by activity, memory, MFF |
+| Touch targets (TextLink hit area, 44 px buttons/tabs on touch) | ✅ checked by ui-check |
+| Dashboard wide layout (no empty column, no stretched cards) | ✅ |
+| Raw ISO dates / English in planner reasons and notifications | ✅ fixed in the backend (`text_utils.py`) |
+| Naive UTC timestamps shown as local time | ✅ `parseApiInstant` |
+| Migrated pages: planner (+cards), school, work, finance, goals, activity, memory, WoT, MFF, login | ✅ |
+| Activity bugs: date filter ignored (`from`/`to` vs `from_date`/`to_date`), multi-area returned nothing, empty change detail | ✅ fixed |
+| `Modal` primitive | ⏳ not needed (ConfirmDialog + Drawer cover all current uses) |
+| `/ai` assistant redesign / split | ⏳ separate phase |
+| `middleware.ts` → `proxy.ts` (Next 16) | ⏳ still open (touches auth) |
+| Light theme | ⏳ out of scope (Themes phase) |
+
 ## What existed before 4A
 
 - Dark theme by convention (`bg-zinc-950` body, `bg-zinc-900 border-zinc-800 rounded-2xl` cards) — but the card

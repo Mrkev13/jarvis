@@ -1,4 +1,4 @@
-# Standa Hub – Design System & Jarvis Visual Language (Roadmap 4A)
+# Standa Hub – Design System & Jarvis Visual Language (Roadmap 4A + 4B)
 
 > **A futuristic Jarvis/HUD personal operating system designed as a professional daily-use product.**
 > Readability always wins over effects. If sci-fi styling ever fights clarity, hierarchy, accessibility or fast
@@ -66,7 +66,19 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 | `Tabs` | switching views of the same list (role=tablist, arrow keys) | navigation between pages |
 | `EmptyState` / `ErrorState` / `LoadingState` / `Skeleton` | mandatory states for every data view | flash an empty state while loading |
 | `ConfirmDialog` | destructive or costly actions; return a Promise from `onConfirm` for the busy state | `window.confirm` |
+| `Drawer` (4B) | side panel over the page: mobile menu, notification panel. `title`, `description`, header `actions`, `width="sm"\|"md"`, `restoreFocus`, `initialFocus` | page content that should be a route; nested drawers |
+| `FilterBar` + `FilterSelect` + `FilterChips` (4B) | filtered lists: search field, labelled selects, multi-select chips (`aria-pressed`), result count (`aria-live`), "Zrušit filtry (n)" | page navigation; filters with no list under them |
+| `AreaBadge` (4B) | area identity (Škola, Práce, WoT…) from `lib/areas.ts` | status (use `StatusBadge`) |
 | `useApiResource(path, {refreshMs, debounceMs})` | any GET: loading starts true, refresh keeps data, abort + stale guard, server error detail | hand-written `useEffect` loaders |
+
+Overlays (`Drawer`, `ConfirmDialog`) share `useModal` (scroll lock, initial focus, Tab trap, Escape unless busy,
+focus restore) and render through a portal into `<body>` — an ancestor with `transform` or `backdrop-filter`
+(sticky header, page transition) would otherwise clip `position: fixed`.
+
+Pure page logic lives next to the primitives in `lib/` with `node:test` tests: `filters.ts` (query building,
+active count), `activity.ts`, `memory.ts`, `goals.ts` (Czech status/tracking/source labels), `school.ts`, `work.ts`,
+`wot.ts`, `mff.ts`, `areas.ts`. `lib/format.ts` adds `parseApiInstant` (naive API timestamps are UTC),
+`formatTime`, `pragueDayKey`, `pragueDayStartIso/EndIso` (date filters as Prague-day bounds in UTC).
 
 API helpers: `apiJson(path, jsonBody("POST", body))` throws `ApiError` with the server `detail`;
 `errorMessage(err)` turns any error into Czech text. 401 still redirects to `/login` (in `apiFetch`).
@@ -101,7 +113,10 @@ Rules:
 ## 7. Accessibility checklist (per page)
 
 - One `h1`; sections/cards have headings; landmarks (`main`, `nav`, `aside`) are labelled.
-- Every interactive element has a visible focus ring (`focus-visible:ring-accent/70`), touch target ≥ 36–40 px.
+- Every interactive element has a visible focus ring (`focus-visible:ring-accent/70`). Touch targets: buttons and
+  tabs are ≥ 36 px with a mouse and grow to 44 px on touch (`pointer-coarse:min-h-11`); `TextLink` and short
+  link titles extend their hit area with an `::after` overlay (≥ 40 px) instead of growing the layout.
+- Authenticated pages have a skip link „Přeskočit na obsah" → `<main id="main-content" tabIndex={-1}>`.
 - Dialogs: `role="dialog"`, `aria-modal`, labelled, focus trap, Escape (not while busy), focus restored.
 - Loading = `role="status"` with text; errors = `role="alert"`; busy buttons = `aria-busy` + disabled.
 - Progress bars have labels; icons are `aria-hidden`; counts in icon buttons are in `aria-label`.
@@ -113,3 +128,62 @@ Rules:
 User-facing UI is Czech. Allowed English: proper names (World of Tanks, Marvel Future Fight), technical micro-labels
 where deliberate, and the bilingual forecast label "Odhad / Forecast". Backend-generated text (e.g. planner reasons)
 is shown as delivered — fix copy at the source.
+
+## 9. Migration conventions (Roadmap 4B)
+
+Every migrated page follows the same skeleton:
+
+```tsx
+<ContentContainer width="default|narrow">           // <main id="main-content">
+  <PageHeader eyebrow={<HudLabel>Modul · …</HudLabel>} title="…" subtitle="…" actions={…} />
+  {/* key numbers */} <StatGrid><MetricCard … /></StatGrid>
+  {/* lists */}      <PageSection title="…"> EntityList / Card rows </PageSection>
+  <ConfirmDialog … />
+</ContentContainer>
+```
+
+- Data: `useApiResource` (filters/search with `debounceMs: 300`); mutations via `apiJson` + `jsonBody`, then
+  `reload()`. The first load shows `LoadingState`, a failed load `ErrorState` with retry, a failed refresh keeps the
+  data and shows an `ErrorState` above it. Never show an empty state before the first response.
+- Forms: `FormField` with visible Czech labels, inline validation messages under the field, one primary submit with
+  `busy`. Disclosure buttons ("Přidat …") carry `aria-expanded`/`aria-controls`.
+- Row-level destructive buttons are `ghost` ("Smazat" + `aria-label` naming the record); the `ConfirmDialog` carries
+  the danger styling. Reminders (4A) keep their danger "Zrušit".
+- Enum values from the API never reach the UI: map them to Czech labels in `lib/<module>.ts` (values in payloads stay
+  unchanged).
+- Dates: date-only (`YYYY-MM-DD`) via `formatDate` without timezone conversion; instants via
+  `formatDateTime`/`formatTime` (naive API values are UTC → shown in Europe/Prague). Group by day with
+  `pragueDayKey`. Never `new Date(x).toLocale…` on API values.
+- Lists instead of admin tables: rows wrap with `flex-wrap`/`min-w-0`/`break-words`; nothing overflows at 390 px.
+
+## 10. Page exceptions & game-module rules
+
+- **World of Tanks / Marvel Future Fight** keep their identity only through the area colour (`AreaBadge`, a thin
+  top accent on one card) and their own terms (tank and character names, T4, Uniform, CTP, ISO-8, Free XP). No neon,
+  no gauges/dials, no glow, no new mechanics. Numbers are MetricCards; build completeness is a plain `Progress`.
+- **Goals** are progress-oriented: Progress + percent + target date. No XP, streaks, trophies or confetti
+  (only the existing subtle completion pulse at 100 %).
+- **Finance** uses semantic colour sparingly: balance by sign, income green, expenses neutral; amounts are signed
+  with a real minus and tabular figures.
+- **Activity** is the audit log: neutral rows, Czech action labels, the change detail (`/activity/{id}` → delta) loads
+  on demand. Only `error` (danger) and `delete`/`reject` (warning) get colour.
+- **AI assistant** (`/ai`) is not migrated yet; it renders the migrated planner cards (`compact`).
+
+## 11. Notification panel
+
+- One bell in the whole app (desktop sidebar or mobile header, chosen by `useMediaQuery`), `aria-label` includes the
+  unread count, `aria-haspopup="dialog"`, `aria-expanded`. Summary polling every 30 s; the badge pulses only when
+  the count increases.
+- Opening runs `POST /notifications/generate` and loads the list into a `Drawer` titled „Notifikace" (summary of
+  unread/important/warnings in the description, „Přečíst vše" in the header).
+- Items: new/read state in text („Nové"/„Přečteno"), severity (`StatusBadge`), area (`AreaBadge`), time in Prague,
+  actions „Otevřít" (closes the panel and navigates), „Přečteno", „Vyřešit" with busy state.
+- Escape or the backdrop closes it and focus returns to the bell; reduced motion disables the slide-in.
+
+## 12. Login shell & mobile navigation
+
+- `/login` is a bare route (`lib/shell.ts` → `isBareRoute`): no sidebar, no bell, no polling, no authenticated
+  requests (so no 401 noise). The PIN field has a real `<label>`, a hint (`aria-describedby`) and `aria-invalid`.
+- Mobile menu = `Drawer` titled „Menu": focus starts on the current page link, Tab is trapped, Escape closes and
+  returns focus to ☰. Choosing another page closes the menu and moves focus to the new page's `#main-content`
+  (choosing the current page just closes it).
