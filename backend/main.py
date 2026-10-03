@@ -30,6 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 from ai import ask_ai, execute_confirm_action, reject_pending, _get_pending_action, _check_pending_expired
+import ai as _ai_module
+from history_service import prepare_conversation_history, window_client_messages
+from llm_config import LLM_SETTINGS
+from llm_usage import log_history
 
 from goal_history_service import ensure_goal_progress_snapshot, compute_goal_progress_and_value
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
@@ -401,6 +405,42 @@ def root():
     }
 
 
+def _as_message_dicts(messages) -> list[dict]:
+    return [m if isinstance(m, dict) else {"role": m.role, "content": m.content} for m in messages]
+
+
+def _history_for_ai(conversation_id: int | None, fallback_messages) -> list[dict]:
+    """Okno historie + shrnutí (A4). Uložená konverzace → shrnutí se ukládá a znovu používá;
+    historie od klienta → jen okno. Chyba přípravy = jen okno z již načtených zpráv."""
+    fallback = _as_message_dicts(fallback_messages)
+    if conversation_id is None:
+        result = window_client_messages(fallback, LLM_SETTINGS)
+        log_history(result, LLM_SETTINGS.usage_logging)
+        return result.messages
+    db = SessionLocal()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if conv is None:
+            return window_client_messages(fallback, LLM_SETTINGS).messages
+        db_messages = (
+            db.query(Message)
+            .filter(Message.conversation_id == conv.id)
+            .order_by(Message.created_at.asc(), Message.id.asc())
+            .all()
+        )
+        result = prepare_conversation_history(
+            db, conv, db_messages, LLM_SETTINGS, _ai_module.summarize_conversation,
+        )
+        log_history(result, LLM_SETTINGS.usage_logging)
+        return result.messages
+    except Exception as exc:  # noqa: BLE001 - historie nesmí shodit chat
+        db.rollback()
+        print(f"[chat] WARNING příprava historie selhala ({type(exc).__name__}) – posílám jen okno")
+        return window_client_messages(fallback, LLM_SETTINGS).messages
+    finally:
+        db.close()
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     conversation_id = request.conversation_id
@@ -526,7 +566,8 @@ def chat(request: ChatRequest):
             planner_db.close()
 
     try:
-        result = ask_ai(messages_for_ai)
+        # A4: jen LLM cesta (planner fast-path výše historii nepotřebuje → žádné zbytečné shrnutí).
+        result = ask_ai(_history_for_ai(conversation_id, messages_for_ai))
         if conversation_id is not None and isinstance(result, dict) and "answer" in result:
             db = SessionLocal()
             try:

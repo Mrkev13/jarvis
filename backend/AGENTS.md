@@ -70,7 +70,7 @@ Pokud insert ActivityLog selže (např. UNIQUE constraint na `dedupe_key`), vyho
 
 ---
 
-## 3. Alembic migrace (7 revizí)
+## 3. Alembic migrace (8 revizí)
 
 Alembic je **jediný vlastník schématu**. `Base.metadata.create_all` se v produkčním startu nevolá
 (používají ho jen unit testy na in-memory SQLite).
@@ -86,6 +86,7 @@ Alembic je **jediný vlastník schématu**. `Base.metadata.create_all` se v prod
 | `0005_backup_log.py`                   | `backup_logs` (10 sloupců)                                          |
 | `0006_auth_sessions.py`                | `auth_sessions` (8 sloupců)                                         |
 | `0007_reconcile_schema_drift.py`       | Sjednocení názvů/existence indexů a NOT NULL s `models.py` (viz 3.4) |
+| `0008_conversation_summary.py`         | `conversations.summary` (Text) + `summarized_until_message_id` (Integer), oba nullable (kap. 16) |
 
 ### 3.2 Startup (FastAPI lifespan)
 
@@ -474,3 +475,28 @@ print(_hash_pin("123456"))
 - `covered_tools` kontextu se počítají jako „načtené" pro planner pravidla (žádné auto-`get_memories`
   ani připomínka, pokud cíle/paměť nese kontext).
 - Log souhrnu requestu má `context_tokens` a `context_sections` (počet), nikdy obsah kontextu.
+
+---
+
+## 16. Historie konverzace a shrnutí (A4, `history_service.py`)
+
+- **Jen LLM cesta** `/chat`: `_history_for_ai` se volá až po planner fast-path (rule-based plán historii
+  nepotřebuje → žádné zbytečné shrnutí). Pořadí zpráv pro model:
+  `system prompt → CURRENT STATE (A3) → CONVERSATION SUMMARY → [starší neshrnuté pod prahem] → posledních N`.
+- **Okno**: posledních `AI_HISTORY_WINDOW_MESSAGES` (8) zpráv doslovně.
+- **Shrnutí** (uložená konverzace): když starší, dosud neshrnuté zprávy (`id > summarized_until_message_id`)
+  přesáhnou `AI_SUMMARY_TRIGGER_TOKENS` (1000), jedno volání `ai.summarize_conversation`
+  (`GROQ_SUMMARY_MODEL`, bez toolů, `max_tokens=AI_MAX_SUMMARY_TOKENS`) shrne dávku max 3× práh
+  a zapracuje předchozí shrnutí. Uloží se `summary` + `summarized_until_message_id` = poslední zahrnutá
+  zpráva → **inkrementální posun, stejné zprávy se znovu neshrnují**. Pod prahem se starší zprávy posílají
+  doslovně a shrnutí se nevolá.
+- Velké dohánění (stará dlouhá konverzace): 1 shrnutí na turn; zbytek nad práh se ten turn vynechá
+  a dožene se v dalších turnech.
+- **Selhání shrnutí** (výjimka, prázdný text, denní limit…): request pokračuje, starší neshrnuté zprávy se
+  pro tento turn vynechají (truncation), uložené shrnutí/ID se nemění.
+- **Rozpočet**: `AI_MAX_HISTORY_TOKENS` (2500) = tvrdé max celé historie vč. shrnutí (nad něj se odebírají
+  nejstarší zprávy, poslední nikdy). Validace: `AI_MAX_SUMMARY_TOKENS + AI_SUMMARY_TRIGGER_TOKENS ≤
+  AI_MAX_HISTORY_TOKENS`. Celý request (odhad): fixní ≤ 3 500 + CURRENT STATE ≤ 600 + historie ≤ 2 500.
+- Historie bez `conversation_id` (od klienta): jen okno + tvrdé max, nic se neukládá.
+- Shrnutí **není evidence** pro planner grounding a je označené jako „context only".
+- Log: řádek `history ...` (počty zpráv, tokeny, summary_used/called/failed, dropped) – nikdy obsah.

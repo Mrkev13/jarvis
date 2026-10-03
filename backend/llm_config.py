@@ -19,6 +19,12 @@ DEFAULT_MAX_FIXED_TOKENS = 3500
 DEFAULT_CONTEXT_TARGET_TOKENS = 500
 DEFAULT_MAX_CONTEXT_TOKENS = 600
 # Retry: SDK vlastní retry vypnuto (0), aby každý 429/5xx prošel aplikační smyčkou a byl vidět v logu.
+# Historie konverzace (A4): okno posledních zpráv, práh shrnutí starších zpráv, max délka shrnutí
+# a tvrdé maximum celé posílané historie (shrnutí + nezahrnuté starší + okno).
+DEFAULT_HISTORY_WINDOW_MESSAGES = 8
+DEFAULT_SUMMARY_TRIGGER_TOKENS = 1000
+DEFAULT_MAX_SUMMARY_TOKENS = 300
+DEFAULT_MAX_HISTORY_TOKENS = 2500
 DEFAULT_SDK_MAX_RETRIES = 0
 DEFAULT_LLM_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_MAX_WAIT_SECONDS = 20
@@ -33,6 +39,10 @@ class LLMSettings:
     max_context_tokens: int  # tvrdé maximum injektovaného CURRENT STATE kontextu
     sdk_max_retries: int = DEFAULT_SDK_MAX_RETRIES
     context_target_tokens: int = DEFAULT_CONTEXT_TARGET_TOKENS
+    history_window_messages: int = DEFAULT_HISTORY_WINDOW_MESSAGES
+    summary_trigger_tokens: int = DEFAULT_SUMMARY_TRIGGER_TOKENS
+    max_summary_tokens: int = DEFAULT_MAX_SUMMARY_TOKENS
+    max_history_tokens: int = DEFAULT_MAX_HISTORY_TOKENS
     llm_max_attempts: int = DEFAULT_LLM_MAX_ATTEMPTS
     retry_max_wait_seconds: int = DEFAULT_RETRY_MAX_WAIT_SECONDS
     usage_logging: bool = True
@@ -65,6 +75,14 @@ def load_llm_settings(env: dict | None = None) -> LLMSettings:
     target_context = _int_env(env, "AI_CONTEXT_TARGET_TOKENS", min(DEFAULT_CONTEXT_TARGET_TOKENS, max_context))
     if target_context > max_context:
         raise ValueError(f"AI_CONTEXT_TARGET_TOKENS ({target_context}) nesmí být větší než AI_MAX_CONTEXT_TOKENS ({max_context})")
+    max_history = _int_env(env, "AI_MAX_HISTORY_TOKENS", DEFAULT_MAX_HISTORY_TOKENS)
+    max_summary = _int_env(env, "AI_MAX_SUMMARY_TOKENS", DEFAULT_MAX_SUMMARY_TOKENS)
+    summary_trigger = _int_env(env, "AI_SUMMARY_TRIGGER_TOKENS", DEFAULT_SUMMARY_TRIGGER_TOKENS)
+    if max_summary + summary_trigger > max_history:
+        raise ValueError(
+            f"AI_MAX_SUMMARY_TOKENS ({max_summary}) + AI_SUMMARY_TRIGGER_TOKENS ({summary_trigger}) "
+            f"musí být <= AI_MAX_HISTORY_TOKENS ({max_history})"
+        )
     return LLMSettings(
         groq_base_url=(env.get("GROQ_BASE_URL") or "").strip() or DEFAULT_GROQ_BASE_URL,
         groq_model=model,
@@ -72,6 +90,10 @@ def load_llm_settings(env: dict | None = None) -> LLMSettings:
         max_fixed_tokens=_int_env(env, "AI_MAX_FIXED_TOKENS", DEFAULT_MAX_FIXED_TOKENS),
         max_context_tokens=max_context,
         context_target_tokens=target_context,
+        history_window_messages=_int_env(env, "AI_HISTORY_WINDOW_MESSAGES", DEFAULT_HISTORY_WINDOW_MESSAGES),
+        summary_trigger_tokens=summary_trigger,
+        max_summary_tokens=max_summary,
+        max_history_tokens=max_history,
         sdk_max_retries=_int_env(env, "GROQ_SDK_MAX_RETRIES", DEFAULT_SDK_MAX_RETRIES, min_value=0),
         llm_max_attempts=_int_env(env, "AI_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS),
         retry_max_wait_seconds=_int_env(env, "AI_LLM_RETRY_MAX_WAIT_SECONDS", DEFAULT_RETRY_MAX_WAIT_SECONDS),

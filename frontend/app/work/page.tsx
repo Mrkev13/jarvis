@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { MAX_STAGGER, staggerStyle, useNewIds } from "@/lib/motion";
 
 type WorkSummary = {
   total_hours: number;
@@ -52,6 +54,11 @@ export default function WorkPage() {
   const [summary, setSummary] = useState<WorkSummary | null>(null);
   const [sessions, setSessions] = useState<WorkSessionItem[]>([]);
   const [loading, setLoading] = useState(false);
+  // Nově přidané session krátce zvýraznit (ne při prvním načtení).
+  const newSessionIds = useNewIds(
+    sessions.map((s) => s.id),
+    summary !== null && !loading,
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingSession, setDeletingSession] = useState<WorkSessionItem | null>(null);
@@ -162,7 +169,7 @@ export default function WorkPage() {
       )}
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
           <div className="text-sm text-zinc-400 mb-4">This month</div>
           <div className="space-y-3">
             <div className="flex justify-between items-baseline gap-4">
@@ -170,7 +177,7 @@ export default function WorkPage() {
               <span className="text-3xl font-bold">
                 {loading && !summary
                   ? "…"
-                  : formatHours(summary?.this_month_hours ?? 0)}
+                  : <AnimatedNumber value={summary?.this_month_hours ?? 0} format={formatHours} />}
               </span>
             </div>
             <div className="flex justify-between items-baseline gap-4">
@@ -178,13 +185,13 @@ export default function WorkPage() {
               <span className="text-2xl font-semibold text-green-400">
                 {loading && !summary
                   ? "…"
-                  : `${formatNumber(summary?.this_month_earnings ?? 0)} Kč`}
+                  : <><AnimatedNumber value={summary?.this_month_earnings ?? 0} format={formatNumber} /> Kč</>}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <div className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-6" style={staggerStyle(1)}>
           <div className="text-sm text-zinc-400 mb-4">Total</div>
           <div className="space-y-3">
             <div className="flex justify-between items-baseline gap-4">
@@ -192,7 +199,7 @@ export default function WorkPage() {
               <span className="text-3xl font-bold">
                 {loading && !summary
                   ? "…"
-                  : formatHours(summary?.total_hours ?? 0)}
+                  : <AnimatedNumber value={summary?.total_hours ?? 0} format={formatHours} />}
               </span>
             </div>
             <div className="flex justify-between items-baseline gap-4">
@@ -200,7 +207,7 @@ export default function WorkPage() {
               <span className="text-2xl font-semibold text-green-400">
                 {loading && !summary
                   ? "…"
-                  : `${formatNumber(summary?.total_earnings ?? 0)} Kč`}
+                  : <><AnimatedNumber value={summary?.total_earnings ?? 0} format={formatNumber} /> Kč</>}
               </span>
             </div>
           </div>
@@ -356,10 +363,13 @@ export default function WorkPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {sessions.map((s) => (
+            {sessions.map((s, si) => (
               <div
                 key={s.id}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col md:flex-row md:items-center gap-4 md:justify-between"
+                className={`motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col md:flex-row md:items-center gap-4 md:justify-between ${
+                  newSessionIds.has(String(s.id)) ? "motion-highlight" : ""
+                }`}
+                style={staggerStyle(Math.min(si + 2, MAX_STAGGER))}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">

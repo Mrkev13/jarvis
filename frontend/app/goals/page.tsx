@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { MAX_STAGGER, staggerStyle, useCompletionSignal } from "@/lib/motion";
 
 type GoalsSummary = {
   active: number;
@@ -199,6 +201,35 @@ function progressColor(progress: number, status: string) {
   if (progress >= 50) return "bg-yellow-500";
   if (progress >= 20) return "bg-orange-500";
   return "bg-red-500";
+}
+
+const formatPercent = (value: number) => String(Math.round(value));
+
+/**
+ * Progress bar cíle: při prvním vykreslení naroste, změny plynule; procento se „dopočítá"
+ * a při dosažení 100 % krátce „pukne" (motion-complete) – jen při přechodu na 100, ne při načtení.
+ */
+function GoalProgress({ pct, status, size }: { pct: number; status: string; size: "md" | "sm" }) {
+  const completion = useCompletionSignal(pct);
+  const isMd = size === "md";
+  return (
+    <>
+      <div className={`flex-1 ${isMd ? "h-3" : "h-2 max-w-sm"} bg-zinc-800 rounded-full overflow-hidden`}>
+        <div
+          className={`motion-progress h-full ${progressColor(pct, status)}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div
+        key={completion}
+        className={`text-sm tabular-nums shrink-0 rounded-md ${
+          isMd ? "font-semibold w-12 text-right" : "text-zinc-400"
+        } ${completion > 0 ? "motion-complete" : ""}`}
+      >
+        <AnimatedNumber value={pct} format={formatPercent} /> %
+      </div>
+    </>
+  );
 }
 
 function todayIso() {
@@ -676,12 +707,13 @@ export default function GoalsPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {activeGoals.map((g) => {
+            {activeGoals.map((g, gi) => {
               const pct = clamp(g.progress ?? 0);
               return (
                 <article
                   key={g.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-700 transition-colors"
+                  className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-700 transition-colors"
+                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className={areaBadge(g.area)}>{g.area}</span>
@@ -756,18 +788,7 @@ export default function GoalsPage() {
                     </div>
                   ) : null}
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 h-3 bg-zinc-800 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${progressColor(
-                          pct,
-                          g.status,
-                        )} transition-[width] duration-500 ease-out`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="text-sm font-semibold tabular-nums shrink-0 w-12 text-right">
-                      {pct} %
-                    </div>
+                    <GoalProgress pct={pct} status={g.status} size="md" />
                   </div>
                 </article>
               );
@@ -782,12 +803,13 @@ export default function GoalsPage() {
             Completed
           </h2>
           <div className="space-y-3">
-            {completedGoals.map((g) => {
+            {completedGoals.map((g, gi) => {
               const pct = clamp(g.progress ?? 0);
               return (
                 <article
                   key={g.id}
-                  className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 opacity-90"
+                  className="motion-card bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 opacity-90"
+                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
                     <span className={areaBadge(g.area)}>{g.area}</span>
@@ -833,12 +855,13 @@ export default function GoalsPage() {
             Paused / Cancelled
           </h2>
           <div className="space-y-3">
-            {otherGoals.map((g) => {
+            {otherGoals.map((g, gi) => {
               const pct = clamp(g.progress ?? 0);
               return (
                 <article
                   key={g.id}
-                  className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 opacity-75"
+                  className="motion-card bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 opacity-75"
+                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
                     <span className={areaBadge(g.area)}>{g.area}</span>
@@ -866,15 +889,7 @@ export default function GoalsPage() {
                     <h3 className="font-medium text-zinc-300 flex-1">
                       {g.title}
                     </h3>
-                    <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden max-w-sm">
-                      <div
-                        className={`h-full ${progressColor(pct, g.status)}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-sm tabular-nums text-zinc-400">
-                      {pct} %
-                    </span>
+                    <GoalProgress pct={pct} status={g.status} size="sm" />
                   </div>
                 </article>
               );

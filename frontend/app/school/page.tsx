@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
 
 type Subject = {
   id: number;
@@ -74,6 +75,9 @@ function priorityClass(priority: string) {
       return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
   }
 }
+
+/** Stavy úkolu, které se zobrazují jako hotové (ztlumení + jemný posun). */
+const DONE_STATUSES = ["done", "passed", "completed", "hotovo"];
 
 function statusClass(status: string) {
   const s = status.toLowerCase();
@@ -535,12 +539,17 @@ export default function SchoolPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {assignments.map((a) => {
+            {assignments.map((a, ai) => {
               const days = daysUntil(a.due_date);
+              const isDone = DONE_STATUSES.includes(a.status.toLowerCase());
+              const isOverdue = !isDone && days !== null && days < 0;
               return (
                 <div
                   key={a.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
+                  className={`motion-card motion-done-transition bg-zinc-900 border border-zinc-800 rounded-2xl p-5 ${
+                    isDone ? "motion-done" : ""
+                  } ${isOverdue ? "motion-attention" : ""}`}
+                  style={staggerStyle(Math.min(ai, MAX_STAGGER))}
                 >
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div className="flex-1 min-w-0">
@@ -579,7 +588,7 @@ export default function SchoolPage() {
                           {a.priority}
                         </span>
                         <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border ${statusClass(
+                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border transition-colors ${statusClass(
                             a.status,
                           )}`}
                         >
@@ -742,12 +751,13 @@ export default function SchoolPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {exams.map((e) => {
+            {exams.map((e, ei) => {
               const days = daysUntil(e.exam_date);
               return (
                 <div
                   key={e.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
+                  className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
+                  style={staggerStyle(Math.min(ei, MAX_STAGGER))}
                 >
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div className="flex-1 min-w-0">
@@ -782,7 +792,7 @@ export default function SchoolPage() {
                           </span>
                         )}
                         <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border ${statusClass(
+                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border transition-colors ${statusClass(
                             e.status,
                           )}`}
                         >

@@ -218,6 +218,27 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         ).scalar()
         self.assertEqual(still_null, 1)
 
+    def test_0008_adds_conversation_summary_columns_and_preserves_rows(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0007_reconcile_schema_drift")
+        self.conn.execute(text("INSERT INTO conversations (title, created_at, updated_at) "
+                               "VALUES ('Chat', '2026-10-01 10:00:00', '2026-10-01 10:00:00')"))
+        self.conn.commit()
+
+        alembic_cmd.upgrade(self.cfg, "0008_conversation_summary")
+        cols = {c["name"]: c["nullable"] for c in inspect(self.conn).get_columns("conversations")}
+        self.assertTrue(cols["summary"])
+        self.assertTrue(cols["summarized_until_message_id"])
+        row = self.conn.execute(text("SELECT title, summary, summarized_until_message_id FROM conversations")).one()
+        self.assertEqual(tuple(row), ("Chat", None, None))
+
+        alembic_cmd.downgrade(self.cfg, "0007_reconcile_schema_drift")
+        cols = {c["name"] for c in inspect(self.conn).get_columns("conversations")}
+        self.assertNotIn("summary", cols)
+        self.assertNotIn("summarized_until_message_id", cols)
+        self.assertEqual(self.conn.execute(text("SELECT title FROM conversations")).scalar(), "Chat")
+
     def test_0007_downgrade_restores_0006_shape(self):
         alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
         before = self._schema_snapshot()

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { areaMeta } from "@/components/PlannerCards";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { staggerStyle } from "@/lib/motion";
 
 type NotificationPreview = {
   id: number;
@@ -177,16 +179,19 @@ function ProgressBar({ value, height = "h-2" }: { value: number; height?: string
   return (
     <div className={`w-full ${height} rounded-full bg-zinc-800 overflow-hidden`}>
       <div
-        className={`${height} rounded-full bg-gradient-to-r ${progressGradient(pct)}`}
+        className={`motion-progress ${height} rounded-full bg-gradient-to-r ${progressGradient(pct)}`}
         style={{ width: `${pct}%` }}
       />
     </div>
   );
 }
 
-function Card({ title, children, actions, className = "" }: { title: React.ReactNode; children: React.ReactNode; actions?: React.ReactNode; className?: string }) {
+function Card({ title, children, actions, className = "", index = 0 }: { title: React.ReactNode; children: React.ReactNode; actions?: React.ReactNode; className?: string; index?: number }) {
   return (
-    <section className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 ${className}`}>
+    <section
+      className={`motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 ${className}`}
+      style={staggerStyle(index)}
+    >
       <div className="flex items-start justify-between gap-3 mb-4">
         <h2 className="text-lg md:text-xl font-semibold">{title}</h2>
         {actions}
@@ -321,7 +326,7 @@ export default function Home() {
           type="button"
           onClick={load}
           disabled={loading}
-          className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+          className="motion-press text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors disabled:opacity-50"
         >
           Obnovit
         </button>
@@ -334,7 +339,7 @@ export default function Home() {
       ) : null}
 
       {/* TODAY */}
-      <Card
+      <Card index={0}
         title={
           <div className="flex items-center gap-2">
             <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-200">☀️</span>
@@ -379,7 +384,7 @@ export default function Home() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
         {/* NOTIFICATIONS */}
-        <Card
+        <Card index={1}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200">🔔</span>
@@ -402,7 +407,7 @@ export default function Home() {
                     const meta = areaMeta(n.area);
                     const maybeLink = n.action_url?.startsWith("/") || n.action_url?.startsWith("http");
                     const body = (
-                      <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3`}>
+                      <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3 ${maybeLink ? "motion-hover-lift" : ""}`}>
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <SeverityBadge severity={n.severity} />
                           <AreaBadge area={n.area} />
@@ -428,7 +433,7 @@ export default function Home() {
         </Card>
 
         {/* GOALS */}
-        <Card
+        <Card index={2}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-200">🎯</span>
@@ -461,7 +466,7 @@ export default function Home() {
         </Card>
 
         {/* UPCOMING */}
-        <Card
+        <Card index={3}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-200">📅</span>
@@ -525,7 +530,7 @@ export default function Home() {
         </Card>
 
         {/* WORK */}
-        <Card
+        <Card index={4}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-200">💼</span>
@@ -545,11 +550,11 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
                   <div className="text-xs uppercase tracking-wider text-zinc-500">Tento měsíc</div>
-                  <div className="text-xl font-semibold mt-1">{formatNumber(work.this_month_hours)} h</div>
+                  <div className="text-xl font-semibold mt-1"><AnimatedNumber value={work.this_month_hours} format={formatNumber} /> h</div>
                 </div>
                 <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
                   <div className="text-xs uppercase tracking-wider text-zinc-500">Výdělek</div>
-                  <div className="text-xl font-semibold text-emerald-300 mt-1">{formatNumber(work.this_month_earnings)} Kč</div>
+                  <div className="text-xl font-semibold text-emerald-300 mt-1"><AnimatedNumber value={work.this_month_earnings} format={formatNumber} /> Kč</div>
                 </div>
               </div>
               {workGoalProgress ? (
@@ -570,7 +575,7 @@ export default function Home() {
         </Card>
 
         {/* FINANCE */}
-        <Card
+        <Card index={5}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200">💰</span>
@@ -589,16 +594,16 @@ export default function Home() {
             <>
               <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-4 mb-4">
                 <div className="text-xs uppercase tracking-wider text-zinc-500">Aktuální bilance</div>
-                <div className="text-2xl font-bold mt-1 text-amber-200">{formatNumber(finance.balance)} Kč</div>
+                <div className="text-2xl font-bold mt-1 text-amber-200"><AnimatedNumber value={finance.balance} format={formatNumber} /> Kč</div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="rounded-xl bg-emerald-500/5 border border-emerald-400/20 p-3">
                   <div className="text-xs uppercase tracking-wider text-zinc-500">Příjem tento měsíc</div>
-                  <div className="text-lg font-semibold text-emerald-300 mt-1">{formatNumber(finance.this_month_income)} Kč</div>
+                  <div className="text-lg font-semibold text-emerald-300 mt-1"><AnimatedNumber value={finance.this_month_income} format={formatNumber} /> Kč</div>
                 </div>
                 <div className="rounded-xl bg-rose-500/5 border border-rose-400/20 p-3">
                   <div className="text-xs uppercase tracking-wider text-zinc-500">Výdaje tento měsíc</div>
-                  <div className="text-lg font-semibold text-rose-300 mt-1">{formatNumber(finance.this_month_expenses)} Kč</div>
+                  <div className="text-lg font-semibold text-rose-300 mt-1"><AnimatedNumber value={finance.this_month_expenses} format={formatNumber} /> Kč</div>
                 </div>
               </div>
               {financeGoalProgress ? (
@@ -619,7 +624,7 @@ export default function Home() {
         </Card>
 
         {/* GAMES (WOT + MFF) */}
-        <Card
+        <Card index={6}
           title={
             <div className="flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-orange-500/15 border border-orange-400/30 text-orange-200">🎮</span>
@@ -694,7 +699,7 @@ export default function Home() {
         </Card>
 
         {/* QUICK ACTIONS */}
-        <section className="md:col-span-2 xl:col-span-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 order-8">
+        <section className="motion-card md:col-span-2 xl:col-span-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 order-8" style={staggerStyle(7)}>
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <h2 className="text-lg md:text-xl font-semibold flex items-center gap-2">
               <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-zinc-500/15 border border-zinc-400/30 text-zinc-200">⚡</span>
@@ -704,7 +709,7 @@ export default function Home() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <Link
               href="/work"
-              className="group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
+              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
             >
               <div className="text-xl">💼</div>
               <div>
@@ -714,7 +719,7 @@ export default function Home() {
             </Link>
             <Link
               href="/finance"
-              className="group rounded-2xl border border-zinc-800 hover:border-amber-400/40 hover:bg-amber-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
+              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-amber-400/40 hover:bg-amber-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
             >
               <div className="text-xl">💰</div>
               <div>
@@ -724,7 +729,7 @@ export default function Home() {
             </Link>
             <Link
               href="/goals"
-              className="group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
+              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
             >
               <div className="text-xl">🎯</div>
               <div>
@@ -734,7 +739,7 @@ export default function Home() {
             </Link>
             <Link
               href="/ai"
-              className="group rounded-2xl border border-zinc-800 hover:border-indigo-400/40 hover:bg-indigo-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
+              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-indigo-400/40 hover:bg-indigo-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
             >
               <div className="text-xl">🤖</div>
               <div>
@@ -744,7 +749,7 @@ export default function Home() {
             </Link>
             <Link
               href="/planner"
-              className="group rounded-2xl border border-zinc-800 hover:border-sky-400/40 hover:bg-sky-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between col-span-2 sm:col-span-1"
+              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-sky-400/40 hover:bg-sky-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between col-span-2 sm:col-span-1"
             >
               <div className="text-xl">📋</div>
               <div>

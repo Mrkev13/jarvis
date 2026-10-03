@@ -2,6 +2,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL, apiFetch } from "@/lib/api";
+import { MOTION } from "@/lib/motion";
+import {
+  confirmActionBody,
+  normalizePendingActions,
+  rejectActionPath,
+  type PendingAction,
+} from "@/lib/pendingActions";
 import PlannerCardRenderer, { type PlannerCard } from "@/components/PlannerCards";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import {
@@ -25,10 +32,10 @@ type Message = {
   plannerCard?: PlannerCard | null;
 };
 
-type PendingAction = {
-  action_id: string;
-  tool: string;
-  arguments: Record<string, unknown>;
+type ActionOutcome = {
+  key: string;
+  title: string;
+  kind: "success" | "rejected";
 };
 
 type ConversationItem = {
@@ -849,6 +856,28 @@ export default function AiPage() {
   const [loading, setLoading] = useState(false);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [confirmingIdx, setConfirmingIdx] = useState<number | null>(null);
+  // UI-only stavy pending akcí (logika potvrzení se nemění):
+  // failed = akce, jejíž potvrzení selhalo (zůstává v seznamu) – červený stav + zatřesení,
+  // outcomes = krátké dočasné karty „potvrzeno / zrušeno" po odebrání akce ze seznamu.
+  const [failedAction, setFailedAction] = useState<{ action: PendingAction; attempt: number } | null>(null);
+  const [actionOutcomes, setActionOutcomes] = useState<ActionOutcome[]>([]);
+  const outcomeSeq = useRef(0);
+
+  function showActionOutcome(title: string, kind: ActionOutcome["kind"]) {
+    outcomeSeq.current += 1;
+    const key = `${kind}-${outcomeSeq.current}`;
+    setActionOutcomes((prev) => [...prev, { key, title, kind }]);
+    window.setTimeout(() => {
+      setActionOutcomes((prev) => prev.filter((o) => o.key !== key));
+    }, MOTION.highlightMs);
+  }
+
+  function markActionFailed(action: PendingAction) {
+    setFailedAction((prev) => ({
+      action,
+      attempt: prev && prev.action === action ? prev.attempt + 1 : 1,
+    }));
+  }
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(
     null,
@@ -959,7 +988,9 @@ export default function AiPage() {
     return conversations.find((c) => c.id === id) ?? null;
   }
 
-  const loadMessages = useCallback(async (conversationId: number) => {
+  // keepPendingActions: obnova téže konverzace hned po /chat nesmí smazat právě
+  // vrácené pending akce (jinak karta k potvrzení zmizí dřív, než ji lze potvrdit).
+  const loadMessages = useCallback(async (conversationId: number, keepPendingActions = false) => {
     setLoadingMessages(true);
     try {
       const response = await apiFetch(`/conversations/${conversationId}/messages`);
@@ -979,7 +1010,9 @@ export default function AiPage() {
         createdAt: toTs(m.created_at),
       }));
       setHistory(mapped);
-      setPendingActions([]);
+      if (!keepPendingActions) {
+        setPendingActions([]);
+      }
     } finally {
       setLoadingMessages(false);
     }
@@ -1013,7 +1046,7 @@ export default function AiPage() {
     return created.id;
   }, []);
 
-  const loadConversations = useCallback(async (preferId?: number) => {
+  const loadConversations = useCallback(async (preferId?: number, keepPendingActions = false) => {
     setLoadingConversations(true);
     try {
       const response = await apiFetch("/conversations");
@@ -1041,7 +1074,7 @@ export default function AiPage() {
       }
       if (nextId !== null) {
         setActiveConversationId(nextId);
-        await loadMessages(nextId);
+        await loadMessages(nextId, keepPendingActions);
       }
     } catch {
       return;
@@ -1136,7 +1169,8 @@ export default function AiPage() {
       const response = await apiFetch("/actions/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_id: action.action_id }),
+        // Backend vrací pending akci s `id`; /actions/confirm vyžaduje { action_id: <id> }.
+        body: JSON.stringify(confirmActionBody(action)),
       });
 
       if (!response.ok) {
@@ -1182,9 +1216,13 @@ export default function AiPage() {
 
       if (data.ok) {
         setPendingActions((prev) => prev.filter((_, i) => i !== idx));
+        showActionOutcome(info.title, "success");
+      } else {
+        markActionFailed(action);
       }
     } catch (err) {
       console.error(err);
+      markActionFailed(action);
       const msg =
         err instanceof Error
           ? `Chyba potvrzení: ${err.message}`
@@ -1204,10 +1242,11 @@ export default function AiPage() {
     }
   }
 
-  function cancelAction(idx: number) {
+  async function cancelAction(idx: number) {
     const action = pendingActions[idx];
     setPendingActions((prev) => prev.filter((_, i) => i !== idx));
     const info = action ? describePendingAction(action) : null;
+    showActionOutcome(info?.title ?? "Akce", "rejected");
     const botText = `❌ Akce byla zrušena${info ? `: ${info.title}` : ""}.`;
     setHistory((h) => [
       ...h,
@@ -1219,6 +1258,25 @@ export default function AiPage() {
       },
     ]);
     void appendLocalAssistantMessageToDb(botText);
+
+    if (!action) return;
+    // Zamítnout i na serveru (stejné id jako potvrzení) – jinak by pending akce zůstala
+    // potvrditelná až do vypršení. 409 = už zpracovaná / vypršelá → není co rušit.
+    try {
+      const response = await apiFetch(rejectActionPath(action), { method: "POST" });
+      if (!response.ok && response.status !== 409) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error(err);
+      const warn =
+        "⚠️ Zrušení se nepodařilo uložit na serveru – akce zůstane nepotvrzená a sama vyprší.";
+      setHistory((h) => [
+        ...h,
+        { id: `a-${Date.now()}`, role: "assistant", content: warn, createdAt: Date.now() },
+      ]);
+      void appendLocalAssistantMessageToDb(warn);
+    }
   }
 
   const sendMessage = useCallback(async () => {
@@ -1319,7 +1377,7 @@ export default function AiPage() {
 
       const data = (await response.json()) as {
         answer: string;
-        pending_actions?: PendingAction[];
+        pending_actions?: unknown;
         planner_result?: PlannerCard | null;
       };
 
@@ -1342,10 +1400,11 @@ export default function AiPage() {
         },
       ]);
 
-      if (Array.isArray(data.pending_actions) && data.pending_actions.length > 0) {
-        setPendingActions(data.pending_actions);
+      const incomingActions = normalizePendingActions(data.pending_actions);
+      if (incomingActions.length > 0) {
+        setPendingActions(incomingActions);
       }
-      void loadConversations(activeConversationId);
+      void loadConversations(activeConversationId ?? undefined, true);
     } catch (err) {
       console.error(err);
       const msg =
@@ -1747,18 +1806,49 @@ export default function AiPage() {
                 {pendingActions.map((action, idx) => {
                   const info = describePendingAction(action);
                   const isConfirming = confirmingIdx === idx;
+                  const isFailed = !isConfirming && failedAction?.action === action;
+                  const state = isConfirming ? "executing" : isFailed ? "failed" : "pending";
                   return (
                     <div
-                      key={`pa-${idx}`}
-                      className="mx-2 border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-zinc-900/80 to-zinc-900/80 rounded-2xl p-4 shadow-lg shadow-amber-950/30"
+                      // pokus selhání v klíči → zatřesení se přehraje při každém dalším selhání
+                      key={`pa-${idx}-${isFailed ? failedAction?.attempt : 0}`}
+                      aria-busy={isConfirming}
+                      className={`motion-card relative overflow-hidden mx-2 border bg-gradient-to-br via-zinc-900/80 to-zinc-900/80 rounded-2xl p-4 shadow-lg transition-colors ${
+                        state === "failed"
+                          ? "motion-shake border-red-500/50 from-red-500/10 shadow-red-950/30"
+                          : state === "executing"
+                            ? "motion-executing border-sky-500/40 from-sky-500/10 shadow-sky-950/30"
+                            : "border-amber-500/30 from-amber-500/10 shadow-amber-950/30"
+                      }`}
                     >
                       <div className="flex items-center gap-2 mb-3">
-                        <div className="h-8 w-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 text-sm font-bold shrink-0">
-                          !
+                        <div
+                          className={`h-8 w-8 rounded-lg border flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
+                            state === "failed"
+                              ? "bg-red-500/20 border-red-500/40 text-red-300"
+                              : state === "executing"
+                                ? "bg-sky-500/20 border-sky-500/40 text-sky-300"
+                                : "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                          }`}
+                        >
+                          {state === "failed" ? "✕" : state === "executing" ? "…" : "!"}
                         </div>
                         <div>
-                          <div className="text-[11px] uppercase tracking-wider text-amber-300/80 font-semibold">
-                            Standa AI chce provést změnu
+                          <div
+                            role="status"
+                            className={`text-[11px] uppercase tracking-wider font-semibold ${
+                              state === "failed"
+                                ? "text-red-300/90"
+                                : state === "executing"
+                                  ? "text-sky-300/90"
+                                  : "text-amber-300/80"
+                            }`}
+                          >
+                            {state === "failed"
+                              ? "Provedení selhalo – můžeš zkusit znovu"
+                              : state === "executing"
+                                ? "Provádím změnu…"
+                                : "Standa AI chce provést změnu"}
                           </div>
                           <div className="text-base font-semibold text-white mt-0.5">
                             {info.title}
@@ -1796,7 +1886,7 @@ export default function AiPage() {
                           type="button"
                           onClick={() => confirmAction(idx)}
                           disabled={isConfirming}
-                          className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-xl transition-colors"
+                          className="motion-press flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-xl transition-colors"
                         >
                           {isConfirming ? "Provádím…" : "Potvrdit"}
                         </button>
@@ -1804,7 +1894,7 @@ export default function AiPage() {
                           type="button"
                           onClick={() => cancelAction(idx)}
                           disabled={isConfirming}
-                          className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 font-medium px-4 py-2.5 rounded-xl border border-zinc-700 transition-colors"
+                          className="motion-press flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 font-medium px-4 py-2.5 rounded-xl border border-zinc-700 transition-colors"
                         >
                           Zrušit
                         </button>
@@ -1812,6 +1902,25 @@ export default function AiPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {actionOutcomes.length > 0 && (
+              <div className="space-y-2 mt-2" aria-live="polite">
+                {actionOutcomes.map((o) => (
+                  <div
+                    key={o.key}
+                    className={`motion-outcome mx-2 rounded-2xl border px-4 py-3 text-sm flex items-center gap-2 ${
+                      o.kind === "success"
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                        : "border-zinc-700 bg-zinc-800/60 text-zinc-300"
+                    }`}
+                  >
+                    <span aria-hidden="true">{o.kind === "success" ? "✓" : "↩"}</span>
+                    <span className="font-medium">{o.kind === "success" ? "Potvrzeno" : "Zrušeno"}:</span>
+                    <span className="truncate">{o.title}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

@@ -9,3 +9,36 @@ node_modules/
 *.db
 *.db-journal
 backups/
+
+# DB dumps / local databases / backups (anywhere)
+*.sql
+*.sql.gz
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+
+# keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python tooling
+venv/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# logs / OS junk
+*.log
+.DS_Store
+Thumbs.db
+
+# local agent / tool state (not project config)
+.claude/settings.local.json
+.claude/launch.json
+.playwright-mcp/
