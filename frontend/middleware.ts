@@ -1,23 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { isPublicPath } from "./lib/publicPaths";
+
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || "standa_hub_session";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-
-const PUBLIC_PATHS = new Set([
-  "/login",
-  "/_next",
-  "/favicon.ico",
-  "/api",
-  "/robots.txt",
-  "/sitemap.xml",
-]);
-
-function isPublicPath(pathname: string): boolean {
-  for (const p of PUBLIC_PATHS) {
-    if (pathname === p || pathname.startsWith(p + "/")) return true;
-  }
-  return false;
-}
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
