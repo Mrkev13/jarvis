@@ -29,3 +29,57 @@ function redirectToLogin(): void {
   // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   window.location.assign(`/login?next=${next}`);
 }
+
+/** Chyba HTTP odpovědi s českým popisem pro uživatele (detail ze serveru, pokud je). */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/** Text chyby z odpovědi: FastAPI `detail` (řetězec nebo seznam validací), jinak „HTTP 500". */
+export async function readErrorDetail(res: Response): Promise<string> {
+  if (res.status === 401) return "Přihlášení vypršelo – přihlas se znovu.";
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    const d = body?.detail;
+    if (typeof d === "string" && d.trim()) return d;
+    if (Array.isArray(d) && d.length) {
+      const first = d[0] as { msg?: unknown };
+      if (typeof first?.msg === "string") return first.msg;
+    }
+  } catch {
+    // ne-JSON tělo (HTML chybová stránka, proxy) – níže obecná hláška
+  }
+  return `Server odpověděl chybou (HTTP ${res.status}).`;
+}
+
+/** apiFetch + kontrola res.ok + JSON. Chyba → ApiError s detailem. 204 → null. */
+export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await apiFetch(path, init);
+  if (!res.ok) throw new ApiError(res.status, await readErrorDetail(res));
+  if (res.status === 204) return null as T;
+  return (await res.json()) as T;
+}
+
+/** JSON tělo pro POST/PATCH. */
+export function jsonBody(method: string, body?: unknown): RequestInit {
+  return body === undefined
+    ? { method }
+    : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+export function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { name?: string }).name === "AbortError";
+}
+
+/** Hláška pro uživatele z libovolné chyby (síť, ApiError…). */
+export function errorMessage(error: unknown, fallback = "Nepodařilo se spojit se serverem."): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof TypeError) return fallback; // fetch: síť / CORS / backend neběží
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
