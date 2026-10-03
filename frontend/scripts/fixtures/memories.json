@@ -7,7 +7,7 @@
   "importance": 9,
   "active": true,
   "created_at": "2026-10-05T17:00:00",
-  "updated_at": "2026-10-03T15:01:29.290774"
+  "updated_at": "2026-10-03T17:06:31.234741"
  },
  {
   "id": 1,
@@ -17,7 +17,7 @@
   "importance": 8,
   "active": true,
   "created_at": "2026-10-11T17:00:00",
-  "updated_at": "2026-10-03T15:01:29.290769"
+  "updated_at": "2026-10-03T17:06:31.234738"
  },
  {
   "id": 5,
@@ -26,8 +26,8 @@
   "content": "Zkoušku z fyziky dát v prvním termínu.",
   "importance": 7,
   "active": true,
-  "created_at": "2026-10-03T15:01:29.444675",
-  "updated_at": "2026-10-03T15:01:29.444678"
+  "created_at": "2026-10-03T17:06:31.373603",
+  "updated_at": "2026-10-03T17:06:31.373606"
  },
  {
   "id": 2,
@@ -37,7 +37,7 @@
   "importance": 6,
   "active": true,
   "created_at": "2026-10-08T17:00:00",
-  "updated_at": "2026-10-03T15:01:29.290773"
+  "updated_at": "2026-10-03T17:06:31.234740"
  },
  {
   "id": 4,
@@ -47,6 +47,6 @@
   "importance": 5,
   "active": true,
   "created_at": "2026-10-02T17:00:00",
-  "updated_at": "2026-10-03T15:01:29.290775"
+  "updated_at": "2026-10-03T17:06:31.234741"
  }
 ]

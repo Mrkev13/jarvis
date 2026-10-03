@@ -51,6 +51,8 @@ function send(res, req, status, body, extraHeaders = {}) {
 // Auth (Roadmap 4C – kontrola proxy a loginu): session cookie „expired" = neplatná session, jinak platná.
 // POST /auth/login: PIN 1234 nastaví cookie „ok", jiný PIN = 401 invalid_credentials (jako backend).
 const AUTH_COOKIE = "standa_hub_session";
+const normalizeQuery = (t) => String(t ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+const searchCalls = []; // pro ui-check: kolik dotazů /search přišlo (debounce)
 const sessionOf = (req) => /(?:^|;\s*)standa_hub_session=([^;]+)/.exec(req.headers.cookie || "")?.[1] ?? null;
 
 function readBody(req) {
@@ -82,6 +84,16 @@ createServer(async (req, res) => {
     return respond(401, { ok: false, error: "invalid_credentials" }, 300);
   }
   if (handleAi(req, url, body, respond)) return;
+  // Roadmap 4D: /search – odpovědi ze skutečné search_service (fixtures/search.json, viz generátor);
+  // neznámý dotaz = prázdný výsledek. Krátká prodleva ukáže stav „Hledám…".
+  if (url.pathname === "/search" && req.method === "GET") {
+    const nq = normalizeQuery(url.searchParams.get("q")).slice(0, 100);
+    searchCalls.push(nq);
+    const all = fixture("search");
+    const hit = Object.entries(all).find(([k]) => normalizeQuery(k) === nq);
+    return respond(200, hit ? { ...hit[1], query: nq } : { query: nq, results: [], total: 0 }, 220);
+  }
+  if (url.pathname === "/__mock/search-calls") return respond(200, searchCalls.splice(0));
   if (req.method === "GET") {
     if (url.pathname === "/reminders") {
       return respond(200, fixture(url.searchParams.get("status") === "all" ? "reminders-all" : "reminders-active"));

@@ -72,7 +72,7 @@
   },
   {
    "id": 22,
-   "timestamp": "2026-10-03T15:01:29.469816",
+   "timestamp": "2026-10-03T17:06:31.400386",
    "area": "wot",
    "action_type": "update",
    "entity_type": "WotGrind",
@@ -82,7 +82,7 @@
   },
   {
    "id": 21,
-   "timestamp": "2026-10-03T15:01:29.458470",
+   "timestamp": "2026-10-03T17:06:31.388265",
    "area": "memory",
    "action_type": "delete",
    "entity_type": "Memory",
@@ -92,7 +92,7 @@
   },
   {
    "id": 20,
-   "timestamp": "2026-10-03T15:01:29.451859",
+   "timestamp": "2026-10-03T17:06:31.381869",
    "area": "memory",
    "action_type": "create",
    "entity_type": "Memory",
@@ -102,7 +102,7 @@
   },
   {
    "id": 19,
-   "timestamp": "2026-10-03T15:01:29.445449",
+   "timestamp": "2026-10-03T17:06:31.374524",
    "area": "memory",
    "action_type": "create",
    "entity_type": "Memory",
@@ -112,7 +112,7 @@
   },
   {
    "id": 18,
-   "timestamp": "2026-10-03T15:01:29.431504",
+   "timestamp": "2026-10-03T17:06:31.359924",
    "area": "finance",
    "action_type": "create",
    "entity_type": "FinanceTransaction",
@@ -122,7 +122,7 @@
   },
   {
    "id": 17,
-   "timestamp": "2026-10-03T15:01:29.420579",
+   "timestamp": "2026-10-03T17:06:31.348573",
    "area": "finance",
    "action_type": "sync",
    "entity_type": "FinanceTransaction",
@@ -132,7 +132,7 @@
   },
   {
    "id": 16,
-   "timestamp": "2026-10-03T15:01:29.419953",
+   "timestamp": "2026-10-03T17:06:31.347922",
    "area": "work",
    "action_type": "create",
    "entity_type": "WorkSession",
@@ -142,7 +142,7 @@
   },
   {
    "id": 15,
-   "timestamp": "2026-10-03T15:01:29.405028",
+   "timestamp": "2026-10-03T17:06:31.331344",
    "area": "finance",
    "action_type": "sync",
    "entity_type": "FinanceTransaction",
@@ -152,7 +152,7 @@
   },
   {
    "id": 14,
-   "timestamp": "2026-10-03T15:01:29.404330",
+   "timestamp": "2026-10-03T17:06:31.330525",
    "area": "work",
    "action_type": "create",
    "entity_type": "WorkSession",
@@ -162,7 +162,7 @@
   },
   {
    "id": 13,
-   "timestamp": "2026-10-03T15:01:29.382407",
+   "timestamp": "2026-10-03T17:06:31.307478",
    "area": "reminders",
    "action_type": "complete",
    "entity_type": "Reminder",
@@ -172,7 +172,7 @@
   },
   {
    "id": 12,
-   "timestamp": "2026-10-03T15:01:29.315672",
+   "timestamp": "2026-10-03T17:06:31.251281",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -182,7 +182,7 @@
   },
   {
    "id": 11,
-   "timestamp": "2026-10-03T15:01:29.303830",
+   "timestamp": "2026-10-03T17:06:31.243590",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -192,7 +192,7 @@
   },
   {
    "id": 10,
-   "timestamp": "2026-10-03T15:01:29.302776",
+   "timestamp": "2026-10-03T17:06:31.242980",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -202,7 +202,7 @@
   },
   {
    "id": 9,
-   "timestamp": "2026-10-03T15:01:29.301730",
+   "timestamp": "2026-10-03T17:06:31.241912",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
@@ -212,7 +212,7 @@
   },
   {
    "id": 8,
-   "timestamp": "2026-10-03T15:01:29.300314",
+   "timestamp": "2026-10-03T17:06:31.241079",
    "area": "reminders",
    "action_type": "create",
    "entity_type": "Reminder",
