@@ -96,6 +96,11 @@
   50%      { box-shadow: 0 0 0 3px rgb(var(--motion-danger-rgb) / 0.22); }
 }
 
+@keyframes motion-drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
 @keyframes motion-shimmer {
   from { transform: translateX(-100%); }
   to   { transform: translateX(100%); }
@@ -160,6 +165,11 @@
   transform-origin: left center;
   animation: motion-grow var(--motion-slow) var(--motion-ease) backwards;
   transition: width var(--motion-slow) var(--motion-ease);
+}
+
+/* Boční panel (Drawer) – krátký vjezd zprava. */
+.motion-drawer {
+  animation: motion-drawer-in var(--motion-normal) var(--motion-ease) backwards;
 }
 
 /* Úspěch (potvrzení, uložení) – krátký „pop". */
@@ -251,6 +261,7 @@
 @media (prefers-reduced-motion: reduce) {
   .motion-page,
   .motion-card,
+  .motion-drawer,
   .motion-progress,
   .motion-success,
   .motion-complete,

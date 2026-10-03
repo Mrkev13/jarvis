@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { dialogKeyAction, FOCUSABLE_SELECTOR, isPromiseLike, lockScroll, nextFocusIndex } from "@/lib/dialog";
+import { useId, useRef, useState } from "react";
+import { isPromiseLike } from "@/lib/dialog";
 import { cx } from "@/lib/ui";
 import { Button } from "./Button";
+import { useModal } from "./useModal";
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -48,49 +49,14 @@ export default function ConfirmDialog({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const messageId = useId();
-  // aktuální hodnoty pro listener bez jeho znovuregistrace
-  const busyRef = useRef(busy);
-  const cancelFn = useRef(onCancel);
-  useEffect(() => {
-    busyRef.current = busy;
-    cancelFn.current = onCancel;
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const release = lockScroll();
+  useModal({
+    open,
+    panelRef,
     // Destruktivní akce: výchozí fokus na bezpečné „Zrušit".
-    const timer = window.setTimeout(() => (danger ? cancelRef.current : confirmRef.current)?.focus(), 0);
-
-    function onKey(e: KeyboardEvent) {
-      const action = dialogKeyAction(e.key, busyRef.current);
-      if (action === "close") {
-        e.preventDefault();
-        cancelFn.current();
-      } else if (action === "trap" && panelRef.current) {
-        const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-        if (!items.length) {
-          e.preventDefault();
-          return;
-        }
-        const current = items.indexOf(document.activeElement as HTMLElement);
-        const next = nextFocusIndex(current, items.length, e.shiftKey);
-        // Necháme prohlížeč, pokud fokus zůstává uvnitř; jinak ho vrátíme na druhý konec.
-        if (current === -1 || (e.shiftKey && current === 0) || (!e.shiftKey && current === items.length - 1)) {
-          e.preventDefault();
-          items[next]?.focus();
-        }
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("keydown", onKey);
-      release();
-      previous?.focus?.();
-    };
-  }, [open, danger]);
+    initialFocus: () => (danger ? cancelRef.current : confirmRef.current),
+    onClose: onCancel,
+    busy,
+  });
 
   if (!open) return null;
 
