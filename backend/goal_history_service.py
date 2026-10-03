@@ -201,7 +201,7 @@ class GoalStagnationInfo:
 
 
 def compute_goal_stagnation(db: Session, goal_id: int, today: date | None = None) -> GoalStagnationInfo:
-    d = today or date.today()
+    d = today or today_local()
     rows = (
         db.query(GoalProgressHistory)
         .filter(GoalProgressHistory.goal_id == goal_id)

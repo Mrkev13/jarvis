@@ -149,6 +149,21 @@ class ReadQueriesTestCase(unittest.TestCase):
         self.assertEqual(rq.query_recent_activity(self.db, days=1000, now_utc=now)["filters"]["days"], rq.MAX_ACTIVITY_DAYS)
 
 
+    def test_timestamps_are_prague_local_with_offset(self):
+        """Follow-up z A5: AI ukazovala UTC (05:12) místo pražského času (07:12)."""
+        self.db.add_all([
+            FinanceTransaction(amount=10, category="Jídlo", transaction_type="expense",
+                               created_at=datetime(2026, 10, 3, 5, 12, 51)),  # SELČ
+            FinanceTransaction(amount=20, category="Jídlo", transaction_type="expense",
+                               created_at=datetime(2026, 12, 3, 6, 0)),  # SEČ
+            ActivityLog(timestamp=datetime(2026, 10, 3, 5, 12), area="finance", action_type="create", summary="X"),
+        ])
+        self.db.commit()
+        stamps = sorted(i["created_at"] for i in rq.query_finance_transactions(self.db)["items"])
+        self.assertEqual(stamps, ["2026-10-03T07:12:51+02:00", "2026-12-03T07:00:00+01:00"])
+        [act] = rq.query_recent_activity(self.db, now_utc=datetime(2026, 10, 3, 12, 0))["items"]
+        self.assertEqual(act["timestamp"], "2026-10-03T07:12:00+02:00")
+
     def test_ai_tool_call_runs_filtered_query_on_request_session(self):
         """get_finance_transactions z LLM běží přes read_queries se session AI requestu a s filtry."""
         self._finance()

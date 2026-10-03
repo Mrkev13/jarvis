@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
+from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
 
@@ -381,7 +382,7 @@ def _finance_goal_stagnation_candidate(db: Session, it: Goal, today: date) -> No
 
 
 def generate_notifications(db: Session, today: date | None = None, now: datetime | None = None) -> dict:
-    d = today or date.today()
+    d = today or today_local()
     if now is None:
         if today is not None:
             now = datetime.combine(today, time(9, 0, 0))

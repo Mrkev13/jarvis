@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
+from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
 
@@ -319,7 +320,7 @@ def _apply_recommendation_history(
 
 
 def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
-    d = today or date.today()
+    d = today or today_local()
     now = _now()
     m = (mode or "").strip().lower()
     if m not in ("daily", "weekly", "goal_review"):

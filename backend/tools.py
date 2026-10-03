@@ -1,9 +1,9 @@
-from datetime import date as date_type
 from datetime import date
 
 from database import SessionLocal
 from models import WotResource, WotGrind
 from models import FinanceTransaction
+from time_utils import today_local
 from models import Subject, Assignment, Exam
 from models import WorkSession
 from models import MffCharacter
@@ -221,7 +221,7 @@ def get_work_summary():
 
     try:
         items = db.query(WorkSession).all()
-        today = date_type.today()
+        today = today_local()
         this_month = (today.year, today.month)
 
         total_hours = 0.0

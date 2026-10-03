@@ -1990,9 +1990,8 @@ def planner_generate(mode: str = "weekly"):
 
 
 def _top_active_goals(db, limit: int = 3):
-    from datetime import date as _date
 
-    today = _date.today()
+    today = today_local()
     rows = db.query(Goal).all()
     enriched: list[dict] = []
     for g in rows:
@@ -2132,9 +2131,8 @@ def _get_finance_with_goal(db, today: date | None = None):
 
 
 def _get_upcoming(db, limit: int = 5, today: date | None = None):
-    from datetime import date as _d
 
-    today_use: date = today or _d.today()
+    today_use: date = today or today_local()
     entries: list[dict] = []
     assignments = db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
     for it in assignments:
