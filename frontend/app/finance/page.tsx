@@ -20,6 +20,7 @@ import {
   StatGrid,
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
+import { financeCategoryLabel } from "@/lib/labels";
 import { apiJson, jsonBody } from "@/lib/api";
 import { formatCzk, formatDate, formatSigned, plural } from "@/lib/format";
 import { staggerStyle, useNewIds } from "@/lib/motion";
@@ -299,7 +300,7 @@ export default function FinancePage() {
 
       <ConfirmDialog
         open={deletingTx != null}
-        title={`Smazat transakci ${deletingTx?.description || deletingTx?.category || ""}?`}
+        title={`Smazat transakci ${deletingTx?.description || (deletingTx ? financeCategoryLabel(deletingTx.category) : "")}?`}
         message="Tato akce je nevratná. Transakce bude odstraněna a zůstatek se přepočítá."
         confirmLabel="Smazat"
         busyLabel="Mažu…"
@@ -324,7 +325,7 @@ function TransactionRow({
   const isIncome = tx.transaction_type === "income";
   // Výdaj se zobrazí jako záporná částka (skutečné minus); příjem zeleně s „+".
   const signed = isIncome ? tx.amount : -tx.amount;
-  const title = tx.description || tx.category;
+  const title = tx.description || financeCategoryLabel(tx.category);
   return (
     <li
       style={highlight ? undefined : staggerStyle(index)}
@@ -340,7 +341,7 @@ function TransactionRow({
           {tx.description ? (
             <>
               <span aria-hidden="true">·</span>
-              <span className="break-words">{tx.category}</span>
+              <span className="break-words">{financeCategoryLabel(tx.category)}</span>
             </>
           ) : null}
           <span aria-hidden="true">·</span>

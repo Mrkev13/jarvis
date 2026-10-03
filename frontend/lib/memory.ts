@@ -4,22 +4,8 @@
  */
 import { filterQuery } from "./filters.ts";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  context: "Kontext",
-  preference: "Preference",
-  goal: "Cíl",
-  fact: "Fakt",
-  habit: "Zvyk",
-  rule: "Pravidlo",
-  work: "Práce",
-  note: "Poznámka",
-};
-
-/** Kategorie je volný text – známé dostanou český popisek, ostatní zůstávají. */
-export function memoryCategoryLabel(category: string | null | undefined): string {
-  const c = String(category ?? "").trim();
-  return CATEGORY_LABELS[c.toLowerCase()] ?? (c || "–");
-}
+/** Popisky kategorií žijí v lib/labels.ts (jedno kanonické mapování). */
+export { memoryCategoryLabel } from "./labels.ts";
 
 export type MemoryFilters = { q: string; area: string; category: string; includeInactive: boolean };
 
