@@ -74,6 +74,9 @@ class PlannerGroundingTestCase(unittest.TestCase):
             patch.object(ai, "SessionLocal", Session),
             patch.object(tools, "SessionLocal", Session),
             patch.object(ai, "_llm_create_with_retry", fake_llm),
+            # Tyto testy pokrývají tool-based planner cestu (fallback bez CURRENT STATE kontextu);
+            # cesta s prefetch kontextem je v test_context_prefetch.py.
+            patch.object(ai, "_build_context_safely", lambda db, message: None),
         ]
         for p in self._patches:
             p.start()

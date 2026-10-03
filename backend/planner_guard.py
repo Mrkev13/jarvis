@@ -123,7 +123,8 @@ def _collect_json(value, key: str | None, numbers: set[float], strings: list[str
             _collect_json(item, key, numbers, strings)
 
 
-def build_evidence(texts: list[str]) -> Evidence:
+def build_evidence(texts: list[str], name_only_texts: tuple[str, ...] = ()) -> Evidence:
+    """texts = živá data (čísla, data, jména); name_only_texts = paměť – jen jména, nikdy čísla/data."""
     numbers: set[float] = set()
     free_text: list[str] = []
     for text in (t for t in texts if t):
@@ -141,7 +142,7 @@ def build_evidence(texts: list[str]) -> Evidence:
     # Timestampy / data / časy nejsou „hodnoty" (jinak by rok 2026 ověřil vymyšlených 2 000 Kč).
     numeric_text = _CLOCK_RE.sub(" ", _ISO_DATETIME_RE.sub(" ", joined))
     numbers |= {_parse_number(m)[0] for m in _NUMBER_RE.finditer(numeric_text)}
-    all_text = "\n".join(t for t in texts if t).lower()
+    all_text = "\n".join(t for t in (*texts, *name_only_texts) if t).lower()
     return Evidence(text=all_text, numbers=frozenset(numbers), day_months=frozenset(day_months))
 
 
