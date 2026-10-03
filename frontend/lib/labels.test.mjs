@@ -74,5 +74,6 @@ test("AI tool names, memory AI categories and activity sources", () => {
   assert.equal(memoryCategoryLabel("constraint"), "Omezení");
   assert.equal(activitySourceLabel("manual"), "ručně");
   assert.equal(activitySourceLabel("ai_confirm"), "AI, potvrzeno");
+  assert.equal(activitySourceLabel("quick_add"), "Rychlé přidání");
   assert.equal(activitySourceLabel("cron_x"), "cron_x");
 });
