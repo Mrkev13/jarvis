@@ -101,6 +101,11 @@
   to   { transform: none; opacity: 1; }
 }
 
+@keyframes motion-undo-timer {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 @keyframes motion-shimmer {
   from { transform: translateX(-100%); }
   to   { transform: translateX(100%); }
@@ -229,6 +234,12 @@
   animation: motion-shimmer var(--motion-shimmer-duration) linear infinite;
 }
 
+/* Roadmap 4C: zbývající čas nabídky „Vrátit" (délku nastaví inline --undo-ms); při omezeném pohybu statická. */
+.motion-undo-timer {
+  transform-origin: left;
+  animation: motion-undo-timer var(--undo-ms, 20000ms) linear forwards;
+}
+
 /* Dočasná stavová karta (úspěch / zrušeno), která po chvíli zmizí; neinteraktivní. */
 .motion-outcome {
   pointer-events: none;
@@ -272,6 +283,7 @@
   .motion-attention,
   .motion-flame-active,
   .motion-flame-milestone,
+  .motion-undo-timer,
   .motion-executing::after {
     animation: none !important;
   }

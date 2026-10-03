@@ -110,7 +110,7 @@ export function MobileHeader() {
 
   return (
     <>
-      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between border-b border-line bg-app/90 px-4 py-2.5 backdrop-blur">
+      <header className="md:hidden sticky top-0 z-30 flex h-[var(--mobile-header-h)] items-center justify-between border-b border-line bg-app/90 px-4 backdrop-blur">
         <Brand />
         <div className="flex items-center gap-1">
           {/* Jen jeden zvonek v celé aplikaci (dřív se mobilní i desktopový dotazovaly zároveň). */}
