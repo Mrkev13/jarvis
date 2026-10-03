@@ -111,6 +111,10 @@ def log_request_summary(
     planner_memories_autoloaded: bool = False,
     context_tokens: int = 0,
     context_sections: int = 0,
+    tools_exposed: int = 0,
+    tool_schema_tokens: int = 0,
+    tool_route: str = "",
+    route_widened: bool = False,
     enabled: bool = True,
 ) -> None:
     if not enabled:
@@ -119,11 +123,13 @@ def log_request_summary(
     logger.info(
         "request calls=%s tool_rounds=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s "
         "rate_limited=%s api_errors=%s context_tokens=%s context_sections=%s "
-        "planner_memories_autoloaded=%s planner_nudged=%s planner_actions_removed=%s",
+        "planner_memories_autoloaded=%s planner_nudged=%s planner_actions_removed=%s "
+        "tools_exposed=%s tool_schema_tokens=%s tool_route=%s route_widened=%s",
         len(records), tool_rounds,
         sum(r.prompt_tokens or 0 for r in ok), sum(r.completion_tokens or 0 for r in ok),
         sum(r.total_tokens or 0 for r in ok), latency_ms,
         sum(1 for r in records if r.rate_limited), sum(1 for r in records if r.error_status is not None),
         context_tokens, context_sections,
         planner_memories_autoloaded, planner_nudged, planner_actions_removed,
+        tools_exposed, tool_schema_tokens, tool_route or "-", route_widened,
     )

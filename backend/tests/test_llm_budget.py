@@ -15,13 +15,13 @@ if BACKEND_DIR not in sys.path:
 
 import ai
 from llm_budget import estimate_fixed_overhead, estimate_tokens, estimate_tool_schema_tokens
-from llm_config import DEFAULT_GROQ_MODEL, DEFAULT_MAX_FIXED_TOKENS, load_llm_settings
+from llm_config import DEFAULT_GROQ_MODEL, load_llm_settings
 from time_utils import now_local
 
 ALL_TOOL_FUNCTIONS = {**ai.READ_TOOL_FUNCTIONS, **ai.WRITE_TOOL_FUNCTIONS}
 WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_")
-# Interní parametry write funkcí, které LLM nesmí vidět ani nastavit.
-INTERNAL_PARAMS = {"user_context"}
+# Interní parametry funkcí, které LLM nesmí vidět ani nastavit (db = session AI requestu, A5 read_queries).
+INTERNAL_PARAMS = {"user_context", "db", "now_utc"}
 
 
 def _schema(tool: dict) -> dict:
@@ -43,8 +43,13 @@ class TokenEstimatorTestCase(unittest.TestCase):
         self.assertEqual(estimate_tool_schema_tokens(tools), estimate_tokens(compact))
 
 
+# Plná sada toolů (AI_TOOL_ROUTING=false / nouzový fallback) smí být nad AI_MAX_FIXED_TOKENS – běžné
+# requesty posílají jen routovanou podmnožinu (A5, test_tool_router.py hlídá AI_MAX_FIXED_TOKENS pro ni).
+FULL_TOOL_SET_MAX_FIXED_TOKENS = 4000
+
+
 class FixedOverheadBudgetTestCase(unittest.TestCase):
-    """System prompt (vč. A1 data/času) + výchozí sada tool schémat musí zůstat pod pevným limitem."""
+    """System prompt (vč. A1 data/času) + plná sada tool schémat musí zůstat pod pevným stropem."""
 
     def test_fixed_overhead_within_budget_for_every_weekday_and_dst_state(self):
         # pondělí–neděle v létě (CEST) i v zimě (CET) – délka názvu dne / pásma se liší
@@ -55,8 +60,8 @@ class FixedOverheadBudgetTestCase(unittest.TestCase):
             for s in samples
         )
         self.assertLessEqual(
-            worst, DEFAULT_MAX_FIXED_TOKENS,
-            msg=f"fixní režie ~{worst} tokenů > {DEFAULT_MAX_FIXED_TOKENS}; zkrať prompt/popisy nebo zaveď routing",
+            worst, FULL_TOOL_SET_MAX_FIXED_TOKENS,
+            msg=f"fixní režie plné sady ~{worst} tokenů > {FULL_TOOL_SET_MAX_FIXED_TOKENS}; zkrať prompt/popisy",
         )
 
     def test_overhead_counts_every_default_tool(self):
@@ -94,7 +99,7 @@ class ToolRegistryTestCase(unittest.TestCase):
             with self.subTest(tool=name):
                 params = inspect.signature(ALL_TOOL_FUNCTIONS[name]).parameters
                 schema_required = set(_schema(tool).get("required", []))
-                py_required = {k for k, p in params.items() if p.default is inspect.Parameter.empty}
+                py_required = {k for k, p in params.items() if p.default is inspect.Parameter.empty} - INTERNAL_PARAMS
                 self.assertLessEqual(schema_required, set(_schema(tool)["properties"]))
                 # Bez povinného argumentu by volání funkce spadlo → schéma ho musí vyžadovat.
                 self.assertLessEqual(py_required, schema_required)
