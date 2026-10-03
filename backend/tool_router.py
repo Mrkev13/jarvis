@@ -56,6 +56,8 @@ _MUTATION_VERB_RE = re.compile(
     r"\b(zmen(?:it|te|im)?\b|uprav|oprav|aktualiz|prepis|smaz|odstran|vymaz|zrus|oznac|posun|presun|deaktiv|"
     r"delete\b|update\b)"
 )
+# Phase C: vrácení provedené změny → undo_change (write_intent="undo").
+_UNDO_VERB_RE = re.compile(r"\b(vrat(?:it|te)?\b|vraceni\b|undo\b|zpet\b|odvolej|anuluj)")
 _MUTATION_STATEMENT_RE = re.compile(r"\b(je hotov|jsou hotov|mam hotov|uz je hotov|jsem dokoncil|jsem splnil)")
 # Vytvoření nového záznamu – při současném mutačním slovese se create tooly posílají jen s tímto slovesem.
 _CREATE_VERB_RE = re.compile(r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|vytvor|zaloz|pamatuj|zapamatuj|"
@@ -149,7 +151,7 @@ def detect_write_intent(text: str) -> bool:
         line = line.strip()
         if not line:
             continue
-        if _WRITE_VERB_RE.search(line):
+        if _WRITE_VERB_RE.search(line) or _UNDO_VERB_RE.search(line):
             return True
         if _is_question(line):
             continue
@@ -159,6 +161,11 @@ def detect_write_intent(text: str) -> bool:
         if not _READ_REQUEST_RE.match(line) and _DIGIT_RE.search(line) and classify_areas(line, implied=False):
             return True
     return False
+
+
+def detect_undo_intent(text: str) -> bool:
+    """„vrať poslední změnu", „undo", „vezmi to zpět" – i v otázce („můžeš to vrátit?")."""
+    return bool(_UNDO_VERB_RE.search(fold_text(text)))
 
 
 def detect_mutation_intent(text: str) -> bool:
@@ -223,13 +230,14 @@ def route_tools(
     if write_intent:
         folded = fold_text(text)
         mutate = detect_mutation_intent(text)
+        undo = detect_undo_intent(text)
         # Úprava existujícího záznamu („změň výdaj na 450 Kč") nemá dostat create tool, pokud uživatel
         # zároveň výslovně nežádá i nový záznam – model by jinak mohl přidat místo upravit.
-        create = not mutate or bool(_CREATE_VERB_RE.search(folded))
-        kinds = {k for k, on in (("mutate", mutate), ("create", create)) if on}
+        create = not (mutate or undo) or bool(_CREATE_VERB_RE.search(folded))
+        kinds = {k for k, on in (("mutate", mutate), ("create", create), ("undo", undo)) if on}
         candidates = [s for s in WRITE_SPECS if s.write_intent in kinds]
         write_areas = explicit & _WRITE_AREAS
-        if _MEMORY_WRITE_RE.search(folded) and not mutate:
+        if _MEMORY_WRITE_RE.search(folded) and not (mutate or undo):
             write_areas = frozenset({AREA_MEMORY})
         if write_areas:
             names |= {s.name for s in candidates if set(s.areas) & write_areas}
