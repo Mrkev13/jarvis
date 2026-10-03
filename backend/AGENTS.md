@@ -639,3 +639,44 @@ print(_hash_pin("123456"))
 - Testy: `test_reminders.py`, `test_reminders_api.py`, `test_ai_reminders.py`, migrace v
   `test_alembic_migration.py`, frontend `lib/reminders.test.mjs`.
 
+---
+
+## 21. Externí doručení připomínek – Web Push (Phase E, `webpush.py`, `delivery_service.py`, migrace 0010)
+
+- **Proč Web Push**: standard prohlížečů, žádný účet u třetí strany ani SDK. Zprávu doručí push služba
+  prohlížeče (Google FCM, Mozilla, Apple, Microsoft) podle odběru zařízení. Implementace jen nad
+  `cryptography`: RFC 8291 šifrování (aes128gcm, ověřeno testovacím vektorem z RFC) + RFC 8292 VAPID (ES256).
+- **Oddělení**: Phase D dál zazvoní připomínku a vytvoří interní notifikaci (zvonek). Externí doručení je
+  samostatný krok – jeho chyba nic z toho neovlivní.
+- **Tabulky** (migrace `0010_push_delivery`, jen nové): `push_subscriptions` (endpoint + klíče zařízení,
+  unikátní `endpoint_hash`, `disabled_at` po 404/410) a `deliveries` (notifikace × kanál × cíl, unikátní
+  `dedupe_key`, `status` pending/sending/sent/failed/skipped, `attempts`, `next_attempt_at`, `last_attempt_at`,
+  `last_error` = jen kategorie, `provider_message_id`).
+- **Životní cyklus** (job `standa_hub_reminders` po zazvonění, `run_delivery_cycle`):
+  1. `enqueue_deliveries`: nevyřešené reminder notifikace z posledních 12 h → chybějící doručení pro každé
+     aktivní zařízení (přihlášené před zazněním). Idempotentní.
+  2. `process_deliveries`: claim pending → sending (podmíněný UPDATE), odeslání, pak `sent`, nebo další pokus
+     (1/5/15/60 min, respektuje `Retry-After` max 1 h, max 5 pokusů → `failed exhausted:*`), nebo trvale
+     `failed` (4xx; 404/410 navíc vypne zařízení). Vyřízená (Hotovo) / starší než 12 h → `skipped`.
+     Přerušené `sending` se po 10 min vrátí do pending; hlavička `Topic` zajistí, že push služba případný
+     duplikát nahradí.
+- **Kanály**: rozhraní `DeliveryProvider` (`channel`, `is_configured`, `targets`, `send`); Web Push je první.
+  Další kanál (ntfy, e-mail…) = nový provider + registrace v `configured_providers`.
+- **API** (session auth): `GET /push/config` (jen veřejný klíč), `POST /push/subscriptions`,
+  `POST /push/unsubscribe`, `POST /push/test` (jen na toto zařízení, mimo frontu), `GET /push/status`
+  (zařízení bez endpointů a klíčů + poslední doručení). Odběr se validuje: jen https a známé push služby
+  (`WEB_PUSH_EXTRA_HOSTS` pro další) → backend nejde zneužít k požadavkům do vnitřní sítě.
+- **Konfigurace**: `EXTERNAL_DELIVERY_ENABLED` (default true), `WEB_PUSH_VAPID_PRIVATE_KEY`,
+  `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_CONTACT`; klíče vygeneruje `scripts/generate_vapid_keys.py`.
+  Bez klíčů se nic externě neposílá. Vyžaduje běžící reminder job (`REMINDERS_CHECK_ENABLED=true`).
+- **Frontend**: `public/sw.js` (jen push + klik), `app/manifest.ts` + ikony, panel `PushSettings` na
+  `/reminders` (oprávnění jen po kliknutí, test, vypnutí, vysvětlení nepodporovaného prostředí).
+- **HTTPS (nutné pro mobil)**: prohlížeč povolí Web Push jen na https nebo localhost. Na PC stačí
+  `http://localhost:3000`. Pro mobil přes Tailscale:
+  `tailscale serve --bg 3000` a `tailscale serve --bg --https=8443 http://127.0.0.1:8000`, pak ve frontendu
+  `NEXT_PUBLIC_API_URL=https://<pc>.<tailnet>.ts.net:8443` a `NEXT_DEV_EXTRA_ORIGINS=<pc>.<tailnet>.ts.net`,
+  v backendu `FRONTEND_ORIGINS` doplnit `https://<pc>.<tailnet>.ts.net` a `AUTH_COOKIE_SECURE=true`.
+  iPhone/iPad: Safari → Sdílet → Přidat na plochu, upozornění zapnout z ikony na ploše (iOS 16.4+).
+- Testy: `test_webpush.py`, `test_delivery.py`, `test_push_api.py`, migrace v `test_alembic_migration.py`,
+  frontend `lib/push.test.mjs`.
+
