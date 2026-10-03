@@ -680,6 +680,18 @@ def chat(request: ChatRequest):
         )
 
 
+@app.get("/search")
+def global_search(q: str = "", limit: int = 30):
+    """Roadmap 4D: globální vyhledávání (Ctrl+K). Chráněné globální auth dependency; dotaz se neloguje."""
+    from search_service import search
+
+    db = SessionLocal()
+    try:
+        return search(db, q, limit)
+    finally:
+        db.close()
+
+
 @app.get("/conversations")
 def list_conversations():
     db = SessionLocal()
