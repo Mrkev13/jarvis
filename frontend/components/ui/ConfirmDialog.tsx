@@ -110,7 +110,10 @@ export default function ConfirmDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy) onCancel();
+        if (e.target !== e.currentTarget) return;
+        // Bez preventDefault by výchozí akce mousedown přesunula fokus na <body> až po obnovení fokusu.
+        e.preventDefault();
+        if (!busy) onCancel();
       }}
     >
       <div
