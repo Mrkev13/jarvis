@@ -29,7 +29,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 
 
-from ai import DailyLimitError, ask_ai, execute_confirm_action, reject_pending, _get_pending_action, _check_pending_expired
+from ai import DailyLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
 import ai as _ai_module
 from history_service import prepare_conversation_history, window_client_messages
 from llm_config import LLM_SETTINGS
@@ -787,6 +787,12 @@ def append_message(conversation_id: int, request: AppendMessageRequest):
 @app.post("/actions/confirm")
 def confirm_action(request: ConfirmActionRequest):
     return execute_confirm_action(request.action_id)
+
+
+@app.post("/actions/undo")
+def undo_action(request: ConfirmActionRequest):
+    """Phase C: „Vrátit" u provedené AI změny → undo pending akce (potvrzuje se stejně jako jiné akce)."""
+    return propose_undo_action(request.action_id)
 
 
 @app.get("/ai/confirm/{pending_id}")

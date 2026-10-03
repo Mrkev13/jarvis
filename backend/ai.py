@@ -50,7 +50,7 @@ SYSTEM_PROMPT = """
 You are the AI assistant inside Standa Hub, a personal dashboard: finances, work, school, goals, World of Tanks (WoT), Marvel Future Fight (MFF), long-term memory.
 
 TOOLS
-- READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory, modify_records): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
+- READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory, modify_records, undo_change): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
 - CURRENT STATE (system message) is live module data: if it answers the question, answer directly. Never re-fetch what it contains; call READ tools only for missing data, all needed ones in one turn. No identical repeated calls.
 - Tool results are authoritative for current data, like CURRENT STATE. RELEVANT MEMORY is context only.
 
@@ -59,7 +59,7 @@ WRITE SAFETY
 - Never say "uložil jsem", "změnil jsem", "přidal jsem" or otherwise imply a change happened before confirmation succeeded. After confirmation_required say e.g. "Připravil jsem změnu k potvrzení."
 - Use exact argument names. Never guess a missing value that would materially change the record; ask instead.
 - Relative dates ("dnes", "zítra", "včera", weekdays) are computed from CURRENT APPLICATION DATE below. Dates are YYYY-MM-DD.
-- Edit/delete/complete existing records only via modify_records: describe the target from the user's words (latest only if they said "poslední"; all_matching only if they said all). Never guess ids. not_prepared (ambiguous_target, target_not_found…) → ask the user which record; never retry with guesses. An unconfirmed proposal is not a record: to cancel it the user presses Zrušit on its card.
+- Edit/delete/complete existing records only via modify_records: describe the target from the user's words (latest only if they said "poslední"; all_matching only if they said all). Never guess ids. not_prepared (ambiguous_target, target_not_found…) → ask the user which record; never retry with guesses. Undo confirmed changes only via undo_change (latest only if they said "poslední"). An unconfirmed proposal is not a record: to cancel it the user presses Zrušit on its card.
 
 DATA RULES
 - Never invent data: game mechanics, currencies, rates, rewards, prices, events, features, deadlines, exam dates, XP, money, hours or goal progress. If information is missing, say so; if current external data would be needed, say it must be checked.
@@ -219,6 +219,46 @@ def _finalize_pending_status(db, pending_id: str, new_status: str):
     if pa:
         pa.status = new_status
         db.commit()
+
+
+def _finalize_executed_with_undo(db, pending_id: str, undo_record: dict) -> None:
+    pa = db.query(PendingAction).filter(PendingAction.id == int(pending_id)).first()
+    if pa is None:
+        return
+    try:
+        args = json.loads(pa.arguments) if pa.arguments else {}
+    except json.JSONDecodeError:
+        args = {}
+    args["undo"] = undo_record
+    pa.arguments = json.dumps(args, ensure_ascii=False, default=str)
+    pa.status = "executed"
+    db.commit()
+
+
+def propose_undo_action(action_id: str) -> dict:
+    """Tlačítko „Vrátit" v UI: z provedené akce udělá undo pending akci (stejné potvrzení jako ostatní)."""
+    db = SessionLocal()
+    try:
+        _check_pending_expired(db)
+        try:
+            plan = TOOLS_BY_NAME["undo_change"].resolver(db, action_id=action_id)
+        except MutationRefused as refused:
+            return {"ok": False, "error": refused.code, "detail": refused.detail}
+        stored = {"plan": plan}
+        pending_id = _store_pending_action(db, "undo_change", stored, ttl_minutes=30)
+        info = _get_pending_action(db, pending_id)
+        return {
+            "ok": True,
+            "pending_action": {
+                "id": pending_id,
+                "tool": "undo_change",
+                "arguments": stored,
+                "preview": plan["preview"],
+                "expires_at": info["expires_at"].isoformat() if info and info.get("expires_at") else None,
+            },
+        }
+    finally:
+        db.close()
 
 
 def reject_pending(db, pending_id: str):
@@ -811,7 +851,13 @@ def execute_confirm_action(action_id: str):
                 fn_args = dict(arguments)
             result = fn(**fn_args)
 
-            _finalize_pending_status(db, action_id, "executed")
+            undo_record = result.pop("undo", None) if isinstance(result, dict) else None
+            if undo_record is not None:
+                # Phase C: data pro vrácení se uloží do původní akce ve stejném commitu jako stav executed.
+                _finalize_executed_with_undo(db, action_id, undo_record)
+                result["undo_available"] = bool(undo_record.get("supported"))
+            else:
+                _finalize_pending_status(db, action_id, "executed")
 
             try:
                 plan_preview = (arguments.get("plan") or {}).get("preview") if isinstance(arguments.get("plan"), dict) else None

@@ -147,6 +147,19 @@ class RouteSelectionTestCase(unittest.TestCase):
         names = _names(route_tools(["smaž ten výdaj za kávu a přidej nový za 120 Kč"]))
         self.assertTrue({"modify_records", "add_finance_transaction"} <= names)
 
+    def test_undo_intent_exposes_only_undo_tool(self):
+        for msg in ("vrať poslední změnu", "undo", "vrať poslední změnu ve financích", "můžeš to vrátit?",
+                    "vezmi to zpět"):
+            with self.subTest(msg):
+                self.assertEqual(_names(route_tools([msg])) & WRITE_NAMES, {"undo_change"})
+        self.assertIn("get_finance_transactions", route_tools(["vrať poslední změnu ve financích"]).names)
+
+    def test_undo_tool_not_exposed_without_undo_intent(self):
+        for msg in ("vrátil jsem knihu do knihovny", "kolik jsem utratil?", "změň poslední výdaj na 450 Kč",
+                    "přidej výdaj 300 Kč za oběd"):
+            with self.subTest(msg):
+                self.assertNotIn("undo_change", route_tools([msg]).names)
+
     def test_requirements_are_added(self):
         route = route_tools(["přidej mi zkoušku z matiky na 12. 1."])
         self.assertTrue({"add_school_exam", "get_school_subjects"} <= _names(route))
