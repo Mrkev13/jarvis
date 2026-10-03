@@ -2,12 +2,13 @@
 
 import { Card, CardHeader, StatusBadge, TextLink } from "@/components/ui";
 import { Skeleton } from "@/components/ui/states";
-import { useApiResource } from "@/hooks/useApiResource";
+import { useApiResource, type ApiResource } from "@/hooks/useApiResource";
 import { reviewView, type WeeklyPayload } from "@/lib/weeklyReview";
 
 /** Kompaktní vstup na dashboardu; celý přehled a historie jsou na /review. */
-export default function WeeklyReviewCard({ index = 0 }: { index?: number }) {
-  const { data, loading, status } = useApiResource<WeeklyPayload>("/weekly-review");
+export default function WeeklyReviewCard({ index, resource }: { index?: number; resource?: ApiResource<WeeklyPayload> }) {
+  const own = useApiResource<WeeklyPayload>(resource ? null : "/weekly-review");
+  const { data, loading, status } = resource ?? own;
   const view = data ? reviewView(data) : null;
   return (
     <Card index={index} aria-labelledby="weekly-card-title">

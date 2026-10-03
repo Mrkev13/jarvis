@@ -13,7 +13,7 @@ import {
   LoadingState,
   StatusBadge,
 } from "@/components/ui";
-import { useApiResource } from "@/hooks/useApiResource";
+import { useApiResource, type ApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import {
   briefingView,
@@ -119,8 +119,10 @@ function Fallback({ groups }: { groups: { title: string; items: FallbackItem[] }
  * Denní přehled (Phase F, vzhled Roadmap 4A): jeden AI přehled na pražský den, sestavený jen z reálných dat.
  * Hlavní „živý" panel dashboardu → jediné místo s HUD rámečkem. Bez AI přehledu deterministický náhled.
  */
-export default function DailyBriefingCard({ index = 0 }: { index?: number }) {
-  const briefing = useApiResource<BriefingPayload>("/briefing/today");
+export default function DailyBriefingCard({ index, resource }: { index?: number; resource?: ApiResource<BriefingPayload> }) {
+  // Řídicí centrum (Roadmap 4F) předává načtený zdroj – přesun widgetu v rozložení pak nic znovu nenačítá.
+  const own = useApiResource<BriefingPayload>(resource ? null : "/briefing/today");
+  const briefing = resource ?? own;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
