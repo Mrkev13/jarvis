@@ -66,7 +66,7 @@ export function formatDate(value: string | null | undefined, withYear = true): s
     const [, y, mo, d] = m;
     return withYear ? `${Number(d)}. ${Number(mo)}. ${y}` : `${Number(d)}. ${Number(mo)}.`;
   }
-  const date = new Date(value);
+  const date = parseApiInstant(value);
   if (Number.isNaN(date.getTime())) return value;
   const parts = new Intl.DateTimeFormat(LOCALE, {
     timeZone: PRAGUE_TZ, day: "numeric", month: "numeric", ...(withYear ? { year: "numeric" } : {}),
@@ -75,10 +75,20 @@ export function formatDate(value: string | null | undefined, withYear = true): s
   return withYear ? `${get("day")}. ${get("month")}. ${get("year")}` : `${get("day")}. ${get("month")}.`;
 }
 
-/** Okamžik (ISO s offsetem / Z) → „5. 10. 8:05" v pražském čase. */
+/**
+ * Okamžik z API → Date. Backend ukládá naive UTC a často vrací ISO bez zóny („2026-10-11T17:00:00");
+ * `new Date()` by ho četl jako místní čas prohlížeče (posun o 1–2 h). Bez zóny = UTC.
+ */
+export function parseApiInstant(value: string): Date {
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const isDateTime = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value);
+  return new Date(isDateTime && !hasZone ? `${value.replace(" ", "T")}Z` : value);
+}
+
+/** Okamžik (ISO s offsetem / Z, nebo naive UTC z API) → „5. 10. 8:05" v pražském čase. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return EMPTY;
-  const date = new Date(value);
+  const date = parseApiInstant(value);
   if (Number.isNaN(date.getTime())) return value;
   const parts = new Intl.DateTimeFormat(LOCALE, {
     timeZone: PRAGUE_TZ, day: "numeric", month: "numeric", hour: "numeric", minute: "2-digit", hourCycle: "h23",

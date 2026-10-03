@@ -12,6 +12,7 @@ import {
   formatPercent,
   formatRelativeDays,
   formatSigned,
+  parseApiInstant,
   plural,
 } from "./format.ts";
 
@@ -61,4 +62,12 @@ test("instants are shown in Prague time (summer and winter)", () => {
   assert.equal(formatDateTime("2026-10-05T06:05:00Z"), "5. 10. 8:05");
   assert.equal(formatDateTime("2026-12-05T23:30:00Z"), "6. 12. 0:30");
   assert.equal(formatDate("2026-12-31T23:30:00Z"), "1. 1. 2027");
+});
+
+test("naive API timestamps are UTC, not browser-local time", () => {
+  // backend: naive UTC isoformat() bez zóny → 17:00 UTC = 19:00 v Praze (SELČ)
+  assert.equal(formatDateTime("2026-10-11T17:00:00"), "11. 10. 19:00");
+  assert.equal(formatDateTime("2026-10-11 17:00:00.123456"), "11. 10. 19:00");
+  assert.equal(formatDateTime("2026-10-11T17:00:00+02:00"), "11. 10. 17:00");
+  assert.equal(parseApiInstant("2026-12-01T10:00:00").toISOString(), "2026-12-01T10:00:00.000Z");
 });
