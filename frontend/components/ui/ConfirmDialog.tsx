@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { isPromiseLike } from "@/lib/dialog";
 import { cx } from "@/lib/ui";
 import { Button } from "./Button";
@@ -72,7 +73,9 @@ export default function ConfirmDialog({
     }
   }
 
-  return (
+  // Portál do <body>: předek s transform/backdrop-filter (sticky hlavička, přechod stránky)
+  // by jinak omezil position: fixed jen na svůj rámeček.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
@@ -115,6 +118,7 @@ export default function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

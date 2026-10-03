@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "@/lib/ui";
 import { useModal } from "./useModal";
 
@@ -40,7 +41,9 @@ export function Drawer({
   useModal({ open, panelRef, onClose, restoreFocus, initialFocus });
 
   if (!open) return null;
-  return (
+  // Portál do <body>: předek s transform/backdrop-filter (sticky hlavička, přechod stránky)
+  // by jinak omezil position: fixed jen na svůj rámeček.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
       onMouseDown={(e) => {
@@ -87,6 +90,7 @@ export function Drawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
