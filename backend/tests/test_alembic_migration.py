@@ -53,6 +53,7 @@ STEP_0005_EXTRA = {"activity_logs", "pending_actions", "backup_logs"}
 STEP_0006_EXTRA = {"activity_logs", "pending_actions", "backup_logs", "auth_sessions"}
 STEP_0009_EXTRA = {"reminders"}
 STEP_0010_EXTRA = {"push_subscriptions", "deliveries"}
+STEP_0011_EXTRA = {"daily_briefings"}
 
 
 def _sqlite_tables(conn):
@@ -161,7 +162,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -282,6 +283,30 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertTrue(STEP_0010_EXTRA <= _sqlite_tables(self.conn))
 
+    def test_0011_adds_daily_briefings_and_downgrades_cleanly(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0010_push_delivery")
+        alembic_cmd.upgrade(self.cfg, "0011_daily_briefings")
+        uniques = {ix["name"] for ix in inspect(self.conn).get_indexes("daily_briefings") if ix["unique"]}
+        self.assertIn("ix_daily_briefings_date", uniques)
+        self.conn.execute(text(
+            "INSERT INTO daily_briefings (briefing_date, status, \"trigger\", attempts, grounding_removed, "
+            "regenerated_count, created_at, updated_at) VALUES ('2026-10-06', 'ready', 'scheduler', 1, 0, 0, "
+            "'2026-10-06 05:00:00', '2026-10-06 05:00:00')"))
+        self.conn.commit()
+        with self.assertRaises(Exception):  # druhý přehled pro stejný den nejde
+            self.conn.execute(text(
+                "INSERT INTO daily_briefings (briefing_date, status, \"trigger\", attempts, grounding_removed, "
+                "regenerated_count, created_at, updated_at) VALUES ('2026-10-06', 'ready', 'manual', 1, 0, 0, "
+                "'2026-10-06 06:00:00', '2026-10-06 06:00:00')"))
+        self.conn.rollback()
+        alembic_cmd.downgrade(self.cfg, "0010_push_delivery")
+        self.assertNotIn("daily_briefings", _sqlite_tables(self.conn))
+        self.assertTrue(STEP_0010_EXTRA <= _sqlite_tables(self.conn))
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertIn("daily_briefings", _sqlite_tables(self.conn))
+
     def test_0007_downgrade_restores_0006_shape(self):
         alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
         before = self._schema_snapshot()
@@ -371,7 +396,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA)
 
             db = main.SessionLocal()
             try:
