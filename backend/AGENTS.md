@@ -390,17 +390,18 @@ print(_hash_pin("123456"))
 - **Odhad tokenů** (`llm_budget.py`): deterministický, bez tokenizeru – ~4 ASCII znaky / token, ne-ASCII znak 2×.
   `estimate_fixed_overhead(system_prompt, tools)` = system prompt (vč. A1 data/času) + kompaktní JSON tool schémat.
 - **Groq free tier = 8 000 TPM** a celá fixní režie se posílá v *každém* LLM volání (i v každém tool kole).
-  Proto platí pevný limit **3 500 odhadovaných tokenů**, hlídaný testem
-  `FixedOverheadBudgetTestCase` (všechny dny v týdnu, CET i CEST). Za běhu `ask_ai` jen loguje warning,
-  pokud režie překročí `AI_MAX_FIXED_TOKENS` (request neblokuje).
-- **Pravidla pro tool schémata** (vytvářej přes `ai._tool()`): obecná pravidla (potvrzení zápisu, paměť,
+  Proto platí pevný limit **3 500 odhadovaných tokenů** pro *routovanou* sadu toolů (A5, kap. 17), hlídaný
+  `test_tool_router.py`; plná sada všech toolů (`AI_TOOL_ROUTING=false` / nouzový fallback) má strop 4 000
+  (`FixedOverheadBudgetTestCase`, všechny dny v týdnu, CET i CEST). Za běhu `ask_ai` jen loguje warning,
+  pokud režie poslané sady překročí `AI_MAX_FIXED_TOKENS` (request neblokuje).
+- **Pravidla pro tool schémata** (přidávej do `tool_registry.TOOL_SPECS`, kap. 17): obecná pravidla (potvrzení zápisu, paměť,
   nevymýšlení dat) patří do `SYSTEM_PROMPT`, ne do popisů toolů. Popis = krátce *co* tool dělá + jen
   nezbytné rozlišení. Jména, parametry a `required` musí sedět s Python funkcí (`ToolRegistryTestCase`);
   READ tooly začínají `get_`, WRITE `add_`/`update_`/`upsert_`/`save_` (prompt je podle jména rozlišuje).
   Interní `user_context` se LLM nikdy nevystavuje.
 - **Kontrakt s frontendem**: planner JSON blok (` ```json ` + `summary`, `actions[priority, area, title, reason]`)
   parsuje `frontend/app/ai/page.tsx → tryParseWeeklyPlan`; hlídá `SystemPromptSafetyTestCase`.
-- Přidání dalších toolů nad rozpočet → nejdřív routing toolů (Roadmap 3.0 A5), ne zvyšování limitu.
+- Nový tool = záznam v `tool_registry.py` s oblastmi (`areas`); routing (A5) ho pošle jen u dotazů z jeho oblasti.
 - **Reálné měření (gpt-oss-120b)**: skutečné `prompt_tokens` ≈ 0,77 × odhad (odhad je záměrně konzervativní);
   fixní režie ≈ 2 700 skutečných tokenů na volání. Groq limit potvrzen hlavičkou `x-ratelimit-limit-tokens: 8000`.
 
@@ -416,7 +417,8 @@ print(_hash_pin("123456"))
     `rl_remaining_tokens` (hlavička `x-ratelimit-remaining-tokens`), 429 / API chyby,
   - každý retry: důvod, pokus, čekání,
   - souhrn requestu (`ask_ai`): počet volání, `tool_rounds`, součty tokenů, latence, počet 429,
-    `planner_nudged`, `planner_actions_removed`.
+    `planner_nudged`, `planner_actions_removed`, A5: `tools_exposed`, `tool_schema_tokens`, `tool_route`
+    (`areas`, `areas+write`, `write_unknown_area`, `generic`, `greeting`, `disabled`, `fallback`), `route_widened`.
 - **Nikdy** se neloguje obsah promptu, zprávy uživatele, argumenty toolů, odpovědi ani klíče
   (hlídá `test_llm_observability.py`).
 - 429 log obsahuje **druh limitu** z Groq zprávy (`limit=TPM|TPD|RPM|RPD`). Denní limity (`TPD`, `RPD`)
@@ -500,3 +502,37 @@ print(_hash_pin("123456"))
 - Historie bez `conversation_id` (od klienta): jen okno + tvrdé max, nic se neukládá.
 - Shrnutí **není evidence** pro planner grounding a je označené jako „context only".
 - Log: řádek `history ...` (počty zpráv, tokeny, summary_used/called/failed, dropped) – nikdy obsah.
+
+---
+
+## 17. Registr a routing AI toolů (A5, `tool_registry.py`, `tool_router.py`, `read_queries.py`)
+
+- **`tool_registry.py` = jediný zdroj pravdy** o AI toolech: `ToolSpec(name, kind read/write, areas, schema,
+  func, covered_by_context, requires, takes_db, explicit_only)`. `ai.TOOLS` / `READ_TOOLS` / `WRITE_TOOLS` /
+  `*_TOOL_FUNCTIONS` se z něj odvozují. Registr se při importu validuje (duplicity, `requires` jen na read tooly).
+- **`read_queries.py`**: AI verze seznamových toolů s filtry a stropem (default 20, max 100), výsledek
+  `{items, total, returned, truncated, filters}`: `get_finance_transactions` (typ, kategorie, období),
+  `get_work_sessions` (projekt, období), `get_school_assignments` / `get_school_exams` (default jen otevřené),
+  `get_goals` (oblast, stav; progres přes `tools.get_goals`), nový `get_recent_activity` (activity log, dny).
+  Běží na db session AI requestu (`takes_db`). **REST endpointy dál volají `tools.py` – tvary odpovědí beze změny.**
+- **`tool_router.route_tools`** (deterministicky, bez LLM, jednou před prvním voláním; sada platí pro všechna kola):
+  - text = aktuální zpráva uživatele; krátký follow-up (≤ 6 slov nebo „a …", „ano", „proč"…) + nejvýš **jedna**
+    předchozí zpráva uživatele. Shrnutí konverzace (A4, system zpráva) ani odpovědi asistenta se nepoužívají.
+  - oblasti: sdílené `context_service.classify_areas` (+ MFF) + intenty `memory`, `activity`; implikované oblasti
+    stejně jako CURRENT STATE prefetch.
+  - READ: tooly oblastí; souhrn (`covered_by_context`) se vynechá, když CURRENT STATE oblast pokryl a uživatel se
+    na ni výslovně neptá; `explicit_only` (předměty, historie cíle) jen při výslovné oblasti; plánovací dotaz
+    přidá `get_goals` + `get_memories`, pokud je nepokrývá kontext; `requires` se doplní vždy.
+  - WRITE: **jen při write záměru** (rozkazovací sloveso, „utratil jsem…", částka v Kč / číslo v oblasti mimo
+    otázku a žádost o výpis). Oblast známá → write tooly oblasti („pamatuj si" → jen `save_memory`); neznámá →
+    všechny write tooly.
+  - pozdrav → žádné tooly; dotaz bez oblasti → všechny READ tooly (`generic`).
+- **Pojistky v `ask_ai`**: write tool mimo routovanou sadu `_run_tool_calls` odmítne (`write_not_available`,
+  žádná pending akce); Groq 400 „tool validation" → jednou rozšířit na všechny READ (+ WRITE jen s write záměrem)
+  a kolo zopakovat, při dalším odmítnutí poslední volání bez toolů. Planner připomínka jen pro dostupné tooly.
+  Pending akce, potvrzení i auth jsou beze změny.
+- **Kill switch**: `AI_TOOL_ROUTING=false` → každý request posílá přesně `ai.TOOLS` (všech 28) jako před A5.
+- **Měření** (odhad schémat, bez kontextu → s CURRENT STATE): všechny tooly 28 / ~2 730; škola 7 → 4 tooly
+  (~600 → ~400), finance 4 → 3 (~300 → ~255), WoT 2 (~100), pozdrav 0, obecný dotaz 18 READ (~1 310),
+  zápis výdaje 5 → 4 (~430 → ~380), zápis s neznámou oblastí 12 (~1 560). Skript `backend/scripts/measure_tool_routing.py`.
+
