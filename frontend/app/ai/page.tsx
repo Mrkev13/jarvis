@@ -5,6 +5,7 @@ import { API_URL, apiFetch } from "@/lib/api";
 import { MOTION } from "@/lib/motion";
 import {
   confirmActionBody,
+  describePreview,
   normalizePendingActions,
   rejectActionPath,
   type PendingAction,
@@ -454,6 +455,8 @@ function describeMemory(args: Record<string, unknown>) {
 }
 
 function describePendingAction(action: PendingAction) {
+  // Úpravy / mazání / dokončení (Phase B): obecná karta z náhledu, který backend ověřil proti datům.
+  if (action.preview) return describePreview(action.preview);
   switch (action.tool) {
     case "add_work_session":
       return describeWorkSession(action.arguments);
@@ -1198,7 +1201,9 @@ export default function AiPage() {
       const info = describePendingAction(action);
       let botText: string;
       if (data.ok) {
-        botText = `✅ ${info.title} byla uložena.\n\n${info.detailLines.join("\n")}`;
+        botText = action.preview
+          ? `✅ Hotovo – ${info.title}.\n\n${info.detailLines.join("\n")}`
+          : `✅ ${info.title} byla uložena.\n\n${info.detailLines.join("\n")}`;
       } else {
         botText = `❌ Změnu se nepodařilo provést.\n\n${data.detail ?? data.error ?? "Neznámá chyba"}`;
       }
@@ -1857,17 +1862,25 @@ export default function AiPage() {
                       </div>
 
                       <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-sm mb-3">
-                        {info.fields.map((f) => (
-                          <div
-                            key={f.label}
-                            className="flex justify-between items-center gap-3 border-b border-zinc-800/70 pb-1.5 last:border-0"
-                          >
-                            <span className="text-zinc-400">{f.label}</span>
-                            <span className="font-medium text-zinc-100 text-right truncate">
-                              {f.value}
-                            </span>
-                          </div>
-                        ))}
+                        {info.fields.map((f, fi) => {
+                          // Dlouhé hodnoty (záznam, staré → nové) přes celou šířku a zalomené, ne uříznuté.
+                          const wide = f.value.length > 24;
+                          return (
+                            <div
+                              key={`${f.label}-${fi}`}
+                              className={`flex justify-between items-center gap-3 border-b border-zinc-800/70 pb-1.5 last:border-0 ${
+                                wide ? "col-span-2" : ""
+                              }`}
+                            >
+                              <span className="text-zinc-400 shrink-0">{f.label}</span>
+                              <span
+                                className={`font-medium text-zinc-100 text-right ${wide ? "break-words min-w-0" : "truncate"}`}
+                              >
+                                {f.value}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {info.footer && (
