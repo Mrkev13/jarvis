@@ -38,6 +38,7 @@ from llm_usage import log_history
 from goal_history_service import ensure_goal_progress_snapshot, compute_goal_progress_and_value
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
 from planner_service import generate_plan
+import reminder_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
@@ -395,6 +396,30 @@ class AppendMessageRequest(BaseModel):
 
 class ConfirmActionRequest(BaseModel):
     action_id: str
+
+
+class ReminderCreateRequest(BaseModel):
+    title: str
+    due_local: str | None = None
+    in_minutes: float | None = None
+    recurrence: str = "none"
+    weekdays: str | list[int] | None = None
+    time_local: str | None = None
+    note: str | None = None
+
+
+class ReminderUpdateRequest(BaseModel):
+    title: str | None = None
+    note: str | None = None
+    due_local: str | None = None
+    recurrence: str | None = None
+    weekdays: str | list[int] | None = None
+    time_local: str | None = None
+
+
+class ReminderSnoozeRequest(BaseModel):
+    minutes: float | None = None
+    until_local: str | None = None
 
 
 class ExecutePendingRequest(BaseModel):
@@ -1582,6 +1607,112 @@ def add_memory(request: MemoryRequest):
 
 # ===== NOTIFICATIONS =====
 
+# ===== REMINDERS (Phase D) =====
+
+def _fire_due_reminders(db) -> None:
+    """Lazy kontrola splatných připomínek (idempotentní); chyba nesmí rozbít čtení notifikací."""
+    try:
+        reminder_service.process_due_reminders(db)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        print(f"[reminders] lazy check failed: {type(exc).__name__}: {exc}")
+
+
+def _reminder_or_404(db, reminder_id: int):
+    from models import Reminder
+    item = db.get(Reminder, reminder_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return item
+
+
+def _reminder_call(fn):
+    try:
+        return fn()
+    except reminder_service.ReminderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@app.get("/reminders")
+def reminders_list(status: str = "active", limit: int = 100):
+    db = SessionLocal()
+    try:
+        _fire_due_reminders(db)
+        return reminder_service.list_reminders(db, status=status, limit=limit)
+    finally:
+        db.close()
+
+
+@app.post("/reminders")
+def reminders_create(request: ReminderCreateRequest):
+    db = SessionLocal()
+    try:
+        spec = _reminder_call(lambda: reminder_service.build_spec(
+            request.title, due_local=request.due_local, in_minutes=request.in_minutes,
+            recurrence=request.recurrence, weekdays=request.weekdays, time_local=request.time_local,
+            note=request.note,
+        ))
+        item = reminder_service.create_from_spec(db, spec)
+        db.commit()
+        return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
+@app.patch("/reminders/{reminder_id}")
+def reminders_update(reminder_id: int, request: ReminderUpdateRequest):
+    db = SessionLocal()
+    try:
+        item = _reminder_or_404(db, reminder_id)
+        changes = _reminder_call(lambda: reminder_service.build_update_changes(
+            item, title=request.title, note=request.note, due_local=request.due_local,
+            recurrence=request.recurrence, weekdays=request.weekdays, time_local=request.time_local,
+        ))
+        reminder_service.update(db, item, changes)
+        db.commit()
+        return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
+@app.post("/reminders/{reminder_id}/snooze")
+def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest):
+    db = SessionLocal()
+    try:
+        item = _reminder_or_404(db, reminder_id)
+        until = _reminder_call(lambda: reminder_service.snooze_target(
+            item, minutes=request.minutes, until_local=request.until_local))
+        _reminder_call(lambda: reminder_service.snooze(db, item, until))
+        db.commit()
+        return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
+@app.post("/reminders/{reminder_id}/done")
+def reminders_done(reminder_id: int):
+    db = SessionLocal()
+    try:
+        item = _reminder_or_404(db, reminder_id)
+        _reminder_call(lambda: reminder_service.complete(db, item))
+        db.commit()
+        return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
+@app.post("/reminders/{reminder_id}/cancel")
+def reminders_cancel(reminder_id: int):
+    db = SessionLocal()
+    try:
+        item = _reminder_or_404(db, reminder_id)
+        _reminder_call(lambda: reminder_service.cancel(db, item))
+        db.commit()
+        return reminder_service.serialize(item)
+    finally:
+        db.close()
+
+
 @app.get("/notifications")
 def notifications_list(
     unread_only: bool = False,
@@ -1591,6 +1722,7 @@ def notifications_list(
 ):
     db = SessionLocal()
     try:
+        _fire_due_reminders(db)
         return list_notifications(
             db,
             unread_only=bool(unread_only),
@@ -1606,6 +1738,8 @@ def notifications_list(
 def notifications_summary_endpoint():
     db = SessionLocal()
     try:
+        # Phase D: zvonek se ptá každých 30 s → splatné připomínky se objeví i bez scheduleru.
+        _fire_due_reminders(db)
         return notifications_summary(db)
     finally:
         db.close()
@@ -2174,10 +2308,15 @@ def pending_list(status: str | None = None, limit: int = 50):
 
 @app.get("/scheduler/status")
 def scheduler_status():
-    from scheduler_service import SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS, SINGLE_WORKER_ASSUMPTION_DOC
+    from scheduler_service import (
+        REMINDERS_CHECK_ENABLED, REMINDERS_CHECK_SECONDS, SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS,
+        SINGLE_WORKER_ASSUMPTION_DOC,
+    )
     return {
         "enabled": SCHEDULER_ENABLED,
         "interval_seconds": SCHEDULER_INTERVAL_SECONDS,
+        "reminders_enabled": REMINDERS_CHECK_ENABLED,
+        "reminders_interval_seconds": REMINDERS_CHECK_SECONDS,
         "doc": SINGLE_WORKER_ASSUMPTION_DOC,
     }
 

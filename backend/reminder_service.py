@@ -335,6 +335,70 @@ def update(db: Session, r: Reminder, changes: dict, user_context: str = "manual"
     return r
 
 
+def build_update_changes(
+    r: Reminder,
+    *,
+    title: str | None = None,
+    note: str | None = None,
+    due_local: str | None = None,
+    shift_minutes=None,
+    recurrence: str | None = None,
+    weekdays=None,
+    time_local: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Požadavek na úpravu → absolutní změny (due_at v UTC). Relativní posun se fixuje TEĎ."""
+    now = now or utc_now()
+    _require_active(r)
+    changes: dict = {}
+    if title is not None:
+        changes["title"] = _clean_title(title)
+    if note is not None:
+        changes["note"] = str(note).strip()[:2000]
+    rec = str(recurrence).strip().lower() if recurrence not in (None, "") else r.recurrence
+    if rec not in RECURRENCES:
+        raise ReminderError("Opakování: none, daily nebo weekly.")
+    if due_local not in (None, "") and shift_minutes not in (None, ""):
+        raise ReminderError("Zadej buď nový čas, nebo posun – ne obojí.")
+    if rec == "none":
+        if due_local not in (None, ""):
+            due = parse_local_datetime(due_local)
+        elif shift_minutes not in (None, ""):
+            if r.recurrence != "none":
+                raise ReminderError("Posun o minuty jde jen u jednorázové připomínky.")
+            try:
+                due = r.due_at + timedelta(minutes=float(shift_minutes))
+            except (TypeError, ValueError):
+                raise ReminderError("shift_minutes musí být číslo.") from None
+        elif r.recurrence != "none":
+            raise ReminderError("Při změně na jednorázovou zadej přesný čas (due_local).")
+        else:
+            due = None
+        if due is not None:
+            if due <= now:
+                raise ReminderError(f"Čas {format_local(due)} už proběhl.")
+            changes["due_at"] = due
+        if r.recurrence != "none":
+            changes.update({"recurrence": "none", "weekdays": None, "local_time": None})
+    else:
+        if due_local not in (None, "") or shift_minutes not in (None, ""):
+            raise ReminderError("U opakované připomínky změň čas opakování (time_local) nebo dny, ne datum.")
+        t = parse_local_time(time_local) if time_local not in (None, "") else r.local_time
+        if not t:
+            raise ReminderError("Opakovaná připomínka potřebuje čas (time_local).")
+        days = None
+        if rec == "weekly":
+            days = parse_weekdays(weekdays) if weekdays not in (None, "", []) else r.weekdays
+            if not days:
+                raise ReminderError("Týdenní připomínka potřebuje dny (weekdays).")
+        if (rec, days, t) != (r.recurrence, r.weekdays if rec == "weekly" else None, r.local_time):
+            changes.update({"recurrence": rec, "weekdays": days, "local_time": t,
+                            "due_at": next_occurrence(rec, days, t, now)})
+    if not changes:
+        raise ReminderError("Není co měnit.")
+    return changes
+
+
 # ===== zpracování splatných (scheduler / lazy při čtení notifikací) =====
 
 def _notify(db: Session, r: Reminder, occurrence: datetime, key: str, now: datetime) -> bool:
