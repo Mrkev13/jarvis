@@ -26,6 +26,7 @@ from planner_guard import PLANNER_REQUIRED_TOOLS
 from tool_registry import (
     AREA_ACTIVITY,
     AREA_MEMORY,
+    AREA_REMINDERS,
     READ_SPECS,
     TOOL_SPECS,
     TOOLS_BY_NAME,
@@ -49,19 +50,19 @@ _FOLLOW_UP_PREFIXES = ("a ", "a co", "a kolik", "a kdy", "jsi si jist", "proc", 
 _WRITE_VERB_RE = re.compile(
     r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|nastav|zmen(?:it|te|im)?\b|uprav|aktualiz|vytvor|zaloz|"
     r"oznac|pamatuj|zapamatuj|poznamen|dopln|prepis|zvys|sniz|odecti|pricti|add\b|save\b|update\b|"
-    r"smaz|odstran|vymaz|zrus|oprav|posun|presun|deaktiv|delete\b)"
+    r"smaz|odstran|vymaz|zrus|oprav|posun|presun|deaktiv|delete\b|pripomen(?:\b|te\b)|odloz|snooze\b)"
 )
 # Phase B: úprava / mazání / dokončení EXISTUJÍCÍHO záznamu → modify_records (write_intent="mutate").
 _MUTATION_VERB_RE = re.compile(
     r"\b(zmen(?:it|te|im)?\b|uprav|oprav|aktualiz|prepis|smaz|odstran|vymaz|zrus|oznac|posun|presun|deaktiv|"
-    r"delete\b|update\b)"
+    r"odloz|snooze\b|delete\b|update\b)"
 )
 # Phase C: vrácení provedené změny → undo_change (write_intent="undo").
 _UNDO_VERB_RE = re.compile(r"\b(vrat(?:it|te)?\b|vraceni\b|undo\b|zpet\b|odvolej|anuluj)")
 _MUTATION_STATEMENT_RE = re.compile(r"\b(je hotov|jsou hotov|mam hotov|uz je hotov|jsem dokoncil|jsem splnil)")
 # Vytvoření nového záznamu – při současném mutačním slovese se create tooly posílají jen s tímto slovesem.
 _CREATE_VERB_RE = re.compile(r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|vytvor|zaloz|pamatuj|zapamatuj|"
-                             r"poznamen|add\b|save\b)")
+                             r"poznamen|pripomen(?:\b|te\b)|add\b|save\b)")
 # Oznamovací věty o proběhlé události („utratil jsem 200 za oběd") – zápis jen mimo otázku.
 _STATEMENT_RE = re.compile(
     r"\b(utratil|zaplatil|koupil|nakoupil|dostal|vydelal|odpracoval|pracoval jsem|splnil|dokoncil|odevzdal|"
@@ -239,6 +240,9 @@ def route_tools(
         write_areas = explicit & _WRITE_AREAS
         if _MEMORY_WRITE_RE.search(folded) and not (mutate or undo):
             write_areas = frozenset({AREA_MEMORY})
+        if AREA_REMINDERS in explicit and not undo:
+            # „připomeň mi za 2 hodiny…" / „posuň připomínku o hodinu": „hodin" není práce, jen čas připomínky.
+            write_areas = frozenset({AREA_REMINDERS})
         if write_areas:
             names |= {s.name for s in candidates if set(s.areas) & write_areas}
             reason = REASON_WRITE

@@ -71,6 +71,9 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
     # Zápis / úprava („označ všechny dnešní úkoly jako hotové") není dotaz na plán → model + pending akce.
     if detect_write_intent(prompt):
         return None
+    # Připomínky (Phase D): „co mám připomenout dnes" chce seznam připomínek, ne denní plán.
+    if has("připom", "pripom", "upomín", "upomin"):
+        return None
 
     goal_review_signals = (
         has("cíl", "cíle", "cil", "cile", "goal", "goals")

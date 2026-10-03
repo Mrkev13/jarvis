@@ -33,6 +33,13 @@ from mutation_service import (
     propose_modify_records,
     propose_undo,
 )
+from reminder_actions import (
+    execute_add_reminder,
+    execute_manage_reminder,
+    propose_add_reminder,
+    propose_manage_reminder,
+    query_reminders,
+)
 from read_queries import (
     query_finance_transactions,
     query_goals,
@@ -48,6 +55,7 @@ READ, WRITE = "read", "write"
 AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS = "finance", "work", "school", "goals"
 AREA_NOTIFICATIONS, AREA_WOT, AREA_MFF = "notifications", "wot", "mff"
 AREA_MEMORY, AREA_ACTIVITY = "memory", "activity"
+AREA_REMINDERS = "reminders"
 
 
 @dataclass(frozen=True)
@@ -202,6 +210,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "Recent app changes (activity log), newest first.",
         {"limit": _LIMIT, "area": _STR, "days": {"type": "integer", "description": "default 7"}},
         func=query_recent_activity, areas=[AREA_ACTIVITY], takes_db=True,
+    ),
+    _read(
+        "get_reminders",
+        "User reminders with Europe/Prague times (due first).",
+        {"status": {"type": "string", "enum": ["active", "all", "done", "cancelled"]}, "limit": _LIMIT},
+        func=query_reminders, areas=[AREA_REMINDERS], takes_db=True, covered=True,
     ),
     # ===== WRITE (jen příprava pending akce; provedení až po potvrzení v UI) =====
     _write(
@@ -391,6 +405,45 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ["entity", "action", "target"],
         func=execute_modify_records, resolver=propose_modify_records, write_intent="mutate",
         areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
+    ),
+    _write(
+        "add_reminder",
+        "Prepare a new reminder (user confirms).",
+        {
+            "title": _STR,
+            "due_local": {"type": "string", "description": "YYYY-MM-DDTHH:MM"},
+            "in_minutes": _NUM,
+            "recurrence": {"type": "string", "enum": ["none", "daily", "weekly"]},
+            "weekdays": {"type": "string", "description": "0=Mon … 6=Sun"},
+            "time_local": {"type": "string", "description": "HH:MM"},
+            "note": _STR,
+        },
+        ["title"],
+        func=execute_add_reminder, resolver=propose_add_reminder, areas=[AREA_REMINDERS],
+    ),
+    _write(
+        "manage_reminder",
+        "Prepare edit/snooze/complete/cancel of a reminder (user confirms).",
+        {
+            "action": {"type": "string", "enum": ["update", "snooze", "complete", "cancel"]},
+            "target": {
+                "type": "object",
+                "description": "id only from tool results",
+                "properties": {"id": _INT, "text": _STR, "date": _DATE, "latest": _BOOL},
+                "additionalProperties": False,
+            },
+            "title": _STR,
+            "due_local": _STR,
+            "shift_minutes": {"type": "number", "description": "'o hodinu' = 60"},
+            "snooze_minutes": _NUM,
+            "snooze_until_local": _STR,
+            "recurrence": {"type": "string", "enum": ["none", "daily", "weekly"]},
+            "weekdays": _STR,
+            "time_local": _STR,
+        },
+        ["action", "target"],
+        func=execute_manage_reminder, resolver=propose_manage_reminder, write_intent="mutate",
+        areas=[AREA_REMINDERS],
     ),
     _write(
         "undo_change",

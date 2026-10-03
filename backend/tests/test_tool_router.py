@@ -75,9 +75,11 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertEqual(_names(route), READ_NAMES)
 
     def test_typical_requests_expose_small_sets(self):
-        for key in ("school", "finance", "wot", "finance_write"):
+        # Bez CURRENT STATE (nejhorší případ); „co mám zítra" od Phase D zahrnuje i připomínky → 8.
+        limits = {"school": 8, "finance": 7, "wot": 7, "finance_write": 7}
+        for key, limit in limits.items():
             with self.subTest(key):
-                self.assertLessEqual(len(route_tools([REPRESENTATIVE[key]]).names), 7)
+                self.assertLessEqual(len(route_tools([REPRESENTATIVE[key]]).names), limit)
 
     def test_area_tools(self):
         self.assertEqual(_names(route_tools(["kolik mám kreditů ve WoT?"])), {"get_wot_resources", "get_wot_grinds"})
@@ -121,7 +123,7 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertEqual(_names(route) & WRITE_NAMES, CREATE_NAMES)
         mutate = route_tools(["smaž to"])
         self.assertEqual(mutate.reason, REASON_WRITE_UNKNOWN)
-        self.assertEqual(_names(mutate) & WRITE_NAMES, {"modify_records"})
+        self.assertEqual(_names(mutate) & WRITE_NAMES, {"modify_records", "manage_reminder"})
 
     def test_mutation_intent_exposes_modify_records_only(self):
         for msg, area_tool in (
