@@ -1,4 +1,4 @@
-// Cesty, které auth middleware pouští bez session (sdílené s testy – middleware.ts je jen importuje).
+// Cesty, které auth brána (proxy.ts) pouští bez session (sdílené s testy – proxy.ts je jen importuje).
 
 // Prefixy (cesta i vše pod ní) – dosavadní chování middleware.
 const PUBLIC_PREFIXES = ["/login", "/_next", "/favicon.ico", "/api", "/robots.txt", "/sitemap.xml"];

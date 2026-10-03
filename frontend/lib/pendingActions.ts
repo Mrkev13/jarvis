@@ -25,6 +25,8 @@ export interface PreviewItem {
 
 export interface PendingPreview {
   kind: "update" | "delete" | "complete" | string;
+  /** Typ záznamu z backendu (finance_transaction, reminder, …) – jen pro zobrazení oblasti. */
+  entity?: string;
   title: string;
   count: number;
   items: PreviewItem[];
@@ -70,6 +72,7 @@ export function normalizePreview(raw: unknown, args?: Record<string, unknown>): 
   const count = Number(candidate.count);
   return {
     kind: str(candidate.kind),
+    entity: str(candidate.entity) || undefined,
     title: candidate.title,
     count: Number.isFinite(count) && count > 0 ? count : items.length,
     items,

@@ -138,6 +138,20 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertIn("modify_records", {t["function"]["name"] for t in self.calls[0]["tools"]})
         self.assertNotIn("add_finance_transaction", {t["function"]["name"] for t in self.calls[0]["tools"]})
 
+    def test_confirm_audit_text_is_human_readable(self):
+        """Roadmap 4C: Aktivita ukazuje „Upravená data (AI): …", ne „Potvrzena akce modify_records (plan=…)"."""
+        pending = self._propose_edit()
+        self.assertTrue(ai.execute_confirm_action(pending["id"])["ok"])
+        db = self.Session()
+        try:
+            approve = [a.summary for a in db.query(ActivityLog).filter_by(area="ai", action_type="approve").all()]
+        finally:
+            db.close()
+        self.assertEqual(len(approve), 1)
+        self.assertTrue(approve[0].startswith("Upravená data (AI): "), approve[0])
+        self.assertNotIn("modify_records", approve[0])
+        self.assertNotIn("=", approve[0])
+
     def test_confirm_mutates_exactly_the_target_once(self):
         pending = self._propose_edit()
         first = ai.execute_confirm_action(pending["id"])

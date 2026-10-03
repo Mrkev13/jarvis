@@ -81,3 +81,126 @@ def finance_summary_cz(transaction_type, amount, category=None, description=None
     if description:
         s += f" ({clip(description, 60)})"
     return s
+
+
+# ===== AI akce (Roadmap 4C): lidské popisky místo interních názvů toolů =====
+
+# Interní název toolu se nemění (pending akce, audit entity_type); tohle je jen text pro uživatele.
+AI_TOOL_LABELS_CZ = {
+    "add_work_session": "Přidán pracovní záznam",
+    "add_finance_transaction": "Přidána transakce",
+    "add_school_subject": "Přidán předmět",
+    "add_school_assignment": "Přidán úkol",
+    "add_school_exam": "Přidána zkouška",
+    "update_wot_resource": "Aktualizovány zdroje WoT",
+    "upsert_wot_grind": "Uložen grind WoT",
+    "upsert_mff_character": "Uložena postava MFF",
+    "upsert_goal": "Uložen cíl",
+    "save_memory": "Uložena poznámka do paměti",
+    "modify_records": "Upravená data",
+    "add_reminder": "Přidána připomínka",
+    "manage_reminder": "Upravená připomínka",
+    "undo_change": "Vrácená změna",
+}
+
+_WOT_RESOURCES_CZ = {"credits": "Credits", "gold": "Gold", "bonds": "Bonds", "free_xp": "Free XP"}
+
+
+def ai_action_label(tool) -> str:
+    """„add_work_session" → „Přidán pracovní záznam"; neznámý tool → „Akce AI"."""
+    return AI_TOOL_LABELS_CZ.get(str(tool or ""), "Akce AI")
+
+
+def _iso_date_cz(value) -> str:
+    from datetime import date as _date
+
+    try:
+        return format_date_cz(_date.fromisoformat(str(value)[:10]))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def ai_action_details(tool, arguments) -> str:
+    """Krátký lidský popis argumentů akce (bez interních klíčů „k=v"): „2. 10. 2026 · 6,5 h · Klient XYZ"."""
+    a = arguments if isinstance(arguments, dict) else {}
+    plan = a.get("plan") if isinstance(a.get("plan"), dict) else None
+    preview = plan.get("preview") if plan and isinstance(plan.get("preview"), dict) else None
+    if preview:
+        title = clip(preview.get("title") or "", 80)
+        try:
+            count = int(preview.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 1:
+            return f"{title} ({count} {plural_cz(count, 'záznam', 'záznamy', 'záznamů')})"
+        items = preview.get("items") if isinstance(preview.get("items"), list) else []
+        label = items[0].get("label") if items and isinstance(items[0], dict) else None
+        return f"{title}: {clip(label, 60)}" if label else title
+
+    parts: list[str] = []
+    if tool == "add_work_session":
+        if a.get("date_value"):
+            parts.append(_iso_date_cz(a["date_value"]))
+        if a.get("hours") not in (None, ""):
+            parts.append(format_hours_cz(a["hours"]))
+        if a.get("project"):
+            parts.append(clip(a["project"], 40))
+    elif tool == "add_finance_transaction":
+        return finance_summary_cz(a.get("transaction_type"), a.get("amount") or 0, a.get("category"), a.get("description"))
+    elif tool in ("add_school_assignment", "add_school_exam"):
+        if a.get("title"):
+            parts.append(clip(a["title"], 60))
+        due = a.get("due_date") or a.get("exam_date")
+        if due:
+            parts.append(f"termín {_iso_date_cz(due)}")
+    elif tool == "update_wot_resource":
+        res = _WOT_RESOURCES_CZ.get(str(a.get("resource") or ""), str(a.get("resource") or ""))
+        parts.append(f"{res}: {format_num_cz(a.get('amount') or 0, 0)}")
+    elif tool == "upsert_wot_grind":
+        if a.get("tank"):
+            parts.append(clip(a["tank"], 40))
+        if a.get("xp_remaining") not in (None, ""):
+            parts.append(f"zbývá {format_num_cz(a['xp_remaining'], 0)} XP")
+    elif tool in ("add_school_subject", "upsert_mff_character"):
+        if a.get("name"):
+            parts.append(clip(a["name"], 60))
+    elif tool == "upsert_goal":
+        if a.get("title"):
+            parts.append(clip(a["title"], 60))
+        if a.get("progress") not in (None, ""):
+            parts.append(f"{format_num_cz(a['progress'], 0)} %")
+    elif tool == "save_memory":
+        if a.get("content"):
+            parts.append(clip(a["content"], 60))
+    elif a.get("title"):
+        parts.append(clip(a["title"], 60))
+    return " · ".join(p for p in parts if p)
+
+
+def ai_action_summary(tool, arguments, prefix: str = "") -> str:
+    """Text do Aktivity: „Přidán pracovní záznam (AI): 2. 10. 2026 · 6,5 h · Klient XYZ"."""
+    label = ai_action_label(tool)
+    details = ai_action_details(tool, arguments)
+    head = f"{prefix}{label} (AI)"
+    return f"{head}: {details}" if details else head
+
+
+# Oblasti pro text (stejné popisky jako frontend lib/areas.ts); neznámá oblast → s velkým prvním písmenem.
+AREA_LABELS_CZ = {
+    "school": "Škola", "work": "Práce", "finance": "Finance", "wot": "World of Tanks", "mff": "Marvel FF",
+    "personal": "Osobní", "fitness": "Fitness", "hobby": "Hobby", "travel": "Cestování", "general": "Obecné",
+    "reminders": "Připomínky", "briefing": "Přehled", "review": "Týdenní přehled", "goals": "Cíle",
+    "memory": "Paměť", "ai": "AI", "system": "Systém",
+}
+
+
+def area_label_cz(area) -> str:
+    a = str(area or "").strip()
+    return AREA_LABELS_CZ.get(a.lower(), a[:1].upper() + a[1:]) if a else ""
+
+
+def planner_action_line(idx: int, action: dict) -> str:
+    """Řádek plánu v textu odpovědi chatu: „1. Připravit se na zkoušku: test (Škola)" – bez interního klíče oblasti."""
+    title = str(action.get("title") or "").strip()
+    area = area_label_cz(action.get("area"))
+    return f"{idx}. {title} ({area})" if area else f"{idx}. {title}"

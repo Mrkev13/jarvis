@@ -44,7 +44,7 @@ import briefing_service
 import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
-from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz
+from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz, planner_action_line
 from time_utils import local_month_bounds_utc, today_local
 from env_config import env_bool
 
@@ -569,14 +569,14 @@ def chat(request: ChatRequest):
                 goals = plan_payload.get("goals") or []
                 answer_lines.append(
                     f"Aktivních cílů: {len(goals)}. "
-                    "Podrobnosti (progress, stagnace, on-track) viz níže v Goal Review kartě."
+                    "Postup, stagnaci a tempo jednotlivých cílů najdeš níže v přehledu cílů."
                 )
             else:
                 actions = plan_payload.get("actions") or []
                 answer_lines.append(plan_payload.get("summary") or "")
                 answer_lines.append("")
                 for idx, a in enumerate(actions[:5], start=1):
-                    answer_lines.append(f"{idx}. [{a.get('area','')}] {a.get('title','')}")
+                    answer_lines.append(planner_action_line(idx, a))
                     if a.get("reason"):
                         answer_lines.append(f"   → {a['reason']}")
             answer_text = "\n".join(answer_lines).strip()

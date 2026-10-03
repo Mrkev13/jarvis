@@ -43,9 +43,21 @@ visual polish.
 | Migrated pages: planner (+cards), school, work, finance, goals, activity, memory, WoT, MFF, login | ✅ |
 | Activity bugs: date filter ignored (`from`/`to` vs `from_date`/`to_date`), multi-area returned nothing, empty change detail | ✅ fixed |
 | `Modal` primitive | ⏳ not needed (ConfirmDialog + Drawer cover all current uses) |
-| `/ai` assistant redesign / split | ⏳ separate phase |
-| `middleware.ts` → `proxy.ts` (Next 16) | ⏳ still open (touches auth) |
+| `/ai` assistant redesign / split | ✅ Roadmap 4C |
+| `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
+
+## Status after Roadmap 4C (AI assistant)
+
+| Item | Status |
+|---|---|
+| `/ai` decomposed (2150 → ~190 lines page; `lib/ai*`, 3 hooks, 10 components) | ✅ see design-system §13 |
+| Design system on `/ai` (rail/Drawer, message variants, pending/undo cards, composer) | ✅ |
+| AI action wording (UI + Activity) | ✅ `aiToolMeta`, `text_utils.ai_action_summary` |
+| `/ai` a11y: labelled textarea/select, h1, Drawer, no `window.prompt/confirm` | ✅ |
+| `middleware.ts` → `proxy.ts` (Next 16) | ✅ `lib/authGate.ts` + tests, browser redirect/login checks |
+| Planner card disappeared after an answer (messages reloaded from the server) | ✅ fixed (only the list refreshes) |
+| Streaming answers | ⏳ not present before 4C, not added |
 
 ## Status after Roadmap 4B.1 (polish)
 

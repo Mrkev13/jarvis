@@ -50,6 +50,8 @@
   /* Rozvržení (používá ContentContainer / Section) */
   --page-max: 76rem;
   --page-max-narrow: 56rem;
+  /* Roadmap 4C: výška mobilní hlavičky (celovýšková stránka AI asistenta ji odečítá). */
+  --mobile-header-h: 3.75rem;
   --page-gutter: 1rem;
   --page-gutter-md: 2rem;
   --section-gap: 1.75rem;
