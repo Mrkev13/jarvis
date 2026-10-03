@@ -7,9 +7,12 @@ import { test } from "node:test";
 import {
   confirmActionBody,
   describePreview,
+  isUndoAvailable,
   normalizePendingActions,
   normalizePreview,
   rejectActionPath,
+  UNDO_PATH,
+  undoActionBody,
 } from "./pendingActions.ts";
 
 // Přesný tvar položky z backendu: backend/ai.py `_run_tool_calls` → pending_actions.append({...}).
@@ -137,4 +140,40 @@ test("batch card lists every affected record and the count", () => {
 test("malformed previews are ignored instead of crashing the card", () => {
   assert.equal(normalizePreview({ title: 5, items: [] }), null);
   assert.equal(normalizePreview(null, { plan: "x" }), null);
+});
+
+// ===== Phase C: vrácení potvrzené změny =====
+test("undo is offered only when the backend says the confirmed action is reversible", () => {
+  assert.equal(isUndoAvailable({ ok: true, result: { undo_available: true } }), true);
+  assert.equal(isUndoAvailable({ ok: true, result: { undo_available: false } }), false);
+  assert.equal(isUndoAvailable({ ok: true, result: { id: 5 } }), false); // create akce
+  assert.equal(isUndoAvailable({ ok: false, result: { undo_available: true } }), false);
+  assert.equal(isUndoAvailable(null), false);
+});
+
+test("undo request sends the executed action id and never {}", () => {
+  assert.equal(UNDO_PATH, "/actions/undo");
+  assert.deepEqual(undoActionBody("77"), { action_id: "77" });
+  assert.throws(() => undoActionBody(""));
+});
+
+test("undo pending card renders through the generic preview", () => {
+  const [action] = normalizePendingActions([{
+    id: "90",
+    tool: "undo_change",
+    arguments: { plan: { version: 1, kind: "undo", original_action_id: 77 } },
+    preview: {
+      kind: "undo", title: "Vrátit: Upravit: transakce", count: 1,
+      items: [{ label: "−450 Kč Jídlo (oběd)", changes: [{ label: "Částka", old: "450 Kč", new: "300 Kč" }] }],
+      warnings: [],
+    },
+  }]);
+  const info = describePreview(action.preview);
+  assert.deepEqual(info.fields.slice(0, 3), [
+    { label: "Akce", value: "Vrácení změny" },
+    { label: "Záznam", value: "−450 Kč Jídlo (oběd)" },
+    { label: "Částka", value: "450 Kč → 300 Kč" },
+  ]);
+  assert.deepEqual(confirmActionBody(action), { action_id: "90" });
+  assert.equal(rejectActionPath(action), "/ai/reject/90");
 });
