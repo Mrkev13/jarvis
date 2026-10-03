@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
+from read_queries import EXAM_OPEN_STATUSES
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,8 @@ def _deadline_actions_for_exams(mode: str, db: Session, today: date) -> list[Pla
     for it in items:
         if not it.exam_date:
             continue
+        if (it.status or "").strip().lower() not in EXAM_OPEN_STATUSES:
+            continue  # složená/neúspěšná zkouška už není úkol (stejně jako Denní přehled a AI kontext)
         dl = _days_left(it.exam_date, today)
         if dl < 0:
             actions.append(
