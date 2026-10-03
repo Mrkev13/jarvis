@@ -522,3 +522,38 @@ class Delivery(Base):
 
 Index("ix_deliveries_dedupe_key", Delivery.dedupe_key, unique=True)
 Index("ix_deliveries_status_next", Delivery.status, Delivery.next_attempt_at)
+
+
+class DailyBriefing(Base):
+    """Denní přehled (Roadmap 3.0 Phase F) – jeden řádek na pražský kalendářní den.
+
+    status: generating → ready | failed. Přegenerování přepíše obsah stejného řádku (regenerated_count).
+    Neukládá se prompt ani celý zdrojový snímek: jen hash, odkazy na zdroje (pro „co je nového") a výsledek.
+    """
+    __tablename__ = "daily_briefings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    briefing_date = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False)
+    trigger = Column(String(20), nullable=False)  # scheduler | catchup | manual
+    attempts = Column(Integer, default=0, nullable=False)
+    next_retry_at = Column(DateTime, nullable=True)
+    error_category = Column(String(60), nullable=True)
+    content = Column(Text, nullable=True)  # validovaný JSON přehledu
+    source_hash = Column(String(64), nullable=True)
+    source_refs = Column(Text, nullable=True)  # JSON seznam „typ:id" ze snímku
+    snapshot_tokens = Column(Integer, nullable=True)
+    model = Column(String(100), nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    grounding_removed = Column(Integer, default=0, nullable=False)
+    regenerated_count = Column(Integer, default=0, nullable=False)
+    generated_at = Column(DateTime, nullable=True)
+    first_generated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+Index("ix_daily_briefings_date", DailyBriefing.briefing_date, unique=True)

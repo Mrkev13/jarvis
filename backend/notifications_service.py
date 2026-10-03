@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
+from read_queries import EXAM_OPEN_STATUSES
 
 
 ALLOWED_SEVERITIES = {"info", "warning", "important"}
@@ -186,6 +187,8 @@ def _deadline_candidates_for_assignment(it: Assignment, today: date) -> Notifica
 def _deadline_candidates_for_exam(it: Exam, today: date) -> NotificationCandidate | None:
     if not it.exam_date:
         return None
+    if (it.status or "").strip().lower() not in EXAM_OPEN_STATUSES:
+        return None  # složená/neúspěšná zkouška: žádný deadline (starý se vyřeší jako „no longer relevant")
     days_left = (it.exam_date - today).days
     if days_left < 0:
         dedupe_key = f"exam_overdue:{it.id}"

@@ -15,6 +15,9 @@ SCHEDULER_INTERVAL_SECONDS = int(os.environ.get("SCHEDULER_INTERVAL_SECONDS", "3
 # nic nezdvojí), takže krátký interval je bezpečný.
 REMINDERS_CHECK_ENABLED = (os.environ.get("REMINDERS_CHECK_ENABLED", "true").lower() in ("1", "true", "yes"))
 REMINDERS_CHECK_SECONDS = max(15, int(os.environ.get("REMINDERS_CHECK_SECONDS", "60")))
+# Phase F: Denní přehled – vlastní job (pomalé LLM volání nesmí brzdit připomínky). Čas v Europe/Prague.
+DAILY_BRIEFING_ENABLED = (os.environ.get("DAILY_BRIEFING_ENABLED", "true").lower() in ("1", "true", "yes"))
+DAILY_BRIEFING_CHECK_SECONDS = max(60, int(os.environ.get("DAILY_BRIEFING_CHECK_SECONDS", "300")))
 SINGLE_WORKER_ASSUMPTION_DOC = (
     "Scheduler assumes single backend worker (uvicorn --workers 1). "
     "If you run multiple workers, scheduler will fire multiple times per hour."
@@ -86,6 +89,24 @@ def _run_reminders_job() -> None:
         db.close()
 
 
+def _run_briefing_job() -> None:
+    from briefing_service import run_scheduled
+
+    db = SessionLocal()
+    try:
+        state = run_scheduled(db)
+        if state in ("generated", "retried"):
+            print(f"[scheduler] daily briefing: {state}")
+    except Exception as _berr:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[scheduler] daily briefing job failed: {type(_berr).__name__}")
+    finally:
+        db.close()
+
+
 def run_job_now() -> dict:
     _run_hourly_job()
     return {"ok": True, "ran_at": datetime.utcnow().isoformat(), "doc": SINGLE_WORKER_ASSUMPTION_DOC}
@@ -95,7 +116,7 @@ def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
-    if not SCHEDULER_ENABLED and not REMINDERS_CHECK_ENABLED:
+    if not SCHEDULER_ENABLED and not REMINDERS_CHECK_ENABLED and not DAILY_BRIEFING_ENABLED:
         print(f"[scheduler] disabled (SCHEDULER_ENABLED={SCHEDULER_ENABLED}, "
               f"REMINDERS_CHECK_ENABLED={REMINDERS_CHECK_ENABLED}). "
               f"Single worker assumption: {SINGLE_WORKER_ASSUMPTION_DOC}")
@@ -123,9 +144,21 @@ def start_scheduler() -> BackgroundScheduler | None:
             max_instances=1,
             next_run_time=datetime.utcnow(),
         )
+    if DAILY_BRIEFING_ENABLED:
+        sched.add_job(
+            _run_briefing_job,
+            trigger=IntervalTrigger(seconds=DAILY_BRIEFING_CHECK_SECONDS),
+            id="standa_hub_briefing",
+            name="standa_hub_briefing",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            next_run_time=datetime.utcnow(),  # po startu hned dohnat chybějící dnešní přehled
+        )
     sched.start()
     print(f"[scheduler] started! hourly={'on' if SCHEDULER_ENABLED else 'off'} ({SCHEDULER_INTERVAL_SECONDS}s), "
-          f"reminders={'on' if REMINDERS_CHECK_ENABLED else 'off'} ({REMINDERS_CHECK_SECONDS}s). "
+          f"reminders={'on' if REMINDERS_CHECK_ENABLED else 'off'} ({REMINDERS_CHECK_SECONDS}s), "
+          f"briefing={'on' if DAILY_BRIEFING_ENABLED else 'off'} ({DAILY_BRIEFING_CHECK_SECONDS}s). "
           f"Single worker: {SINGLE_WORKER_ASSUMPTION_DOC}")
     _scheduler = sched
     return sched
