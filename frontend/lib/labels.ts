@@ -237,3 +237,49 @@ export function fieldValueLabel(field: string, value: unknown, entityType?: stri
   }
   return VALUE_LABELS[f]?.[key(v)] ?? v;
 }
+
+// ---------- akce AI (Roadmap 4C) ----------
+
+/**
+ * WRITE tooly AI (backend tool_registry WRITE_SPECS; texty v Aktivitě: backend text_utils.AI_TOOL_LABELS_CZ).
+ * `action` = co se stane (karta k potvrzení), `done` = co se stalo (výsledek), `area` = oblast pro štítek.
+ */
+const AI_TOOLS: Record<string, { action: string; done: string; area: string | null }> = {
+  add_work_session: { action: "Přidat pracovní záznam", done: "Přidán pracovní záznam", area: "work" },
+  add_finance_transaction: { action: "Přidat transakci", done: "Přidána transakce", area: "finance" },
+  add_school_subject: { action: "Přidat předmět", done: "Přidán předmět", area: "school" },
+  add_school_assignment: { action: "Přidat úkol", done: "Přidán úkol", area: "school" },
+  add_school_exam: { action: "Přidat zkoušku", done: "Přidána zkouška", area: "school" },
+  update_wot_resource: { action: "Aktualizovat zdroje WoT", done: "Aktualizovány zdroje WoT", area: "wot" },
+  upsert_wot_grind: { action: "Uložit grind WoT", done: "Uložen grind WoT", area: "wot" },
+  upsert_mff_character: { action: "Uložit postavu MFF", done: "Uložena postava MFF", area: "mff" },
+  upsert_goal: { action: "Uložit cíl", done: "Uložen cíl", area: "goals" },
+  save_memory: { action: "Uložit poznámku do paměti", done: "Uložena poznámka do paměti", area: "memory" },
+  modify_records: { action: "Upravit data", done: "Upravená data", area: null },
+  add_reminder: { action: "Přidat připomínku", done: "Přidána připomínka", area: "reminders" },
+  manage_reminder: { action: "Upravit připomínku", done: "Upravená připomínka", area: "reminders" },
+  undo_change: { action: "Vrátit změnu", done: "Vrácená změna", area: null },
+};
+
+export const AI_WRITE_TOOLS = Object.keys(AI_TOOLS);
+
+/** Popisky akce AI; neznámý tool → „Akce AI" (interní název se uživateli neukazuje). */
+export function aiToolMeta(tool: string | null | undefined): { action: string; done: string; area: string | null } {
+  return AI_TOOLS[String(tool ?? "")] ?? { action: "Akce AI", done: "Akce AI provedena", area: null };
+}
+
+/** Typ záznamu z náhledu změny (backend mutation_service / reminder_actions) → oblast pro štítek. */
+const PREVIEW_ENTITY_AREAS: Record<string, string> = {
+  finance_transaction: "finance",
+  work_session: "work",
+  school_assignment: "school",
+  school_exam: "school",
+  goal: "goals",
+  wot_grind: "wot",
+  memory: "memory",
+  reminder: "reminders",
+};
+
+export function previewEntityArea(entity: string | null | undefined): string | null {
+  return PREVIEW_ENTITY_AREAS[key(entity)] ?? null;
+}
