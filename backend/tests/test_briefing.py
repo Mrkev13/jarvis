@@ -244,7 +244,7 @@ class GenerateTestCase(BriefingTestBase):
         self.seed_busy()
         for bad in ("Tady je přehled bez JSONu.", '{"summary": 5}', '{"summary": "x", "priorities": "nope"}'):
             with self.subTest(bad=bad):
-                self.q(lambda db: db.query(DailyBriefing).delete() or db.commit())
+                self.q(lambda db: (db.query(DailyBriefing).delete(), db.commit()))
                 self.gen(FakeLLM(bad))
                 self.assertEqual((self.row().status, self.row().error_category), ("failed", "invalid_response"))
         self.gen(FakeLLM("```json\n" + good_answer() + "\n```"), trigger="manual")
@@ -299,13 +299,14 @@ class GenerateTestCase(BriefingTestBase):
         expected = [(daily, "daily_limit"), (tpm, "rate_limit"), (network, "provider")]
         for fake, category in expected:
             with self.subTest(category=category), patch.object(ai, "_llm_create_with_retry", fake):
-                self.q(lambda db: db.query(DailyBriefing).delete() or db.commit())
+                self.q(lambda db: (db.query(DailyBriefing).delete(), db.commit()))
                 self.q(lambda db: bs.generate(db, trigger="scheduler", now=SEVEN))
                 self.assertEqual(self.row().error_category, category)
         self.assertIsNone(captured["tools"])
-        self.assertEqual(captured["max_tokens"], bs.MAX_OUTPUT_TOKENS)
+        self.assertNotIn("max_tokens", captured)
+        self.assertEqual(captured["extra_params"], bs.request_params())
         with patch.object(ai, "_llm_create_with_retry", ok):
-            self.q(lambda db: db.query(DailyBriefing).delete() or db.commit())
+            self.q(lambda db: (db.query(DailyBriefing).delete(), db.commit()))
             self.q(lambda db: bs.generate(db, trigger="scheduler", now=SEVEN))
         row = self.row()
         self.assertEqual((row.status, row.prompt_tokens, row.total_tokens), ("ready", 800, 920))
@@ -391,6 +392,215 @@ class SchedulerTimingTestCase(BriefingTestBase):
         self.assertEqual(self.run_at(datetime(2026, 10, 6, 21, 50), llm), "exists")  # 23:50 Praha
         self.assertEqual(self.run_at(datetime(2026, 10, 6, 22, 30), llm), "not_yet")  # 00:30 dalšího dne
         self.assertEqual(self.q(lambda db: db.query(DailyBriefing).count()), 1)
+
+
+class FakeGroq:
+    """Lokální HTTP fake Groq (httpx MockTransport) za skutečným OpenAI SDK klientem – žádná síť."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    def handler(self, request):
+        import httpx
+
+        self.requests.append(json.loads(request.content))
+        status, body = self.responses.pop(0) if self.responses else (200, completion(good_answer()))
+        if isinstance(body, str):
+            return httpx.Response(status, text=body, headers={"content-type": "text/plain"})
+        return httpx.Response(status, json=body)
+
+    def client(self):
+        import httpx
+        from openai import OpenAI
+
+        return OpenAI(api_key="test", base_url="http://groq.fake/openai/v1", max_retries=0,
+                      http_client=httpx.Client(transport=httpx.MockTransport(self.handler)))
+
+
+def completion(content, finish="stop", refusal=None, reasoning=150):
+    return {
+        "id": "chatcmpl-fake", "object": "chat.completion", "created": 0, "model": "openai/gpt-oss-120b",
+        "choices": [{"index": 0, "finish_reason": finish,
+                     "message": {"role": "assistant", "content": content, "refusal": refusal}}],
+        "usage": {"prompt_tokens": 900, "completion_tokens": 400, "total_tokens": 1300,
+                  "completion_tokens_details": {"reasoning_tokens": reasoning}},
+    }
+
+
+def groq_error(status, message, code=None):
+    return status, {"error": {"message": message, "type": "invalid_request_error", "code": code}}
+
+
+class StructuredOutputTestCase(BriefingTestBase):
+    """Reálná cesta ai._llm_create_with_retry → OpenAI SDK → fake HTTP (Phase F hardening)."""
+
+    def run_with(self, fake, now=SEVEN, trigger="scheduler", regenerate=False):
+        with patch.object(ai, "client", fake.client()), patch("time.sleep", lambda s: None):
+            return self.q(lambda db: bs.generate(db, trigger=trigger, now=now, regenerate=regenerate))
+
+    def reset(self):
+        def go(db):
+            db.query(DailyBriefing).delete()
+            db.commit()
+        self.q(go)
+
+    def test_request_sends_strict_schema_low_reasoning_and_new_cap(self):
+        self.seed_busy()
+        fake = FakeGroq()
+        with self.assertLogs("standa_hub.briefing", "INFO") as logs:
+            self.run_with(fake)
+        [body] = fake.requests
+        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertEqual(body["max_completion_tokens"], 1200)
+        self.assertNotIn("max_tokens", body)
+        self.assertNotIn("tools", body)
+        self.assertNotIn("tool_choice", body)
+        self.assertEqual([m["role"] for m in body["messages"]], ["system", "user"], "bez historie konverzace")
+        fmt = body["response_format"]
+        self.assertEqual(fmt["type"], "json_schema")
+        self.assertTrue(fmt["json_schema"]["strict"])
+        schema = fmt["json_schema"]["schema"]
+        self.assertEqual(schema, bs.RESPONSE_SCHEMA)
+        self.assertEqual(sorted(schema["required"]), ["note", "priorities", "summary", "upcoming", "watch"])
+        self.assertFalse(schema["additionalProperties"])
+        for key in ("priorities", "watch", "upcoming"):
+            item = schema["properties"][key]["items"]
+            self.assertFalse(item["additionalProperties"])
+            self.assertEqual(sorted(item["required"]), sorted(item["properties"]))
+        row = self.row()
+        self.assertEqual((row.status, row.model), ("ready", "openai/gpt-oss-120b"))
+        self.assertEqual((row.prompt_tokens, row.completion_tokens, row.total_tokens), (900, 400, 1300))
+        self.assertIn("reasoning_tokens=150", "\n".join(logs.output))
+        self.assertNotIn("Esej", "\n".join(logs.output), "log bez obsahu")
+
+    def test_normal_chat_request_is_unchanged(self):
+        fake = FakeGroq((200, completion("ahoj")))
+        with patch.object(ai, "client", fake.client()):
+            ai._llm_create_with_retry([{"role": "user", "content": "x"}], tools=None)
+        [body] = fake.requests
+        for key in ("reasoning_effort", "response_format", "max_completion_tokens"):
+            self.assertNotIn(key, body)
+
+    def test_strict_response_still_goes_through_grounding(self):
+        self.seed_busy()
+        answer = good_answer(priorities=[
+            {"ref": "assignment:999", "title": "Vymyšlený úkol", "why": "Neexistuje."},
+            {"ref": "assignment:2", "title": "Odevzdat esej do 23:59 za 5000 Kč", "why": "Termín je dnes."},
+        ], note="")
+        self.run_with(FakeGroq((200, completion(answer))))
+        row = self.row()
+        content = json.loads(row.content)
+        self.assertEqual([p["ref"] for p in content["priorities"]], ["assignment:2"])
+        self.assertEqual(content["priorities"][0]["text"], content["priorities"][0]["label"])
+        self.assertIsNone(content["note"], "prázdná poznámka ze schématu = žádná")
+        self.assertGreaterEqual(row.grounding_removed, 2)
+        self.reset()
+        bad = good_answer(priorities=[{"ref": "x:1", "title": "a", "why": ""}], watch=[], upcoming=[])
+        self.run_with(FakeGroq((200, completion(bad))))
+        self.assertEqual((self.row().status, self.row().error_category), ("failed", "grounding_rejected"))
+
+    def test_length_finish_is_output_limit_and_not_retried_soon(self):
+        self.seed_busy()
+        fake = FakeGroq((200, completion('{"summary":"Dnes', finish="length", reasoning=1100)))
+        self.run_with(fake)
+        row = self.row()
+        self.assertEqual((row.status, row.error_category), ("failed", "output_limit"))
+        self.assertEqual(row.next_retry_at, SEVEN + timedelta(hours=6))
+        self.assertEqual(row.completion_tokens, 400, "spotřeba i u uťaté odpovědi")
+        self.assertIsNone(row.content)
+        with patch.object(ai, "client", fake.client()):
+            for minutes in (5, 60, 300):
+                self.q(lambda db: bs.run_scheduled(db, now=SEVEN + timedelta(minutes=minutes)))
+        self.assertEqual(len(fake.requests), 1, "stejný poddimenzovaný požadavek se hned neopakuje")
+
+    def test_provider_failures_are_classified_safely(self):
+        cases = [
+            (groq_error(400, "Failed to generate JSON. Please adjust your prompt.", "json_validate_failed"),
+             "schema_error"),
+            (groq_error(400, "max completion tokens reached before generating a valid document",
+                        "json_validate_failed"), "output_limit"),
+            (groq_error(400, "reasoning_effort is not supported", "invalid_request"), "request_rejected"),
+            ((500, {"error": {"message": "upstream"}}), "provider"),
+            ((200, completion(None, refusal="I can't help with that.")), "refused"),
+            ((200, completion("   ")), "invalid_response"),
+            ((200, completion("Tohle není JSON")), "invalid_response"),
+            ((200, {"id": "x", "object": "chat.completion", "created": 0, "model": "m", "choices": []}),
+             "invalid_response"),
+            ((200, "<html>bad gateway</html>"), "invalid_response"),
+        ]
+        self.seed_busy()
+        for response, category in cases:
+            with self.subTest(category=category, response=str(response)[:60]):
+                self.reset()
+                responses = [response, response] if response[0] >= 500 else [response]
+                self.run_with(FakeGroq(*responses))
+                row = self.row()
+                self.assertEqual((row.status, row.error_category), ("failed", category))
+                self.assertIsNotNone(row.next_retry_at)
+        self.assertEqual(self.briefing_notes(), [])
+
+    def test_failed_regeneration_with_output_limit_keeps_previous(self):
+        self.seed_busy()
+        self.run_with(FakeGroq())
+        before = self.row().content
+        self.run_with(FakeGroq((200, completion("{", finish="length"))), now=SEVEN + timedelta(hours=1),
+                      trigger="manual", regenerate=True)
+        row = self.row()
+        self.assertEqual((row.status, row.error_category, row.content), ("ready", "regenerate_failed:output_limit", before))
+
+    def test_quiet_day_makes_zero_llm_requests(self):
+        fake = FakeGroq()
+        self.run_with(fake)
+        self.assertEqual(fake.requests, [])
+        self.assertEqual((self.row().status, self.row().model), ("ready", "deterministic"))
+
+
+class ChangesNoiseTestCase(BriefingTestBase):
+    def test_technical_activity_is_filtered_but_user_changes_stay(self):
+        self.seed_busy()
+        t = SEVEN - timedelta(hours=1)
+
+        def go(db):
+            noise = [
+                dict(area="goals", action_type="snapshot", summary="Snapshot progresu cíle"),
+                dict(area="finance", action_type="sync", summary="Synchronizace práce do financí"),
+                dict(area="work", action_type="sync_to_finance", summary="Sync hodin"),
+                dict(area="system", action_type="error", summary="Chyba AI"),
+                dict(area="ai", action_type="approve", summary="Potvrzena akce"),
+                dict(area="school", action_type="update", summary="Úprava", user_context="unit_test"),
+                dict(area="school", action_type="update", summary="Úprava", user_context="test"),
+                dict(area="school", action_type="create", summary="Úkol přidán: [TEST] A3 ověření"),
+                dict(area="school", action_type="delete", summary="Test cleanup: smazány testovací položky"),
+                # vytvořeno a hned smazáno (úklid po ověřování) → čistý dopad nulový
+                dict(area="school", action_type="create", summary="Úkol přidán: Dočasný", entity_type="Assignment",
+                     entity_id=77),
+                dict(area="school", action_type="delete", summary="Úkol smazán: Dočasný", entity_type="Assignment",
+                     entity_id=77),
+            ]
+            keep = [
+                dict(area="school", action_type="create", summary="Úkol přidán: Laboratorní protokol",
+                     entity_type="Assignment", entity_id=5, user_context="manual"),
+                dict(area="school", action_type="delete", summary="Úkol smazán: Starý referát",
+                     entity_type="Assignment", entity_id=3, user_context="manual"),
+                dict(area="goals", action_type="update", summary="Cíl upraven: Našetřit 150 000 Kč",
+                     user_context="ai_confirm"),
+                dict(area="reminders", action_type="complete", summary="Připomínka hotová: fyzio"),
+            ]
+            for i, kw in enumerate(noise + keep):
+                db.add(ActivityLog(timestamp=t + timedelta(seconds=i), dedupe_key=f"n{i}", **kw))
+            db.commit()
+        self.q(go)
+        snap = self.q(lambda db: build_snapshot(db, SEVEN))
+        summaries = [i.label for i in snap.sections["changes"]]
+        for text in ("Laboratorní protokol", "Starý referát", "Našetřit", "fyzio"):
+            self.assertTrue(any(text in s for s in summaries), text)
+        for text in ("Snapshot", "Synchronizace", "Sync hodin", "Chyba AI", "Potvrzena", "[TEST]", "cleanup",
+                     "Dočasný", "Úprava"):
+            self.assertFalse(any(text in s for s in summaries), text)
+        # počty v souhrnu jen ze smysluplných změn (seed: 1× finance create)
+        self.assertEqual(sorted(snap.changes_summary.split(", ")),
+                         ["1× finance", "1× goals", "1× reminders", "2× school"])
 
 
 class IntegrationTestCase(BriefingTestBase):

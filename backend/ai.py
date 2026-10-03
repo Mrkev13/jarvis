@@ -422,13 +422,16 @@ def _llm_create_with_retry(
     call_log: list[LLMCallRecord] | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
+    extra_params: dict | None = None,
 ):
     """Chat completion s aplikačním retry (SDK retry je vypnuté → každý 429/5xx je vidět v logu).
 
     max_retries = celkový počet pokusů (default LLM_SETTINGS.llm_max_attempts). Po 429 se čeká dle
     hlavičky retry-after / textu „try again in …" (max AI_LLM_RETRY_MAX_WAIT_SECONDS). Každý pokus
     se zapíše do call_log (jen čísla) a zaloguje bez obsahu zpráv. tools=None → volání bez toolů
-    (např. shrnutí konverzace); model default LLM_SETTINGS.groq_model.
+    (např. shrnutí konverzace); model default LLM_SETTINGS.groq_model. extra_params = další parametry jen
+    pro konkrétního volajícího (např. Denní přehled: response_format, reasoning_effort, max_completion_tokens);
+    běžný chat je neposílá.
     """
     import openai as _openai
 
@@ -444,6 +447,8 @@ def _llm_create_with_retry(
         request_kwargs.update(tools=tools, tool_choice=tool_choice)
     if max_tokens is not None:
         request_kwargs["max_tokens"] = max_tokens
+    if extra_params:
+        request_kwargs.update(extra_params)
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         started = time.monotonic()

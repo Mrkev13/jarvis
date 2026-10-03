@@ -33,7 +33,11 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
-MAX_OUTPUT_TOKENS = 700
+# Strop výstupu (ne očekávaná spotřeba). gpt-oss je reasoning model: reasoning tokeny se počítají do
+# completion budgetu, takže 700 nestačilo na úvahu + kompletní JSON. Odpověď sama má typicky 250–450 tokenů.
+MAX_OUTPUT_TOKENS = 1200
+# Přehled jen shrnuje/řadí hotový deterministický snímek → nízká úroveň uvažování stačí a šetří budget.
+REASONING_EFFORT = "low"
 MAX_PRIORITIES, MAX_LIST = 5, 5
 MAX_SCHEDULER_ATTEMPTS = 4
 STALE_GENERATING = timedelta(minutes=10)
@@ -45,6 +49,11 @@ RETRY_DELAYS = {
     "invalid_response": timedelta(minutes=30),
     "grounding_rejected": timedelta(minutes=30),
     "internal": timedelta(minutes=30),
+    # Stejný (poddimenzovaný / odmítnutý) požadavek hned opakovat nemá smysl → dlouhé odstupy.
+    "output_limit": timedelta(hours=6),
+    "schema_error": timedelta(hours=1),
+    "refused": timedelta(hours=6),
+    "request_rejected": timedelta(hours=6),
 }
 ERROR_TEXT = {
     "daily_limit": "AI má vyčerpaný denní limit – zkusím to později (nebo ručně).",
@@ -53,6 +62,10 @@ ERROR_TEXT = {
     "invalid_response": "AI vrátila neplatnou odpověď – zkusím to znovu.",
     "grounding_rejected": "AI odpověď neodpovídala datům – zkusím to znovu.",
     "internal": "Interní chyba při sestavení přehledu.",
+    "output_limit": "AI nestihla odpověď v limitu délky – zkusím to později (nebo ručně).",
+    "schema_error": "AI nedodržela formát odpovědi – zkusím to později.",
+    "refused": "AI odmítla přehled vytvořit.",
+    "request_rejected": "AI služba odmítla požadavek (nastavení) – zkusím to později.",
 }
 
 SYSTEM_PROMPT = """You write the user's Daily Briefing in Standa Hub. The user message is a SNAPSHOT of real data (Europe/Prague); every line starts with a [ref].
@@ -61,15 +74,46 @@ Rules:
 - Czech, short. If little is happening, say so in one sentence and keep lists short or empty.
 - priorities: 1-5 highest-value actions for today, ordered; each is one snapshot item (its ref).
 - watch: overdue or needs-attention items. upcoming: next days. Never repeat a ref across lists.
-- note: optional one short factual remark about progress or changes, else null.
-Return ONLY this JSON:
-{"summary":"1-2 sentences","priorities":[{"ref":"…","title":"max 12 words","why":"max 20 words"}],"watch":[{"ref":"…","text":"max 15 words"}],"upcoming":[{"ref":"…","text":"max 15 words"}],"note":null}"""
+- note: optional one short factual remark about progress or changes, else "".
+- Lengths: summary 1-2 sentences; title max 12 words; why max 20 words; watch/upcoming text max 15 words; at most 5 items per list.
+- ref is copied exactly from the snapshot, without brackets.
+Answer with the JSON object defined by the response schema."""
+
+_ITEM = {"type": "object", "additionalProperties": False, "required": ["ref", "text"],
+         "properties": {"ref": {"type": "string"}, "text": {"type": "string"}}}
+# Strict JSON Schema (Structured Outputs): struktura je zaručená providerem; obsah dál ověřuje `ground`.
+# Záměrně jednoduché (bez min/max, bez unionů) – limity hlídá backend.
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["summary", "priorities", "watch", "upcoming", "note"],
+    "properties": {
+        "summary": {"type": "string"},
+        "priorities": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["ref", "title", "why"],
+            "properties": {"ref": {"type": "string"}, "title": {"type": "string"}, "why": {"type": "string"}}}},
+        "watch": {"type": "array", "items": _ITEM},
+        "upcoming": {"type": "array", "items": _ITEM},
+        "note": {"type": "string"},
+    },
+}
+
+
+def request_params() -> dict:
+    """Parametry jen pro Denní přehled (běžný AI chat je nepoužívá)."""
+    return {
+        "max_completion_tokens": MAX_OUTPUT_TOKENS,
+        "reasoning_effort": REASONING_EFFORT,
+        "response_format": {"type": "json_schema",
+                            "json_schema": {"name": "daily_briefing", "strict": True, "schema": RESPONSE_SCHEMA}},
+    }
 
 
 class BriefingError(Exception):
-    def __init__(self, category: str):
+    def __init__(self, category: str, usage: dict | None = None):
         super().__init__(category)
         self.category = category
+        self.usage = usage  # spotřeba i u nepovedené odpovědi (např. output_limit)
 
 
 class BriefingInProgress(Exception):
@@ -197,35 +241,80 @@ def build_messages(snap: Snapshot) -> list[dict]:
 
 
 def estimate_request_tokens(snap: Snapshot) -> int:
-    return sum(estimate_tokens(m["content"]) for m in build_messages(snap)) + MAX_OUTPUT_TOKENS
+    schema = estimate_tokens(json.dumps(RESPONSE_SCHEMA))  # provider schéma vkládá do promptu
+    return sum(estimate_tokens(m["content"]) for m in build_messages(snap)) + schema + MAX_OUTPUT_TOKENS
+
+
+def _classify_call_error(exc: RuntimeError, records: list) -> str:
+    """RuntimeError z ai._llm_create_with_retry → kategorie. Původní výjimka SDK je v __cause__."""
+    if any(r.rate_limited for r in records) or "Rate limit" in str(exc):
+        return "rate_limit"
+    cause = exc.__cause__
+    status = getattr(cause, "status_code", None)
+    if status is None or status >= 500 or status in (408, 409):
+        return "provider"
+    text = f"{getattr(cause, 'code', '') or ''} {cause}".lower()
+    if any(k in text for k in ("max_completion_tokens", "max_tokens", "max completion tokens", "token limit",
+                               "finish_reason: length", "finish_reason=length")):
+        return "output_limit"
+    if "json_validate_failed" in text or "schema" in text or "response_format" in text:
+        return "schema_error"
+    return "request_rejected"
+
+
+def _usage_from(response, records: list, started: float) -> dict:
+    from llm_config import LLM_SETTINGS
+
+    ok = [r for r in records if not r.rate_limited and r.error_status is None]
+    usage = {
+        "model": getattr(response, "model", None) or LLM_SETTINGS.groq_model,
+        "prompt_tokens": sum(r.prompt_tokens or 0 for r in ok),
+        "completion_tokens": sum(r.completion_tokens or 0 for r in ok),
+        "total_tokens": sum(r.total_tokens or 0 for r in ok),
+        "latency_ms": int((time.monotonic() - started) * 1000),
+        "reasoning_tokens": None,
+    }
+    # OpenAI-kompatibilní detail (Groq ho u reasoning modelů vrací); jen se loguje, bez migrace.
+    details = getattr(getattr(response, "usage", None), "completion_tokens_details", None)
+    reasoning = getattr(details, "reasoning_tokens", None)
+    if isinstance(reasoning, int):
+        usage["reasoning_tokens"] = reasoning
+    return usage
 
 
 def _call_llm(snap: Snapshot, llm=None) -> tuple[str, dict]:
-    """Jedno volání bez toolů. llm(messages, max_tokens) -> (text, usage) – v testech fake."""
+    """Jedno volání bez toolů a bez historie, se strict JSON Schema. llm(messages, max_tokens) -> (text, usage)
+    je testovací háček; reálná cesta jde přes ai._llm_create_with_retry s request_params()."""
     if llm is not None:
         return llm(build_messages(snap), MAX_OUTPUT_TOKENS)
     import ai
-    from llm_config import LLM_SETTINGS
 
     records = []
     started = time.monotonic()
     try:
         response = ai._llm_create_with_retry(build_messages(snap), tools=None, temperature=0.2, max_retries=2,
-                                             call_log=records, max_tokens=MAX_OUTPUT_TOKENS)
+                                             call_log=records, extra_params=request_params())
     except ai.DailyLimitError:
         raise BriefingError("daily_limit") from None
     except RuntimeError as exc:
-        kinds = {r.limit_kind for r in records if r.rate_limited}
-        raise BriefingError("rate_limit" if kinds or "Rate limit" in str(exc) else "provider") from None
-    ok = [r for r in records if not r.rate_limited and r.error_status is None]
-    usage = {
-        "model": LLM_SETTINGS.groq_model,
-        "prompt_tokens": sum(r.prompt_tokens or 0 for r in ok),
-        "completion_tokens": sum(r.completion_tokens or 0 for r in ok),
-        "total_tokens": sum(r.total_tokens or 0 for r in ok),
-        "latency_ms": int((time.monotonic() - started) * 1000),
-    }
-    return response.choices[0].message.content or "", usage
+        raise BriefingError(_classify_call_error(exc, records)) from None
+    except Exception:  # noqa: BLE001 - nečekaný tvar odpovědi providera (např. ne-JSON tělo)
+        raise BriefingError("invalid_response") from None
+    usage = _usage_from(response, records, started)
+    choices = getattr(response, "choices", None) or []
+    if not choices or getattr(choices[0], "message", None) is None:
+        raise BriefingError("invalid_response", usage)
+    choice = choices[0]
+    finish = getattr(choice, "finish_reason", None)
+    if getattr(choice.message, "refusal", None) or finish == "content_filter":
+        raise BriefingError("refused", usage)
+    if finish == "length":
+        # Uťato na stropu výstupu – i kdyby JSON vypadal celý, nevěříme mu.
+        raise BriefingError("output_limit", usage)
+    text = choice.message.content
+    if not isinstance(text, str) or not text.strip():
+        raise BriefingError("invalid_response", usage)
+    return text, usage
 
 
 # ===== perzistence a generování =====
@@ -309,7 +398,7 @@ def generate(db: Session, *, trigger: str, now: datetime | None = None, regenera
         db.commit()
         if trigger != "manual":
             _notify(db, row, content, now)
-        _log(row, trigger, "ready")
+        _log(row, trigger, "ready", usage.get("reasoning_tokens"))
         return row
     except Exception as exc:  # noqa: BLE001 - selhání přehledu nesmí rozbít nic dalšího
         db.rollback()
@@ -317,22 +406,27 @@ def generate(db: Session, *, trigger: str, now: datetime | None = None, regenera
         if not isinstance(exc, BriefingError):
             logger.warning("briefing internal error %s", type(exc).__name__)
         row = db.get(DailyBriefing, row.id)
+        failed_usage = getattr(exc, "usage", None)
+        if failed_usage and not previous_content:
+            row.prompt_tokens, row.completion_tokens = failed_usage.get("prompt_tokens"), failed_usage.get("completion_tokens")
+            row.total_tokens, row.latency_ms = failed_usage.get("total_tokens"), failed_usage.get("latency_ms")
         row.error_category = category if not previous_content else f"regenerate_failed:{category}"
         row.next_retry_at = now + RETRY_DELAYS.get(category, timedelta(minutes=30))
         # Nepovedené přegenerování nechá původní (platný) přehled.
         row.status = "ready" if previous_content else "failed"
         row.updated_at = now
         db.commit()
-        _log(row, trigger, row.status)
+        _log(row, trigger, row.status, (getattr(exc, "usage", None) or {}).get("reasoning_tokens"))
         return row
 
 
-def _log(row: DailyBriefing, trigger: str, status: str) -> None:
+def _log(row: DailyBriefing, trigger: str, status: str, reasoning_tokens: int | None = None) -> None:
     logger.info(
         "briefing id=%s date=%s trigger=%s status=%s attempt=%s error=%s prompt_tokens=%s completion_tokens=%s "
-        "total_tokens=%s latency_ms=%s snapshot_tokens=%s grounding_fixes=%s",
+        "reasoning_tokens=%s total_tokens=%s latency_ms=%s snapshot_tokens=%s grounding_fixes=%s",
         row.id, row.briefing_date, trigger, status, row.attempts, row.error_category or "-", row.prompt_tokens,
-        row.completion_tokens, row.total_tokens, row.latency_ms, row.snapshot_tokens, row.grounding_removed,
+        row.completion_tokens, reasoning_tokens if reasoning_tokens is not None else "-", row.total_tokens,
+        row.latency_ms, row.snapshot_tokens, row.grounding_removed,
     )
 
 
