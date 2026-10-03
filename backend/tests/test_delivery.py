@@ -25,36 +25,12 @@ import scheduler_service  # noqa: E402
 import webpush  # noqa: E402
 from database import Base  # noqa: E402
 from models import Delivery, Notification, PushSubscription, Reminder  # noqa: E402
+from tests.fakes import FakeProvider  # noqa: E402
 from tests.test_webpush import RFC, decrypt  # noqa: E402
 
 NOW = datetime(2026, 10, 4, 12, 0)
 UA_PUBLIC, UA_AUTH = RFC["ua_public"], RFC["auth"]
 ENDPOINT = "https://fcm.googleapis.com/fcm/send/device-1"
-
-
-class FakeProvider:
-    """Kanál s předem danými výsledky. targets = [(id, od kdy)]."""
-
-    def __init__(self, channel="fake", targets=((1, None),), results=None):
-        self.channel = channel
-        self._targets = list(targets)
-        self.results = list(results or [])
-        self.calls = []
-
-    def is_configured(self):
-        return True
-
-    def targets(self, db):
-        return list(self._targets)
-
-    def send(self, db, target_id, message, dedupe_key):
-        self.calls.append((target_id, message, dedupe_key))
-        outcome = self.results.pop(0) if self.results else ds.DeliveryResult(True, message_id="m1")
-        if isinstance(outcome, Exception):
-            raise outcome
-        if callable(outcome):
-            return outcome(target_id)
-        return outcome
 
 
 class DeliveryTestBase(unittest.TestCase):
