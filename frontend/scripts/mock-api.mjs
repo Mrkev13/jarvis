@@ -98,8 +98,8 @@ createServer(async (req, res) => {
     return respond(200, hit ? { ...hit[1], query: nq } : { query: nq, results: [], total: 0 }, 220);
   }
   if (url.pathname === "/__mock/search-calls") return respond(200, searchCalls.splice(0));
-  // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service (fixtures/quick-add.json,
-  // generátor viz docs); neznámý text = „unknown". /quick-add/prepare vrátí pending akci „qa-…", /actions/confirm
+  // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service.parse (fixtures/quick-add.json,
+  // now = 2026-10-11 17:00 UTC jako ostatní fixtures, předměty ze school-subjects.json); neznámý text = „unknown". /quick-add/prepare vrátí pending akci „qa-…", /actions/confirm
   // ji „zapíše" (bez undo). Popis „chyba" = první potvrzení selže (kontrola cesty „Zkusit znovu").
   if (url.pathname.startsWith("/quick-add/") && sessionOf(req) === "expired") return respond(401, { detail: "Not authenticated" });
   if (url.pathname === "/quick-add/parse" && req.method === "POST") {

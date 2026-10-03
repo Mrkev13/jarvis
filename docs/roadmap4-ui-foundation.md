@@ -47,6 +47,18 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4E (Smart Quick Add)
+
+| Item | Status |
+|---|---|
+| Global Quick Add (Ctrl/Cmd+Shift+K, sidebar "+ Rychlé přidání", mobile header "+") | ✅ design-system §15 |
+| Deterministic Czech parser: reminder, finance, work, exam, assignment (no LLM, no writes) | ✅ `quick_add_service.py`, tests |
+| Preview → edit → explicit "Uložit" via existing pending action + `/actions/confirm` | ✅ `prepare_write_action(source="quick_add")` |
+| Activity source "Rychlé přidání" | ✅ `user_context="quick_add"` |
+| Ambiguity as questions, confidence in words | ✅ |
+| Quick Add integration step for modules | ✅ `module-integration-checklist.md` §7 |
+| AI fallback for unknown text | ❌ by design (boundary documented in design-system §15) |
+
 ## Status after Roadmap 4D (Global Search / Ctrl+K)
 
 | Item | Status |
@@ -56,7 +68,7 @@ visual polish.
 | Czech normalisation + ranking shared by backend and frontend | ✅ `lib/search.ts` ↔ `search_service.py` |
 | Deep links to records with focus + highlight on 8 modules | ✅ `SearchHighlighter`, `data-search-target` |
 | Search integration step for future modules | ✅ `module-integration-checklist.md` §6 |
-| Mutations from the palette | ❌ by design – Smart Quick Add (Roadmap 4E) |
+| Mutations from the palette | ❌ by design – Smart Quick Add (Roadmap 4E, ✅) |
 
 ## Status after Roadmap 4C (AI assistant)
 
