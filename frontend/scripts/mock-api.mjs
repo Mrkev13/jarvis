@@ -53,6 +53,11 @@ function send(res, req, status, body, extraHeaders = {}) {
 const AUTH_COOKIE = "standa_hub_session";
 const normalizeQuery = (t) => String(t ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 const searchCalls = []; // pro ui-check: kolik dotazů /search přišlo (debounce)
+const quickAddCalls = []; // Roadmap 4E: texty /quick-add/parse (debounce, žádný zápis při rozboru)
+const quickAddPrepared = [];
+const quickAddConfirmed = [];
+const quickAddFailOnce = new Set();
+let quickAddSeq = 0;
 const sessionOf = (req) => /(?:^|;\s*)standa_hub_session=([^;]+)/.exec(req.headers.cookie || "")?.[1] ?? null;
 
 function readBody(req) {
@@ -83,7 +88,6 @@ createServer(async (req, res) => {
     }
     return respond(401, { ok: false, error: "invalid_credentials" }, 300);
   }
-  if (handleAi(req, url, body, respond)) return;
   // Roadmap 4D: /search – odpovědi ze skutečné search_service (fixtures/search.json, viz generátor);
   // neznámý dotaz = prázdný výsledek. Krátká prodleva ukáže stav „Hledám…".
   if (url.pathname === "/search" && req.method === "GET") {
@@ -94,6 +98,44 @@ createServer(async (req, res) => {
     return respond(200, hit ? { ...hit[1], query: nq } : { query: nq, results: [], total: 0 }, 220);
   }
   if (url.pathname === "/__mock/search-calls") return respond(200, searchCalls.splice(0));
+  // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service (fixtures/quick-add.json,
+  // generátor viz docs); neznámý text = „unknown". /quick-add/prepare vrátí pending akci „qa-…", /actions/confirm
+  // ji „zapíše" (bez undo). Popis „chyba" = první potvrzení selže (kontrola cesty „Zkusit znovu").
+  if (url.pathname.startsWith("/quick-add/") && sessionOf(req) === "expired") return respond(401, { detail: "Not authenticated" });
+  if (url.pathname === "/quick-add/parse" && req.method === "POST") {
+    const text = String(body?.text ?? "").trim().replace(/\s+/g, " ");
+    quickAddCalls.push(text);
+    const hit = Object.entries(fixture("quick-add")).find(([k]) => k === text);
+    if (text === "simuluj chybu") return respond(500, { detail: "Simulovaná chyba serveru." }, 150);
+    const empty = text.length < 2;
+    return respond(200, hit ? hit[1] : {
+      kind: empty ? "empty" : "unknown", confidence: "low", fields: {}, display: { title: "", subtitle: "", area: null },
+      warnings: [], needs_input: [], errors: [], ready: false,
+    }, 150);
+  }
+  if (url.pathname === "/quick-add/prepare" && req.method === "POST") {
+    const f = body?.fields ?? {};
+    quickAddPrepared.push(body);
+    const errors = [];
+    if (!["reminder", "finance", "work", "exam", "assignment"].includes(body?.kind)) errors.push({ field: "kind", message: "Neznámý typ záznamu." });
+    if (body?.kind === "finance" && !(Number(f.amount) > 0)) errors.push({ field: "amount", message: "Částka musí být kladná." });
+    if (body?.kind === "work" && !(Number(f.hours) > 0 && Number(f.hours) <= 24)) errors.push({ field: "hours", message: "Hodiny musí být mezi 0 a 24." });
+    if ((body?.kind === "exam" || body?.kind === "assignment") && !f.subject_id) errors.push({ field: "subject_id", message: "Vyber existující předmět." });
+    if (errors.length) return respond(422, { detail: { errors } }, 200);
+    const id = `qa-${++quickAddSeq}`;
+    if (String(f.description || f.title || f.project || "").toLowerCase() === "chyba") quickAddFailOnce.add(id);
+    return respond(200, { ok: true, pending_action: { id, tool: `quick_add:${body.kind}`, arguments: { ...f, _source: "quick_add" }, expires_at: null } }, 250);
+  }
+  if (url.pathname === "/actions/confirm" && req.method === "POST" && String(body?.action_id || "").startsWith("qa-")) {
+    const id = String(body.action_id);
+    if (quickAddFailOnce.delete(id)) return respond(200, { ok: false, error: "execution_failed", detail: "Zápis se nepodařil (simulace) – zkus to znovu." }, 400);
+    quickAddConfirmed.push(id);
+    return respond(200, { ok: true, tool: "x", arguments: {}, result: { id: quickAddConfirmed.length } }, 400);
+  }
+  if (url.pathname === "/__mock/quick-add") {
+    return respond(200, { parse: quickAddCalls.splice(0), prepared: quickAddPrepared.splice(0), confirmed: quickAddConfirmed.splice(0) });
+  }
+  if (handleAi(req, url, body, respond)) return;
   if (req.method === "GET") {
     if (url.pathname === "/reminders") {
       return respond(200, fixture(url.searchParams.get("status") === "all" ? "reminders-all" : "reminders-active"));
