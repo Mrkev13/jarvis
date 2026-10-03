@@ -1,8 +1,41 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import ConfirmDialog from "@/components/ConfirmDialog";
+import { useId, useMemo, useState } from "react";
+import {
+  AreaBadge,
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  EntityList,
+  EntityRow,
+  ErrorState,
+  fieldClass,
+  FilterBar,
+  FilterSelect,
+  FormField,
+  HudLabel,
+  LoadingState,
+  PageHeader,
+  PageSection,
+  StatusBadge,
+} from "@/components/ui";
+import { useApiResource } from "@/hooks/useApiResource";
+import { apiJson, errorMessage, jsonBody } from "@/lib/api";
+import { areaMeta } from "@/lib/areas";
+import { countActiveFilters } from "@/lib/filters";
+import { formatDateTime, plural } from "@/lib/format";
+import {
+  distinctSorted,
+  EMPTY_MEMORY_FILTERS,
+  memoryCategoryLabel,
+  memoryPayload,
+  memoryQuery,
+  type MemoryDraft,
+  type MemoryFilters,
+} from "@/lib/memory";
 
 type MemoryItem = {
   id: number;
@@ -15,115 +48,152 @@ type MemoryItem = {
   updated_at: string | null;
 };
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "–";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("cs-CZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const EMPTY_DRAFT: MemoryDraft = { area: "general", category: "context", content: "", importance: 5, active: true };
+
+/** Formulář poznámky – stejný pro přidání i úpravu. */
+function MemoryForm({
+  draft,
+  onChange,
+  onSubmit,
+  onCancel,
+  busy,
+  error,
+  submitLabel,
+  areas,
+  categories,
+}: {
+  draft: MemoryDraft;
+  onChange: (d: MemoryDraft) => void;
+  onSubmit: () => void;
+  onCancel?: () => void;
+  busy: boolean;
+  error: string | null;
+  submitLabel: string;
+  areas: string[];
+  categories: string[];
+}) {
+  const listId = useId();
+  const [contentError, setContentError] = useState<string | null>(null);
+  return (
+    <form
+      className="space-y-4"
+      aria-busy={busy}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!draft.content.trim()) {
+          setContentError("Vyplň obsah poznámky.");
+          return;
+        }
+        setContentError(null);
+        onSubmit();
+      }}
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FormField label="Oblast" hint="Např. school, work, finance, general.">
+          {(p) => (
+            <>
+              <input {...p} list={`${listId}-areas`} value={draft.area} onChange={(e) => onChange({ ...draft, area: e.target.value })} className={fieldClass} />
+              <datalist id={`${listId}-areas`}>
+                {areas.map((a) => (
+                  <option key={a} value={a}>
+                    {areaMeta(a).label}
+                  </option>
+                ))}
+              </datalist>
+            </>
+          )}
+        </FormField>
+        <FormField label="Kategorie" hint="Např. context, preference, goal.">
+          {(p) => (
+            <>
+              <input {...p} list={`${listId}-cats`} value={draft.category} onChange={(e) => onChange({ ...draft, category: e.target.value })} className={fieldClass} />
+              <datalist id={`${listId}-cats`}>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {memoryCategoryLabel(c)}
+                  </option>
+                ))}
+              </datalist>
+            </>
+          )}
+        </FormField>
+        <FormField label={`Důležitost: ${draft.importance}/10`}>
+          {(p) => (
+            <input
+              {...p}
+              type="range"
+              min={1}
+              max={10}
+              value={draft.importance}
+              onChange={(e) => onChange({ ...draft, importance: Number(e.target.value) })}
+              className="h-10 w-full accent-[var(--color-accent)]"
+            />
+          )}
+        </FormField>
+      </div>
+      <FormField label="Obsah" error={contentError}>
+        {(p) => (
+          <textarea {...p} rows={4} value={draft.content} onChange={(e) => onChange({ ...draft, content: e.target.value })} className={`${fieldClass} resize-y`} />
+        )}
+      </FormField>
+      <label className="flex min-h-10 w-fit items-center gap-2 text-sm text-ink-2">
+        <input type="checkbox" checked={draft.active} onChange={(e) => onChange({ ...draft, active: e.target.checked })} className="h-4 w-4 accent-[var(--color-accent)]" />
+        Aktivní (AI ji používá)
+      </label>
+      {error ? <ErrorState message={error} /> : null}
+      <div className="flex flex-wrap justify-end gap-2">
+        {onCancel ? (
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
+            Zrušit
+          </Button>
+        ) : null}
+        <Button type="submit" variant="primary" busy={busy} busyLabel="Ukládám…">
+          {submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
 }
 
 export default function MemoryPage() {
-  const [items, setItems] = useState<MemoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<MemoryFilters>(EMPTY_MEMORY_FILTERS);
+  const qs = memoryQuery(filters);
+  const list = useApiResource<MemoryItem[]>(`/memories${qs ? `?${qs}` : ""}`, { debounceMs: 300 });
+  // Možnosti filtrů ze všech poznámek (ne jen z aktuálně vyfiltrovaných – výběr by se jinak zúžil sám na sebe).
+  const all = useApiResource<MemoryItem[]>("/memories?include_inactive=true");
 
-  const [q, setQ] = useState("");
-  const [area, setArea] = useState<string>("all");
-  const [category, setCategory] = useState<string>("all");
-  const [includeInactive, setIncludeInactive] = useState(false);
-
+  const [createDraft, setCreateDraft] = useState<MemoryDraft>(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    area: "general",
-    category: "context",
-    content: "",
-    importance: 5,
-    active: true,
-  });
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({
-    area: "",
-    category: "",
-    content: "",
-    importance: 5,
-    active: true,
-  });
+  const [editDraft, setEditDraft] = useState<MemoryDraft>(EMPTY_DRAFT);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (q.trim()) params.set("q", q.trim());
-      if (area !== "all") params.set("area", area);
-      if (category !== "all") params.set("category", category);
-      if (includeInactive) params.set("include_inactive", "true");
+  const items = useMemo(() => (Array.isArray(list.data) ? list.data : []), [list.data]);
+  const source = Array.isArray(all.data) ? all.data : items;
+  const areas = useMemo(() => distinctSorted(source.map((m) => m.area)), [source]);
+  const categories = useMemo(() => distinctSorted(source.map((m) => m.category)), [source]);
+  const active = countActiveFilters({ ...filters });
 
-      const res = await apiFetch(`/memories?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as MemoryItem[];
-      setItems(Array.isArray(data) ? data : []);
-    } catch {
-      setError("Nepodařilo se načíst memory z backendu.");
-    } finally {
-      setLoading(false);
-    }
-  }, [q, area, category, includeInactive]);
+  async function reloadAll() {
+    await Promise.all([list.reload(), all.reload()]);
+  }
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      void load().catch(() => {});
-    });
-  }, [load]);
-
-  const areaOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const it of items) set.add(it.area);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items]);
-
-  const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const it of items) set.add(it.category);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items]);
-
-  async function createMemory(e: React.FormEvent) {
-    e.preventDefault();
-    const content = createForm.content.trim();
-    if (!content) {
-      setError("Vyplň obsah memory.");
-      return;
-    }
+  async function createMemory() {
     setCreating(true);
-    setError(null);
+    setCreateError(null);
     try {
-      const res = await apiFetch("/memory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          area: createForm.area.trim() || "general",
-          category: createForm.category.trim() || "context",
-          content,
-          importance: createForm.importance,
-          active: createForm.active,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setCreateForm((f) => ({ ...f, content: "" }));
-      await load();
+      await apiJson("/memory", jsonBody("POST", memoryPayload(createDraft)));
+      setCreateDraft((d) => ({ ...d, content: "" }));
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se uložit memory.");
+      setCreateError(errorMessage(err, "Nepodařilo se uložit poznámku."));
     } finally {
       setCreating(false);
     }
@@ -131,427 +201,201 @@ export default function MemoryPage() {
 
   function startEdit(item: MemoryItem) {
     setEditingId(item.id);
-    setEditForm({
-      area: item.area,
-      category: item.category,
-      content: item.content,
-      importance: item.importance,
-      active: item.active,
-    });
+    setEditError(null);
+    setEditDraft({ area: item.area, category: item.category, content: item.content, importance: item.importance, active: item.active });
   }
 
   async function saveEdit() {
     if (editingId == null) return;
-    const content = editForm.content.trim();
-    if (!content) {
-      setError("Obsah memory nesmí být prázdný.");
-      return;
-    }
-    setError(null);
+    setSavingEdit(true);
+    setEditError(null);
     try {
-      const res = await apiFetch(`/memory/${editingId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          area: editForm.area.trim() || "general",
-          category: editForm.category.trim() || "context",
-          content,
-          importance: editForm.importance,
-          active: editForm.active,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await apiJson(`/memory/${editingId}`, jsonBody("PATCH", memoryPayload(editDraft)));
       setEditingId(null);
-      await load();
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se upravit memory.");
+      setEditError(errorMessage(err, "Nepodařilo se upravit poznámku."));
+    } finally {
+      setSavingEdit(false);
     }
   }
 
   async function toggleActive(item: MemoryItem, next: boolean) {
+    setBusyId(item.id);
+    setActionError(null);
     try {
-      const res = await apiFetch(`/memory/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: next }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await load();
+      await apiJson(`/memory/${item.id}`, jsonBody("PATCH", { active: next }));
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se změnit stav memory.");
+      setActionError(errorMessage(err, "Nepodařilo se změnit stav poznámky."));
+    } finally {
+      setBusyId(null);
     }
   }
 
   async function confirmHardDelete() {
     if (!deleteTarget) return;
+    setActionError(null);
     try {
-      const res = await apiFetch(`/memory/${deleteTarget.id}/hard`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await load();
+      await apiJson(`/memory/${deleteTarget.id}/hard`, { method: "DELETE" });
+      await reloadAll();
     } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se smazat memory.");
+      setActionError(errorMessage(err, "Nepodařilo se smazat poznámku."));
     } finally {
       setDeleteTarget(null);
     }
   }
 
   return (
-    <main className="p-4 md:p-8 max-w-6xl mx-auto space-y-8 md:space-y-10">
-      <header>
-        <h1 className="text-2xl md:text-4xl font-bold">Memory</h1>
-        <p className="text-zinc-400 mt-2">
-          Long-term paměť pro AI. Nepleť si to s aktuálními databázovými fakty.
-        </p>
-      </header>
+    <ContentContainer width="narrow">
+      <PageHeader
+        eyebrow={<HudLabel>Systém · paměť AI</HudLabel>}
+        title="Paměť"
+        subtitle="Dlouhodobé poznámky, ze kterých AI vychází – preference, kontext a pravidla. Nejsou to aktuální data z modulů."
+        actions={
+          <Button size="sm" onClick={() => void reloadAll()} busy={list.refreshing} busyLabel="Obnovuji…" disabled={list.loading}>
+            Obnovit
+          </Button>
+        }
+      />
 
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
+      <FilterBar
+        label="Filtry paměti"
+        search={{
+          value: filters.q,
+          onChange: (q) => setFilters((f) => ({ ...f, q })),
+          placeholder: "Hledat v obsahu, oblasti nebo kategorii…",
+          label: "Hledat v paměti",
+        }}
+        activeCount={active}
+        onReset={() => setFilters(EMPTY_MEMORY_FILTERS)}
+        result={list.data ? `${items.length} ${plural(items.length, "poznámka", "poznámky", "poznámek")}` : null}
+      >
+        <FilterSelect
+          label="Oblast"
+          value={filters.area}
+          onChange={(area) => setFilters((f) => ({ ...f, area }))}
+          options={[{ value: "all", label: "Všechny" }, ...areas.map((a) => ({ value: a, label: areaMeta(a).label }))]}
+        />
+        <FilterSelect
+          label="Kategorie"
+          value={filters.category}
+          onChange={(category) => setFilters((f) => ({ ...f, category }))}
+          options={[{ value: "all", label: "Všechny" }, ...categories.map((c) => ({ value: c, label: memoryCategoryLabel(c) }))]}
+        />
+        <label className="flex min-h-10 items-center gap-2 text-sm text-ink-2">
+          <input
+            type="checkbox"
+            checked={filters.includeInactive}
+            onChange={(e) => setFilters((f) => ({ ...f, includeInactive: e.target.checked }))}
+            className="h-4 w-4 accent-[var(--color-accent)]"
+          />
+          Zobrazit i neaktivní
+        </label>
+      </FilterBar>
 
-      <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-[240px] flex-1">
-            <div className="text-sm text-zinc-400 mb-1">Search</div>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Hledej v area/category/obsahu…"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-            />
-          </div>
+      {actionError ? <ErrorState message={actionError} /> : null}
 
-          <div className="min-w-[180px]">
-            <div className="text-sm text-zinc-400 mb-1">Area</div>
-            <select
-              value={area}
-              onChange={(e) => setArea(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-            >
-              <option value="all">All</option>
-              {areaOptions.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="min-w-[180px]">
-            <div className="text-sm text-zinc-400 mb-1">Category</div>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-            >
-              <option value="all">All</option>
-              {categoryOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-3 pt-7">
-            <label className="flex items-center gap-2 text-sm text-zinc-300 select-none">
-              <input
-                type="checkbox"
-                checked={includeInactive}
-                onChange={(e) => setIncludeInactive(e.target.checked)}
-                className="accent-indigo-500"
-              />
-              show inactive
-            </label>
-            <button
-              type="button"
-              onClick={load}
-              disabled={loading}
-              className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors disabled:opacity-50"
-            >
-              Obnovit
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6">
-        <h2 className="text-lg font-semibold mb-4">Přidat memory</h2>
-        <form onSubmit={createMemory} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <div className="text-sm text-zinc-400 mb-1">Area</div>
-              <input
-                value={createForm.area}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, area: e.target.value }))
-                }
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-              />
-            </div>
-            <div>
-              <div className="text-sm text-zinc-400 mb-1">Category</div>
-              <input
-                value={createForm.category}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, category: e.target.value }))
-                }
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-              />
-            </div>
-            <div>
-              <div className="text-sm text-zinc-400 mb-1">
-                Importance: {createForm.importance}/10
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={10}
-                value={createForm.importance}
-                onChange={(e) =>
-                  setCreateForm((f) => ({
-                    ...f,
-                    importance: Number(e.target.value),
-                  }))
-                }
-                className="w-full"
-              />
-              <label className="mt-2 flex items-center gap-2 text-sm text-zinc-300 select-none">
-                <input
-                  type="checkbox"
-                  checked={createForm.active}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({ ...f, active: e.target.checked }))
-                  }
-                  className="accent-indigo-500"
-                />
-                active
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <div className="text-sm text-zinc-400 mb-1">Content</div>
-            <textarea
-              value={createForm.content}
-              onChange={(e) =>
-                setCreateForm((f) => ({ ...f, content: e.target.value }))
+      <PageSection title="Poznámky" labelledBy="memory-list">
+        <div aria-busy={list.loading || list.refreshing}>
+          {list.error && !list.data ? (
+            <ErrorState message={list.error} onRetry={() => void list.reload()} retrying={list.refreshing} />
+          ) : list.loading || !list.data ? (
+            <LoadingState lines={4} label="Načítám paměť…" />
+          ) : items.length === 0 ? (
+            <EmptyState
+              action={
+                active > 0 ? (
+                  <Button size="sm" onClick={() => setFilters(EMPTY_MEMORY_FILTERS)}>
+                    Zrušit filtry
+                  </Button>
+                ) : undefined
               }
-              rows={4}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500 resize-y"
-            />
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={creating}
-              className="bg-white text-black font-medium px-5 py-2.5 rounded-xl disabled:opacity-50 hover:bg-zinc-200 transition-colors"
             >
-              {creating ? "Ukládám…" : "Uložit"}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Seznam</h2>
-          <div className="text-sm text-zinc-500">
-            {loading ? "Načítám…" : `${items.length} položek`}
-          </div>
-        </div>
-
-        {items.map((it) => {
-          const isEditing = editingId === it.id;
-          return (
-            <div
-              key={it.id}
-              className={`border rounded-2xl p-4 md:p-5 ${
-                it.active
-                  ? "bg-zinc-900 border-zinc-800"
-                  : "bg-zinc-900/40 border-zinc-800/60"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      {it.area}
-                    </span>
-                    <span className="text-xs text-zinc-600">/</span>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      {it.category}
-                    </span>
-                    {!it.active && (
-                      <span className="text-xs px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-400">
-                        inactive
-                      </span>
-                    )}
-                    <span className="text-xs text-zinc-500">
-                      Importance: {it.importance}/10
-                    </span>
-                  </div>
-
-                  {!isEditing ? (
-                    <p className="whitespace-pre-wrap leading-7 text-zinc-200 mt-3">
-                      {it.content}
-                    </p>
-                  ) : (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <input
-                          value={editForm.area}
-                          onChange={(e) =>
-                            setEditForm((f) => ({ ...f, area: e.target.value }))
-                          }
-                          className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
+              {active > 0 ? "Filtrům neodpovídá žádná poznámka." : "Zatím žádné poznámky. Přidej první níže."}
+            </EmptyState>
+          ) : (
+            <EntityList label="Poznámky paměti">
+              {items.map((it) => {
+                const editing = editingId === it.id;
+                return (
+                  <EntityRow
+                    key={it.id}
+                    muted={!it.active}
+                    busy={busyId === it.id}
+                    badges={
+                      <>
+                        <AreaBadge area={it.area} />
+                        <StatusBadge>{memoryCategoryLabel(it.category)}</StatusBadge>
+                        {!it.active ? <StatusBadge>Neaktivní</StatusBadge> : null}
+                        <span className="text-xs tabular-nums text-ink-muted">Důležitost {it.importance}/10</span>
+                      </>
+                    }
+                    title={editing ? <span className="sr-only">Úprava poznámky</span> : <span className="whitespace-pre-wrap font-normal leading-relaxed">{it.content}</span>}
+                    meta={`Vytvořeno ${formatDateTime(it.created_at)} · upraveno ${formatDateTime(it.updated_at)}`}
+                    actions={
+                      editing ? null : (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => startEdit(it)}>
+                            Upravit
+                          </Button>
+                          <Button size="sm" variant="ghost" disabled={busyId === it.id} onClick={() => void toggleActive(it, !it.active)}>
+                            {it.active ? "Deaktivovat" : "Aktivovat"}
+                          </Button>
+                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(it)}>
+                            Smazat
+                          </Button>
+                        </>
+                      )
+                    }
+                  >
+                    {editing ? (
+                      <div className="mt-2">
+                        <MemoryForm
+                          draft={editDraft}
+                          onChange={setEditDraft}
+                          onSubmit={() => void saveEdit()}
+                          onCancel={() => setEditingId(null)}
+                          busy={savingEdit}
+                          error={editError}
+                          submitLabel="Uložit změny"
+                          areas={areas}
+                          categories={categories}
                         />
-                        <input
-                          value={editForm.category}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              category: e.target.value,
-                            }))
-                          }
-                          className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-                        />
-                        <div>
-                          <div className="text-xs text-zinc-400 mb-1">
-                            Importance: {editForm.importance}/10
-                          </div>
-                          <input
-                            type="range"
-                            min={1}
-                            max={10}
-                            value={editForm.importance}
-                            onChange={(e) =>
-                              setEditForm((f) => ({
-                                ...f,
-                                importance: Number(e.target.value),
-                              }))
-                            }
-                            className="w-full"
-                          />
-                          <label className="mt-2 flex items-center gap-2 text-sm text-zinc-300 select-none">
-                            <input
-                              type="checkbox"
-                              checked={editForm.active}
-                              onChange={(e) =>
-                                setEditForm((f) => ({
-                                  ...f,
-                                  active: e.target.checked,
-                                }))
-                              }
-                              className="accent-indigo-500"
-                            />
-                            active
-                          </label>
-                        </div>
                       </div>
+                    ) : null}
+                  </EntityRow>
+                );
+              })}
+            </EntityList>
+          )}
+        </div>
+      </PageSection>
 
-                      <textarea
-                        value={editForm.content}
-                        onChange={(e) =>
-                          setEditForm((f) => ({
-                            ...f,
-                            content: e.target.value,
-                          }))
-                        }
-                        rows={4}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500 resize-y"
-                      />
-                    </div>
-                  )}
-
-                  <div className="text-xs text-zinc-500 mt-3">
-                    Created: {formatDateTime(it.created_at)} · Updated:{" "}
-                    {formatDateTime(it.updated_at)}
-                  </div>
-                </div>
-
-                <div className="shrink-0 flex flex-col gap-2">
-                  {!isEditing ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => startEdit(it)}
-                        className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                      >
-                        Edit
-                      </button>
-                      {it.active ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleActive(it, false)}
-                          className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                        >
-                          Deactivate
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleActive(it, true)}
-                          className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                        >
-                          Activate
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(it)}
-                        className="text-sm px-4 py-2 rounded-xl bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={saveEdit}
-                        className="text-sm px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
-                      >
-                        Uložit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(null)}
-                        className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
-                      >
-                        Zrušit
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </section>
+      <Card>
+        <CardHeader title="Přidat poznámku" description="Krátký fakt nebo preference, kterou má AI dlouhodobě znát." />
+        <MemoryForm
+          draft={createDraft}
+          onChange={setCreateDraft}
+          onSubmit={() => void createMemory()}
+          busy={creating}
+          error={createError}
+          submitLabel="Uložit poznámku"
+          areas={areas}
+          categories={categories}
+        />
+      </Card>
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Smazat memory?"
-        message={
-          deleteTarget
-            ? `Opravdu smazat memory #${deleteTarget.id}? Tohle je nevratné.`
-            : ""
-        }
-        confirmLabel="Smazat"
-        cancelLabel="Zrušit"
-        danger={true}
+        title="Smazat poznámku?"
+        message={deleteTarget ? `Poznámka #${deleteTarget.id} se smaže natrvalo. Pokud ji jen nechceš používat, deaktivuj ji.` : ""}
+        confirmLabel="Smazat natrvalo"
+        cancelLabel="Ponechat"
+        danger
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmHardDelete}
       />
-    </main>
+    </ContentContainer>
   );
 }
-
