@@ -234,6 +234,22 @@
   animation: motion-shimmer var(--motion-shimmer-duration) linear infinite;
 }
 
+/* Roadmap 4D: záznam otevřený z vyhledávání – zřetelný obrys, který po chvíli zmizí (třídu odebere JS). */
+.search-target-active {
+  outline: 2px solid rgb(34 211 238 / 0.75);
+  outline-offset: 3px;
+  animation: motion-highlight var(--motion-highlight-duration) ease-out;
+}
+
+/* Roadmap 4D: paleta Ctrl+K – krátký nástup (při omezeném pohybu bez animace). */
+@keyframes motion-palette-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.motion-palette {
+  animation: motion-palette-in var(--motion-fast) var(--motion-ease);
+}
+
 /* Roadmap 4C: zbývající čas nabídky „Vrátit" (délku nastaví inline --undo-ms); při omezeném pohybu statická. */
 .motion-undo-timer {
   transform-origin: left;
@@ -284,6 +300,8 @@
   .motion-flame-active,
   .motion-flame-milestone,
   .motion-undo-timer,
+  .motion-palette,
+  .search-target-active,
   .motion-executing::after {
     animation: none !important;
   }
