@@ -1,0 +1,448 @@
+{
+ "2": {
+  "id": 2,
+  "timestamp": "2026-10-11T14:00:00",
+  "area": "school",
+  "action_type": "create",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Úkol přidán: Laboratorní protokol č. 3",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx0"
+ },
+ "3": {
+  "id": 3,
+  "timestamp": "2026-10-11T07:00:00",
+  "area": "finance",
+  "action_type": "create",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Výdaj 350 Kč: Doprava",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx1"
+ },
+ "4": {
+  "id": 4,
+  "timestamp": "2026-10-11T00:00:00",
+  "area": "work",
+  "action_type": "create",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Práce 5 h – Klient ABC",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx2"
+ },
+ "5": {
+  "id": 5,
+  "timestamp": "2026-10-10T17:00:00",
+  "area": "goals",
+  "action_type": "update",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Cíl upraven: Přečíst 12 knih (pozastaven)",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx3"
+ },
+ "6": {
+  "id": 6,
+  "timestamp": "2026-10-10T10:00:00",
+  "area": "reminders",
+  "action_type": "complete",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Připomínka hotová: Koupit lístky",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx4"
+ },
+ "7": {
+  "id": 7,
+  "timestamp": "2026-10-10T03:00:00",
+  "area": "memory",
+  "action_type": "create",
+  "entity_type": null,
+  "entity_id": null,
+  "summary": "Paměť: Nejlíp se učím ráno",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "fx5"
+ },
+ "1": {
+  "id": 1,
+  "timestamp": "2026-10-08T17:00:00",
+  "area": "school",
+  "action_type": "complete",
+  "entity_type": "Assignment",
+  "entity_id": 2,
+  "summary": "Dokončeno (AI): Esej",
+  "delta": {
+   "status": {
+    "old": "todo",
+    "new": "done"
+   }
+  },
+  "user_context": null,
+  "dedupe_key": "a1"
+ },
+ "22": {
+  "id": 22,
+  "timestamp": "2026-10-03T13:46:32.176717",
+  "area": "wot",
+  "action_type": "update",
+  "entity_type": "WotGrind",
+  "entity_id": 2,
+  "summary": "Grind Kranvagn upraven – zbývá 52 000 XP",
+  "delta": {
+   "xp_remaining": {
+    "old": 64000.0,
+    "new": 52000.0
+   },
+   "priority": {
+    "old": "medium",
+    "new": "high"
+   },
+   "status": {
+    "old": "active",
+    "new": "active"
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "wot:update:WotGrind:2:ffc35dd4"
+ },
+ "21": {
+  "id": 21,
+  "timestamp": "2026-10-03T13:46:32.164012",
+  "area": "memory",
+  "action_type": "delete",
+  "entity_type": "Memory",
+  "entity_id": 6,
+  "summary": "Poznámka v paměti trvale smazána: Dočasná poznámka",
+  "delta": {
+   "area": {
+    "old": "general",
+    "new": null
+   },
+   "category": {
+    "old": "context",
+    "new": null
+   },
+   "content": {
+    "old": "Dočasná poznámka",
+    "new": null
+   },
+   "importance": {
+    "old": 2,
+    "new": null
+   },
+   "active": {
+    "old": true,
+    "new": null
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "memory:delete:Memory:6:8bf8a980"
+ },
+ "20": {
+  "id": 20,
+  "timestamp": "2026-10-03T13:46:32.158600",
+  "area": "memory",
+  "action_type": "create",
+  "entity_type": "Memory",
+  "entity_id": 6,
+  "summary": "Poznámka přidána do paměti: Dočasná poznámka",
+  "delta": {
+   "area": {
+    "old": null,
+    "new": "general"
+   },
+   "category": {
+    "old": null,
+    "new": "context"
+   },
+   "content": {
+    "old": null,
+    "new": "Dočasná poznámka"
+   },
+   "importance": {
+    "old": null,
+    "new": 2
+   },
+   "active": {
+    "old": null,
+    "new": true
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "memory:create:Memory:6:16b8f1f2"
+ },
+ "19": {
+  "id": 19,
+  "timestamp": "2026-10-03T13:46:32.152903",
+  "area": "memory",
+  "action_type": "create",
+  "entity_type": "Memory",
+  "entity_id": 5,
+  "summary": "Poznámka přidána do paměti: Zkoušku z fyziky dát v prvním termínu.",
+  "delta": {
+   "area": {
+    "old": null,
+    "new": "school"
+   },
+   "category": {
+    "old": null,
+    "new": "plan"
+   },
+   "content": {
+    "old": null,
+    "new": "Zkoušku z fyziky dát v prvním termínu."
+   },
+   "importance": {
+    "old": null,
+    "new": 7
+   },
+   "active": {
+    "old": null,
+    "new": true
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "memory:create:Memory:5:797d3739"
+ },
+ "18": {
+  "id": 18,
+  "timestamp": "2026-10-03T13:46:32.141863",
+  "area": "finance",
+  "action_type": "create",
+  "entity_type": "FinanceTransaction",
+  "entity_id": 11,
+  "summary": "-190 Kč food (Oběd)",
+  "delta": {
+   "amount": {
+    "old": null,
+    "new": 189.9
+   },
+   "category": {
+    "old": null,
+    "new": "food"
+   },
+   "description": {
+    "old": null,
+    "new": "Oběd"
+   },
+   "transaction_type": {
+    "old": null,
+    "new": "expense"
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "finance:create:FinanceTransaction:11:0b1e4c5f"
+ },
+ "17": {
+  "id": 17,
+  "timestamp": "2026-10-03T13:46:32.133147",
+  "area": "finance",
+  "action_type": "sync",
+  "entity_type": "FinanceTransaction",
+  "entity_id": 10,
+  "summary": "+2 438 Kč work (sync) – Workshop",
+  "delta": {
+   "amount": {
+    "old": null,
+    "new": 2437.5
+   },
+   "category": {
+    "old": null,
+    "new": "work"
+   },
+   "description": {
+    "old": null,
+    "new": "Work: Klient XYZ – Workshop"
+   },
+   "transaction_type": {
+    "old": null,
+    "new": "income"
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "finance:sync:FinanceTransaction:10:cd41804b"
+ },
+ "16": {
+  "id": 16,
+  "timestamp": "2026-10-03T13:46:32.132632",
+  "area": "work",
+  "action_type": "create",
+  "entity_type": "WorkSession",
+  "entity_id": 9,
+  "summary": "Práce 6,5 h – Klient XYZ (Workshop)",
+  "delta": {
+   "date": {
+    "old": null,
+    "new": "2026-10-10"
+   },
+   "hours": {
+    "old": null,
+    "new": 6.5
+   },
+   "project": {
+    "old": null,
+    "new": "Klient XYZ"
+   },
+   "description": {
+    "old": null,
+    "new": "Workshop"
+   },
+   "hourly_rate": {
+    "old": null,
+    "new": 375.0
+   },
+   "sync_to_finance": {
+    "old": null,
+    "new": true
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "work:create:WorkSession:9:2390328d"
+ },
+ "15": {
+  "id": 15,
+  "timestamp": "2026-10-03T13:46:32.119384",
+  "area": "finance",
+  "action_type": "sync",
+  "entity_type": "FinanceTransaction",
+  "entity_id": 9,
+  "summary": "+2 438 Kč work (sync) – Workshop",
+  "delta": {
+   "amount": {
+    "old": null,
+    "new": 2437.5
+   },
+   "category": {
+    "old": null,
+    "new": "work"
+   },
+   "description": {
+    "old": null,
+    "new": "Work: Klient XYZ – Workshop"
+   },
+   "transaction_type": {
+    "old": null,
+    "new": "income"
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "finance:sync:FinanceTransaction:9:cd41804b"
+ },
+ "14": {
+  "id": 14,
+  "timestamp": "2026-10-03T13:46:32.118738",
+  "area": "work",
+  "action_type": "create",
+  "entity_type": "WorkSession",
+  "entity_id": 8,
+  "summary": "Práce 6,5 h – Klient XYZ (Workshop)",
+  "delta": {
+   "date": {
+    "old": null,
+    "new": "2026-10-10"
+   },
+   "hours": {
+    "old": null,
+    "new": 6.5
+   },
+   "project": {
+    "old": null,
+    "new": "Klient XYZ"
+   },
+   "description": {
+    "old": null,
+    "new": "Workshop"
+   },
+   "hourly_rate": {
+    "old": null,
+    "new": 375.0
+   },
+   "sync_to_finance": {
+    "old": null,
+    "new": true
+   }
+  },
+  "user_context": "manual",
+  "dedupe_key": "work:create:WorkSession:8:2390328d"
+ },
+ "13": {
+  "id": 13,
+  "timestamp": "2026-10-03T13:46:32.093350",
+  "area": "reminders",
+  "action_type": "complete",
+  "entity_type": "Reminder",
+  "entity_id": 5,
+  "summary": "Připomínka hotová: Koupit lístky · so 10. 10. 2026 09:00",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminder-done:5:2026-10-03T13:46:32.092364"
+ },
+ "12": {
+  "id": 12,
+  "timestamp": "2026-10-03T13:46:32.027872",
+  "area": "reminders",
+  "action_type": "create",
+  "entity_type": "Reminder",
+  "entity_id": 5,
+  "summary": "Připomínka: Koupit lístky · so 10. 10. 2026 09:00",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminders:create:Reminder:5:10ed4496"
+ },
+ "11": {
+  "id": 11,
+  "timestamp": "2026-10-03T13:46:32.019819",
+  "area": "reminders",
+  "action_type": "create",
+  "entity_type": "Reminder",
+  "entity_id": 4,
+  "summary": "Připomínka: Ranní protažení · denně v 07:00",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminders:create:Reminder:4:f0a0493b"
+ },
+ "10": {
+  "id": 10,
+  "timestamp": "2026-10-03T13:46:32.019241",
+  "area": "reminders",
+  "action_type": "create",
+  "entity_type": "Reminder",
+  "entity_id": 3,
+  "summary": "Připomínka: Odeslat fakturu · st 14. 10. 2026 10:00",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminders:create:Reminder:3:292e38f0"
+ },
+ "9": {
+  "id": 9,
+  "timestamp": "2026-10-03T13:46:32.018554",
+  "area": "reminders",
+  "action_type": "create",
+  "entity_type": "Reminder",
+  "entity_id": 2,
+  "summary": "Připomínka: Zalít květiny · po 12. 10. 2026 08:00",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminders:create:Reminder:2:9016a76a"
+ },
+ "8": {
+  "id": 8,
+  "timestamp": "2026-10-03T13:46:32.017716",
+  "area": "reminders",
+  "action_type": "create",
+  "entity_type": "Reminder",
+  "entity_id": 1,
+  "summary": "Připomínka: Fyzioterapie · ne 11. 10. 2026 18:30",
+  "delta": null,
+  "user_context": "manual",
+  "dedupe_key": "reminders:create:Reminder:1:57840454"
+ }
+}

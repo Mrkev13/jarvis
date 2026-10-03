@@ -321,7 +321,7 @@ export default function WorkPage() {
                           {day.sessions.length > 1
                             ? `${day.sessions.length} ${plural(day.sessions.length, "záznam", "záznamy", "záznamů")} · `
                             : null}
-                          {formatHours(day.hours)} · {formatCzkExact(day.earnings)}
+                          {formatHours(day.hours)} · <span data-day-total>{formatCzkExact(day.earnings)}</span>
                         </p>
                       </div>
                       <ul className="space-y-2 border-l border-line pl-3 md:pl-4">
@@ -393,7 +393,7 @@ function SessionRow({
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-base font-semibold tabular-nums text-ink">{formatCzkExact(s.earnings)}</span>
+          <span data-session-earnings className="text-base font-semibold tabular-nums text-ink">{formatCzkExact(s.earnings)}</span>
           <Button
             size="sm"
             variant="ghost"

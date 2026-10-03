@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A + 4B).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A + 4B + 4B.1).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -300,6 +300,84 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   await page.getByLabel("Hledat v paměti").pressSequentially("ráno", { delay: 60 });
   await page.waitForTimeout(800);
   check("paměť: hledání s debounce (1 dotaz na slovo)", urls.length === 1, String(urls.length));
+  await ctx.close();
+}
+
+// 12) Roadmap 4B.1 – vyvážení dashboardu na širokých displejích (nezávislé na konkrétních datech).
+for (const width of [1920, 1366]) {
+  const { ctx, page } = await open("/", { width, height: 1000 });
+  const m = await page.evaluate(() => {
+    const card = (id) => document.getElementById(id)?.closest("section, article, div[aria-labelledby]")?.getBoundingClientRect();
+    const [today, attention, goals, upcoming, work, finance, games] =
+      ["today-title", "attention-title", "goals-title", "upcoming-title", "work-title", "finance-title", "games-title"].map(card);
+    return {
+      topGap: Math.abs(today.bottom - attention.bottom),
+      // sloupec Práce/Finance nesmí trčet nad sousední karty (dřív o ~400 px)
+      stackOverhang: finance.bottom - Math.max(goals.bottom, upcoming.bottom),
+      gamesBelow: games.top >= Math.max(goals.bottom, upcoming.bottom, finance.bottom),
+      workAbove: work.bottom <= finance.top,
+    };
+  });
+  check(`dashboard @${width}: horní sloupce vyrovnané (< 200 px)`, m.topGap < 200, `${Math.round(m.topGap)} px`);
+  check(`dashboard @${width}: Práce/Finance nepřečnívá sousedy`, m.stackOverhang <= 40, `${Math.round(m.stackOverhang)} px`);
+  check(`dashboard @${width}: Hry jako pruh pod sloupci`, m.gamesBelow && m.workAbove);
+  await ctx.close();
+}
+
+// 13) Roadmap 4B.1 – žádné interní hodnoty v UI (popisky z lib/labels.ts).
+{
+  const RAW_ENTITY = /\b(WotGrind|WotResource|FinanceTransaction|WorkSession|MffCharacter|PendingAction|Assignment|Exam|Memory|Reminder|Goal)\s*#/;
+  const { ctx, page, errors } = await open("/activity");
+  const text = await page.locator("main").innerText();
+  check("aktivita: žádné interní typy entit", !RAW_ENTITY.test(text), (text.match(RAW_ENTITY) || [""])[0]);
+  check("aktivita: žádný surový zdroj (manual / ai_confirm)", !/zdroj: (manual|ai_confirm)\b/.test(text));
+  check("aktivita: česká entita (např. Grind #)", /(Grind|Transakce|Pracovní záznam|Paměť|Úkol) #\d+/.test(text));
+  check("aktivita: bez „Pamatka“ a „(hard)“", !/Pamatka|\(hard\)|\(soft\)/.test(text));
+  const rows = page.getByRole("button", { name: "Detail" });
+  const fieldNames = [];
+  for (let i = 0; i < Math.min(await rows.count(), 6); i += 1) {
+    await rows.nth(i).click();
+    await page.waitForTimeout(250);
+  }
+  for (const dt of await page.locator('[id^="activity-detail-"] dt').allInnerTexts()) fieldNames.push(dt);
+  check("aktivita: detail má české názvy polí", fieldNames.length > 0 && fieldNames.every((f) => !/_|^[a-z]+$/.test(f)), fieldNames.slice(0, 8).join(", "));
+  check("aktivita (labels): bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/finance");
+  const meta = await page.locator("main li").allInnerTexts();
+  const raw = meta.filter((t) => /(^|\s|·)\s*(work|food|salary|rent)\s*(·|$)/im.test(t));
+  check("finance: kategorie česky (žádné work/food)", raw.length === 0, raw.slice(0, 2).join(" | "));
+  check("finance: work → Práce", meta.some((t) => /Práce/.test(t)));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/memory");
+  const text = await page.locator("main").innerText();
+  check("paměť: kategorie česky (žádné plan/context/decision)", !/\b(plan|context|decision|routine|constraint)\b/.test(text)); // „preference" je i české slovo
+  check("paměť: plan → Plán", /\bPlán\b/.test(text));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/work");
+  const days = await page.evaluate(() => {
+    const num = (s) => Number(s.replace(/[^\d,−-]/g, "").replace(",", ".").replace("−", "-"));
+    return [...document.querySelectorAll("[data-day-total]")].map((el) => {
+      const li = el.closest("li");
+      const rows = [...li.querySelectorAll("[data-session-earnings]")].map((r) => num(r.textContent));
+      return { total: num(el.textContent), sum: Math.round(rows.reduce((a, b) => a + b, 0) * 100) / 100, text: el.textContent };
+    });
+  });
+  const bad = days.filter((d) => Math.abs(d.total - d.sum) > 0.001);
+  check("práce: zobrazené řádky dávají zobrazený denní součet", days.length > 0 && bad.length === 0, bad.map((d) => `${d.sum} ≠ ${d.text}`).join(", "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/wot");
+  const text = await page.locator("main").innerText();
+  check("wot: žádná sekce „Připravujeme“", !/Připravujeme/.test(text));
+  check("wot: žádné prázdné zástupné dlaždice", (await page.locator("main .border-dashed").count()) === 0);
   await ctx.close();
 }
 
