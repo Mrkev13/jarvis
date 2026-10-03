@@ -23,6 +23,10 @@ from briefing_snapshot import Snapshot, build_snapshot
 from llm_budget import estimate_tokens
 from models import DailyBriefing, Notification
 from planner_guard import build_evidence, ungrounded_items
+from structured_llm import (
+    StructuredLLMError, call_structured, classify_call_error, clip, make_ref_stripper,
+    request_params as _structured_params, usage_from,
+)
 from time_utils import local_day_bounds_utc, to_local, utc_now
 
 logger = logging.getLogger("standa_hub.briefing")
@@ -101,19 +105,11 @@ RESPONSE_SCHEMA = {
 
 def request_params() -> dict:
     """Parametry jen pro Denní přehled (běžný AI chat je nepoužívá)."""
-    return {
-        "max_completion_tokens": MAX_OUTPUT_TOKENS,
-        "reasoning_effort": REASONING_EFFORT,
-        "response_format": {"type": "json_schema",
-                            "json_schema": {"name": "daily_briefing", "strict": True, "schema": RESPONSE_SCHEMA}},
-    }
+    return _structured_params("daily_briefing", RESPONSE_SCHEMA, MAX_OUTPUT_TOKENS, REASONING_EFFORT)
 
 
-class BriefingError(Exception):
-    def __init__(self, category: str, usage: dict | None = None):
-        super().__init__(category)
-        self.category = category
-        self.usage = usage  # spotřeba i u nepovedené odpovědi (např. output_limit)
+class BriefingError(StructuredLLMError):
+    """Kategorie chyby přehledu (+ spotřeba i u nepovedené odpovědi)."""
 
 
 class BriefingInProgress(Exception):
@@ -162,28 +158,11 @@ def _strip_json(text: str) -> dict:
     return data
 
 
-def _clip(text, limit: int) -> str:
-    t = " ".join(str(text or "").split())
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+_clip = clip
 
 
 # Interní odkazy snímku („exam:2", „[activity:117]") slouží uzemnění a odkazům, ne textu pro uživatele.
-_REF = r"\[?(?<![\w-])(?:assignment|exam|reminder|goal|notification|finance|activity):[0-9A-Za-z_-]+\]?"
-_REF_GROUP_RE = re.compile(rf"\s*[(\[]\s*(?:{_REF}\s*(?:[,;]|\ba\b|\band\b)?\s*)+[)\]]")
-_REF_RE = re.compile(rf"\s*{_REF}")
-
-
-def _strip_refs(text: str) -> str:
-    """Odstraní interní odkazy z viditelného textu; text bez odkazů vrátí beze změny."""
-    t = str(text or "")
-    if not _REF_RE.search(t):
-        return t
-    t = _REF_GROUP_RE.sub("", t)
-    t = _REF_RE.sub("", t)
-    t = re.sub(r"\s+([,.;:!?])", r"\1", t)
-    t = re.sub(r"([,;])(?:\s*[,;])+", r"\1", t)
-    t = re.sub(r"[,;]\s*(?=[.!?]|$)", "", t)
-    return " ".join(t.split()).strip(" ,;")
+_strip_refs = make_ref_stripper(("assignment", "exam", "reminder", "goal", "notification", "finance", "activity"))
 
 
 def _clean_visible(content: dict) -> dict:
@@ -277,76 +256,19 @@ def estimate_request_tokens(snap: Snapshot) -> int:
     return sum(estimate_tokens(m["content"]) for m in build_messages(snap)) + schema + MAX_OUTPUT_TOKENS
 
 
-def _classify_call_error(exc: RuntimeError, records: list) -> str:
-    """RuntimeError z ai._llm_create_with_retry → kategorie. Původní výjimka SDK je v __cause__."""
-    if any(r.rate_limited for r in records) or "Rate limit" in str(exc):
-        return "rate_limit"
-    cause = exc.__cause__
-    status = getattr(cause, "status_code", None)
-    if status is None or status >= 500 or status in (408, 409):
-        return "provider"
-    text = f"{getattr(cause, 'code', '') or ''} {cause}".lower()
-    if any(k in text for k in ("max_completion_tokens", "max_tokens", "max completion tokens", "token limit",
-                               "finish_reason: length", "finish_reason=length")):
-        return "output_limit"
-    if "json_validate_failed" in text or "schema" in text or "response_format" in text:
-        return "schema_error"
-    return "request_rejected"
-
-
-def _usage_from(response, records: list, started: float) -> dict:
-    from llm_config import LLM_SETTINGS
-
-    ok = [r for r in records if not r.rate_limited and r.error_status is None]
-    usage = {
-        "model": getattr(response, "model", None) or LLM_SETTINGS.groq_model,
-        "prompt_tokens": sum(r.prompt_tokens or 0 for r in ok),
-        "completion_tokens": sum(r.completion_tokens or 0 for r in ok),
-        "total_tokens": sum(r.total_tokens or 0 for r in ok),
-        "latency_ms": int((time.monotonic() - started) * 1000),
-        "reasoning_tokens": None,
-    }
-    # OpenAI-kompatibilní detail (Groq ho u reasoning modelů vrací); jen se loguje, bez migrace.
-    details = getattr(getattr(response, "usage", None), "completion_tokens_details", None)
-    reasoning = getattr(details, "reasoning_tokens", None)
-    if isinstance(reasoning, int):
-        usage["reasoning_tokens"] = reasoning
-    return usage
+_classify_call_error = classify_call_error
+_usage_from = usage_from
 
 
 def _call_llm(snap: Snapshot, llm=None) -> tuple[str, dict]:
     """Jedno volání bez toolů a bez historie, se strict JSON Schema. llm(messages, max_tokens) -> (text, usage)
-    je testovací háček; reálná cesta jde přes ai._llm_create_with_retry s request_params()."""
+    je testovací háček; reálná cesta jde přes structured_llm.call_structured s request_params()."""
     if llm is not None:
         return llm(build_messages(snap), MAX_OUTPUT_TOKENS)
-    import ai
-
-    records = []
-    started = time.monotonic()
     try:
-        response = ai._llm_create_with_retry(build_messages(snap), tools=None, temperature=0.2, max_retries=2,
-                                             call_log=records, extra_params=request_params())
-    except ai.DailyLimitError:
-        raise BriefingError("daily_limit") from None
-    except RuntimeError as exc:
-        raise BriefingError(_classify_call_error(exc, records)) from None
-    except Exception:  # noqa: BLE001 - nečekaný tvar odpovědi providera (např. ne-JSON tělo)
-        raise BriefingError("invalid_response") from None
-    usage = _usage_from(response, records, started)
-    choices = getattr(response, "choices", None) or []
-    if not choices or getattr(choices[0], "message", None) is None:
-        raise BriefingError("invalid_response", usage)
-    choice = choices[0]
-    finish = getattr(choice, "finish_reason", None)
-    if getattr(choice.message, "refusal", None) or finish == "content_filter":
-        raise BriefingError("refused", usage)
-    if finish == "length":
-        # Uťato na stropu výstupu – i kdyby JSON vypadal celý, nevěříme mu.
-        raise BriefingError("output_limit", usage)
-    text = choice.message.content
-    if not isinstance(text, str) or not text.strip():
-        raise BriefingError("invalid_response", usage)
-    return text, usage
+        return call_structured(build_messages(snap), request_params())
+    except StructuredLLMError as exc:
+        raise BriefingError(exc.category, exc.usage) from None
 
 
 # ===== perzistence a generování =====
