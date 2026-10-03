@@ -1,13 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiFetch } from "@/lib/api";
-import { areaMeta } from "@/components/PlannerCards";
-import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
-import { staggerStyle } from "@/lib/motion";
 import DailyBriefingCard from "@/components/DailyBriefingCard";
 import WeeklyReviewCard from "@/components/WeeklyReviewCard";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { areaMeta } from "@/components/PlannerCards";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ContentContainer,
+  EmptyState,
+  EntityList,
+  EntityRow,
+  ErrorState,
+  HudLabel,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  Progress,
+  StatGrid,
+  StatusBadge,
+  StatusPulse,
+  TextLink,
+} from "@/components/ui";
+import { useApiResource } from "@/hooks/useApiResource";
+import { formatDate, formatDays, formatNumber, formatRelativeDays } from "@/lib/format";
+import { staggerStyle } from "@/lib/motion";
+import { clampPercent, cx, priorityTone, severityTone, type Tone } from "@/lib/ui";
 
 type NotificationPreview = {
   id: number;
@@ -30,18 +50,20 @@ type GoalQuick = {
   tracking_type: string;
 };
 
+type GoalProgressInfo = {
+  title: string;
+  current_value: number | null;
+  target_value: number | null;
+  progress: number;
+  target_date: string | null;
+} | null;
+
 type WorkQuick = {
   total_hours: number;
   total_earnings: number;
   this_month_hours: number;
   this_month_earnings: number;
-  goal?: {
-    title: string;
-    current_value: number | null;
-    target_value: number | null;
-    progress: number;
-    target_date: string | null;
-  } | null;
+  goal?: GoalProgressInfo;
 };
 
 type FinanceQuick = {
@@ -51,13 +73,7 @@ type FinanceQuick = {
   this_month_income: number;
   this_month_expenses: number;
   transactions_count: number;
-  goal?: {
-    title: string;
-    current_value: number | null;
-    target_value: number | null;
-    progress: number;
-    target_date: string | null;
-  } | null;
+  goal?: GoalProgressInfo;
 };
 
 type UpcomingItem = {
@@ -95,13 +111,7 @@ type DashboardPayload = {
   finance: FinanceQuick;
   upcoming: UpcomingItem[];
   wot: {
-    top_grinds: Array<{
-      id: number;
-      tank: string;
-      xp_remaining: number;
-      priority: string;
-      status: string;
-    }>;
+    top_grinds: Array<{ id: number; tank: string; xp_remaining: number; priority: string; status: string }>;
     credits?: number | null;
     free_xp?: number | null;
     bonds?: number | null;
@@ -114,174 +124,114 @@ type DashboardPayload = {
   };
 };
 
-function formatNumber(value?: number | null) {
-  if (value === undefined || value === null) return "-";
-  return new Intl.NumberFormat("cs-CZ").format(value);
-}
+const fmt0 = (v: number) => formatNumber(v, 0);
+const fmt1 = (v: number) => formatNumber(v, 1);
 
-function formatDate(iso: string | null | undefined) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
-}
-
-function progressGradient(pct: number) {
-  if (pct >= 80) return "from-emerald-500/80 to-green-500/50";
-  if (pct >= 45) return "from-amber-400/80 to-yellow-500/50";
-  if (pct >= 15) return "from-orange-500/80 to-amber-500/40";
-  return "from-rose-500/80 to-red-500/50";
-}
-
+/** Oblast = identita (barva podle oblasti), ne stav. */
 function AreaBadge({ area }: { area: string }) {
   const meta = areaMeta(area);
   return (
-    <span className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${meta.bg} ${meta.border} ${meta.text}`}>
+    <span className={cx("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4", meta.bg, meta.border, meta.text)}>
       {meta.label}
     </span>
   );
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const s = String(severity || "info").toLowerCase();
-  if (s === "important") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border bg-red-500/15 border-red-400/30 text-red-200">
-        ● Important
-      </span>
-    );
-  }
-  if (s === "warning") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border bg-amber-500/15 border-amber-400/30 text-amber-200">
-        ● Warning
-      </span>
-    );
-  }
+function TodayRow({ a }: { a: TodayAction }) {
+  const top = Number(a.priority) === 1;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border bg-zinc-500/10 border-zinc-400/30 text-zinc-200">
-      ● Info
-    </span>
-  );
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-  const p = String(priority || "medium").toLowerCase();
-  if (p === "high") {
-    return <span className="text-[11px] px-2 py-0.5 rounded-full border bg-amber-500/15 border-amber-400/30 text-amber-200">High</span>;
-  }
-  if (p === "low") {
-    return <span className="text-[11px] px-2 py-0.5 rounded-full border bg-zinc-500/10 border-zinc-400/30 text-zinc-300">Low</span>;
-  }
-  return <span className="text-[11px] px-2 py-0.5 rounded-full border bg-indigo-500/10 border-indigo-400/30 text-indigo-200">Medium</span>;
-}
-
-function ProgressBar({ value, height = "h-2" }: { value: number; height?: string }) {
-  const pct = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-  return (
-    <div className={`w-full ${height} rounded-full bg-zinc-800 overflow-hidden`}>
-      <div
-        className={`motion-progress ${height} rounded-full bg-gradient-to-r ${progressGradient(pct)}`}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
-function Card({ title, children, actions, className = "", index = 0 }: { title: React.ReactNode; children: React.ReactNode; actions?: React.ReactNode; className?: string; index?: number }) {
-  return (
-    <section
-      className={`motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 ${className}`}
-      style={staggerStyle(index)}
-    >
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <h2 className="text-lg md:text-xl font-semibold">{title}</h2>
-        {actions}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function ActionRow({ a }: { a: TodayAction }) {
-  const meta = areaMeta(a.area);
-  const isTop = Number(a.priority) === 1;
-  return (
-    <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3 flex items-start gap-3`}>
-      <div className={`shrink-0 w-9 h-9 rounded-full grid place-items-center font-bold text-sm border ${isTop ? "bg-amber-400/90 text-zinc-950 border-amber-300" : "bg-white/5 text-zinc-100 border-white/10"}`}>
-        {a.priority}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap mb-1">
+    <EntityRow
+      tone={top ? "accent" : "neutral"}
+      badges={
+        <>
+          <span
+            className={cx(
+              "grid h-6 w-6 place-items-center rounded-full border font-mono text-[11px] font-semibold",
+              top ? "border-accent/60 bg-accent/15 text-accent-strong" : "border-line text-ink-2",
+            )}
+            aria-label={`Priorita ${a.priority}`}
+          >
+            {a.priority}
+          </span>
           <AreaBadge area={a.area} />
-        </div>
-        <div className="font-semibold text-[15px] leading-snug break-words">{a.title}</div>
-        <div className="text-zinc-400 text-sm mt-1 break-words">{a.reason}</div>
-      </div>
-    </div>
+        </>
+      }
+      title={a.title}
+      meta={a.reason}
+    />
   );
+}
+
+function upcomingLabel(u: UpcomingItem): { tone: Tone; text: string } {
+  const days = Number(u.days_left) || 0;
+  if (u.overdue) return { tone: "danger", text: `po termínu · ${formatDays(Math.abs(days))}` };
+  if (days === 0) return { tone: "warning", text: "dnes" };
+  return { tone: days <= 3 ? "warning" : "neutral", text: formatRelativeDays(days) };
 }
 
 function GoalRow({ g }: { g: GoalQuick }) {
-  const pct = Math.max(0, Math.min(100, Math.round(Number(g.progress) || 0)));
+  const pct = clampPercent(g.progress);
   const hasValue = g.current_value !== null && g.current_value !== undefined && g.target_value;
-  const trackingBadge = g.tracking_type === "automatic"
-    ? <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-500/10 border-emerald-400/30 text-emerald-200">Automatic</span>
-    : <span className="text-[11px] px-2 py-0.5 rounded-full border bg-zinc-500/10 border-zinc-400/30 text-zinc-300">Manual</span>;
+  const unit = g.area === "finance" ? " Kč" : g.area === "work" ? " h" : "";
+  const priority = priorityTone(g.priority);
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 md:p-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-        <div className="font-semibold break-words">{g.title}</div>
-        <div className="flex items-center gap-1.5">
+    <li className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <span className="min-w-0 break-words font-medium text-ink">{g.title}</span>
+        <span className="flex flex-wrap items-center gap-1.5">
           <AreaBadge area={g.area} />
-          <PriorityBadge priority={g.priority} />
-          {trackingBadge}
-        </div>
+          {priority.tone !== "neutral" ? <StatusBadge tone={priority.tone}>{priority.label}</StatusBadge> : null}
+        </span>
       </div>
-      {hasValue ? (
-        <div className="text-zinc-300 text-sm mb-2">
-          {formatNumber(Number(g.current_value))} / {formatNumber(Number(g.target_value))}
-          {g.area === "finance" ? " Kč" : g.area === "work" ? " h" : ""}
-        </div>
-      ) : null}
       <div className="flex items-center gap-3">
-        <div className="flex-1"><ProgressBar value={pct} /></div>
-        <div className="text-sm font-semibold text-zinc-100 w-12 text-right">{pct} %</div>
+        <Progress value={pct} label={`${g.title}: splněno ${pct} %`} className="flex-1" />
+        <span className="w-11 text-right text-sm font-semibold tabular-nums text-ink">{pct} %</span>
       </div>
-      {g.target_date ? (
-        <div className="text-xs text-zinc-500 mt-2">Target: {formatDate(g.target_date)}</div>
-      ) : null}
+      <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-ink-muted">
+        {hasValue ? (
+          <span>
+            {formatNumber(Number(g.current_value))} / {formatNumber(Number(g.target_value))}
+            {unit}
+          </span>
+        ) : null}
+        <span>{g.tracking_type === "automatic" ? "automaticky" : "ručně"}</span>
+        {g.target_date ? <span>termín {formatDate(g.target_date)}</span> : null}
+      </div>
+    </li>
+  );
+}
+
+function GoalProgressBlock({ goal, unit, fallbackTitle, current }: { goal: GoalProgressInfo | undefined; unit: string; fallbackTitle: string; current: number }) {
+  if (!goal?.target_value || Number(goal.target_value) <= 0) return null;
+  const pct = clampPercent(goal.progress);
+  const title = goal.title || fallbackTitle;
+  return (
+    <div className="mt-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 text-sm">
+        <span className="truncate font-medium text-ink">{title}</span>
+        <span className="shrink-0 font-semibold tabular-nums">{pct} %</span>
+      </div>
+      <Progress value={pct} label={`${title}: splněno ${pct} %`} />
+      <div className="mt-1.5 text-xs text-ink-muted">
+        {formatNumber(goal.current_value ?? current)} / {formatNumber(Number(goal.target_value))} {unit}
+        {goal.target_date ? ` · termín ${formatDate(goal.target_date)}` : null}
+      </div>
     </div>
   );
 }
 
+const QUICK_ACTIONS = [
+  { href: "/work", icon: "💼", title: "Zapsat práci", hint: "Odpracované hodiny" },
+  { href: "/finance", icon: "💰", title: "Přidat výdaj", hint: "Finance" },
+  { href: "/goals", icon: "🎯", title: "Nový cíl", hint: "Cíle" },
+  { href: "/ai", icon: "🤖", title: "AI asistent", hint: "Chat" },
+  { href: "/planner", icon: "📋", title: "Plánovač", hint: "Den / týden" },
+];
+
 export default function Home() {
-  const [data, setData] = useState<DashboardPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    void Promise.resolve()
-      .then(() => apiFetch("/dashboard"))
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const payload = (await r.json()) as DashboardPayload;
-        setData(payload);
-      })
-      .catch(() => {
-        setError("Nepodařilo se načíst Dashboard data.");
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void Promise.resolve(load()).catch(() => {});
-    });
-  }, [load]);
-
+  const dashboard = useApiResource<DashboardPayload>("/dashboard");
+  const data = dashboard.data;
+  const loading = dashboard.loading;
   const today = data?.today;
   const notifications = data?.notifications;
   const goals = data?.goals;
@@ -291,483 +241,338 @@ export default function Home() {
   const wot = data?.wot;
   const mff = data?.mff;
 
-  const showSkeleton = loading && !data;
-
-  const workGoalProgress = useMemo(() => {
-    const g = work?.goal;
-    if (!g?.target_value || Number(g.target_value) <= 0) return null;
-    return {
-      title: g.title || "Měsíční hodinový cíl",
-      current: g.current_value ?? work?.this_month_hours ?? 0,
-      target: Number(g.target_value),
-      progress: Math.max(0, Math.min(100, Math.round(Number(g.progress) || 0))),
-      target_date: g.target_date,
-    };
-  }, [work]);
-
-  const financeGoalProgress = useMemo(() => {
-    const g = finance?.goal;
-    if (!g?.target_value || Number(g.target_value) <= 0) return null;
-    return {
-      title: g.title || "Cíl bilance",
-      current: g.current_value ?? finance?.balance ?? 0,
-      target: Number(g.target_value),
-      progress: Math.max(0, Math.min(100, Math.round(Number(g.progress) || 0))),
-      target_date: g.target_date,
-    };
-  }, [finance]);
-
   return (
-    <main className="p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6">
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl md:text-4xl font-bold">Command Center</h1>
-          <p className="text-zinc-400 mt-2">Důležité věci dnes, cíle, finance, práce a co se blíží.</p>
-        </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="motion-press text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors disabled:opacity-50"
-        >
-          Obnovit
-        </button>
-      </header>
+    <ContentContainer>
+      <PageHeader
+        eyebrow={
+          <HudLabel className="flex items-center gap-2">
+            <StatusPulse tone="success" live={!loading && !dashboard.error} /> Standa Hub · řídicí centrum
+          </HudLabel>
+        }
+        title="Řídicí centrum"
+        subtitle="Dnešní priority, přehledy, cíle, práce a finance na jednom místě."
+        actions={
+          <Button variant="secondary" onClick={() => void dashboard.reload()} busy={dashboard.refreshing} busyLabel="Obnovuji…">
+            Obnovit
+          </Button>
+        }
+      />
 
-      {error ? (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-2xl p-4">
-          {error}
-        </div>
+      {dashboard.status === "error" ? (
+        <ErrorState message={dashboard.error} onRetry={() => void dashboard.reload()} retrying={dashboard.refreshing} />
+      ) : dashboard.error ? (
+        <ErrorState message={`Obnovení selhalo: ${dashboard.error}`} />
       ) : null}
 
-      {/* DAILY BRIEFING (Phase F) */}
-      <DailyBriefingCard index={0} />
+      {/* Přehledy: denní (hlavní živý panel) a týdenní */}
+      <div className="grid gap-4 md:gap-6 xl:grid-cols-3 xl:items-start">
+        <div className="min-w-0 xl:col-span-2">
+          <DailyBriefingCard index={0} />
+        </div>
+        <WeeklyReviewCard index={1} />
+      </div>
 
-      {/* WEEKLY REVIEW (Phase G) – kompaktně, detail a historie na /review */}
-      <WeeklyReviewCard index={1} />
+      {/* Klíčová čísla */}
+      <section aria-label="Klíčová čísla" className="motion-card" style={staggerStyle(2)}>
+        {loading ? (
+          <StatGrid>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-[92px] animate-pulse rounded-[var(--radius-control)] bg-surface" aria-hidden="true" />
+            ))}
+          </StatGrid>
+        ) : data ? (
+          <StatGrid>
+            <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
+            <MetricCard
+              label="Výdělek · měsíc"
+              value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />}
+              unit="Kč"
+            />
+            <MetricCard
+              label="Bilance"
+              value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
+              unit="Kč"
+              tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
+              hint={`${finance?.transactions_count ?? 0} transakcí`}
+            />
+            <MetricCard
+              label="Výdaje · měsíc"
+              value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
+              unit="Kč"
+              hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
+            />
+          </StatGrid>
+        ) : null}
+      </section>
 
-      {/* TODAY */}
-      <Card index={0}
-        title={
-          <div className="flex items-center gap-2">
-            <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-200">☀️</span>
-            Dnes
-          </div>
-        }
-        actions={<Link href="/planner" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Planner →</Link>}
-        className="md:col-span-2 xl:col-span-3"
-      >
-        {showSkeleton ? (
-          <div className="space-y-3">
-            <div className="h-4 w-2/3 rounded bg-zinc-800 animate-pulse" />
-            <div className="h-20 rounded-xl bg-zinc-800/60 animate-pulse" />
-            <div className="h-20 rounded-xl bg-zinc-800/60 animate-pulse" />
-          </div>
-        ) : today ? (
-          <>
-            {today.summary ? <div className="text-zinc-300 mb-4">{today.summary}</div> : null}
-            {today.actions && today.actions.length > 0 ? (
-              <div className="space-y-2.5">
-                {today.actions.slice(0, 3).map((a, i) => (
-                  <ActionRow key={`${a.priority}-${i}-${a.title}`} a={a} />
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-zinc-500 border border-dashed border-zinc-800 rounded-xl p-5 text-center">
-                Dnes máš volno podle Planneru. Jdi na /goals a vytvoř si priority.
-              </div>
-            )}
-            {notifications && notifications.unread > 0 ? (
-              <div className="mt-4 flex items-center gap-2 text-sm text-zinc-300">
-                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-400/30 text-amber-200">
-                  🔔 {notifications.unread} upozornění
-                  {notifications.important > 0 ? ` · ${notifications.important} important` : null}
-                  {notifications.warning > 0 ? ` · ${notifications.warning} warning` : null}
-                </span>
-              </div>
-            ) : null}
-          </>
+      {/* Dnes podle plánovače */}
+      <Card index={3} aria-labelledby="today-title">
+        <CardHeader
+          title={<span id="today-title">Dnes</span>}
+          icon="☀️"
+          description={today?.summary}
+          actions={<TextLink href="/planner">Plánovač →</TextLink>}
+        />
+        {loading ? (
+          <LoadingState lines={3} label="Načítám dnešní plán…" />
+        ) : today && today.actions?.length ? (
+          <EntityList label="Dnešní priority">
+            {today.actions.slice(0, 3).map((a, i) => (
+              <TodayRow key={`${a.priority}-${i}-${a.title}`} a={a} />
+            ))}
+          </EntityList>
+        ) : data ? (
+          <EmptyState action={<TextLink href="/goals">Nastavit cíle →</TextLink>}>Dnes podle plánovače nic nehoří.</EmptyState>
         ) : null}
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
-        {/* NOTIFICATIONS */}
-        <Card index={1}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200">🔔</span>
-              Vyžaduje pozornost
-            </div>
-          }
-          actions={<Link href="/planner" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Všechna upozornění →</Link>}
-          className="md:col-span-1 xl:col-span-1 order-2 md:order-1"
-        >
-          {showSkeleton ? (
-            <div className="space-y-3">
-              <div className="h-16 rounded-xl bg-zinc-800/60 animate-pulse" />
-              <div className="h-16 rounded-xl bg-zinc-800/60 animate-pulse" />
-            </div>
-          ) : notifications ? (
-            <>
-              {notifications.preview && notifications.preview.length > 0 ? (
-                <ul className="space-y-3">
-                  {notifications.preview.slice(0, 3).map((n) => {
-                    const meta = areaMeta(n.area);
-                    const maybeLink = n.action_url?.startsWith("/") || n.action_url?.startsWith("http");
-                    const body = (
-                      <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3 ${maybeLink ? "motion-hover-lift" : ""}`}>
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <SeverityBadge severity={n.severity} />
-                          <AreaBadge area={n.area} />
-                        </div>
-                        <div className="font-semibold text-[15px] break-words">{n.title}</div>
-                        {n.message ? <div className="text-sm text-zinc-400 mt-1 break-words">{n.message}</div> : null}
-                      </div>
-                    );
-                    return (
-                      <li key={n.id}>
-                        {maybeLink ? <Link href={String(n.action_url)}>{body}</Link> : body}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className="text-sm text-zinc-500 border border-dashed border-zinc-800 rounded-xl p-5 text-center">
-                  Žádná neřešená upozornění.
-                </div>
-              )}
-            </>
-          ) : null}
-        </Card>
-
-        {/* GOALS */}
-        <Card index={2}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-200">🎯</span>
-              Cíle
-            </div>
-          }
-          actions={<Link href="/goals" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Všechny cíle →</Link>}
-          className="md:col-span-1 xl:col-span-1 order-3 md:order-2"
-        >
-          {showSkeleton ? (
-            <div className="space-y-3">
-              <div className="h-24 rounded-xl bg-zinc-800/60 animate-pulse" />
-              <div className="h-24 rounded-xl bg-zinc-800/60 animate-pulse" />
-            </div>
-          ) : goals ? (
-            <>
-              {goals.top && goals.top.length > 0 ? (
-                <div className="space-y-3">
-                  {goals.top.map((g) => (
-                    <GoalRow key={g.id} g={g} />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-zinc-500 border border-dashed border-zinc-800 rounded-xl p-5 text-center">
-                  Zatím nemáš žádný aktivní cíl.
-                </div>
-              )}
-            </>
-          ) : null}
-        </Card>
-
-        {/* UPCOMING */}
-        <Card index={3}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-200">📅</span>
-              Nadcházející
-            </div>
-          }
-          actions={
-            <div className="flex items-center gap-3">
-              <Link href="/school" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Škola →</Link>
-            </div>
-          }
-          className="md:col-span-2 xl:col-span-1 order-4"
-        >
-          {showSkeleton ? (
-            <div className="space-y-2">
-              <div className="h-14 rounded-xl bg-zinc-800/60 animate-pulse" />
-              <div className="h-14 rounded-xl bg-zinc-800/60 animate-pulse" />
-              <div className="h-14 rounded-xl bg-zinc-800/60 animate-pulse" />
-            </div>
-          ) : upcoming.length > 0 ? (
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
+        {/* Vyžaduje pozornost */}
+        <Card index={4} aria-labelledby="attention-title">
+          <CardHeader
+            title={<span id="attention-title">Vyžaduje pozornost</span>}
+            icon="🔔"
+            actions={
+              notifications && notifications.unread > 0 ? (
+                <StatusBadge tone={notifications.important > 0 ? "danger" : "warning"}>
+                  {notifications.unread} nepřečtených
+                </StatusBadge>
+              ) : undefined
+            }
+          />
+          {loading ? (
+            <LoadingState lines={2} />
+          ) : notifications?.preview?.length ? (
             <ul className="space-y-2">
-              {upcoming.map((u) => {
-                const isOverdue = u.overdue;
-                const days = Math.abs(Number(u.days_left) || 0);
-                return (
-                  <li
-                    key={`${u.type}-${u.id}`}
-                    className={`rounded-xl border p-3 ${isOverdue ? "bg-red-500/10 border-red-400/30" : "bg-zinc-950/40 border-zinc-800"}`}
-                  >
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {u.type === "assignment" ? <span className="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border bg-indigo-500/10 border-indigo-400/30 text-indigo-200">Assignment</span> : null}
-                          {u.type === "exam" ? <span className="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full border bg-rose-500/10 border-rose-400/30 text-rose-200">Zkouška</span> : null}
-                          {u.type === "goal_target" ? <AreaBadge area={u.area} /> : null}
-                        </div>
-                        <div className="font-semibold mt-1 break-words">{u.title}</div>
-                        <div className="text-xs text-zinc-400 mt-1">{formatDate(u.date)}</div>
-                      </div>
-                      <div className={`shrink-0 text-sm font-semibold ${isOverdue ? "text-red-300" : "text-zinc-200"}`}>
-                        {isOverdue ? (
-                          <>OVERDUE · {days} {days === 1 ? "den" : days < 5 ? "dny" : "dní"} po termínu</>
-                        ) : days === 0 ? (
-                          <>DNES</>
-                        ) : days === 1 ? (
-                          <>ZA 1 DEN</>
-                        ) : (
-                          <>ZA {days} DNY</>
-                        )}
-                      </div>
+              {notifications.preview.slice(0, 3).map((n) => {
+                const sev = severityTone(n.severity);
+                const href = n.action_url && n.action_url.startsWith("/") ? n.action_url : null;
+                const body = (
+                  <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                      <StatusBadge tone={sev.tone} dot>
+                        {sev.label}
+                      </StatusBadge>
+                      <AreaBadge area={n.area} />
                     </div>
+                    <div className="break-words text-sm font-medium text-ink">{n.title}</div>
+                    {n.message ? <div className="mt-0.5 line-clamp-2 break-words text-xs text-ink-muted">{n.message}</div> : null}
+                  </div>
+                );
+                return (
+                  <li key={n.id}>
+                    {href ? (
+                      <Link
+                        href={href}
+                        className="block rounded-[var(--radius-control)] motion-hover-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                      >
+                        {body}
+                      </Link>
+                    ) : (
+                      body
+                    )}
                   </li>
                 );
               })}
             </ul>
-          ) : (
-            <div className="text-sm text-zinc-500 border border-dashed border-zinc-800 rounded-xl p-5 text-center">
-              Žádné blížící se termíny.
-            </div>
-          )}
+          ) : data ? (
+            <EmptyState compact>Žádná neřešená upozornění.</EmptyState>
+          ) : null}
         </Card>
 
-        {/* WORK */}
-        <Card index={4}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-200">💼</span>
-              Práce
-            </div>
-          }
-          actions={<Link href="/work" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Work →</Link>}
-          className="order-5"
-        >
-          {showSkeleton ? (
-            <div className="space-y-3">
-              <div className="h-4 w-2/3 rounded bg-zinc-800 animate-pulse" />
-              <div className="h-10 rounded bg-zinc-800 animate-pulse" />
-            </div>
+        {/* Cíle */}
+        <Card index={5} aria-labelledby="goals-title">
+          <CardHeader
+            title={<span id="goals-title">Cíle</span>}
+            icon="🎯"
+            actions={<TextLink href="/goals">Všechny →</TextLink>}
+          />
+          {loading ? (
+            <LoadingState lines={2} />
+          ) : goals?.top?.length ? (
+            <ul className="space-y-2">
+              {goals.top.map((g) => (
+                <GoalRow key={g.id} g={g} />
+              ))}
+            </ul>
+          ) : data ? (
+            <EmptyState compact>Zatím žádný aktivní cíl.</EmptyState>
+          ) : null}
+        </Card>
+
+        {/* Nadcházející */}
+        <Card index={6} aria-labelledby="upcoming-title" className="md:col-span-2 xl:col-span-1">
+          <CardHeader
+            title={<span id="upcoming-title">Nadcházející</span>}
+            icon="📅"
+            actions={<TextLink href="/school">Škola →</TextLink>}
+          />
+          {loading ? (
+            <LoadingState lines={3} />
+          ) : upcoming.length ? (
+            <EntityList label="Nadcházející termíny">
+              {upcoming.map((u) => {
+                const label = upcomingLabel(u);
+                return (
+                  <EntityRow
+                    key={`${u.type}-${u.id}`}
+                    tone={u.overdue ? "danger" : "neutral"}
+                    badges={
+                      <>
+                        {u.type === "assignment" ? <StatusBadge>Úkol</StatusBadge> : null}
+                        {u.type === "exam" ? <StatusBadge tone="info">Zkouška</StatusBadge> : null}
+                        {u.type === "goal_target" ? <AreaBadge area={u.area} /> : null}
+                        <StatusBadge tone={label.tone}>{label.text}</StatusBadge>
+                      </>
+                    }
+                    title={u.title}
+                    meta={formatDate(u.date)}
+                  />
+                );
+              })}
+            </EntityList>
+          ) : data ? (
+            <EmptyState compact>Žádné blížící se termíny.</EmptyState>
+          ) : null}
+        </Card>
+
+        {/* Práce */}
+        <Card index={7} aria-labelledby="work-title">
+          <CardHeader title={<span id="work-title">Práce</span>} icon="💼" actions={<TextLink href="/work">Práce →</TextLink>} />
+          {loading ? (
+            <LoadingState lines={2} />
           ) : work ? (
             <>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
-                  <div className="text-xs uppercase tracking-wider text-zinc-500">Tento měsíc</div>
-                  <div className="text-xl font-semibold mt-1"><AnimatedNumber value={work.this_month_hours} format={formatNumber} /> h</div>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs text-ink-muted">Celkem odpracováno</dt>
+                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_hours, 1)} h</dd>
                 </div>
-                <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
-                  <div className="text-xs uppercase tracking-wider text-zinc-500">Výdělek</div>
-                  <div className="text-xl font-semibold text-emerald-300 mt-1"><AnimatedNumber value={work.this_month_earnings} format={formatNumber} /> Kč</div>
+                <div>
+                  <dt className="text-xs text-ink-muted">Celkem vyděláno</dt>
+                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(work.total_earnings, 0)} Kč</dd>
                 </div>
-              </div>
-              {workGoalProgress ? (
-                <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 p-3">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="text-sm font-medium truncate">{workGoalProgress.title}</div>
-                    <div className="text-sm font-semibold text-right shrink-0">{workGoalProgress.progress} %</div>
-                  </div>
-                  <div className="text-xs text-zinc-400 mb-2">
-                    {formatNumber(workGoalProgress.current)} / {formatNumber(workGoalProgress.target)} h
-                    {workGoalProgress.target_date ? ` · target ${formatDate(workGoalProgress.target_date)}` : null}
-                  </div>
-                  <ProgressBar value={workGoalProgress.progress} />
-                </div>
-              ) : null}
+              </dl>
+              <GoalProgressBlock goal={work.goal} unit="h" fallbackTitle="Měsíční hodinový cíl" current={work.this_month_hours} />
             </>
           ) : null}
         </Card>
 
-        {/* FINANCE */}
-        <Card index={5}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-amber-500/15 border border-amber-400/30 text-amber-200">💰</span>
-              Finance
-            </div>
-          }
-          actions={<Link href="/finance" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Finance →</Link>}
-          className="order-6"
-        >
-          {showSkeleton ? (
-            <div className="space-y-3">
-              <div className="h-12 rounded bg-zinc-800 animate-pulse" />
-              <div className="h-16 rounded-xl bg-zinc-800/60 animate-pulse" />
-            </div>
+        {/* Finance */}
+        <Card index={8} aria-labelledby="finance-title">
+          <CardHeader
+            title={<span id="finance-title">Finance</span>}
+            icon="💰"
+            actions={<TextLink href="/finance">Finance →</TextLink>}
+          />
+          {loading ? (
+            <LoadingState lines={2} />
           ) : finance ? (
             <>
-              <div className="rounded-xl bg-zinc-950/60 border border-zinc-800 p-4 mb-4">
-                <div className="text-xs uppercase tracking-wider text-zinc-500">Aktuální bilance</div>
-                <div className="text-2xl font-bold mt-1 text-amber-200"><AnimatedNumber value={finance.balance} format={formatNumber} /> Kč</div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded-xl bg-emerald-500/5 border border-emerald-400/20 p-3">
-                  <div className="text-xs uppercase tracking-wider text-zinc-500">Příjem tento měsíc</div>
-                  <div className="text-lg font-semibold text-emerald-300 mt-1"><AnimatedNumber value={finance.this_month_income} format={formatNumber} /> Kč</div>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs text-ink-muted">Příjem tento měsíc</dt>
+                  <dd className="font-semibold tabular-nums text-success">{formatNumber(finance.this_month_income, 0)} Kč</dd>
                 </div>
-                <div className="rounded-xl bg-rose-500/5 border border-rose-400/20 p-3">
-                  <div className="text-xs uppercase tracking-wider text-zinc-500">Výdaje tento měsíc</div>
-                  <div className="text-lg font-semibold text-rose-300 mt-1"><AnimatedNumber value={finance.this_month_expenses} format={formatNumber} /> Kč</div>
+                <div>
+                  <dt className="text-xs text-ink-muted">Výdaje tento měsíc</dt>
+                  <dd className="font-semibold tabular-nums text-ink">{formatNumber(finance.this_month_expenses, 0)} Kč</dd>
                 </div>
-              </div>
-              {financeGoalProgress ? (
-                <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="text-sm font-medium truncate">{financeGoalProgress.title}</div>
-                    <div className="text-sm font-semibold text-right shrink-0">{financeGoalProgress.progress} %</div>
-                  </div>
-                  <div className="text-xs text-zinc-400 mb-2">
-                    {formatNumber(financeGoalProgress.current)} / {formatNumber(financeGoalProgress.target)} Kč
-                    {financeGoalProgress.target_date ? ` · target ${formatDate(financeGoalProgress.target_date)}` : null}
-                  </div>
-                  <ProgressBar value={financeGoalProgress.progress} />
-                </div>
-              ) : null}
+              </dl>
+              <GoalProgressBlock goal={finance.goal} unit="Kč" fallbackTitle="Cíl bilance" current={finance.balance} />
             </>
           ) : null}
         </Card>
 
-        {/* GAMES (WOT + MFF) */}
-        <Card index={6}
-          title={
-            <div className="flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-orange-500/15 border border-orange-400/30 text-orange-200">🎮</span>
-              Hry
-            </div>
-          }
-          actions={
-            <div className="flex items-center gap-3">
-              <Link href="/wot" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">WoT →</Link>
-              <Link href="/mff" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">MFF →</Link>
-            </div>
-          }
-          className="order-7"
-        >
-          {showSkeleton ? (
-            <div className="space-y-3">
-              <div className="h-20 rounded-xl bg-zinc-800/60 animate-pulse" />
-              <div className="h-20 rounded-xl bg-zinc-800/60 animate-pulse" />
-            </div>
+        {/* Hry */}
+        <Card index={9} aria-labelledby="games-title">
+          <CardHeader
+            title={<span id="games-title">Hry</span>}
+            icon="🎮"
+            actions={
+              <>
+                <TextLink href="/wot">WoT →</TextLink>
+                <TextLink href="/mff">MFF →</TextLink>
+              </>
+            }
+          />
+          {loading ? (
+            <LoadingState lines={2} />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-semibold text-sm">World of Tanks</div>
+            <div className="space-y-3 text-sm">
+              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">World of Tanks</span>
                   {wot?.credits !== undefined && wot.credits !== null ? (
-                    <span className="text-xs text-zinc-400">{formatNumber(wot.credits)} ₵</span>
+                    <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
                   ) : null}
                 </div>
-                {wot?.top_grinds && wot.top_grinds.length > 0 ? (
-                  <div className="space-y-2">
-                    {wot.top_grinds.slice(0, 2).map((g) => (
-                      <div key={g.id} className="flex items-center justify-between gap-2 text-sm">
-                        <div className="min-w-0 truncate">{g.tank}</div>
-                        <div className="text-zinc-300 shrink-0">{formatNumber(g.xp_remaining)} XP</div>
-                      </div>
-                    ))}
-                  </div>
+                {wot?.top_grinds?.length ? (
+                  wot.top_grinds.slice(0, 2).map((g) => (
+                    <div key={g.id} className="flex justify-between gap-2">
+                      <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
+                      <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
+                    </div>
+                  ))
                 ) : (
-                  <div className="text-xs text-zinc-500">Žádné aktivní grindy.</div>
+                  <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
                 )}
               </div>
-
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-semibold text-sm">Marvel Future Fight</div>
-                  {mff ? <span className="text-xs text-zinc-400">{mff.tracked_characters} tracked</span> : null}
+              <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">Marvel Future Fight</span>
+                  {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
                 </div>
                 {mff ? (
-                  <div className="space-y-2 text-sm">
+                  <>
                     <div className="flex justify-between gap-2">
-                      <span className="text-zinc-400">T4</span>
-                      <span className="font-semibold text-amber-300">{mff.t4_count}</span>
+                      <span className="text-ink-muted">T4 postavy</span>
+                      <span className="tabular-nums text-ink">{mff.t4_count}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-zinc-400">High priority</span>
-                      <span className="font-semibold">{mff.priority_count}</span>
+                      <span className="text-ink-muted">Vysoká priorita</span>
+                      <span className="tabular-nums text-ink">{mff.priority_count}</span>
                     </div>
-                    <div>
-                      <div className="flex justify-between gap-2 text-xs mb-1">
-                        <span className="text-zinc-400">Avg build completeness</span>
-                        <span>{mff.average_build_completeness} %</span>
-                      </div>
-                      <ProgressBar value={mff.average_build_completeness} height="h-1.5" />
+                    <div className="mt-2 flex items-center gap-3">
+                      <Progress
+                        size="sm"
+                        value={mff.average_build_completeness}
+                        label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
+                        className="flex-1"
+                      />
+                      <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
                     </div>
-                  </div>
+                  </>
                 ) : (
-                  <div className="text-xs text-zinc-500">Žádné postavy.</div>
+                  <p className="text-xs text-ink-muted">Žádné postavy.</p>
                 )}
               </div>
             </div>
           )}
         </Card>
-
-        {/* QUICK ACTIONS */}
-        <section className="motion-card md:col-span-2 xl:col-span-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 order-8" style={staggerStyle(7)}>
-          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-            <h2 className="text-lg md:text-xl font-semibold flex items-center gap-2">
-              <span className="inline-grid h-7 w-7 place-items-center rounded-xl bg-zinc-500/15 border border-zinc-400/30 text-zinc-200">⚡</span>
-              Rychlé akce
-            </h2>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <Link
-              href="/work"
-              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
-            >
-              <div className="text-xl">💼</div>
-              <div>
-                <div className="font-semibold">+ Work session</div>
-                <div className="text-xs text-zinc-400">Zapsat hodiny</div>
-              </div>
-            </Link>
-            <Link
-              href="/finance"
-              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-amber-400/40 hover:bg-amber-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
-            >
-              <div className="text-xl">💰</div>
-              <div>
-                <div className="font-semibold">+ Finance expense</div>
-                <div className="text-xs text-zinc-400">Přidat výdaj</div>
-              </div>
-            </Link>
-            <Link
-              href="/goals"
-              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
-            >
-              <div className="text-xl">🎯</div>
-              <div>
-                <div className="font-semibold">+ Cíl</div>
-                <div className="text-xs text-zinc-400">Nový goal</div>
-              </div>
-            </Link>
-            <Link
-              href="/ai"
-              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-indigo-400/40 hover:bg-indigo-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between"
-            >
-              <div className="text-xl">🤖</div>
-              <div>
-                <div className="font-semibold">Otevřít AI</div>
-                <div className="text-xs text-zinc-400">Chat asistent</div>
-              </div>
-            </Link>
-            <Link
-              href="/planner"
-              className="motion-hover-lift group rounded-2xl border border-zinc-800 hover:border-sky-400/40 hover:bg-sky-500/5 transition-colors p-4 min-h-[96px] flex flex-col justify-between col-span-2 sm:col-span-1"
-            >
-              <div className="text-xl">📋</div>
-              <div>
-                <div className="font-semibold">Planner</div>
-                <div className="text-xs text-zinc-400">Celý den / týden</div>
-              </div>
-            </Link>
-          </div>
-        </section>
       </div>
-    </main>
+
+      {/* Rychlé akce */}
+      <Card index={10} aria-labelledby="quick-title">
+        <CardHeader title={<span id="quick-title">Rychlé akce</span>} icon="⚡" />
+        <nav aria-label="Rychlé akce" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {QUICK_ACTIONS.map((q) => (
+            <Link
+              key={q.href}
+              href={q.href}
+              className="motion-hover-lift flex min-h-[72px] items-center gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3 transition-colors hover:border-accent/40 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            >
+              <span aria-hidden="true" className="text-lg">
+                {q.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">{q.title}</span>
+                <span className="block text-xs text-ink-muted">{q.hint}</span>
+              </span>
+            </Link>
+          ))}
+        </nav>
+      </Card>
+    </ContentContainer>
   );
 }

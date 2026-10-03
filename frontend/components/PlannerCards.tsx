@@ -61,6 +61,9 @@ const AREA_STYLES: Record<string, { bg: string; border: string; text: string; la
   hobby:    { bg: "bg-rose-500/10",     border: "border-rose-400/30",     text: "text-rose-200",     label: "Hobby" },
   travel:   { bg: "bg-teal-500/10",     border: "border-teal-400/30",     text: "text-teal-200",     label: "Cestování" },
   general:  { bg: "bg-zinc-500/10",     border: "border-zinc-400/30",     text: "text-zinc-200",     label: "Obecné" },
+  reminders: { bg: "bg-sky-500/10",     border: "border-sky-400/30",      text: "text-sky-200",      label: "Připomínky" },
+  briefing: { bg: "bg-cyan-500/10",     border: "border-cyan-400/30",     text: "text-cyan-200",     label: "Přehled" },
+  review:   { bg: "bg-violet-500/10",   border: "border-violet-400/30",   text: "text-violet-200",   label: "Týdenní přehled" },
 };
 
 export function areaMeta(area: string | undefined | null) {
