@@ -7,6 +7,7 @@ import { areaMeta } from "@/components/PlannerCards";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { staggerStyle } from "@/lib/motion";
 import DailyBriefingCard from "@/components/DailyBriefingCard";
+import WeeklyReviewCard from "@/components/WeeklyReviewCard";
 
 type NotificationPreview = {
   id: number;
@@ -341,6 +342,9 @@ export default function Home() {
 
       {/* DAILY BRIEFING (Phase F) */}
       <DailyBriefingCard index={0} />
+
+      {/* WEEKLY REVIEW (Phase G) – kompaktně, detail a historie na /review */}
+      <WeeklyReviewCard index={1} />
 
       {/* TODAY */}
       <Card index={0}

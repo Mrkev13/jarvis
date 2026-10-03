@@ -14,6 +14,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
 
   const links = [
     { href: "/", label: "Dashboard" },
+    { href: "/review", label: "📅 Týdenní přehled" },
     { href: "/activity", label: "📜 Aktivita" },
     { href: "/wot", label: "World of Tanks" },
     { href: "/finance", label: "Finance" },
