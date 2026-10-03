@@ -57,7 +57,7 @@ export function Tabs<T extends string>({
             onClick={() => onChange(item.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cx(
-              "motion-press min-h-9 rounded-lg px-3 text-sm transition-colors",
+              "motion-press min-h-9 pointer-coarse:min-h-11 rounded-lg px-3 text-sm transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
               selected ? "bg-elevated text-ink shadow-[inset_0_-1px_0_0_rgb(34_211_238/0.6)]" : "text-ink-muted hover:text-ink",
             )}

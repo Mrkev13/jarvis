@@ -12,7 +12,8 @@ function MaybeLink({ url, children }: { url: string; children: React.ReactNode }
   return href ? (
     <Link
       href={href}
-      className="block rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 motion-hover-lift"
+      // after: rozšiřuje dotykovou plochu i u krátkého textového odkazu (≥ 40 px)
+      className="relative block rounded-[var(--radius-control)] after:absolute after:inset-x-0 after:-inset-y-2 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 motion-hover-lift"
     >
       {children}
     </Link>
