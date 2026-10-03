@@ -60,6 +60,12 @@ DEFAULT_PUSH_HOSTS = (
 )
 
 
+def deliverable_types() -> tuple[str, ...]:
+    """Typy notifikací, které jdou i ven: připomínky (Phase D) a Denní přehled (Phase F, DAILY_BRIEFING_PUSH)."""
+    briefing = os.environ.get("DAILY_BRIEFING_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
+    return ("reminder", "daily_briefing") if briefing else ("reminder",)
+
+
 def external_delivery_enabled() -> bool:
     return os.environ.get("EXTERNAL_DELIVERY_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 
@@ -264,7 +270,7 @@ def enqueue_deliveries(db: Session, providers: list[DeliveryProvider], now: date
     now = now or utc_now()
     notes = (
         db.query(Notification)
-        .filter(Notification.notification_type == "reminder", Notification.resolved == False,  # noqa: E712
+        .filter(Notification.notification_type.in_(deliverable_types()), Notification.resolved == False,  # noqa: E712
                 Notification.created_at >= now - ENQUEUE_LOOKBACK)
         .order_by(Notification.id)
         .all()
