@@ -25,6 +25,6 @@ test("payload trims and falls back like before", () => {
 test("category labels and distinct options", () => {
   assert.equal(memoryCategoryLabel("preference"), "Preference");
   assert.equal(memoryCategoryLabel("Context"), "Kontext");
-  assert.equal(memoryCategoryLabel("vlastní"), "vlastní");
+  assert.equal(memoryCategoryLabel("vlastní"), "Vlastní"); // 4B.1: neznámá kategorie s velkým písmenem (lib/labels)
   assert.deepEqual(distinctSorted(["work", "finance", "work", "", null, "škola"]), ["finance", "škola", "work"]);
 });
