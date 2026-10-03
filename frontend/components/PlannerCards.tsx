@@ -1,6 +1,6 @@
 // Barvy oblastí žijí v lib/areas.ts (sdílené s dashboardem, zvonkem a cíli).
 import { areaMeta } from "@/lib/areas";
-import { formatDate, formatPercent, formatRelativeDays } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent, formatRelativeDays } from "@/lib/format";
 import { goalPaceMeta, goalTrackingLabel } from "@/lib/goals";
 import { clampPercent, cx, priorityTone } from "@/lib/ui";
 import { AreaBadge, Card, EmptyState, HudLabel, Progress, StatusBadge } from "@/components/ui";
@@ -158,7 +158,7 @@ function GoalReviewRow({ goal: g }: { goal: GoalReviewItem }) {
           <div className="text-xl font-semibold tabular-nums text-ink">{formatPercent(pct)}</div>
           {g.current_value != null || g.target_value != null ? (
             <div className="text-xs tabular-nums text-ink-muted">
-              {g.current_value ?? "–"} / {g.target_value ?? "–"}
+              {formatNumber(g.current_value)} / {formatNumber(g.target_value)}
             </div>
           ) : null}
         </div>
