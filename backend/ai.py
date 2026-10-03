@@ -554,6 +554,10 @@ def _run_tool_calls(db, tool_calls):
 DAILY_LIMIT_KINDS = frozenset({"TPD", "RPD"})
 
 
+class DailyLimitError(RuntimeError):
+    """Vyčerpaný denní limit (TPD/RPD) – krátké čekání nepomůže; /chat podle typu volí text pro uživatele."""
+
+
 def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
@@ -607,7 +611,7 @@ def _llm_create_with_retry(
             log_call(record, log_enabled)
             if record.limit_kind in DAILY_LIMIT_KINDS:
                 # Denní limit: čekání v řádu sekund nepomůže – neretryovat, říct pravdu.
-                raise RuntimeError(
+                raise DailyLimitError(
                     "AI provider má vyčerpaný denní limit (rate limit tokenů/požadavků za den byl překročen). "
                     "Zkus to prosím později – limit se průběžně obnovuje."
                 ) from last_exc

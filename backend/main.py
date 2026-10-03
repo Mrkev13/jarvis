@@ -29,7 +29,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 
 
-from ai import ask_ai, execute_confirm_action, reject_pending, _get_pending_action, _check_pending_expired
+from ai import DailyLimitError, ask_ai, execute_confirm_action, reject_pending, _get_pending_action, _check_pending_expired
 import ai as _ai_module
 from history_service import prepare_conversation_history, window_client_messages
 from llm_config import LLM_SETTINGS
@@ -595,6 +595,12 @@ def chat(request: ChatRequest):
         status = 503
         if "Rate limit" in msg or "překročen" in msg:
             status = 429
+        # Denní limit (TPD/RPD) se během sekund neobnoví → neslibovat krátké čekání.
+        retry_hint = (
+            "Denní limit se během pár sekund neobnoví – zkus to prosím později."
+            if isinstance(exc, DailyLimitError)
+            else "Za 10 sekund by to mělo zase fungovat."
+        )
         return JSONResponse(
             status_code=status,
             content={
@@ -602,7 +608,7 @@ def chat(request: ChatRequest):
                 "answer": (
                     f"⚠️ {msg}\n\n"
                     "Uložila jsem kontext, můžeš klidně pokládat otázky pokračovat. "
-                    "Za 10 sekund by to mělo zase fungovat."
+                    f"{retry_hint}"
                 ),
                 "pending_actions": [],
             },

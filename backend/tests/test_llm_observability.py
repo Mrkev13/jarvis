@@ -155,6 +155,7 @@ class LLMObservabilityTestCase(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 ai._llm_create_with_retry([{"role": "user", "content": "x"}], tools=[], call_log=records)
         self.assertEqual(len(self.calls), 1, msg="denní limit se nesmí retryovat")
+        self.assertIsInstance(ctx.exception, ai.DailyLimitError)
         self.assertEqual(self.sleeps, [])
         self.assertEqual(records[0].limit_kind, "TPD")
         self.assertIn("denní limit", str(ctx.exception))
