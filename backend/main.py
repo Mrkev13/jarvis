@@ -40,6 +40,7 @@ from notifications_service import generate_notifications, list_notifications, no
 from planner_service import generate_plan
 import reminder_service
 import delivery_service
+import briefing_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
@@ -424,6 +425,10 @@ class ReminderUpdateRequest(BaseModel):
 class PushSubscriptionRequest(BaseModel):
     endpoint: str
     keys: dict[str, str]
+
+
+class BriefingGenerateRequest(BaseModel):
+    regenerate: bool = False
 
 
 class PushEndpointRequest(BaseModel):
@@ -1726,6 +1731,31 @@ def reminders_cancel(reminder_id: int):
         db.close()
 
 
+# ===== DENNÍ PŘEHLED (Phase F) =====
+
+@app.get("/briefing/today")
+def briefing_today():
+    db = SessionLocal()
+    try:
+        return briefing_service.payload(db)
+    finally:
+        db.close()
+
+
+@app.post("/briefing/today/generate")
+def briefing_generate(request: BriefingGenerateRequest):
+    """Ruční vygenerování dnešního přehledu; existující se přepíše jen s regenerate=true."""
+    db = SessionLocal()
+    try:
+        try:
+            briefing_service.generate(db, trigger="manual", regenerate=request.regenerate)
+        except briefing_service.BriefingInProgress:
+            raise HTTPException(status_code=409, detail="Přehled se právě generuje.") from None
+        return briefing_service.payload(db)
+    finally:
+        db.close()
+
+
 # ===== EXTERNÍ DORUČENÍ / WEB PUSH (Phase E) =====
 # Veřejný VAPID klíč je veřejný; privátní nikdy neopouští backend. Endpointy chrání globální session auth.
 
@@ -2403,14 +2433,17 @@ def pending_list(status: str | None = None, limit: int = 50):
 @app.get("/scheduler/status")
 def scheduler_status():
     from scheduler_service import (
-        REMINDERS_CHECK_ENABLED, REMINDERS_CHECK_SECONDS, SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS,
-        SINGLE_WORKER_ASSUMPTION_DOC,
+        DAILY_BRIEFING_CHECK_SECONDS, DAILY_BRIEFING_ENABLED, REMINDERS_CHECK_ENABLED, REMINDERS_CHECK_SECONDS,
+        SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS, SINGLE_WORKER_ASSUMPTION_DOC,
     )
     return {
         "enabled": SCHEDULER_ENABLED,
         "interval_seconds": SCHEDULER_INTERVAL_SECONDS,
         "reminders_enabled": REMINDERS_CHECK_ENABLED,
         "reminders_interval_seconds": REMINDERS_CHECK_SECONDS,
+        "briefing_enabled": DAILY_BRIEFING_ENABLED,
+        "briefing_interval_seconds": DAILY_BRIEFING_CHECK_SECONDS,
+        "briefing_time": briefing_service.briefing_time().strftime("%H:%M"),
         "doc": SINGLE_WORKER_ASSUMPTION_DOC,
     }
 
