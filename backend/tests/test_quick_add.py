@@ -138,7 +138,7 @@ class FinanceParseTestCase(unittest.TestCase):
         self.assertEqual(r["fields"]["transaction_type"], "income")
         self.assertEqual(r["fields"]["amount"], 5000.0)
         self.assertEqual(r["fields"]["description"], "Servind")
-        self.assertTrue(r["display"]["subtitle"].startswith("Příjem"))
+        self.assertEqual(r["display"]["subtitle"], "Příjem · 5\xa0000\xa0Kč · dnes", "kategorie Příjem se neopakuje")
 
     def test_unknown_category_is_explicit(self):
         r = p("dárek 300 Kč")
@@ -197,6 +197,7 @@ class WorkParseTestCase(unittest.TestCase):
     def test_too_many_hours(self):
         r = p("40 h práce")
         self.assertIn("hours", fields_of(r["errors"]))
+        self.assertEqual(r["confidence"], "medium", "chyba nesmí vypadat jako jisté rozpoznání")
         self.assertFalse(r["ready"])
 
     def test_money_without_rate_is_not_rate(self):

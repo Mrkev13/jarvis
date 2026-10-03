@@ -457,8 +457,9 @@ def _display(kind: str, f: dict, subjects: dict[int, str], today: date) -> dict:
     if kind == "finance":
         income = f.get("transaction_type") == "income"
         amount = format_czk_cz(f["amount"]) if isinstance(f.get("amount"), (int, float)) else "? Kč"
+        category = f.get("category") if f.get("category") not in ("Příjem", "Výdaj") else None
         return {"title": f.get("description") or f.get("category") or ("Příjem" if income else "Výdaj"),
-                "subtitle": " · ".join(x for x in ("Příjem" if income else "Výdaj", amount, f.get("category"), "dnes") if x),
+                "subtitle": " · ".join(x for x in ("Příjem" if income else "Výdaj", amount, category, "dnes") if x),
                 "area": "finance"}
     if kind == "work":
         parts = [format_hours_cz(f["hours"], 2) if f.get("hours") else "? h"]
@@ -511,7 +512,7 @@ def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = No
             _parse_work(t, d, now_utc, d.confidence)
         elif d.kind in ("exam", "assignment"):
             _parse_school(t, d, now_utc, d.kind, subj)
-    if d.needs_input and d.confidence == "high":
+    if (d.needs_input or d.errors) and d.confidence == "high":
         d.confidence = "medium"
     today = now_local(now_utc).date()
     names = {s["id"]: s["name"] for s in subj}

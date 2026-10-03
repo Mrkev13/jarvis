@@ -57,6 +57,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
   }, []);
   const abortRef = useRef<AbortController | null>(null);
   const seqRef = useRef(0);
+  const refocusRef = useRef(false);
 
   const busy = save.status === "saving";
   useModal({ open: true, panelRef, initialFocus: () => inputRef.current, onClose, busy });
@@ -186,8 +187,16 @@ function Dialog({ onClose }: { onClose: () => void }) {
     setText("");
     setParse({ status: "idle" });
     setForm({});
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    refocusRef.current = true;
   }
+
+  // po „Přidat další" vrátit fokus do pole, až bude znovu povolené (po vykreslení)
+  useEffect(() => {
+    if (save.status === "idle" && refocusRef.current) {
+      refocusRef.current = false;
+      inputRef.current?.focus();
+    }
+  }, [save.status]);
 
   function onInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
@@ -382,7 +391,8 @@ function Preview({
     <section aria-label="Náhled" data-testid="quick-add-preview" data-kind={kind} className={cx("space-y-3 transition-opacity", stale && "opacity-60")}>
       <div className="flex flex-wrap items-center gap-1.5">
         <AreaBadge area={KIND_AREAS[kind]} />
-        <StatusBadge tone="neutral">{KIND_LABELS[kind]}</StatusBadge>
+        {/* druh jen tam, kde ho oblast neříká sama (Škola → Zkouška / Úkol) */}
+        {KIND_AREAS[kind] === "school" ? <StatusBadge tone="neutral">{KIND_LABELS[kind]}</StatusBadge> : null}
         <StatusBadge tone={conf.tone} dot>
           {conf.label}
         </StatusBadge>
