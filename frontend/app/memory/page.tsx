@@ -342,7 +342,7 @@ export default function MemoryPage() {
                           <Button size="sm" variant="ghost" disabled={busyId === it.id} onClick={() => void toggleActive(it, !it.active)}>
                             {it.active ? "Deaktivovat" : "Aktivovat"}
                           </Button>
-                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(it)}>
+                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(it)}>
                             Smazat
                           </Button>
                         </>
