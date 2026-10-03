@@ -183,3 +183,24 @@ def ai_action_summary(tool, arguments, prefix: str = "") -> str:
     details = ai_action_details(tool, arguments)
     head = f"{prefix}{label} (AI)"
     return f"{head}: {details}" if details else head
+
+
+# Oblasti pro text (stejné popisky jako frontend lib/areas.ts); neznámá oblast → s velkým prvním písmenem.
+AREA_LABELS_CZ = {
+    "school": "Škola", "work": "Práce", "finance": "Finance", "wot": "World of Tanks", "mff": "Marvel FF",
+    "personal": "Osobní", "fitness": "Fitness", "hobby": "Hobby", "travel": "Cestování", "general": "Obecné",
+    "reminders": "Připomínky", "briefing": "Přehled", "review": "Týdenní přehled", "goals": "Cíle",
+    "memory": "Paměť", "ai": "AI", "system": "Systém",
+}
+
+
+def area_label_cz(area) -> str:
+    a = str(area or "").strip()
+    return AREA_LABELS_CZ.get(a.lower(), a[:1].upper() + a[1:]) if a else ""
+
+
+def planner_action_line(idx: int, action: dict) -> str:
+    """Řádek plánu v textu odpovědi chatu: „1. Připravit se na zkoušku: test (Škola)" – bez interního klíče oblasti."""
+    title = str(action.get("title") or "").strip()
+    area = area_label_cz(action.get("area"))
+    return f"{idx}. {title} ({area})" if area else f"{idx}. {title}"

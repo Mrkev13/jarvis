@@ -163,3 +163,26 @@ class ActivityTextTestCase(unittest.TestCase):
         db.close()
         main.hard_delete_memory(mid)
         self.assertEqual(self._summaries(), ["Poznámka v paměti trvale smazána: Učit se ráno"])
+
+
+class PlannerChatTextTestCase(unittest.TestCase):
+    """Regrese 4C: textová odpověď chatu na „Co mám dnes dělat?" ukazovala interní klíč „[school]"."""
+
+    def test_action_line_uses_czech_area_label(self):
+        from text_utils import area_label_cz, planner_action_line
+
+        line = planner_action_line(1, {"area": "school", "title": "Připravit se na zkoušku: test"})
+        self.assertEqual(line, "1. Připravit se na zkoušku: test (Škola)")
+        self.assertNotIn("[", line)
+        self.assertEqual(planner_action_line(2, {"area": "", "title": "Bez oblasti"}), "2. Bez oblasti")
+        self.assertEqual(area_label_cz("WOT"), "World of Tanks")
+        self.assertEqual(area_label_cz("zahrada"), "Zahrada")
+
+    def test_area_labels_match_frontend(self):
+        import re
+        from pathlib import Path
+        from text_utils import AREA_LABELS_CZ
+
+        src = (Path(__file__).resolve().parents[2] / "frontend" / "lib" / "areas.ts").read_text(encoding="utf-8")
+        frontend = dict(re.findall(r'^\s+([a-z_]+):\s+\{[^}]*label: "([^"]+)"', src, re.M))
+        self.assertEqual(AREA_LABELS_CZ, frontend)
