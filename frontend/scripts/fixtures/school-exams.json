@@ -1,0 +1,22 @@
+[
+ {
+  "id": 2,
+  "title": "Zápočtový test",
+  "exam_type": "test",
+  "exam_date": "2026-09-30",
+  "status": "passed",
+  "notes": "",
+  "subject_id": 3,
+  "subject_name": "Dějepis"
+ },
+ {
+  "id": 1,
+  "title": "Zkouška fyzika",
+  "exam_type": "exam",
+  "exam_date": "2026-10-15",
+  "status": "upcoming",
+  "notes": "",
+  "subject_id": 1,
+  "subject_name": "Matematika"
+ }
+]

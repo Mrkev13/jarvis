@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A + 4B).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -22,11 +22,13 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? ` – ${detail}` : ""}`);
 }
 
-async function open(path, { width = 1440, height = 1000, scheme = "dark", reducedMotion = "no-preference", delayPath } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion });
+async function open(path, { width = 1440, height = 1000, scheme = "dark", reducedMotion = "no-preference", delayPath, setup } = {}) {
+  // Mobilní šířka = dotykové zařízení (pointer: coarse → větší tlačítka, viz Button).
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion, hasTouch: width < 500 });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  if (setup) await setup(page);
   if (delayPath) {
     await page.route(`**${delayPath}`, async (route) => {
       await new Promise((r) => setTimeout(r, 1500));
@@ -42,7 +44,18 @@ const PAGES = [
   ["/", "dashboard"],
   ["/reminders", "reminders"],
   ["/review", "weekly-review"],
+  // Roadmap 4B
+  ["/planner", "planner"],
+  ["/school", "school"],
+  ["/work", "work"],
+  ["/finance", "finance"],
+  ["/goals", "goals"],
+  ["/activity", "activity"],
+  ["/memory", "memory"],
+  ["/wot", "wot"],
+  ["/mff", "mff"],
 ];
+const ONLY = process.env.UI_CHECK_PAGES ? process.env.UI_CHECK_PAGES.split(",") : null;
 const WIDTHS = [
   [1920, "wide"],
   [1366, "laptop"],
@@ -51,7 +64,7 @@ const WIDTHS = [
 ];
 
 // 1) Rozložení: šířky, jeden <h1>, žádné horizontální přetečení, žádné chyby JS, jeden zvonek.
-for (const [path, name] of PAGES) {
+for (const [path, name] of PAGES.filter(([, n]) => !ONLY || ONLY.includes(n))) {
   for (const [width, label] of WIDTHS) {
     const { ctx, page, errors } = await open(path, { width });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -61,6 +74,21 @@ for (const [path, name] of PAGES) {
     const bells = await page.locator('button[aria-label^="Notifikace"]').count();
     check(`${name} @${label}: jeden zvonek notifikací`, bells === 1, String(bells));
     check(`${name} @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    // Dotykové cíle: myš ≥ 36 px, dotyk ≥ 40 px na výšku (vč. rozšířené plochy ::after).
+    const minTarget = width < 500 ? 40 : 36;
+    const small = await page.evaluate((min) => {
+      const out = [];
+      for (const el of document.querySelectorAll("main a[href], main button")) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || getComputedStyle(el).visibility === "hidden") continue;
+        if (el.closest("p, li p") && el.tagName === "A" && !el.className.includes("after:")) continue; // odkaz ve větě
+        const after = getComputedStyle(el, "::after");
+        const extra = after.content !== "none" && after.position === "absolute" ? -2 * parseFloat(after.top || "0") : 0;
+        if (r.height + Math.max(0, extra) < min) out.push(`${el.tagName.toLowerCase()}:${(el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 24)}(${Math.round(r.height)})`);
+      }
+      return out;
+    }, minTarget);
+    check(`${name} @${label}: dotykové cíle ≥ ${minTarget} px`, small.length === 0, small.slice(0, 6).join(", "));
     if (["wide", "mobile"].includes(label) || name !== "dashboard") {
       await page.screenshot({ path: `${OUT}${name}-${label}.png`, fullPage: true });
     }
@@ -146,6 +174,96 @@ for (const scheme of ["light", "dark"]) {
     return `${cs.boxShadow} | ${cs.outlineStyle}`;
   });
   check("klávesnice: viditelný fokus", ring !== "" && (!ring.startsWith("none") || !ring.endsWith("none")), ring);
+  await ctx.close();
+}
+
+// 7) Login: samostatný rám – bez navigace, bez zvonku, bez dotazů na notifikace, PIN s popiskem.
+{
+  const requests = [];
+  const { ctx, page, errors } = await open("/login", {
+    setup: async (p) => {
+      p.on("request", (r) => requests.push(new URL(r.url()).pathname));
+      await p.route("**/auth/session/validate", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) }),
+      );
+    },
+  });
+  check("login: bez zvonku notifikací", (await page.locator('button[aria-label^="Notifikace"]').count()) === 0);
+  check("login: bez navigace aplikace", (await page.locator("nav").count()) === 0);
+  check("login: žádné dotazy na /notifications", !requests.some((r) => r.startsWith("/notifications")), requests.join(","));
+  const pin = page.getByLabel("PIN", { exact: true });
+  check("login: pole PIN má přístupný popisek", (await pin.count()) === 1);
+  check("login: fokus v poli PIN", await pin.evaluate((el) => el === document.activeElement));
+  check("login: právě jeden h1", (await page.locator("h1").count()) === 1);
+  check("login: bez chyb JS", errors.length === 0, errors.join("; "));
+  await page.screenshot({ path: `${OUT}login-wide.png` });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: `${OUT}login-mobile.png` });
+  await ctx.close();
+}
+
+// 8) Mobilní menu: dialog, fokus dovnitř, Escape zavře a vrátí fokus, po navigaci fokus na obsah.
+{
+  const { ctx, page } = await open("/planner", { width: 390, height: 844 });
+  const opener = page.getByRole("button", { name: "Otevřít menu" });
+  await opener.click();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  check("menu: role=dialog s popiskem", (await menu.count()) === 1);
+  check("menu: aria-expanded na tlačítku", (await opener.getAttribute("aria-expanded")) === "true");
+  await page.waitForTimeout(80);
+  const inMenu = await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')));
+  check("menu: fokus uvnitř menu", inMenu);
+  const current = await page.evaluate(() => document.activeElement?.getAttribute("aria-current"));
+  check("menu: fokus na aktuální stránce", current === "page", String(current));
+  for (let i = 0; i < 25; i += 1) await page.keyboard.press("Tab");
+  check("menu: Tab zůstává v menu", await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]'))));
+  await page.screenshot({ path: `${OUT}menu-mobile.png` });
+  await page.keyboard.press("Escape");
+  check("menu: Escape zavře", (await menu.count()) === 0);
+  await page.waitForTimeout(50);
+  check("menu: fokus zpět na tlačítko", await opener.evaluate((el) => el === document.activeElement));
+  await opener.click();
+  await menu.getByRole("link", { name: "Finance" }).click();
+  await page.waitForURL("**/finance");
+  await page.waitForTimeout(300);
+  check("menu: po navigaci zavřené", (await page.getByRole("dialog").count()) === 0);
+  const focusId = await page.evaluate(() => document.activeElement?.id);
+  check("menu: po navigaci fokus na hlavní obsah", focusId === "main-content", String(focusId));
+  await ctx.close();
+}
+
+// 9) Panel notifikací: Drawer s popiskem, Escape, návrat fokusu, české texty.
+for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
+  const { ctx, page, errors } = await open("/", { width, height: width < 500 ? 844 : 900 });
+  const bell = page.locator('button[aria-label^="Notifikace"]');
+  await bell.click();
+  const panel = page.getByRole("dialog", { name: "Notifikace" });
+  await page.waitForTimeout(1500); // generate (POST) + seznam
+  check(`notifikace @${label}: panel je dialog s popiskem`, (await panel.count()) === 1);
+  check(`notifikace @${label}: fokus v panelu`, await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]'))));
+  const items = await panel.locator("li").count();
+  check(`notifikace @${label}: seznam položek`, items > 0, String(items));
+  const raw = await panel.evaluate((el) => /\b\d{4}-\d{2}-\d{2}\b|overdue|deadline/i.test(el.textContent || ""));
+  check(`notifikace @${label}: bez surových ISO dat / angličtiny`, !raw);
+  await page.screenshot({ path: `${OUT}notifications-${label}.png` });
+  await page.keyboard.press("Escape");
+  check(`notifikace @${label}: Escape zavře`, (await panel.count()) === 0);
+  await page.waitForTimeout(50);
+  check(`notifikace @${label}: fokus zpět na zvonek`, await bell.evaluate((el) => el === document.activeElement));
+  check(`notifikace @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
+// 10) Omezený pohyb pro Drawer: bez vjezdové animace.
+{
+  const { ctx, page } = await open("/", { reducedMotion: "reduce" });
+  await page.locator('button[aria-label^="Notifikace"]').click();
+  await page.waitForTimeout(100);
+  const anim = await page.evaluate(() => {
+    const el = document.querySelector(".motion-drawer");
+    return el ? getComputedStyle(el).animationName : "missing";
+  });
+  check("reduced motion: Drawer bez animace", anim === "none", anim);
   await ctx.close();
 }
 

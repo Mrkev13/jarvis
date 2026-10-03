@@ -18,6 +18,22 @@ const GET_ROUTES = {
   "/notifications/summary": () => fixture("notifications-summary"),
   "/notifications": () => fixture("notifications"),
   "/push/config": () => fixture("push-config"),
+  // Roadmap 4B: moduly
+  "/finance/summary": () => fixture("finance-summary"),
+  "/finance/transactions": () => fixture("finance-transactions"),
+  "/goals/list": () => fixture("goals-list"),
+  "/goals/summary": () => fixture("goals-summary"),
+  "/memories": () => fixture("memories"),
+  "/mff/characters": () => fixture("mff-characters"),
+  "/mff/summary": () => fixture("mff-summary"),
+  "/school/subjects": () => fixture("school-subjects"),
+  "/school/assignments": () => fixture("school-assignments"),
+  "/school/exams": () => fixture("school-exams"),
+  "/work/sessions": () => fixture("work-sessions"),
+  "/work/summary": () => fixture("work-summary"),
+  "/wot/grinds": () => fixture("wot-grinds"),
+  "/wot/resources": () => fixture("wot-resources"),
+  "/activity": () => fixture("activity"),
 };
 
 function send(res, req, status, body) {
@@ -38,6 +54,10 @@ createServer((req, res) => {
   if (req.method === "GET") {
     if (url.pathname === "/reminders") {
       return respond(200, fixture(url.searchParams.get("status") === "all" ? "reminders-all" : "reminders-active"));
+    }
+    if (url.pathname === "/planner") {
+      const mode = url.searchParams.get("mode") || "daily";
+      return respond(200, fixture(["daily", "weekly", "goal_review"].includes(mode) ? `planner-${mode}` : "planner-daily"));
     }
     if (url.pathname.startsWith("/weekly-review/week/")) return respond(200, fixture("weekly-review"));
     const route = GET_ROUTES[url.pathname];

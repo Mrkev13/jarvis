@@ -1,0 +1,23 @@
+[
+ {
+  "id": 1,
+  "tank": "Object 279 (e)",
+  "xp_remaining": 128000.0,
+  "priority": "high",
+  "status": "active"
+ },
+ {
+  "id": 2,
+  "tank": "Kranvagn",
+  "xp_remaining": 64000.0,
+  "priority": "medium",
+  "status": "active"
+ },
+ {
+  "id": 3,
+  "tank": "T-100 LT",
+  "xp_remaining": 0.0,
+  "priority": "low",
+  "status": "completed"
+ }
+]

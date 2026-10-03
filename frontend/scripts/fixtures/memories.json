@@ -1,0 +1,42 @@
+[
+ {
+  "id": 3,
+  "area": "finance",
+  "category": "goal",
+  "content": "Chci mít rezervu na 3 měsíce výdajů.",
+  "importance": 9,
+  "active": true,
+  "created_at": "2026-10-05T17:00:00",
+  "updated_at": "2026-10-03T12:22:48.652221"
+ },
+ {
+  "id": 1,
+  "area": "school",
+  "category": "preference",
+  "content": "Nejlíp se učím ráno do 10:00.",
+  "importance": 8,
+  "active": true,
+  "created_at": "2026-10-11T17:00:00",
+  "updated_at": "2026-10-03T12:22:48.652219"
+ },
+ {
+  "id": 2,
+  "area": "work",
+  "category": "context",
+  "content": "Klient ABC platí do 14 dnů od faktury.",
+  "importance": 6,
+  "active": true,
+  "created_at": "2026-10-08T17:00:00",
+  "updated_at": "2026-10-03T12:22:48.652221"
+ },
+ {
+  "id": 4,
+  "area": "general",
+  "category": "context",
+  "content": "Fyzioterapie je každou neděli.",
+  "importance": 5,
+  "active": true,
+  "created_at": "2026-10-02T17:00:00",
+  "updated_at": "2026-10-03T12:22:48.652221"
+ }
+]

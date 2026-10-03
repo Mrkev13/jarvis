@@ -1,0 +1,26 @@
+[
+ {
+  "id": 3,
+  "name": "Dějepis",
+  "code": "DEJ",
+  "semester": "ZS 2026",
+  "credits": 3,
+  "active": true
+ },
+ {
+  "id": 2,
+  "name": "Fyzika",
+  "code": "FYZ1",
+  "semester": "ZS 2026",
+  "credits": 5,
+  "active": true
+ },
+ {
+  "id": 1,
+  "name": "Matematika",
+  "code": "",
+  "semester": "",
+  "credits": 0,
+  "active": true
+ }
+]

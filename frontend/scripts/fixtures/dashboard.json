@@ -5,8 +5,8 @@
    {
     "priority": 1,
     "area": "school",
-    "title": "Vyřešit overdue úkol: Sada",
-    "reason": "Deadline byl 2026-10-02 (po termínu)."
+    "title": "Dokončit úkol po termínu: Sada",
+    "reason": "Termín byl 2. 10. 2026 (po termínu)."
    }
   ],
   "today_deadline": null
@@ -115,20 +115,27 @@
   "count": 3
  },
  "work": {
-  "total_hours": 18.0,
-  "total_earnings": 3600.0,
-  "this_month_hours": 7.0,
-  "this_month_earnings": 1400.0,
+  "total_hours": 33.5,
+  "total_earnings": 7475.0,
+  "this_month_hours": 18.5,
+  "this_month_earnings": 4275.0,
   "goal": null
  },
  "finance": {
-  "balance": -500.0,
-  "income": 1400.0,
-  "expenses": 1900.0,
-  "this_month_income": 1400.0,
-  "this_month_expenses": 1900.0,
-  "transactions_count": 4,
-  "goal": null
+  "balance": 11310.0,
+  "income": 16400.0,
+  "expenses": 5090.0,
+  "this_month_income": 16400.0,
+  "this_month_expenses": 4450.0,
+  "transactions_count": 8,
+  "goal": {
+   "id": 4,
+   "title": "Finanční rezerva 50 000 Kč",
+   "current_value": 11310.0,
+   "target_value": 50000.0,
+   "progress": 23,
+   "target_date": "2026-12-31"
+  }
  },
  "upcoming": [
   {
@@ -185,48 +192,55 @@
     "xp_remaining": 128000.0,
     "priority": "high",
     "status": "active"
+   },
+   {
+    "id": 2,
+    "tank": "Kranvagn",
+    "xp_remaining": 64000.0,
+    "priority": "medium",
+    "status": "active"
    }
   ],
   "credits": 8450000.0,
-  "free_xp": null,
-  "bonds": null
+  "free_xp": 184000.0,
+  "bonds": 6200.0
  },
  "mff": {
-  "tracked_characters": 1,
-  "t4_count": 1,
+  "tracked_characters": 3,
+  "t4_count": 2,
   "priority_count": 1,
-  "average_build_completeness": 25
+  "average_build_completeness": 34
  },
  "recent_activity": [
   {
-   "timestamp": "2026-10-08T17:00:00",
+   "timestamp": "2026-10-11T14:00:00",
    "area": "school",
+   "action_type": "create",
+   "summary": "Úkol přidán: Laboratorní protokol č. 3"
+  },
+  {
+   "timestamp": "2026-10-11T07:00:00",
+   "area": "finance",
+   "action_type": "create",
+   "summary": "Výdaj 350 Kč: Doprava"
+  },
+  {
+   "timestamp": "2026-10-11T00:00:00",
+   "area": "work",
+   "action_type": "create",
+   "summary": "Práce 5 h – Klient ABC"
+  },
+  {
+   "timestamp": "2026-10-10T17:00:00",
+   "area": "goals",
+   "action_type": "update",
+   "summary": "Cíl upraven: Přečíst 12 knih (pozastaven)"
+  },
+  {
+   "timestamp": "2026-10-10T10:00:00",
+   "area": "reminders",
    "action_type": "complete",
-   "summary": "Dokončeno (AI): Esej"
-  },
-  {
-   "timestamp": "2026-10-03T11:39:21.863865",
-   "area": "reminders",
-   "action_type": "complete",
-   "summary": "Připomínka hotová: Koupit lístky · so 10. 10. 2026 09:00"
-  },
-  {
-   "timestamp": "2026-10-03T11:39:21.814694",
-   "area": "reminders",
-   "action_type": "create",
-   "summary": "Připomínka: Koupit lístky · so 10. 10. 2026 09:00"
-  },
-  {
-   "timestamp": "2026-10-03T11:39:21.807646",
-   "area": "reminders",
-   "action_type": "create",
-   "summary": "Připomínka: Ranní protažení · denně v 07:00"
-  },
-  {
-   "timestamp": "2026-10-03T11:39:21.807126",
-   "area": "reminders",
-   "action_type": "create",
-   "summary": "Připomínka: Odeslat fakturu · st 14. 10. 2026 10:00"
+   "summary": "Připomínka hotová: Koupit lístky"
   }
  ]
 }
