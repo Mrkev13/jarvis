@@ -198,7 +198,7 @@ Every migrated page follows the same skeleton:
   with a real minus and tabular figures.
 - **Activity** is the audit log: neutral rows, Czech action labels, the change detail (`/activity/{id}` → delta) loads
   on demand. Only `error` (danger) and `delete`/`reject` (warning) get colour.
-- **AI assistant** (`/ai`) is not migrated yet; it renders the migrated planner cards (`compact`).
+- **AI assistant** (`/ai`): see §13 (Roadmap 4C).
 
 ## 11. Notification panel
 
@@ -218,3 +218,43 @@ Every migrated page follows the same skeleton:
 - Mobile menu = `Drawer` titled „Menu": focus starts on the current page link, Tab is trapped, Escape closes and
   returns focus to ☰. Choosing another page closes the menu and moves focus to the new page's `#main-content`
   (choosing the current page just closes it).
+
+## 13. AI assistant (Roadmap 4C)
+
+**Structure** – `app/ai/page.tsx` only composes; logic and UI are bounded:
+
+| Layer | Pieces |
+|---|---|
+| Pure logic (`lib/`, node tests) | `aiActions.ts` (pending action → view model), `aiChat.ts` (API mapping, error kinds, message variants), `markdown.ts` (answer → blocks), `labels.ts` `aiToolMeta` |
+| State (`hooks/`) | `useConversations` (list, active, create/rename/delete), `useAiChat` (history, /chat, confirm/reject/undo, outcomes), `useAiVoice` (dictation, Ctrl+Shift+M, read-aloud) |
+| UI (`components/ai/`) | `ChatHeader` (the only h1), `ConversationPanel` (rail ≥ lg, `Drawer` below), `MessageList`, `MessageItem`, `Markdown`, `PendingActionCard`, `ActionOutcomeCard`, `Composer`, `EmptyConversation` |
+
+**Layout** – full-height chat (`100dvh` minus `--mobile-header-h` on mobile); header, messages and composer share one
+centred `max-w-4xl` column; the conversation rail is visible from `lg`, below that it opens in a `Drawer`
+(focus trap, Escape, focus return; choosing a conversation closes it and focuses the composer).
+
+**Message variants** – user: restrained surface on the right; assistant: plain text (Markdown) without a bubble,
+the "Standa AI" micro-label only on the first message of a group; status (✅ / ⚠️ / ❌ texts such as action
+results and errors): compact semantic row (headline + details on one line); planner results: the Planner
+components (`PlannerCardRenderer`, legacy JSON plans via `WeeklyPlanCard`). Violet (`accent-2`) marks only the AI
+author/indicator; actions use cyan.
+
+**Pending actions** – the card is the confirmation step (no extra dialog): status line ("Čeká na tvé potvrzení" /
+"Provádím změnu…" / "Provedení selhalo"), kind badge (Nový záznam / Úprava / Smazání / Dokončení / Vrácení změny),
+area badge, record count, title, new values (create) or every record with old → new (preview from the backend,
+max. 10 shown + "a dalších N"), warnings, highlighted footer (earnings, amount, count), "Potvrdit" (busy) and
+"Zamítnout". Semantics are unchanged: confirm `POST /actions/confirm`, reject `POST /ai/reject/{id}`.
+**Undo** – only when the backend returns `result.undo_available`; the outcome row shows "Vrátit" with a 20 s timer
+bar (static under reduced motion); undo is itself a pending action with a preview.
+
+**Action labels** – one mapping per side, internal tool names never reach the user:
+`lib/labels.ts` `aiToolMeta(tool)` → `{action: "Přidat pracovní záznam", done: "Přidán pracovní záznam", area}`;
+backend `text_utils.AI_TOOL_LABELS_CZ` + `ai_action_summary()` for Activity ("Přidán pracovní záznam (AI):
+2. 10. 2026 · 6,5 h · Klient XYZ"). A backend test fails when a new WRITE tool has no label.
+
+**Composer & a11y** – labelled textarea (grows to ~8 lines), Enter sends, Shift+Enter new line (IME-safe), send
+disabled when empty, busy "Odesílám…", failure notice (`role=alert`) with retry – none for the daily limit;
+voice settings behind a labelled disclosure, the locale `<select>` has a label; icon buttons have names;
+conversation actions are labelled and visible on focus/hover (always on touch).
+**Scrolling** – new content scrolls into view only while the user is near the bottom; sending or switching
+conversations always jumps to the latest message.
