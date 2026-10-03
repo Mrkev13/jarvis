@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { MAX_STAGGER, staggerStyle, useCompletionSignal } from "@/lib/motion";
@@ -189,11 +190,6 @@ function clamp(v: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, v));
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("cs-CZ", {
-    maximumFractionDigits: 2,
-  }).format(value);
-}
 
 function progressColor(progress: number, status: string) {
   if (status.trim().toLowerCase() === "completed") return "bg-green-500";
