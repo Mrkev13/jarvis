@@ -1,118 +1,62 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { useState } from "react";
 import {
-  DailyPlanCard,
-  WeeklyPlanCard,
-  GoalReviewCard,
-  type PlannerPlan,
-  type GoalReview,
-} from "@/components/PlannerCards";
+  Button,
+  ContentContainer,
+  ErrorState,
+  HudLabel,
+  LoadingState,
+  PageHeader,
+  Tabs,
+} from "@/components/ui";
+import { DailyPlanCard, GoalReviewCard, WeeklyPlanCard, type GoalReview, type PlannerPlan } from "@/components/PlannerCards";
+import { useApiResource } from "@/hooks/useApiResource";
+
+type Mode = "daily" | "weekly" | "goal_review";
+
+const MODES: Array<{ value: Mode; label: string }> = [
+  { value: "daily", label: "Dnes" },
+  { value: "weekly", label: "Týden" },
+  { value: "goal_review", label: "Cíle" },
+];
 
 export default function PlannerPage() {
-  const [mode, setMode] = useState<"daily" | "weekly" | "goal_review">("daily");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<PlannerPlan | GoalReview | null>(null);
+  const [mode, setMode] = useState<Mode>("daily");
+  const plan = useApiResource<PlannerPlan | GoalReview>(`/planner?mode=${mode}`);
 
-  async function load(nextMode: "daily" | "weekly" | "goal_review") {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/planner?mode=${encodeURIComponent(nextMode)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as PlannerPlan | GoalReview;
-      setPlan(data);
-    } catch {
-      setError("Nepodařilo se načíst Planner z backendu.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void load(mode).catch(() => {});
-    });
-  }, [mode]);
-
-  const isGoalReview = useMemo(
-    () => Boolean(plan && (plan as GoalReview).mode === "goal_review"),
-    [plan],
-  );
-
-  const dailyPlan = plan && !isGoalReview && (plan as PlannerPlan).mode === "daily"
-    ? (plan as PlannerPlan)
-    : null;
-  const weeklyPlan = plan && !isGoalReview && (plan as PlannerPlan).mode === "weekly"
-    ? (plan as PlannerPlan)
-    : null;
-  const goalReview = plan && isGoalReview ? (plan as GoalReview) : null;
+  // Při přepnutí režimu se nezobrazuje plán z předchozího režimu.
+  const current = plan.data && plan.data.mode === mode ? plan.data : null;
 
   return (
-    <main className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 md:space-y-8">
-      <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl md:text-4xl font-bold">Planner 2.0</h1>
-          <p className="text-zinc-400 mt-2">
-            Doporučení vychází pouze z uložených dat (deadliny, goals, work/finance).
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {([
-            ["daily", "Daily"],
-            ["weekly", "Weekly"],
-            ["goal_review", "Goal review"],
-          ] as const).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setMode(k)}
-              className={`px-4 py-2.5 rounded-xl border transition-colors text-sm ${
-                mode === k
-                  ? "bg-white text-black border-white"
-                  : "border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-700"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
-
-      <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-zinc-400">Summary</div>
-          <button
-            type="button"
-            onClick={() => void load(mode)}
-            disabled={loading}
-            className="text-sm px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors disabled:opacity-50"
-          >
+    <ContentContainer width="narrow">
+      <PageHeader
+        eyebrow={<HudLabel>Modul · plánovač</HudLabel>}
+        title="Plánovač"
+        subtitle="Doporučení jen z uložených dat – termíny, cíle, práce a finance."
+        actions={
+          <Button size="sm" onClick={() => void plan.reload()} busy={plan.refreshing} busyLabel="Obnovuji…" disabled={plan.loading}>
             Obnovit
-          </button>
-        </div>
-        <div className="text-lg font-semibold mt-2">
-          {loading ? "Načítám…" : plan ? plan.summary : "—"}
-        </div>
-      </section>
+          </Button>
+        }
+      />
 
-      {loading && !plan && (
-        <div className="text-sm text-zinc-500 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-          Načítám plán…
-        </div>
-      )}
+      <Tabs id="planner-mode" label="Režim plánu" items={MODES} value={mode} onChange={setMode} />
 
-      {dailyPlan && !loading && <DailyPlanCard plan={dailyPlan} />}
-      {weeklyPlan && !loading && <WeeklyPlanCard plan={weeklyPlan} />}
-      {goalReview && !loading && <GoalReviewCard plan={goalReview} />}
-    </main>
+      <div role="tabpanel" id="planner-mode-panel" aria-labelledby={`planner-mode-${mode}`} aria-busy={plan.loading || plan.refreshing}>
+        {plan.error && !current ? (
+          <ErrorState message={plan.error} onRetry={() => void plan.reload()} retrying={plan.refreshing} />
+        ) : !current ? (
+          <LoadingState lines={4} label="Načítám plán…" />
+        ) : (
+          <>
+            {plan.error ? <ErrorState className="mb-4" message={plan.error} onRetry={() => void plan.reload()} /> : null}
+            {current.mode === "daily" ? <DailyPlanCard plan={current} headingLevel="h2" /> : null}
+            {current.mode === "weekly" ? <WeeklyPlanCard plan={current} headingLevel="h2" /> : null}
+            {current.mode === "goal_review" ? <GoalReviewCard plan={current} headingLevel="h2" /> : null}
+          </>
+        )}
+      </div>
+    </ContentContainer>
   );
 }
