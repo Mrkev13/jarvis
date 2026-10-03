@@ -119,9 +119,3 @@ export function fallbackGroups(p: BriefingPayload): { title: string; items: Fall
   ].filter((g) => g.items.length > 0);
 }
 
-/** Chyba z POST /briefing/today/generate → česká hláška. */
-export function generateErrorText(status: number, detail?: string | null): string {
-  if (status === 401) return "Přihlášení vypršelo – přihlas se znovu.";
-  if (status === 409) return "Přehled se už právě vytváří – chvíli počkej.";
-  return detail ? `Nepovedlo se: ${detail}` : "Přehled se nepodařilo vytvořit.";
-}

@@ -1,0 +1,97 @@
+/*
+ * Jarvis / HUD vizuální vrstva (Roadmap 4A). Vše je VOLITELNÉ a dekorativní:
+ * - nikdy nepřekrývá obsah (pointer-events: none, pod textem),
+ * - nemění rozložení,
+ * - na mobilu je tlumenější, při omezeném pohybu bez animace.
+ * Komponenty: components/ui/hud.tsx (HudFrame, HudLabel, AccentLine, StatusPulse).
+ */
+
+/* Jemná technická mřížka za obsahem aplikace. */
+.hud-grid {
+  position: relative;
+  isolation: isolate;
+}
+.hud-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 70% -10%, rgb(34 211 238 / 0.07), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 0% 0%, rgb(167 139 250 / 0.05), transparent 60%),
+    linear-gradient(rgb(148 163 184 / var(--hud-line-opacity)) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / var(--hud-line-opacity)) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 85%);
+}
+@media (max-width: 767px) {
+  .hud-grid::before {
+    background-image:
+      radial-gradient(ellipse 90% 40% at 70% -10%, rgb(34 211 238 / 0.06), transparent 60%);
+  }
+}
+
+/* Rohové značky kolem panelu (HudFrame). Vnitřek zůstává čistý. */
+.hud-frame {
+  position: relative;
+}
+.hud-frame::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  --c: var(--hud-corner);
+  --s: var(--hud-corner-size);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / var(--s) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1px var(--s) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--s) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1px var(--s) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--s) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1px var(--s) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--s) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1px var(--s) no-repeat;
+}
+.hud-frame-violet::after {
+  --c: var(--hud-corner-violet);
+}
+
+/* Tenká světelná linka (oddělovač / horní hrana aktivního panelu). */
+.accent-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(34 211 238 / 0.6), rgb(167 139 250 / 0.45), transparent);
+}
+
+/* Stavová tečka s jemným pulzem (jen u „živých" stavů). */
+.status-pulse {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.status-pulse-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: hud-ping var(--motion-pulse-duration) cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes hud-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-pulse-live::after {
+    animation: none;
+    /* stav zůstává čitelný: statický prstenec místo pulzu */
+    transform: scale(1.9);
+    opacity: 0.25;
+  }
+}

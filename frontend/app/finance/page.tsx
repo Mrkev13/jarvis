@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { staggerStyle, useNewIds } from "@/lib/motion";
@@ -24,12 +25,6 @@ type FinanceTransaction = {
 
 type FormType = "income" | "expense" | null;
 
-function formatNumber(value?: number | null) {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("cs-CZ").format(value);
-}
 
 function formatDate(value?: string) {
   if (!value) return "";

@@ -1,11 +1,33 @@
 # Roadmap 4 – UI Foundation (preparation)
 
-Input for Roadmap 4. **Nothing here is implemented yet.** Evidence comes from the Roadmap 3.5 frontend audit
+Input for Roadmap 4. **Status (Roadmap 4A):** the foundation is implemented — see
+[design-system.md](design-system.md) and the status table below. Evidence comes from the Roadmap 3.5 frontend audit
 (see [architecture-audit.md](architecture-audit.md), R1–R10). Recommendation: start Roadmap 4 with a
 **Design System Audit/Foundation** (primitives + data-fetching hook), then migrate pages one at a time, then
 visual polish.
 
-## What exists today
+## Status after Roadmap 4A
+
+| Item | Status |
+|---|---|
+| Design tokens (`app/tokens.css`), HUD layer (`app/hud.css`) | ✅ done |
+| `lib/format.ts` (formatNumber/Czk/Hours/Percent/Date/DateTime, plurals) | ✅ done; local `formatNumber` copies in goals/work/wot/finance replaced |
+| `apiJson` / `readErrorDetail` / `ApiError` / `errorMessage` in `lib/api.ts` | ✅ done |
+| `useApiResource` (loading true, refresh keeps data, abort, stale guard, debounce, polling) | ✅ done |
+| AppShell: one `NotificationsBell`, no shell `<h1>`, shared scroll lock, Czech navigation | ✅ done (`Sidebar.tsx`, `layout.tsx`) |
+| `PageHeader`, `PageSection`, `Card`, `MetricCard`/`StatGrid`, `StatusBadge`, `Progress`, `EntityList/Row`, `EmptyState`/`ErrorState`/`Skeleton`/`LoadingState`, `Button`, `FormField`, `Tabs`, HUD accents | ✅ done (`components/ui`) |
+| `ConfirmDialog` rebuild (role, aria-modal, focus trap, busy, Escape, focus restore) | ✅ done; old import path re-exports it |
+| Reduced motion for Tailwind `animate-*` | ✅ done |
+| Migrated pages: dashboard (Řídicí centrum), reminders, weekly review (+ Daily Briefing / weekly cards, PushSettings) | ✅ done |
+| Browser checks: `frontend/scripts/ui-check.mjs` + fixture mock API | ✅ done |
+| `FilterBar`, `Modal`/`Drawer` | ⏳ not needed by the migrated pages – build with their first real user (activity/memory filters, notification panel) |
+| Remaining pages: school, finance, work, goals, wot, mff, planner, activity, memory, login, AI | ⏳ Roadmap 4B (AI assistant: 4G) |
+| Search debounce on activity/memory | ⏳ comes free with `useApiResource({debounceMs})` when those pages migrate |
+| `middleware.ts` → `proxy.ts` (Next 16), one `API_URL` constant | ⏳ 4B (touches auth; do it with a login regression check) |
+| Notification panel (inside the bell), planner cards, `/activity` light-theme cards | ⏳ 4B |
+| Backend copy in English (e.g. planner "Vyřešit overdue úkol") | ⏳ fix at the source (backend) |
+
+## What existed before 4A
 
 - Dark theme by convention (`bg-zinc-950` body, `bg-zinc-900 border-zinc-800 rounded-2xl` cards) — but the card
   class string is copied ~60× across 18 files, page headers 13×, badges with 4 different area palettes,
@@ -14,7 +36,7 @@ visual polish.
   `staggerStyle`, reduced-motion block).
 - Container widths vary from `max-w-4xl` to `max-w-7xl`; vertical spacing from `space-y-4` to `space-y-10`.
 
-## Primitives to create (in this order)
+## Primitives (original plan; see status above)
 
 | Primitive | Replaces / notes |
 |---|---|

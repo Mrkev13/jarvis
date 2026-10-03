@@ -1,0 +1,67 @@
+/*
+ * Standa Hub – design tokens (Roadmap 4A, docs/design-system.md).
+ *
+ * Tailwind 4 z nich generuje utility: bg-surface, border-line, text-ink-muted, text-accent, bg-accent/10,
+ * rounded-card, shadow-glow… Aplikace je záměrně tmavá (nezávisle na motivu systému).
+ * Drž sadu malou: nová barva jen s jasným významem.
+ */
+@theme {
+  /* Plochy (od nejtmavší) */
+  --color-app: #07090d;        /* pozadí aplikace */
+  --color-surface: #0d1117;    /* karta */
+  --color-surface-2: #121821;  /* vnořený řádek / sekundární plocha */
+  --color-elevated: #171e29;   /* dialog, popover, zvýrazněná karta */
+  --color-hover: #1c2431;      /* hover interaktivních ploch */
+
+  /* Linky */
+  --color-line: #242c39;        /* výchozí okraj */
+  --color-line-subtle: #1a212c; /* oddělovače uvnitř karty */
+
+  /* Text (kontrast na surface: ink 17:1, ink-2 11:1, ink-muted 6:1) */
+  --color-ink: #f3f6fa;
+  --color-ink-2: #c2cad6;
+  --color-ink-muted: #8b96a8;
+  --color-ink-faint: #5d6878;   /* jen dekorace / disabled, ne pro čtený text */
+
+  /* Akcenty (Jarvis): cyan = primární, violet = AI / odhady */
+  --color-accent: #22d3ee;
+  --color-accent-strong: #67e8f9;
+  --color-accent-2: #a78bfa;
+
+  /* Sémantika – jen tam, kde něco znamená */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #38bdf8;
+  --color-neutral: #94a3b8;
+
+  /* Tvar */
+  --radius-card: 1rem;     /* karty, dialogy */
+  --radius-control: 0.75rem; /* tlačítka, inputy, vnořené řádky */
+
+  /* Efekty */
+  --shadow-card: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -20px rgb(0 0 0 / 0.8);
+  --shadow-elevated: 0 24px 64px -24px rgb(0 0 0 / 0.9);
+  --shadow-glow: 0 0 0 1px rgb(34 211 238 / 0.28), 0 0 28px -10px rgb(34 211 238 / 0.45);
+  --shadow-glow-violet: 0 0 0 1px rgb(167 139 250 / 0.3), 0 0 28px -10px rgb(167 139 250 / 0.45);
+}
+
+:root {
+  /* Rozvržení (používá ContentContainer / Section) */
+  --page-max: 76rem;
+  --page-max-narrow: 56rem;
+  --page-gutter: 1rem;
+  --page-gutter-md: 2rem;
+  --section-gap: 1.75rem;
+  --card-pad: 1rem;
+  --card-pad-md: 1.25rem;
+
+  /* HUD dekorace */
+  --hud-line-opacity: 0.035;
+  --hud-corner: rgb(34 211 238 / 0.55);
+  --hud-corner-violet: rgb(167 139 250 / 0.6);
+  --hud-corner-size: 10px;
+
+  /* Pohyb – doplňuje motion.css (--motion-fast 140 ms, --motion-normal 240 ms) */
+  --motion-pulse-duration: 2400ms;
+}

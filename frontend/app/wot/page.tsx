@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Resources = {
@@ -30,12 +31,6 @@ const RESOURCE_KEYS = ["credits", "gold", "bonds", "free_xp"] as const;
 const PRIORITIES = ["low", "medium", "high"];
 const STATUSES = ["active", "paused", "completed"];
 
-function formatNumber(value?: number | null) {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("cs-CZ").format(value);
-}
 
 function priorityClass(priority: string) {
   switch (priority.toLowerCase()) {

@@ -1,20 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { Card, EntityList, EntityRow, HudFrame, HudLabel, MetricCard, StatGrid, StatusBadge } from "@/components/ui";
 import { safeHref } from "@/lib/briefing";
 import { staggerStyle } from "@/lib/motion";
-import {
-  confidenceLabel,
-  trendTone,
-  type ForecastView,
-  type WeeklyContent,
-  type WeeklyItem,
-} from "@/lib/weeklyReview";
+import { cx, trendTone, type Tone } from "@/lib/ui";
+import { confidenceLabel, type ForecastView, type WeeklyContent, type WeeklyItem } from "@/lib/weeklyReview";
 
 function MaybeLink({ url, children }: { url: string; children: React.ReactNode }) {
   const href = safeHref(url);
   return href ? (
-    <Link href={href} className="block rounded-xl motion-hover-lift">
+    <Link
+      href={href}
+      className="block rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 motion-hover-lift"
+    >
       {children}
     </Link>
   ) : (
@@ -22,145 +21,150 @@ function MaybeLink({ url, children }: { url: string; children: React.ReactNode }
   );
 }
 
-function Block({ title, hint, children, index }: { title: string; hint?: string; children: React.ReactNode; index: number }) {
+/** Fakt: neutrální plocha, význam nese jen tečka a nadpis sekce (ne barevné pozadí). */
+function FactList({ items, tone }: { items: WeeklyItem[]; tone: Tone }) {
+  const dot = tone === "success" ? "bg-success" : tone === "danger" ? "bg-warning" : "bg-accent";
   return (
-    <section className="motion-card min-w-0" style={staggerStyle(index)}>
-      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
-        {title}
-        {hint ? <span className="normal-case tracking-normal text-zinc-600"> · {hint}</span> : null}
-      </h3>
+    <ul className="space-y-2">
+      {items.map((item) => (
+        <li key={item.ref}>
+          <MaybeLink url={item.url}>
+            <div className="flex gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 px-3 py-2.5">
+              <span aria-hidden="true" className={cx("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", dot)} />
+              <div className="min-w-0 text-sm">
+                <div className="break-words text-ink">{item.text}</div>
+                {item.when && !item.text.includes(item.when) ? <div className="mt-0.5 text-xs text-ink-muted">{item.when}</div> : null}
+              </div>
+            </div>
+          </MaybeLink>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BlockTitle({ children, hint }: { children: React.ReactNode; hint?: string }) {
+  return (
+    <h3 className="mb-2.5 flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-ink">
       {children}
-    </section>
+      {hint ? <HudLabel className="text-[10px]">{hint}</HudLabel> : null}
+    </h3>
   );
 }
 
-function FactRow({ item, tone }: { item: WeeklyItem; tone: "good" | "bad" | "plain" }) {
-  const cls =
-    tone === "good"
-      ? "bg-emerald-500/10 border-emerald-400/30"
-      : tone === "bad"
-        ? "bg-red-500/10 border-red-400/30"
-        : "bg-zinc-950/40 border-zinc-800";
+function ForecastPanel({ forecasts }: { forecasts: ForecastView[] }) {
   return (
-    <li>
-      <MaybeLink url={item.url}>
-        <div className={`rounded-xl border p-2.5 text-sm ${cls}`}>
-          <div className="break-words text-zinc-100">{item.text}</div>
-          {item.when && !item.text.includes(item.when) ? <div className="text-xs text-zinc-500 mt-0.5">{item.when}</div> : null}
+    <HudFrame variant="violet">
+      <Card tone="ai" className="bg-accent-2/[0.04]" aria-labelledby="forecasts-title">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 id="forecasts-title" className="flex items-center gap-2 text-sm font-semibold text-ink">
+            Odhady
+            <StatusBadge tone="ai">Odhad / Forecast</StatusBadge>
+          </h3>
+          <HudLabel>nejsou fakta · jen z dat</HudLabel>
         </div>
-      </MaybeLink>
-    </li>
+        {forecasts.length ? (
+          <ul className="space-y-3">
+            {forecasts.map((f) => (
+              <li key={f.ref} className="border-l-2 border-dashed border-accent-2/50 pl-3">
+                <p className="text-sm italic text-ink">{f.statement}</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <StatusBadge tone="ai">{confidenceLabel(f.confidence)}</StatusBadge>
+                  {f.basis_labels.length || f.rule ? (
+                    <span className="text-xs text-ink-muted">
+                      Podklad: {[f.rule, ...f.basis_labels].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-ink-muted">Žádný odhad – data na něj nestačí.</p>
+        )}
+      </Card>
+    </HudFrame>
   );
 }
 
-function ComparisonRow({ item }: { item: WeeklyItem }) {
-  const m = item.metric;
-  if (!m) return <FactRow item={item} tone="plain" />;
-  const t = trendTone(m.trend);
-  const color = t.tone === "good" ? "text-emerald-300" : t.tone === "bad" ? "text-red-300" : "text-zinc-300";
-  return (
-    <li className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <span className="text-sm text-zinc-300">{m.label}</span>
-        <span className={`text-sm font-semibold ${color}`}>
-          {t.arrow ? <span aria-hidden="true">{t.arrow} </span> : null}
-          {m.delta_text || "–"}
-          {t.label ? <span className="sr-only"> ({t.label})</span> : null}
-        </span>
-      </div>
-      <div className="text-xs text-zinc-500 mt-1">
-        {m.cur_text}
-        {m.prev_text !== null ? ` · ${m.prev_label} ${m.prev_text}` : ""}
-        {m.note ? ` · ${m.note}` : ""}
-      </div>
-      {item.text && item.text !== m.label ? <div className="text-sm text-zinc-200 mt-1.5 break-words">{item.text}</div> : null}
-    </li>
-  );
-}
-
-function ForecastCard({ f }: { f: ForecastView }) {
-  return (
-    <li className="rounded-xl border border-dashed border-violet-400/40 bg-violet-500/5 p-3">
-      <div className="flex items-center gap-2 flex-wrap mb-1.5">
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full border bg-violet-500/15 border-violet-400/40 text-violet-200">
-          Odhad / Forecast
-        </span>
-        <span className="text-[11px] text-violet-200/80">{confidenceLabel(f.confidence)}</span>
-      </div>
-      <p className="text-sm text-zinc-200 italic break-words">{f.statement}</p>
-      {f.basis_labels.length || f.rule ? (
-        <p className="text-xs text-zinc-500 mt-1.5 break-words">
-          Podklad: {[f.rule, ...f.basis_labels].filter(Boolean).join(" · ")}
-        </p>
-      ) : null}
-    </li>
-  );
-}
-
-/** Obsah týdenního přehledu: fakta, srovnání, příští týden, odhady (vizuálně oddělené), zaměření. */
+/** Obsah týdenního přehledu: fakta, srovnání (spočítaná), příští týden, odhady (vizuálně oddělené), zaměření. */
 export default function WeeklyReviewView({ content, isFallback = false }: { content: WeeklyContent; isFallback?: boolean }) {
-  let i = 0;
+  const metrics = content.comparisons.filter((c) => c.metric);
+  const textComparisons = content.comparisons.filter((c) => !c.metric);
   return (
-    <div className="space-y-5">
-      <div className="motion-card" style={staggerStyle(i++)}>
+    <div className="space-y-6">
+      <div className="motion-card" style={staggerStyle(0)}>
         {isFallback ? (
-          <p className="text-xs text-amber-200/90 mb-1.5">Náhled z dat bez AI – zatím bez vytvořeného přehledu.</p>
+          <StatusBadge tone="warning" className="mb-2">Náhled z dat – bez AI shrnutí</StatusBadge>
         ) : null}
-        <h2 className="text-xl md:text-2xl font-semibold break-words">{content.headline}</h2>
-        <p className="text-zinc-300 mt-2 leading-relaxed">{content.summary}</p>
+        <h2 className="break-words text-xl md:text-2xl font-semibold tracking-tight text-ink">{content.headline}</h2>
+        <p className="mt-2 max-w-3xl leading-relaxed text-ink-2">{content.summary}</p>
       </div>
 
       {content.wins.length || content.concerns.length ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-5 md:grid-cols-2">
           {content.wins.length ? (
-            <Block title="Co se povedlo" hint="fakta" index={i++}>
-              <ul className="space-y-2">
-                {content.wins.map((w) => <FactRow key={w.ref} item={w} tone="good" />)}
-              </ul>
-            </Block>
+            <section className="motion-card min-w-0" style={staggerStyle(1)}>
+              <BlockTitle hint="fakta">Co se povedlo</BlockTitle>
+              <FactList items={content.wins} tone="success" />
+            </section>
           ) : null}
           {content.concerns.length ? (
-            <Block title="Na co pozor" hint="fakta" index={i++}>
-              <ul className="space-y-2">
-                {content.concerns.map((c) => <FactRow key={c.ref} item={c} tone="bad" />)}
-              </ul>
-            </Block>
+            <section className="motion-card min-w-0" style={staggerStyle(2)}>
+              <BlockTitle hint="fakta">Na co pozor</BlockTitle>
+              <FactList items={content.concerns} tone="danger" />
+            </section>
           ) : null}
         </div>
       ) : null}
 
-      {content.comparisons.length ? (
-        <Block title="Srovnání s minulým týdnem" hint="spočítáno z dat" index={i++}>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {content.comparisons.map((c) => <ComparisonRow key={c.ref} item={c} />)}
-          </ul>
-        </Block>
+      {metrics.length || textComparisons.length ? (
+        <section className="motion-card" style={staggerStyle(3)}>
+          <BlockTitle hint="spočítáno z dat">Srovnání s minulým týdnem</BlockTitle>
+          {metrics.length ? (
+            <StatGrid cols={3}>
+              {metrics.map((c) => {
+                const m = c.metric!;
+                return (
+                  <MetricCard
+                    key={c.ref}
+                    label={m.label}
+                    value={m.cur_text}
+                    trend={m.delta_text || undefined}
+                    trendTone={trendTone(m.trend)}
+                    hint={m.prev_text !== null ? `${m.prev_label} ${m.prev_text}` : undefined}
+                  />
+                );
+              })}
+            </StatGrid>
+          ) : null}
+          {textComparisons.length ? <FactList items={textComparisons} tone="neutral" /> : null}
+        </section>
       ) : null}
 
-      {content.next_week.length ? (
-        <Block title="Příští týden" hint="známé závazky" index={i++}>
-          <ul className="space-y-2">
-            {content.next_week.map((n) => <FactRow key={n.ref} item={n} tone="plain" />)}
-          </ul>
-        </Block>
-      ) : null}
-
-      <Block title="Odhady" hint="nejsou fakta" index={i++}>
-        {content.forecasts.length ? (
-          <ul className="space-y-2">
-            {content.forecasts.map((f) => <ForecastCard key={f.ref} f={f} />)}
-          </ul>
-        ) : (
-          <p className="text-sm text-zinc-500">Žádný odhad – data na něj nestačí.</p>
-        )}
-      </Block>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className="motion-card min-w-0" style={staggerStyle(4)}>
+          <BlockTitle hint="známé závazky">Příští týden</BlockTitle>
+          {content.next_week.length ? (
+            <EntityList>
+              {content.next_week.map((n) => (
+                <EntityRow key={n.ref} title={<MaybeLink url={n.url}>{n.text}</MaybeLink>} meta={n.when && !n.text.includes(n.when) ? n.when : undefined} />
+              ))}
+            </EntityList>
+          ) : (
+            <p className="text-sm text-ink-muted">Na příští týden nejsou známé žádné termíny.</p>
+          )}
+        </section>
+        <section className="motion-card min-w-0" style={staggerStyle(5)}>
+          <ForecastPanel forecasts={content.forecasts} />
+        </section>
+      </div>
 
       {content.focus.length ? (
-        <Block title="Zaměř se" index={i++}>
-          <ul className="space-y-2">
-            {content.focus.map((f) => <FactRow key={f.ref} item={f} tone="plain" />)}
-          </ul>
-        </Block>
+        <section className="motion-card" style={staggerStyle(6)}>
+          <BlockTitle>Zaměř se</BlockTitle>
+          <FactList items={content.focus} tone="neutral" />
+        </section>
       ) : null}
     </div>
   );

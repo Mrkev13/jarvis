@@ -1,0 +1,210 @@
+{
+ "week_start": "2026-10-05",
+ "week_label": "5.–11. 10. 2026",
+ "is_current": true,
+ "can_generate": true,
+ "enabled": true,
+ "schedule_label": "neděle 19:00",
+ "scheduled_at": "2026-10-11T17:00:00Z",
+ "status": "ready",
+ "review": {
+  "headline": "Dokončený úkol, vyšší výdaje",
+  "summary": "Tento týden jsi dokončil jeden úkol a cíl se posunul. Výdaje byly vyšší než minulý týden.",
+  "wins": [
+   {
+    "ref": "metric:assignments_completed",
+    "text": "Dokončen 1 úkol",
+    "kind": "metric",
+    "url": "/school",
+    "metric": {
+     "ref": "metric:assignments_completed",
+     "key": "assignments_completed",
+     "label": "Dokončené úkoly",
+     "unit": "",
+     "cur": 1,
+     "prev": 0,
+     "prev_label": "minulý týden",
+     "delta": 1,
+     "pct": null,
+     "trend": "better",
+     "cur_text": "1",
+     "prev_text": "0",
+     "delta_text": "+1",
+     "note": "",
+     "url": "/school"
+    }
+   },
+   {
+    "ref": "goal:1",
+    "text": "Cíl spoření se posunul z 6 % na 10 %",
+    "kind": "goal",
+    "url": "/goals",
+    "label": "Našetřit 150 000 Kč",
+    "when": "6 % → 10 %",
+    "detail": "+4 %"
+   }
+  ],
+  "concerns": [
+   {
+    "ref": "metric:finance_expense",
+    "text": "Výdaje 1 500 Kč, minulý týden 400 Kč",
+    "kind": "metric",
+    "url": "/finance",
+    "metric": {
+     "ref": "metric:finance_expense",
+     "key": "finance_expense",
+     "label": "Výdaje",
+     "unit": "Kč",
+     "cur": 1500.0,
+     "prev": 400.0,
+     "prev_label": "minulý týden",
+     "delta": 1100.0,
+     "pct": null,
+     "trend": "worse",
+     "cur_text": "1 500 Kč",
+     "prev_text": "400 Kč",
+     "delta_text": "+1 100 Kč",
+     "note": "",
+     "url": "/finance"
+    }
+   },
+   {
+    "ref": "assignment:1",
+    "text": "Sada je stále po termínu",
+    "kind": "assignment",
+    "url": "/school",
+    "label": "Sada",
+    "when": "po termínu od 2. 10.",
+    "detail": ""
+   }
+  ],
+  "comparisons": [
+   {
+    "ref": "metric:work_hours",
+    "text": "Práce 7 h místo 11 h",
+    "kind": "metric",
+    "url": "/work",
+    "metric": {
+     "ref": "metric:work_hours",
+     "key": "work_hours",
+     "label": "Odpracováno",
+     "unit": "h",
+     "cur": 7.0,
+     "prev": 11.0,
+     "prev_label": "minulý týden",
+     "delta": -4.0,
+     "pct": -36,
+     "trend": "down",
+     "cur_text": "7 h",
+     "prev_text": "11 h",
+     "delta_text": "−4 h (−36 %)",
+     "note": "",
+     "url": "/work"
+    }
+   },
+   {
+    "ref": "metric:finance_expense",
+    "text": "Výdaje +1 100 Kč",
+    "kind": "metric",
+    "url": "/finance",
+    "metric": {
+     "ref": "metric:finance_expense",
+     "key": "finance_expense",
+     "label": "Výdaje",
+     "unit": "Kč",
+     "cur": 1500.0,
+     "prev": 400.0,
+     "prev_label": "minulý týden",
+     "delta": 1100.0,
+     "pct": null,
+     "trend": "worse",
+     "cur_text": "1 500 Kč",
+     "prev_text": "400 Kč",
+     "delta_text": "+1 100 Kč",
+     "note": "",
+     "url": "/finance"
+    }
+   }
+  ],
+  "next_week": [
+   {
+    "ref": "assignment:3",
+    "text": "Projekt v úterý 13. 10.",
+    "kind": "assignment",
+    "url": "/school",
+    "label": "Projekt",
+    "when": "termín úterý 13. 10.",
+    "detail": ""
+   },
+   {
+    "ref": "metric:next_week_deadlines",
+    "text": "4 termíny, nejvíc ve středu",
+    "kind": "metric",
+    "url": "/school",
+    "metric": {
+     "ref": "metric:next_week_deadlines",
+     "key": "next_week_deadlines",
+     "label": "Termíny úkolů a zkoušek příští týden",
+     "unit": "",
+     "cur": 4,
+     "prev": 1,
+     "prev_label": "tento týden",
+     "delta": 3,
+     "pct": null,
+     "trend": "up",
+     "cur_text": "4",
+     "prev_text": "1",
+     "delta_text": "+3",
+     "note": "nejvíc středa 14. 10. (2)",
+     "url": "/school"
+    }
+   }
+  ],
+  "forecasts": [
+   {
+    "ref": "forecast:deadline_load",
+    "kind": "forecast",
+    "statement": "Příští týden může být náročnější: 4 termíny.",
+    "confidence": "high",
+    "confidence_text": "vysoká",
+    "rule": "známé termíny v kalendáři",
+    "basis": [
+     "assignment:3",
+     "assignment:4",
+     "assignment:5",
+     "exam:1"
+    ],
+    "basis_labels": [
+     "Projekt · termín úterý 13. 10.",
+     "Referát · termín středa 14. 10.",
+     "Laboratoř · termín středa 14. 10.",
+     "Zkouška fyzika · zkouška čtvrtek 15. 10."
+    ]
+   }
+  ],
+  "focus": [
+   {
+    "ref": "assignment:1",
+    "text": "Dodělat Sadu",
+    "kind": "assignment",
+    "url": "/school",
+    "label": "Sada",
+    "when": "po termínu od 2. 10.",
+    "detail": ""
+   }
+  ],
+  "quiet": false,
+  "week_start": "2026-10-05",
+  "partial": true,
+  "period_end": "2026-10-11T17:00:00Z",
+  "deterministic": false
+ },
+ "generated_at": "2026-10-11T17:00:00Z",
+ "generated_label": "neděle 11. 10. 19:00",
+ "period_end_label": "neděle 11. 10. 19:00",
+ "trigger": "scheduler",
+ "regenerated_count": 0,
+ "error_category": null,
+ "error_text": null,
+ "fallback": null
+}

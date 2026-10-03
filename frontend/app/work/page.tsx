@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { MAX_STAGGER, staggerStyle, useNewIds } from "@/lib/motion";
@@ -31,11 +32,6 @@ const dateFormatter = new Intl.DateTimeFormat("cs-CZ", {
   year: "numeric",
 });
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("cs-CZ", {
-    maximumFractionDigits: 2,
-  }).format(value);
-}
 
 function formatHours(value: number) {
   const fixed = value % 1 === 0 ? value.toFixed(0) : value.toFixed(1);

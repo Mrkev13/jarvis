@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Button, Card, CardHeader, StatusBadge } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import {
   currentPushEnv,
@@ -156,56 +157,40 @@ export default function PushSettings() {
 
   const on = state === "on";
   return (
-    <section
-      aria-busy={busy || state === "checking"}
-      className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-5 flex flex-col gap-3"
-    >
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h2 className="font-semibold">Upozornění mimo aplikaci</h2>
-          <p className={`text-sm mt-0.5 ${on ? "text-emerald-300" : "text-zinc-400"}`} role="status">
-            {deviceStateLabel(state)}
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {state === "off" && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void enable()}
-              className="motion-press rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 px-3 py-2 text-sm font-medium text-white"
-            >
-              Zapnout na tomto zařízení
-            </button>
-          )}
-          {on && (
-            <>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void sendTest()}
-                className="motion-press rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 py-2 text-sm"
-              >
-                Poslat test
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void disable()}
-                className="motion-press rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 py-2 text-sm"
-              >
-                Vypnout na tomto zařízení
-              </button>
-            </>
-          )}
-        </div>
+    <Card as="section" aria-busy={busy || state === "checking"} aria-labelledby="push-settings">
+      <CardHeader title={<span id="push-settings">Upozornění mimo aplikaci</span>} />
+      <div className="-mt-2 mb-3">
+        <StatusBadge tone={on ? "success" : state === "denied" ? "warning" : "neutral"} dot={on} className="whitespace-normal">
+          <span role="status">{deviceStateLabel(state)}</span>
+        </StatusBadge>
       </div>
-      {detail && <p className="text-sm text-zinc-400">{detail}</p>}
-      {message && <p className="text-sm text-zinc-300" aria-live="polite">{message}</p>}
-      <p className="text-xs text-zinc-500">
+      <div className="flex flex-wrap gap-2">
+        {state === "off" && (
+          <Button variant="primary" size="sm" busy={busy} busyLabel="Zapínám…" onClick={() => void enable()}>
+            Zapnout na tomto zařízení
+          </Button>
+        )}
+        {on && (
+          <>
+            <Button size="sm" disabled={busy} onClick={() => void sendTest()}>
+              Poslat test
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void disable()}>
+              Vypnout na tomto zařízení
+            </Button>
+          </>
+        )}
+      </div>
+      {detail && <p className="mt-3 text-sm text-ink-muted">{detail}</p>}
+      {message && (
+        <p className="mt-3 text-sm text-ink-2" aria-live="polite">
+          {message}
+        </p>
+      )}
+      <p className="mt-3 text-xs text-ink-muted">
         Připomínky se vždy ukážou i ve zvonku aplikace. Upozornění mimo aplikaci posílá server přes push službu
         prohlížeče; zastaralé (starší než 12 h) ani už vyřízené se neposílají.
       </p>
-    </section>
+    </Card>
   );
 }
