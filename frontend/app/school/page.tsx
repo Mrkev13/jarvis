@@ -399,6 +399,7 @@ export default function SchoolPage() {
       return (
         <EntityRow
           key={entry.key}
+          searchTarget={`assignment-${a.id}`}
           style={stagger}
           className={cx("motion-card motion-done-transition", done && "motion-done", overdue && "motion-attention")}
           tone={overdue ? "danger" : "neutral"}
@@ -434,6 +435,7 @@ export default function SchoolPage() {
     return (
       <EntityRow
         key={entry.key}
+        searchTarget={`exam-${e.id}`}
         style={stagger}
         className="motion-card"
         muted={closed}
@@ -833,7 +835,7 @@ export default function SchoolPage() {
             ) : (
               <ul aria-label="Předměty" className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
                 {subjects.map((s) => (
-                  <Card as="li" inset key={s.id} className={cx("min-w-0", !s.active && "opacity-70")}>
+                  <Card as="li" inset key={s.id} data-search-target={`subject-${s.id}`} className={cx("min-w-0", !s.active && "opacity-70")}>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h3 className="min-w-0 break-words font-medium text-ink">{s.name}</h3>
                       {s.code ? <span className="font-mono text-xs text-ink-muted">{s.code}</span> : null}

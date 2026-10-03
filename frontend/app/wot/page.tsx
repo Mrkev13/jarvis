@@ -390,6 +390,7 @@ function GrindRow({
   const done = String(g.status).toLowerCase() === "completed";
   return (
     <EntityRow
+      searchTarget={g.id != null ? `grind-${g.id}` : undefined}
       style={staggerStyle(index)}
       className="motion-card"
       muted={done}

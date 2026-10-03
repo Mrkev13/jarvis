@@ -372,6 +372,7 @@ function SessionRow({
   const finance = financeSyncMeta(s);
   return (
     <li
+      data-search-target={`session-${s.id}`}
       style={staggerStyle(staggerIndex)}
       className={cx(
         "motion-card relative rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 px-3 py-3 md:px-4",

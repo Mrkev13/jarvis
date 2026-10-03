@@ -328,6 +328,7 @@ function TransactionRow({
   const title = tx.description || financeCategoryLabel(tx.category);
   return (
     <li
+      data-search-target={`transaction-${tx.id}`}
       style={highlight ? undefined : staggerStyle(index)}
       className={cx(
         "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2.5 md:px-4",
