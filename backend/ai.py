@@ -307,6 +307,9 @@ def prepare_write_action(db, fn_name: str, arguments: dict, *, source: str | Non
     Tool s resolverem (úpravy, připomínky, vrácení) dostane plán s náhledem ověřeným proti DB;
     MutationRefused / TypeError z resolveru se propouští volajícímu.
     """
+    # Zdroj určuje jen volající (Rychlé přidání). Argumenty od LLM ho nesmí podstrčit – jinak by se akce AI
+    # v auditu tvářila jako ruční Rychlé přidání.
+    arguments = {k: v for k, v in (arguments or {}).items() if k != PENDING_SOURCE_KEY}
     stored_arguments = arguments
     preview = None
     spec = TOOLS_BY_NAME.get(fn_name)

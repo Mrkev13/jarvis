@@ -456,6 +456,27 @@ class QuickAddApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 422)
         self.assertEqual(self.count(PendingAction), 0)
 
+    def test_ai_arguments_cannot_claim_quick_add_source(self):
+        """Regrese 4E: `_source` v argumentech od LLM nesmí z akce AI udělat „Rychlé přidání" (audit)."""
+        self.login()
+        db = self.Session()
+        try:
+            pending = ai.prepare_write_action(db, "add_finance_transaction", {
+                "amount": 5, "category": "Ostatní", "transaction_type": "expense", "description": "podvrh",
+                "_source": "quick_add"})
+        finally:
+            db.close()
+        self.assertNotIn("_source", pending["arguments"])
+        r = self.client.post("/actions/confirm", json={"action_id": pending["id"]})
+        self.assertTrue(r.json().get("ok"), r.text)
+        db = self.Session()
+        try:
+            contexts = {(lg.area, lg.user_context) for lg in db.query(ActivityLog).all()}
+        finally:
+            db.close()
+        self.assertIn(("ai", "ai_confirm"), contexts)
+        self.assertNotIn(("finance", "quick_add"), contexts)
+
     def test_finance_end_to_end_source_label(self):
         self.login()
         self.prepare_and_confirm("finance", {"amount": "189,90", "transaction_type": "expense", "category": "Jídlo",
