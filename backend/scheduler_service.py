@@ -69,6 +69,19 @@ def _run_reminders_job() -> None:
         except Exception:
             pass
         print(f"[scheduler] reminders job failed: {type(_rerr).__name__}: {_rerr}")
+    # Phase E: externí doručení až po zazvonění a odděleně – jeho chyba nesmí ovlivnit připomínky.
+    try:
+        from delivery_service import run_delivery_cycle
+
+        dstats = run_delivery_cycle(db)
+        if dstats.get("enqueued") or dstats.get("sent") or dstats.get("failed") or dstats.get("retry"):
+            print(f"[scheduler] external delivery: {dstats}")
+    except Exception as _derr:  # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[scheduler] external delivery failed: {type(_derr).__name__}")
     finally:
         db.close()
 
