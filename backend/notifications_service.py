@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
-from text_utils import days_left_cz, format_date_cz
+from text_utils import days_left_cz, format_date_cz, format_hours_cz
 from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
@@ -334,7 +334,7 @@ def _work_behind_candidate_for_goal(db: Session, it: Goal, today: date) -> Notif
         area="work",
         title=f"Práce za plánem: {it.title}",
         message=(
-            f"Aktuálně {float(current_value):.1f} h, očekávaně ~{expected_value:.1f} h "
+            f"Aktuálně {format_hours_cz(current_value, 1)}, očekávaně ~{format_hours_cz(expected_value, 1)} "
             f"({int(round(elapsed_fraction * 100))} % měsíce)."
         ),
         severity="warning",

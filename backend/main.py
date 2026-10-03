@@ -44,6 +44,7 @@ import briefing_service
 import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
+from text_utils import format_hours_cz
 from time_utils import local_month_bounds_utc, today_local
 from env_config import env_bool
 
@@ -1276,8 +1277,7 @@ def add_work_session(request: WorkSessionRequest):
             db.flush()
             item.finance_transaction_id = finance_item.id
 
-        hours_str = f"{request.hours:g}"
-        work_summary = f"+{hours_str} h"
+        work_summary = f"Práce {format_hours_cz(request.hours)}"
         if request.project:
             work_summary = f"{work_summary} – {request.project}"
         if request.description:
@@ -2659,8 +2659,7 @@ def delete_work_session(item_id: int):
         if item is None:
             raise HTTPException(status_code=404, detail="WorkSession not found")
 
-        hours_str = f"{float(item.hours or 0):g}"
-        work_summary = f"-{hours_str} h"
+        work_summary = f"práce {format_hours_cz(item.hours or 0)}"
         if item.project:
             work_summary = f"{work_summary} – {item.project}"
         log_activity(
@@ -2760,7 +2759,7 @@ def delete_memory(item_id: int):
         if len(content_preview) > 50:
             content_preview = content_preview[:50].rstrip() + "…"
         log_activity(
-            db, "memory", "delete", f"Pamatka deaktivována (soft): {content_preview}",
+            db, "memory", "delete", f"Poznámka v paměti deaktivována: {content_preview}",
             entity_type="Memory", entity_id=item.id,
             delta=delta_dict(old_obj, item, ["active"]),
             user_context="manual"
@@ -2807,7 +2806,7 @@ def update_memory(item_id: int, request: MemoryUpdateRequest):
             if len(content_preview) > 50:
                 content_preview = content_preview[:50].rstrip() + "…"
             log_activity(
-                db, "memory", "update", f"Pamatka {toggle_str}: {content_preview}",
+                db, "memory", "update", f"Poznámka v paměti {toggle_str}: {content_preview}",
                 entity_type="Memory", entity_id=item.id,
                 delta=delta_dict(old_obj, item, changed_fields or ["active"]),
                 user_context="manual"
@@ -2817,7 +2816,7 @@ def update_memory(item_id: int, request: MemoryUpdateRequest):
             if len(content_preview) > 50:
                 content_preview = content_preview[:50].rstrip() + "…"
             log_activity(
-                db, "memory", "update", f"Pamatka upravena: {content_preview}",
+                db, "memory", "update", f"Poznámka v paměti upravena: {content_preview}",
                 entity_type="Memory", entity_id=item.id,
                 delta=delta_dict(old_obj, item, changed_fields),
                 user_context="manual"
@@ -2852,7 +2851,7 @@ def hard_delete_memory(item_id: int):
         if len(content_preview) > 50:
             content_preview = content_preview[:50].rstrip() + "…"
         log_activity(
-            db, "memory", "delete", f"Pamatka trvale smazána (hard): {content_preview}",
+            db, "memory", "delete", f"Poznámka v paměti trvale smazána: {content_preview}",
             entity_type="Memory", entity_id=item.id,
             delta=delta_dict(item, None, ["area", "category", "content", "importance", "active"]),
             user_context="manual"

@@ -30,3 +30,27 @@ def days_left_cz(days: int) -> str:
         return "zítra"
     verb = "zbývají" if 2 <= days <= 4 else "zbývá"
     return f"{verb} {days} {plural_cz(days, 'den', 'dny', 'dní')}"
+
+
+def format_num_cz(value, max_decimals: int = 2) -> str:
+    """Číslo pro text: „0,5", „12", „1 250,75" (desetinná čárka, mezera mezi tisíci, bez zbytečných nul)."""
+    if value is None:
+        return "–"
+    f = round(float(value), max_decimals)
+    if f == 0:
+        f = 0.0  # žádné „-0"
+    s = f"{f:,.{max_decimals}f}" if max_decimals > 0 else f"{f:,.0f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s.replace(",", " ").replace(".", ",")
+
+
+def format_hours_cz(hours, max_decimals: int = 2) -> str:
+    """„0,5 h", „8 h"."""
+    return f"{format_num_cz(hours, max_decimals)} h"
+
+
+def memory_count_cz(n: int) -> str:
+    """„Zohledněna 1 poznámka z paměti" / „Zohledněny 3 poznámky…" / „Zohledněno 5 poznámek…"."""
+    verb = plural_cz(n, "Zohledněna", "Zohledněny", "Zohledněno")
+    return f"{verb} {n} {plural_cz(n, 'poznámka', 'poznámky', 'poznámek')} z paměti"

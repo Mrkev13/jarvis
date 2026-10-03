@@ -30,7 +30,7 @@ from database import SessionLocal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
 from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
-from text_utils import clip
+from text_utils import clip, format_num_cz
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -66,9 +66,7 @@ class StaleTarget(Exception):
 def _num(value) -> str:
     if value is None:
         return "–"
-    f = float(value)
-    s = f"{f:,.2f}".rstrip("0").rstrip(".") if f % 1 else f"{f:,.0f}"
-    return s.replace(",", " ")
+    return format_num_cz(value, 2).replace("\u00a0", " ")
 
 
 def _d(value) -> str:

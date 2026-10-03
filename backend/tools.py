@@ -16,6 +16,7 @@ from models import (
     parse_legacy_uru_state,
 )
 from activity_service import log_activity, delta_dict
+from text_utils import format_hours_cz
 
 
 def get_wot_resources():
@@ -286,8 +287,7 @@ def add_work_session(
             db.flush()
             item.finance_transaction_id = finance_item.id
 
-        hours_str = f"{hours:g}"
-        work_summary = f"+{hours_str} h"
+        work_summary = f"Práce {format_hours_cz(hours)}"
         if project:
             work_summary = f"{work_summary} – {project}"
         if description:
@@ -1346,7 +1346,7 @@ def save_memory(
         if len(content_preview) > 60:
             content_preview = content_preview[:60].rstrip() + "…"
         log_activity(
-            db, "memory", "create", f"Pamatka přidána: {content_preview}",
+            db, "memory", "create", f"Poznámka přidána do paměti: {content_preview}",
             entity_type="Memory", entity_id=item.id,
             delta=delta_dict(None, item, ["area", "category", "content", "importance", "active"]),
             user_context=user_context
