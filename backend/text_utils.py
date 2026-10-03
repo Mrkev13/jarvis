@@ -54,3 +54,30 @@ def memory_count_cz(n: int) -> str:
     """„Zohledněna 1 poznámka z paměti" / „Zohledněny 3 poznámky…" / „Zohledněno 5 poznámek…"."""
     verb = plural_cz(n, "Zohledněna", "Zohledněny", "Zohledněno")
     return f"{verb} {n} {plural_cz(n, 'poznámka', 'poznámky', 'poznámek')} z paměti"
+
+
+def format_czk_cz(amount) -> str:
+    """Přesná částka: celé koruny bez desetin („4 875 Kč"), jinak na haléře („2 437,50 Kč")."""
+    cents = round(float(amount or 0) * 100)
+    if cents % 100 == 0:
+        return f"{format_num_cz(cents / 100, 0)} Kč"
+    s = f"{abs(cents) / 100:,.2f}".replace(",", " ").replace(".", ",")
+    return f"{'-' if cents < 0 else ''}{s} Kč"
+
+
+def finance_category_cz(category) -> str:
+    """Kategorie transakce pro text: systémová „work" (zápis z Práce) → „Práce"; ostatní je text uživatele."""
+    c = str(category or "").strip()
+    return "Práce" if c.lower() == "work" else c
+
+
+def finance_summary_cz(transaction_type, amount, category=None, description=None) -> str:
+    """„Výdaj 189,90 Kč · food (Oběd)" / „Příjem 15 000 Kč · Výplata"."""
+    kind = "Příjem" if transaction_type == "income" else "Výdaj"
+    s = f"{kind} {format_czk_cz(amount)}"
+    cat = finance_category_cz(category)
+    if cat:
+        s += f" · {cat}"
+    if description:
+        s += f" ({clip(description, 60)})"
+    return s

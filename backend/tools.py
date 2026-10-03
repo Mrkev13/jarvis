@@ -16,7 +16,7 @@ from models import (
     parse_legacy_uru_state,
 )
 from activity_service import log_activity, delta_dict
-from text_utils import format_hours_cz
+from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz
 
 
 def get_wot_resources():
@@ -300,8 +300,7 @@ def add_work_session(
         )
 
         if finance_item is not None:
-            fin_amount_str = f"{earnings:,.0f}".replace(",", " ")
-            fin_summary = f"+{fin_amount_str} Kč work (sync)"
+            fin_summary = f"Zapsáno z Práce: příjem {format_czk_cz(earnings)}"
             if description:
                 fin_summary = f"{fin_summary} – {description}"
             log_activity(
@@ -374,11 +373,7 @@ def add_finance_transaction(
         db.add(item)
         db.flush()
 
-        sign = "+" if transaction_type == "income" else "-"
-        amount_str = f"{amount:,.0f}".replace(",", " ")
-        summary = f"{sign}{amount_str} Kč {category}"
-        if description:
-            summary = f"{summary} ({description})"
+        summary = finance_summary_cz(transaction_type, amount, category, description)
         log_activity(
             db, "finance", "create", summary,
             entity_type="FinanceTransaction", entity_id=item.id,
