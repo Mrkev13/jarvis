@@ -2,10 +2,35 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { formatNumber } from "@/lib/format";
-import ConfirmDialog from "@/components/ConfirmDialog";
-import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { areaMeta } from "@/lib/areas";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { GOAL_SOURCES, GOAL_STATUSES, goalSourceMeta, goalStatusMeta, goalTrackingLabel } from "@/lib/goals";
 import { MAX_STAGGER, staggerStyle, useCompletionSignal } from "@/lib/motion";
+import { cx, priorityTone } from "@/lib/ui";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import {
+  AreaBadge,
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  EntityList,
+  EntityRow,
+  ErrorState,
+  FormField,
+  fieldClass,
+  HudLabel,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  PageSection,
+  Progress,
+  SectionHeader,
+  StatGrid,
+  StatusBadge,
+} from "@/components/ui";
 
 type GoalsSummary = {
   active: number;
@@ -44,187 +69,66 @@ const AREA_OPTIONS = [
   "hobby",
 ];
 
-const STATUS_OPTIONS = [
-  "active",
-  "in_progress",
-  "completed",
-  "paused",
-  "cancelled",
-];
+// Hodnoty beze změny (active, in_progress, completed, paused, cancelled) – jen české popisky.
+const STATUS_OPTIONS: readonly string[] = GOAL_STATUSES;
+
+const PRIORITY_OPTIONS = ["high", "medium", "low"] as const;
 
 const TRACKING_OPTIONS = [
-  { value: "manual", label: "Manuální progress (%)" },
-  { value: "automatic", label: "Automaticky (napojen na modul)" },
-] as const;
-
-const SOURCE_OPTIONS = [
-  {
-    value: "finance_balance",
-    label: "Finance: Stav účtu (Kč)",
-    unit: "Kč",
-    placeholder: "150000",
-  },
-  {
-    value: "work_month_hours",
-    label: "Work: Hodin za měsíc (h)",
-    unit: "h",
-    placeholder: "100",
-  },
-  {
-    value: "work_month_earnings",
-    label: "Práce – výdělky tento měsíc",
-    unit: "Kč",
-    placeholder: "80000",
-  },
-  {
-    value: "finance_month_income",
-    label: "Finance – příjmy tento měsíc",
-    unit: "Kč",
-    placeholder: "100000",
-  },
-  {
-    value: "finance_month_expenses",
-    label: "Finance – výdaje tento měsíc",
-    unit: "Kč",
-    placeholder: "50000",
-  },
-  {
-    value: "school_completed_assignments",
-    label: "Škola – dokončené úkoly",
-    unit: "ks",
-    placeholder: "20",
-  },
-  {
-    value: "school_open_assignments",
-    label: "Škola – otevřené úkoly",
-    unit: "ks",
-    placeholder: "10",
-  },
-  {
-    value: "mff_t4_count",
-    label: "MFF – celkem T4 postav",
-    unit: "ks",
-    placeholder: "20",
-  },
-  {
-    value: "mff_built_t4_count",
-    label: "MFF – postavené T4",
-    unit: "ks",
-    placeholder: "15",
-  },
-  {
-    value: "mff_high_priority_built_count",
-    label: "MFF – high priority built",
-    unit: "ks",
-    placeholder: "5",
-  },
+  { value: "manual", label: "Ručně (průběh v %)" },
+  { value: "automatic", label: "Automaticky (napojeno na modul)" },
 ] as const;
 
 function sourceUnit(source: string | null | undefined): string {
-  if (!source) return "";
-  return SOURCE_OPTIONS.find((o) => o.value === source)?.unit ?? "";
-}
-
-const dateFormatter = new Intl.DateTimeFormat("cs-CZ", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
-function areaBadge(area: string) {
-  const a = area.trim().toLowerCase();
-  const palette: Record<string, string> = {
-    finance:
-      "bg-green-950/70 border-green-800 text-green-300",
-    school:
-      "bg-blue-950/70 border-blue-800 text-blue-300",
-    work: "bg-purple-950/70 border-purple-800 text-purple-300",
-    wot: "bg-amber-950/70 border-amber-800 text-amber-300",
-    mff: "bg-pink-950/70 border-pink-800 text-pink-300",
-    personal:
-      "bg-sky-950/70 border-sky-800 text-sky-300",
-    travel:
-      "bg-cyan-950/70 border-cyan-800 text-cyan-300",
-    fitness:
-      "bg-red-950/70 border-red-800 text-red-300",
-    hobby:
-      "bg-indigo-950/70 border-indigo-800 text-indigo-300",
-  };
-  const cls = palette[a] ?? "bg-zinc-800 border-zinc-700 text-zinc-300";
-  return `px-2.5 py-1 text-xs rounded-lg border font-medium uppercase tracking-wide ${cls}`;
-}
-
-function priorityClass(priority: string) {
-  const p = priority.trim().toLowerCase();
-  if (p === "high") {
-    return "px-2 py-0.5 text-xs rounded-full bg-red-950/80 border border-red-800 text-red-300";
-  }
-  if (p === "medium") {
-    return "px-2 py-0.5 text-xs rounded-full bg-yellow-950/70 border border-yellow-800 text-yellow-300";
-  }
-  if (p === "low") {
-    return "px-2 py-0.5 text-xs rounded-full bg-sky-950/70 border border-sky-800 text-sky-300";
-  }
-  return "px-2 py-0.5 text-xs rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300";
-}
-
-function statusClass(status: string) {
-  const s = status.trim().toLowerCase();
-  switch (s) {
-    case "active":
-      return "px-2 py-0.5 text-xs rounded-full bg-indigo-950/70 border border-indigo-800 text-indigo-300";
-    case "in_progress":
-      return "px-2 py-0.5 text-xs rounded-full bg-blue-950/70 border border-blue-800 text-blue-300";
-    case "completed":
-      return "px-2 py-0.5 text-xs rounded-full bg-green-950/70 border border-green-800 text-green-300";
-    case "paused":
-      return "px-2 py-0.5 text-xs rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300";
-    case "cancelled":
-      return "px-2 py-0.5 text-xs rounded-full bg-red-950/50 border border-red-900 text-red-300";
-    default:
-      return "px-2 py-0.5 text-xs rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300";
-  }
+  return goalSourceMeta(source)?.unit ?? "";
 }
 
 function clamp(v: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, v));
 }
 
-
-function progressColor(progress: number, status: string) {
-  if (status.trim().toLowerCase() === "completed") return "bg-green-500";
-  if (progress >= 80) return "bg-green-500";
-  if (progress >= 50) return "bg-yellow-500";
-  if (progress >= 20) return "bg-orange-500";
-  return "bg-red-500";
-}
-
-const formatPercent = (value: number) => String(Math.round(value));
+const formatPct = (value: number) => formatPercent(value);
 
 /**
- * Progress bar cíle: při prvním vykreslení naroste, změny plynule; procento se „dopočítá"
+ * Průběh cíle: pruh (Progress) + procento, které se při změně plynule „dopočítá"
  * a při dosažení 100 % krátce „pukne" (motion-complete) – jen při přechodu na 100, ne při načtení.
  */
-function GoalProgress({ pct, status, size }: { pct: number; status: string; size: "md" | "sm" }) {
+function GoalProgress({
+  pct,
+  status,
+  title,
+  size,
+  barValue,
+}: {
+  pct: number;
+  status: string;
+  title: string;
+  size: "md" | "sm";
+  /** Hodnota pruhu, pokud se liší od zobrazeného procenta (splněné cíle mají plný pruh). */
+  barValue?: number;
+}) {
   const completion = useCompletionSignal(pct);
-  const isMd = size === "md";
+  const completed = status.trim().toLowerCase() === "completed";
   return (
-    <>
-      <div className={`flex-1 ${isMd ? "h-3" : "h-2 max-w-sm"} bg-zinc-800 rounded-full overflow-hidden`}>
-        <div
-          className={`motion-progress h-full ${progressColor(pct, status)}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div
+    <div className="flex items-center gap-3">
+      <Progress
+        value={barValue ?? pct}
+        label={`Průběh cíle ${title}`}
+        tone={completed ? "success" : undefined}
+        size={size}
+        className="flex-1"
+      />
+      <span
         key={completion}
-        className={`text-sm tabular-nums shrink-0 rounded-md ${
-          isMd ? "font-semibold w-12 text-right" : "text-zinc-400"
-        } ${completion > 0 ? "motion-complete" : ""}`}
+        className={cx(
+          "shrink-0 rounded-md text-right text-sm tabular-nums",
+          size === "md" ? "w-14 font-semibold text-ink" : "w-12 text-ink-muted",
+          completion > 0 && "motion-complete",
+        )}
       >
-        <AnimatedNumber value={pct} format={formatPercent} /> %
-      </div>
-    </>
+        <AnimatedNumber value={pct} format={formatPct} />
+      </span>
+    </div>
   );
 }
 
@@ -259,16 +163,22 @@ const emptyDraft: Draft = {
   priority: "medium",
   progress: "0",
   tracking_type: "manual",
-  source: SOURCE_OPTIONS[0].value,
+  source: GOAL_SOURCES[0].value,
   target_value: "",
   target_date: "",
 };
+
+type FieldError = { field: "title" | "target_value"; message: string } | null;
 
 export default function GoalsPage() {
   const [summary, setSummary] = useState<GoalsSummary | null>(null);
   const [goals, setGoals] = useState<GoalItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<FieldError>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingGoal, setDeletingGoal] = useState<GoalItem | null>(null);
 
@@ -277,7 +187,7 @@ export default function GoalsPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const [sumRes, listRes] = await Promise.all([
         apiFetch("/goals/summary"),
@@ -286,8 +196,9 @@ export default function GoalsPage() {
       if (!sumRes.ok || !listRes.ok) throw new Error();
       setSummary((await sumRes.json()) as GoalsSummary);
       setGoals((await listRes.json()) as GoalItem[]);
+      setLoaded(true);
     } catch {
-      setError("Nepodařilo se načíst cíle.");
+      setLoadError("Nepodařilo se načíst cíle.");
     } finally {
       setLoading(false);
     }
@@ -298,6 +209,17 @@ export default function GoalsPage() {
       void loadData().catch(() => {});
     });
   }, [loadData]);
+
+  function clearFormErrors() {
+    setFormError(null);
+    setFieldError(null);
+  }
+
+  function openNewForm() {
+    setDraft(emptyDraft);
+    clearFormErrors();
+    setShowForm(true);
+  }
 
   function startEdit(g: GoalItem) {
     setDraft({
@@ -315,12 +237,13 @@ export default function GoalsPage() {
       tracking_type:
         g.tracking_type === "automatic" ? "automatic" : "manual",
       source:
-        g.source && SOURCE_OPTIONS.some((o) => o.value === g.source)
+        g.source && GOAL_SOURCES.some((o) => o.value === g.source)
           ? g.source
-          : SOURCE_OPTIONS[0].value,
+          : GOAL_SOURCES[0].value,
       target_value: g.target_value != null ? String(g.target_value) : "",
       target_date: g.target_date ?? "",
     });
+    clearFormErrors();
     setShowForm(true);
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -329,18 +252,19 @@ export default function GoalsPage() {
 
   function resetForm() {
     setDraft(emptyDraft);
+    clearFormErrors();
     setShowForm(false);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!draft.title.trim() || !draft.area) {
-      setError("Vyplň název a zvol oblast cíle.");
+      setFieldError({ field: "title", message: "Vyplň název a zvol oblast cíle." });
       return;
     }
     const isAutomatic = draft.tracking_type === "automatic";
     if (isAutomatic && !draft.target_value.trim()) {
-      setError("U automatického cíle vyplň cílovou hodnotu.");
+      setFieldError({ field: "target_value", message: "U automatického cíle vyplň cílovou hodnotu." });
       return;
     }
     const progressNum = parseInt(draft.progress, 10);
@@ -360,7 +284,7 @@ export default function GoalsPage() {
     };
 
     setSubmitting(true);
-    setError(null);
+    clearFormErrors();
     try {
       const res = await apiFetch("/goal", {
         method: "POST",
@@ -372,7 +296,7 @@ export default function GoalsPage() {
       await loadData();
     } catch (err) {
       console.error(err);
-      setError("Nepodařilo se uložit cíl.");
+      setFormError("Nepodařilo se uložit cíl.");
     } finally {
       setSubmitting(false);
     }
@@ -380,6 +304,7 @@ export default function GoalsPage() {
 
   async function confirmDeleteGoal() {
     if (!deletingGoal) return;
+    setActionError(null);
     try {
       const res = await apiFetch(`/goal/${deletingGoal.id}`, {
         method: "DELETE",
@@ -388,7 +313,7 @@ export default function GoalsPage() {
       await loadData();
     } catch (err) {
       console.error(err);
-      setError("Nepodařilo se smazat cíl.");
+      setActionError("Nepodařilo se smazat cíl.");
     } finally {
       setDeletingGoal(null);
     }
@@ -405,502 +330,445 @@ export default function GoalsPage() {
       !["active", "in_progress", "completed"].includes(g.status.toLowerCase()),
   );
 
+  const firstLoad = loading && !loaded;
+  const isAutomaticDraft = draft.tracking_type === "automatic";
+  const draftSource = goalSourceMeta(draft.source);
+  const statValue = (n: number | undefined) => (firstLoad && !summary ? "…" : formatNumber(n ?? 0));
+
   return (
-    <main className="p-4 md:p-8 max-w-5xl mx-auto">
-      <header className="mb-6 md:mb-8">
-        <h1 className="text-2xl md:text-4xl font-bold">Goals</h1>
-        <p className="text-zinc-400 mt-2">
-          Sledování cílů napříč všemi oblastmi s přehledem postupu.
-        </p>
-      </header>
+    <ContentContainer>
+      <PageHeader
+        eyebrow={<HudLabel>Modul · cíle</HudLabel>}
+        title="Cíle"
+        subtitle="Sledování cílů napříč všemi oblastmi s přehledem postupu."
+        actions={
+          !showForm ? (
+            <Button variant="primary" onClick={openNewForm} aria-expanded={false}>
+              Přidat cíl
+            </Button>
+          ) : null
+        }
+      />
 
-      {error && (
-        <div className="mb-6 bg-red-950/50 border border-red-900 text-red-200 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
+      {loadError && loaded ? (
+        <ErrorState message={loadError} onRetry={() => void loadData()} retrying={loading} />
+      ) : null}
+      {actionError ? <ErrorState message={actionError} /> : null}
 
-      <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-8">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-semibold">Overview</h2>
-          {!showForm ? (
-            <button
-              type="button"
-              onClick={() => {
-                setDraft({
-                  ...emptyDraft,
-                  area: AREA_OPTIONS[0],
-                  status: "active",
-                  priority: "medium",
-                  target_date: "",
-                  progress: "0",
-                  tracking_type: "manual",
-                  source: SOURCE_OPTIONS[0].value,
-                  target_value: "",
-                });
-                setShowForm(true);
-              }}
-              className="bg-white text-black font-medium px-5 py-2.5 rounded-xl hover:bg-zinc-200 transition-colors"
-            >
-              + Add goal
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="text-sm text-zinc-400 hover:text-zinc-200"
-            >
-              {draft.id ? "Zrušit editaci" : "Zavřít"}
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
-          <div className="bg-zinc-800/60 border border-zinc-800 rounded-xl p-4">
-            <div className="text-sm text-zinc-400 mb-1">Active</div>
-            <div className="text-2xl font-bold text-indigo-300">
-              {loading && !summary ? "…" : summary?.active ?? 0}
-            </div>
-          </div>
-          <div className="bg-zinc-800/60 border border-zinc-800 rounded-xl p-4">
-            <div className="text-sm text-zinc-400 mb-1">In progress</div>
-            <div className="text-2xl font-bold text-blue-300">
-              {loading && !summary ? "…" : summary?.in_progress ?? 0}
-            </div>
-          </div>
-          <div className="bg-zinc-800/60 border border-zinc-800 rounded-xl p-4">
-            <div className="text-sm text-zinc-400 mb-1">Completed</div>
-            <div className="text-2xl font-bold text-green-400">
-              {loading && !summary ? "…" : summary?.completed ?? 0}
-            </div>
-          </div>
-          <div className="bg-zinc-800/60 border border-zinc-800 rounded-xl p-4">
-            <div className="text-sm text-zinc-400 mb-1">Total</div>
-            <div className="text-2xl font-bold">
-              {loading && !summary ? "…" : summary?.total ?? 0}
-            </div>
-          </div>
-        </div>
-
-        {showForm && (
-          <form
-            onSubmit={handleSubmit}
-            className="border-t border-zinc-800 pt-5"
-          >
-            <div className="mb-3 text-sm text-zinc-400">
-              {draft.id ? (
-                <>
-                  Editace cíle <strong className="text-zinc-200">#{draft.id}</strong>
-                </>
-              ) : (
-                "Nový cíl"
-              )}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Title *
-                </label>
-                <input
-                  type="text"
-                  placeholder="např. Našetřit 150 000 Kč"
-                  value={draft.title}
-                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Area *
-                </label>
-                <select
-                  value={draft.area}
-                  onChange={(e) => setDraft({ ...draft, area: e.target.value })}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                >
-                  {AREA_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Status
-                </label>
-                <select
-                  value={draft.status}
-                  onChange={(e) =>
-                    setDraft({ ...draft, status: e.target.value })
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                >
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1).replace("_", " ")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Priority
-                </label>
-                <select
-                  value={draft.priority}
-                  onChange={(e) =>
-                    setDraft({ ...draft, priority: e.target.value })
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Tracking type
-                </label>
-                <select
-                  value={draft.tracking_type}
-                  onChange={(e) =>
-                    setDraft({ ...draft, tracking_type: e.target.value })
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                >
-                  {TRACKING_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Target date
-                </label>
-                <input
-                  type="date"
-                  value={draft.target_date}
-                  min={todayIso()}
-                  onChange={(e) =>
-                    setDraft({ ...draft, target_date: e.target.value })
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                />
-              </div>
-              {draft.tracking_type === "automatic" ? (
-                <>
-                  <div>
-                    <label className="block text-sm text-zinc-400 mb-1.5">
-                      Zdroj dat
-                    </label>
-                    <select
-                      value={draft.source}
-                      onChange={(e) =>
-                        setDraft({ ...draft, source: e.target.value })
-                      }
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                    >
-                      {SOURCE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-400 mb-1.5">
-                      Cílová hodnota ({sourceUnit(draft.source)})
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={
-                        draft.source === "finance_balance" ? 1 : 0.25
-                      }
-                      placeholder={
-                        SOURCE_OPTIONS.find((o) => o.value === draft.source)
-                          ?.placeholder ?? ""
-                      }
-                      value={draft.target_value}
-                      onChange={(e) =>
-                        setDraft({ ...draft, target_value: e.target.value })
-                      }
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <label className="block text-sm text-zinc-400 mb-1.5">
-                    Progress (%)
-                  </label>
+      {showForm && (
+        <Card as="section" aria-labelledby="goal-form-title">
+          <CardHeader
+            as="h2"
+            title={
+              <span id="goal-form-title">
+                {draft.id ? `Úprava cíle #${draft.id}` : "Nový cíl"}
+              </span>
+            }
+            actions={
+              <Button size="sm" variant="ghost" onClick={resetForm} aria-expanded={true} aria-controls="goal-form">
+                {draft.id ? "Zrušit úpravu" : "Zavřít"}
+              </Button>
+            }
+          />
+          <form id="goal-form" onSubmit={handleSubmit} className="space-y-4">
+            {formError ? <ErrorState message={formError} /> : null}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                label="Název *"
+                error={fieldError?.field === "title" ? fieldError.message : undefined}
+              >
+                {(p) => (
                   <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={draft.progress}
-                    onChange={(e) =>
-                      setDraft({ ...draft, progress: e.target.value })
-                    }
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none focus:border-zinc-500"
+                    {...p}
+                    type="text"
+                    placeholder="např. Našetřit 150 000 Kč"
+                    value={draft.title}
+                    onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                    className={fieldClass}
                   />
-                </div>
+                )}
+              </FormField>
+              <FormField label="Oblast *">
+                {(p) => (
+                  <select
+                    {...p}
+                    value={draft.area}
+                    onChange={(e) => setDraft({ ...draft, area: e.target.value })}
+                    className={fieldClass}
+                  >
+                    {AREA_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {areaMeta(opt).label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+              <FormField label="Stav">
+                {(p) => (
+                  <select
+                    {...p}
+                    value={draft.status}
+                    onChange={(e) => setDraft({ ...draft, status: e.target.value })}
+                    className={fieldClass}
+                  >
+                    {STATUS_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {goalStatusMeta(opt).label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+              <FormField label="Priorita">
+                {(p) => (
+                  <select
+                    {...p}
+                    value={draft.priority}
+                    onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
+                    className={fieldClass}
+                  >
+                    {PRIORITY_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {priorityTone(opt).label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+              <FormField label="Sledování">
+                {(p) => (
+                  <select
+                    {...p}
+                    value={draft.tracking_type}
+                    onChange={(e) => setDraft({ ...draft, tracking_type: e.target.value })}
+                    className={fieldClass}
+                  >
+                    {TRACKING_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+              <FormField label="Termín" hint="Nepovinné">
+                {(p) => (
+                  <input
+                    {...p}
+                    type="date"
+                    value={draft.target_date}
+                    min={todayIso()}
+                    onChange={(e) => setDraft({ ...draft, target_date: e.target.value })}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              {isAutomaticDraft ? (
+                <>
+                  <FormField label="Zdroj dat">
+                    {(p) => (
+                      <select
+                        {...p}
+                        value={draft.source}
+                        onChange={(e) => setDraft({ ...draft, source: e.target.value })}
+                        className={fieldClass}
+                      >
+                        {GOAL_SOURCES.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label} ({opt.unit})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </FormField>
+                  <FormField
+                    label={`Cílová hodnota${draftSource ? ` (${draftSource.unit})` : ""} *`}
+                    error={fieldError?.field === "target_value" ? fieldError.message : undefined}
+                  >
+                    {(p) => (
+                      <input
+                        {...p}
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step={draft.source === "finance_balance" ? 1 : 0.25}
+                        placeholder={draftSource?.placeholder ?? ""}
+                        value={draft.target_value}
+                        onChange={(e) => setDraft({ ...draft, target_value: e.target.value })}
+                        className={fieldClass}
+                      />
+                    )}
+                  </FormField>
+                </>
+              ) : (
+                <FormField label="Průběh (%)" hint="0–100">
+                  {(p) => (
+                    <input
+                      {...p}
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={100}
+                      value={draft.progress}
+                      onChange={(e) => setDraft({ ...draft, progress: e.target.value })}
+                      className={fieldClass}
+                    />
+                  )}
+                </FormField>
               )}
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Popis cíle, jak dosáhnout…"
-                  value={draft.description}
-                  onChange={(e) =>
-                    setDraft({ ...draft, description: e.target.value })
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 outline-none resize-none focus:border-zinc-500"
-                />
-              </div>
+              <FormField label="Popis" hint="Nepovinné" className="md:col-span-2">
+                {(p) => (
+                  <textarea
+                    {...p}
+                    rows={2}
+                    placeholder="Popis cíle, jak dosáhnout…"
+                    value={draft.description}
+                    onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                    className={cx(fieldClass, "resize-none")}
+                  />
+                )}
+              </FormField>
             </div>
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition-colors"
-              >
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={resetForm}>
                 Storno
-              </button>
-              <button
-                type="submit"
-                disabled={submitting || loading}
-                className="bg-white text-black font-medium px-5 py-2.5 rounded-xl disabled:opacity-50 hover:bg-zinc-200 transition-colors"
-              >
-                {submitting
-                  ? "Ukládám…"
-                  : draft.id
-                    ? "Uložit změny"
-                    : "Vytvořit cíl"}
-              </button>
+              </Button>
+              <Button type="submit" variant="primary" busy={submitting} busyLabel="Ukládám…" disabled={loading}>
+                {draft.id ? "Uložit změny" : "Vytvořit cíl"}
+              </Button>
             </div>
           </form>
-        )}
-      </section>
-
-      <section className="mb-10">
-        <h2 className="text-xl font-semibold mb-4">Active goals</h2>
-
-        {loading && goals.length === 0 ? (
-          <div className="text-zinc-500 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            Načítám…
-          </div>
-        ) : activeGoals.length === 0 ? (
-          <div className="text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            Zatím žádné aktivní cíle. Přidej první!
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {activeGoals.map((g, gi) => {
-              const pct = clamp(g.progress ?? 0);
-              return (
-                <article
-                  key={g.id}
-                  className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5 hover:border-zinc-700 transition-colors"
-                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
-                >
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <span className={areaBadge(g.area)}>{g.area}</span>
-                    <span className={statusClass(g.status)}>{g.status.replace("_", " ")}</span>
-                    <span className={priorityClass(g.priority)}>
-                      Priority: {g.priority}
-                    </span>
-                    {g.target_date && (
-                      <span className="text-xs text-zinc-400 ml-auto">
-                        Target:{" "}
-                        {dateFormatter.format(
-                          new Date(`${g.target_date}T00:00:00`),
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-lg font-semibold break-words">
-                        {g.title}
-                      </h3>
-                      {g.description && (
-                        <p className="text-sm text-zinc-400 mt-1 leading-relaxed whitespace-pre-wrap">
-                          {g.description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(g)}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-                      >
-                        Editovat
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeletingGoal(g)}
-                        className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  {g.tracking_type === "automatic" ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                      <div className="text-xs flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-medium">
-                          Automatic: {g.source}
-                        </span>
-                      </div>
-                      <div className="text-sm font-semibold tabular-nums text-zinc-200">
-                        <span
-                          className={
-                            g.current_value != null ? "text-zinc-100" : "text-zinc-500"
-                          }
-                        >
-                          {g.current_value != null
-                            ? formatNumber(g.current_value)
-                            : "—"}
-                        </span>
-                        <span className="text-zinc-500 mx-1">/</span>
-                        <span className="text-zinc-100">
-                          {g.target_value != null
-                            ? formatNumber(g.target_value)
-                            : "—"}
-                        </span>
-                        <span className="ml-1 text-zinc-400">
-                          {sourceUnit(g.source)}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-3">
-                    <GoalProgress pct={pct} status={g.status} size="md" />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {completedGoals.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-xl font-semibold mb-4 text-green-400">
-            Completed
-          </h2>
-          <div className="space-y-3">
-            {completedGoals.map((g, gi) => {
-              const pct = clamp(g.progress ?? 0);
-              return (
-                <article
-                  key={g.id}
-                  className="motion-card bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 opacity-90"
-                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
-                >
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className={areaBadge(g.area)}>{g.area}</span>
-                    <span className={statusClass(g.status)}>completed</span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(g)}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeletingGoal(g)}
-                        className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded-lg transition-colors"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <h3 className="font-medium line-through text-zinc-400 flex-1">
-                      {g.title}
-                    </h3>
-                    <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden max-w-sm">
-                      <div className="h-full bg-green-500 w-full" />
-                    </div>
-                    <span className="text-sm tabular-nums text-green-400">
-                      {pct} %
-                    </span>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+        </Card>
       )}
 
-      {otherGoals.length > 0 && (
-        <section>
-          <h2 className="text-xl font-semibold mb-4 text-zinc-400">
-            Paused / Cancelled
-          </h2>
-          <div className="space-y-3">
-            {otherGoals.map((g, gi) => {
-              const pct = clamp(g.progress ?? 0);
-              return (
-                <article
-                  key={g.id}
-                  className="motion-card bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 opacity-75"
-                  style={staggerStyle(Math.min(gi, MAX_STAGGER))}
+      <section aria-labelledby="goals-overview" className="space-y-3">
+        <h2 id="goals-overview" className="sr-only">
+          Přehled
+        </h2>
+        <StatGrid cols={4}>
+          <MetricCard label="Aktivní" value={statValue(summary?.active)} />
+          <MetricCard label="Rozpracované" value={statValue(summary?.in_progress)} />
+          <MetricCard label="Splněné" value={statValue(summary?.completed)} />
+          <MetricCard label="Celkem" value={statValue(summary?.total)} />
+        </StatGrid>
+      </section>
+
+      {firstLoad ? (
+        <LoadingState lines={4} label="Načítám cíle…" />
+      ) : loadError && !loaded ? (
+        <ErrorState message={loadError} onRetry={() => void loadData()} retrying={loading} />
+      ) : (
+        <>
+          <PageSection
+            labelledBy="goals-active"
+            title={`Aktivní cíle${activeGoals.length ? ` (${activeGoals.length})` : ""}`}
+          >
+            <div aria-busy={loading || undefined}>
+              {activeGoals.length === 0 ? (
+                <EmptyState
+                  action={
+                    !showForm ? (
+                      <Button size="sm" variant="secondary" onClick={openNewForm}>
+                        Přidat cíl
+                      </Button>
+                    ) : undefined
+                  }
                 >
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className={areaBadge(g.area)}>{g.area}</span>
-                    <span className={statusClass(g.status)}>
-                      {g.status.replace("_", " ")}
-                    </span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(g)}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeletingGoal(g)}
-                        className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded-lg transition-colors"
-                      >
-                        🗑️
-                      </button>
-                    </div>
+                  Zatím žádné aktivní cíle.
+                </EmptyState>
+              ) : (
+                <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {activeGoals.map((g, gi) => (
+                    <ActiveGoalCard
+                      key={g.id}
+                      goal={g}
+                      index={Math.min(gi, MAX_STAGGER)}
+                      onEdit={() => startEdit(g)}
+                      onDelete={() => setDeletingGoal(g)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </PageSection>
+
+          {completedGoals.length > 0 || otherGoals.length > 0 ? (
+            <PageSection
+              labelledBy="goals-closed"
+              title="Splněné, pozastavené a zrušené"
+              description="Cíle, na kterých se teď nepracuje."
+            >
+              <div className="space-y-5" aria-busy={loading || undefined}>
+                {completedGoals.length > 0 && (
+                  <div className="space-y-2">
+                    <SectionHeader as="h3" title={`Splněné (${completedGoals.length})`} />
+                    <EntityList label="Splněné cíle">
+                      {completedGoals.map((g, gi) => (
+                        <SecondaryGoalRow
+                          key={g.id}
+                          goal={g}
+                          index={Math.min(gi, MAX_STAGGER)}
+                          onEdit={() => startEdit(g)}
+                          onDelete={() => setDeletingGoal(g)}
+                        />
+                      ))}
+                    </EntityList>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <h3 className="font-medium text-zinc-300 flex-1">
-                      {g.title}
-                    </h3>
-                    <GoalProgress pct={pct} status={g.status} size="sm" />
+                )}
+                {otherGoals.length > 0 && (
+                  <div className="space-y-2">
+                    <SectionHeader as="h3" title={`Pozastavené a zrušené (${otherGoals.length})`} />
+                    <EntityList label="Pozastavené a zrušené cíle">
+                      {otherGoals.map((g, gi) => (
+                        <SecondaryGoalRow
+                          key={g.id}
+                          goal={g}
+                          index={Math.min(gi, MAX_STAGGER)}
+                          onEdit={() => startEdit(g)}
+                          onDelete={() => setDeletingGoal(g)}
+                        />
+                      ))}
+                    </EntityList>
                   </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+                )}
+              </div>
+            </PageSection>
+          ) : null}
+        </>
       )}
 
       <ConfirmDialog
         open={deletingGoal != null}
-        title={`Smazat cíl ${deletingGoal?.title ?? ""}?`}
+        title={`Smazat cíl „${deletingGoal?.title ?? ""}“?`}
         message="Tato akce je nevratná. Cíl bude odstraněn ze Standa Hubu."
+        confirmLabel="Smazat cíl"
+        busyLabel="Mažu…"
         onConfirm={confirmDeleteGoal}
         onCancel={() => setDeletingGoal(null)}
       />
-    </main>
+    </ContentContainer>
+  );
+}
+
+/** Aktuální / cílová hodnota automatického cíle s jednotkou zdroje. */
+function GoalValues({ goal }: { goal: GoalItem }) {
+  return (
+    <span className="text-sm tabular-nums">
+      <span className={goal.current_value != null ? "font-semibold text-ink" : "text-ink-faint"}>
+        {formatNumber(goal.current_value)}
+      </span>
+      <span className="mx-1 text-ink-faint">/</span>
+      <span className="font-semibold text-ink">{formatNumber(goal.target_value)}</span>
+      {sourceUnit(goal.source) ? <span className="ml-1 text-ink-muted">{sourceUnit(goal.source)}</span> : null}
+    </span>
+  );
+}
+
+function ActiveGoalCard({
+  goal: g,
+  index,
+  onEdit,
+  onDelete,
+}: {
+  goal: GoalItem;
+  index: number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const status = goalStatusMeta(g.status);
+  const priority = priorityTone(g.priority);
+  const pct = clamp(g.progress ?? 0);
+  return (
+    <Card as="li" index={index} className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <AreaBadge area={g.area} />
+        <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+        <StatusBadge tone={priority.tone}>Priorita: {priority.label}</StatusBadge>
+      </div>
+      <div className="min-w-0">
+        <h3 className="break-words text-base font-semibold text-ink md:text-lg">{g.title}</h3>
+        {g.description && (
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-2">{g.description}</p>
+        )}
+      </div>
+      <div className="mt-auto space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-ink-muted">
+          <span className="min-w-0 break-words">{goalTrackingLabel(g.tracking_type, g.source)}</span>
+          {g.tracking_type === "automatic" ? <GoalValues goal={g} /> : null}
+        </div>
+        <GoalProgress pct={pct} status={g.status} title={g.title} size="md" />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle pt-3">
+        <span className="text-xs text-ink-muted">
+          {g.target_date ? (
+            <>
+              Termín: <span className="tabular-nums text-ink-2">{formatDate(g.target_date)}</span>
+            </>
+          ) : (
+            "Bez termínu"
+          )}
+        </span>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={onEdit} aria-label={`Upravit cíl ${g.title}`}>
+            Upravit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat cíl ${g.title}`}>
+            Smazat
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SecondaryGoalRow({
+  goal: g,
+  index,
+  onEdit,
+  onDelete,
+}: {
+  goal: GoalItem;
+  index: number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const status = goalStatusMeta(g.status);
+  const completed = g.status.toLowerCase() === "completed";
+  const pct = clamp(g.progress ?? 0);
+  return (
+    <EntityRow
+      className={cx("motion-card", !completed && "opacity-80")}
+      style={staggerStyle(index)}
+      muted={completed}
+      badges={
+        <>
+          <AreaBadge area={g.area} />
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+        </>
+      }
+      title={g.title}
+      meta={
+        <>
+          {goalTrackingLabel(g.tracking_type, g.source)}
+          {g.target_date ? ` · termín ${formatDate(g.target_date)}` : ""}
+        </>
+      }
+      actions={
+        <>
+          <Button size="sm" variant="ghost" onClick={onEdit} aria-label={`Upravit cíl ${g.title}`}>
+            Upravit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat cíl ${g.title}`}>
+            Smazat
+          </Button>
+        </>
+      }
+    >
+      <div className="mt-2 max-w-md">
+        <GoalProgress pct={pct} status={g.status} title={g.title} size="sm" barValue={completed ? 100 : undefined} />
+      </div>
+    </EntityRow>
   );
 }
