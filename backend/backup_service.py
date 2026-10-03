@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.engine import make_url
+
 from database import SessionLocal
 from models import BackupLog
 from time_utils import local_day_bounds_utc, now_local
@@ -29,8 +31,11 @@ def _is_sqlite() -> bool:
 def _sqlite_file_path() -> Optional[Path]:
     if not _is_sqlite():
         return None
-    raw = _DATABASE_URL.split("://", 1)[1]
-    raw = raw.lstrip("/")
+    # make_url zvládne relativní (sqlite:///./x.db) i absolutní cestu na Linuxu (sqlite:////tmp/x.db)
+    # i Windows (sqlite:///C:\\x.db); dřívější lstrip("/") z absolutní POSIX cesty udělal relativní.
+    raw = make_url(_DATABASE_URL).database or ""
+    if not raw or raw == ":memory:":
+        return None
     p = Path(raw).resolve()
     if p.exists():
         return p
