@@ -358,6 +358,9 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     return tool_messages, pending_actions
 
 
+# Odpověď, když request připravil pending akci: deterministicky, nezávisle na textu modelu.
+PENDING_CONFIRMATION_ANSWER = "Připravil jsem změnu k potvrzení."
+
 DAILY_LIMIT_KINDS = frozenset({"TPD", "RPD"})
 
 
@@ -678,6 +681,10 @@ def ask_ai(messages):
                         api_messages.append({"role": "system", "content": planner_tools_nudge(missing)})
                         continue
                     answer, planner_actions_removed = _finalize_planner_answer(answer, evidence_texts, memory_evidence)
+                if all_pending_actions:
+                    # Změna jen čeká na potvrzení – text modelu („byl označen jako hotový") by mohl tvrdit
+                    # opak (reálný případ). Detail změny ukazuje karta s náhledem.
+                    answer = PENDING_CONFIRMATION_ANSWER
                 return {
                     "answer": answer,
                     "pending_actions": all_pending_actions,

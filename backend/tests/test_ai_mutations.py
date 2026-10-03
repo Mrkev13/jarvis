@@ -303,6 +303,84 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertIn("Upravit: transakce", approve.summary)
         self.assertLessEqual(len(approve.summary), 500)
 
+    # ---- odpověď u návrhu nesmí tvrdit, že se změna už stala (regrese live Phase B C) ----
+    _CLAIMS = ("uložen", "označen", "změnil", "smazán", "hotov", "přidal")
+
+    def _assert_waiting_answer(self, result):
+        self.assertEqual(len(result["pending_actions"]), 1)
+        self.assertEqual(result["answer"], ai.PENDING_CONFIRMATION_ANSWER)
+        for claim in self._CLAIMS:
+            self.assertNotIn(claim, result["answer"].lower())
+
+    def test_create_proposal_cannot_claim_execution(self):
+        args = {"amount": 120, "category": "Jídlo", "transaction_type": "expense", "description": "káva"}
+        result = self._ask("přidej výdaj 120 Kč za kávu", [
+            _message(tool_calls=[_call("add_finance_transaction", args)]),
+            _message(content="Výdaj 120 Kč za kávu byl uložen."),
+        ])
+        self._assert_waiting_answer(result)
+        self.assertNotIn("káva", self._amounts())
+
+    def test_edit_proposal_cannot_claim_execution(self):
+        result = self._ask("změň výdaj za oběd s kolegy na 450 Kč", [
+            _modify(entity="finance_transaction", action="update", target={"text": "oběd s kolegy"},
+                    changes={"amount": 450}),
+            _message(content="Změnil jsem částku na 450 Kč."),
+        ])
+        self._assert_waiting_answer(result)
+        self.assertEqual(self._amounts()["oběd s kolegy"], 320)
+
+    def test_delete_proposal_cannot_claim_execution(self):
+        result = self._ask("smaž testovací výdaj", [
+            _modify(entity="finance_transaction", action="delete", target={"text": "testovací"}),
+            _message(content="Testovací výdaj byl smazán."),
+        ])
+        self._assert_waiting_answer(result)
+        self.assertIn("testovací výdaj", self._amounts())
+
+    def test_complete_proposal_cannot_claim_execution(self):
+        result = self._ask("označ úkol z práva jako hotový", [
+            _modify(entity="school_assignment", action="complete", target={"text": "právo"}),
+            _message(content="Úkol z práva byl označen jako hotový."),
+        ])
+        self._assert_waiting_answer(result)
+        self.assertEqual(self._assignment_statuses()["Esej o ústavě"], "todo")
+
+    def test_batch_proposal_cannot_claim_execution(self):
+        result = self._ask("označ všechny dnešní úkoly jako hotové", [
+            _modify(entity="school_assignment", action="update", target={"date": "2026-10-03", "all_matching": True},
+                    changes={"status": "done"}),
+            _message(content="Oba dnešní úkoly jsou hotové."),
+        ])
+        self._assert_waiting_answer(result)
+        self.assertEqual(result["pending_actions"][0]["preview"]["count"], 2)
+        self.assertEqual(set(self._assignment_statuses().values()), {"todo"})
+
+    def test_answer_without_pending_action_is_kept(self):
+        # Odmítnutý/nejednoznačný návrh (žádná pending akce) → doptání modelu zůstává beze změny.
+        result = self._ask("smaž ten výdaj", [
+            _modify(entity="finance_transaction", action="delete", target={}),
+            _message(content="Který výdaj myslíš?"),
+        ])
+        self.assertEqual(result["pending_actions"], [])
+        self.assertEqual(result["answer"], "Který výdaj myslíš?")
+
+    def test_success_is_reported_normally_after_actual_confirmation(self):
+        result = self._ask("označ úkol z práva jako hotový", [
+            _modify(entity="school_assignment", action="complete", target={"text": "právo"}),
+            _message(content="Úkol z práva byl označen jako hotový."),
+        ])
+        outcome = ai.execute_confirm_action(result["pending_actions"][0]["id"])
+        self.assertTrue(outcome["ok"], outcome)  # UI z toho zobrazí „✅ Hotovo"
+        self.assertEqual(self._assignment_statuses()["Esej o ústavě"], "done")
+
+    def _assignment_statuses(self):
+        db = self.Session()
+        try:
+            return {a.title: a.status for a in db.query(Assignment).all()}
+        finally:
+            db.close()
+
     def test_write_requests_skip_the_planner_fast_path(self):
         self.assertIsNone(main.detect_planner_intent("označ všechny dnešní úkoly jako hotové"))
         self.assertIsNotNone(main.detect_planner_intent("co mám dělat dnes"))
