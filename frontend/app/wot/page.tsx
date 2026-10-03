@@ -44,15 +44,6 @@ import {
 
 const LOAD_ERROR = "Nepodařilo se načíst data z backendu.";
 
-/** Plánované části modulu – zatím bez dat (zachováno z původní stránky, kotvy beze změny). */
-const UPCOMING = [
-  { id: "statistics", title: "Statistiky", text: "Bitvy · WR · WN8 · DPG" },
-  { id: "tanks", title: "Tanky", text: "Seznam tanků v garáži a jejich detail" },
-  { id: "equipment", title: "Vybavení", text: "Vybavení a spotřební materiál" },
-  { id: "sessions", title: "Herní sezení", text: "Historie sezení a statistiky za sezení" },
-  { id: "progress-history", title: "Historie postupu", text: "Vývoj zdrojů v čase a grafy" },
-];
-
 export default function WotPage() {
   const resourcesRes = useApiResource<WotResources>("/wot/resources");
   const grindsRes = useApiResource<WotGrind[]>("/wot/grinds");
@@ -172,7 +163,7 @@ export default function WotPage() {
       <PageHeader
         eyebrow={<HudLabel>Modul · World of Tanks</HudLabel>}
         title="World of Tanks"
-        subtitle="Zdroje, grindy, statistiky a postup."
+        subtitle="Zdroje a grindy tanků."
         meta={<AreaBadge area="wot" />}
       />
 
@@ -369,25 +360,6 @@ export default function WotPage() {
           </PageSection>
         </div>
       )}
-
-      {/* ===== PŘIPRAVUJEME ===== */}
-      <PageSection labelledBy="wot-upcoming" title="Připravujeme" description="Tyto části modulu zatím nejsou k dispozici.">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {UPCOMING.map((s) => (
-            <section
-              key={s.id}
-              id={s.id}
-              aria-labelledby={`wot-${s.id}`}
-              className="min-w-0 rounded-[var(--radius-control)] border border-dashed border-line px-4 py-3"
-            >
-              <h3 id={`wot-${s.id}`} className="text-sm font-medium text-ink-2">
-                {s.title}
-              </h3>
-              <p className="mt-0.5 break-words text-sm text-ink-muted">{s.text}</p>
-            </section>
-          ))}
-        </div>
-      </PageSection>
 
       <ConfirmDialog
         open={deletingGrind != null}
