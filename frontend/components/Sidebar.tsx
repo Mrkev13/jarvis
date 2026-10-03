@@ -73,7 +73,7 @@ function Brand({ as: Tag = "div" }: { as?: "div" | "p" }) {
         SH
       </span>
       <span className="leading-tight">
-        <span className="block text-base font-semibold text-ink">Standa Hub</span>
+        <span className="block whitespace-nowrap text-base font-semibold text-ink">Standa Hub</span>
         <HudLabel className="flex items-center gap-1.5 text-[10px]">
           <StatusPulse tone="success" className="h-1.5 w-1.5" /> online
         </HudLabel>

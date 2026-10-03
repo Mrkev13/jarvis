@@ -11,7 +11,7 @@ type CardProps = {
   flush?: boolean;
   /** Pořadí pro postupný vstup (motion-card). */
   index?: number;
-  as?: "section" | "div" | "article" | "li";
+  as?: "section" | "div" | "article" | "li" | "aside";
   className?: string;
 } & Omit<React.HTMLAttributes<HTMLElement>, "className" | "children">;
 
