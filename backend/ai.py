@@ -1,4 +1,5 @@
 import json
+import zlib
 import os
 import time
 import types
@@ -175,6 +176,14 @@ def _check_pending_expired(db) -> int:
     return affected
 
 
+def _audit_entity_id(action_id) -> int:
+    """Stabilní id pro audit: id PendingAction. (Dřív hash() – v Pythonu se mění s každým startem.)"""
+    try:
+        return int(action_id)
+    except (TypeError, ValueError):
+        return zlib.crc32(str(action_id).encode("utf-8")) % (10**8)
+
+
 def _confirm_pending_action_atomically(db, pending_id: str) -> dict | None:
     try:
         pid = int(pending_id)
@@ -195,7 +204,9 @@ def _confirm_pending_action_atomically(db, pending_id: str) -> dict | None:
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(status_code=409, detail="Pending already processed")
-    db.flush()
+    # Claim se commitne hned (AGENTS.md §4.2): executor zapisuje ve vlastní session; kdyby proces spadl
+    # uprostřed, zůstane „executing" a start ho označí jako failed – akce se nedá potvrdit podruhé.
+    db.commit()
     db.refresh(pa)
     try:
         args = json.loads(pa.arguments) if pa.arguments else {}
@@ -798,7 +809,7 @@ def execute_confirm_action(action_id: str):
                     db, "system", "error",
                     f"Potvrzení akce selhalo: action_id {action_id} - {he.detail}",
                     entity_type="PendingAction",
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -833,7 +844,7 @@ def execute_confirm_action(action_id: str):
                     db, "system", "error",
                     f"Neznámý write tool: {tool_name}",
                     entity_type="ToolRegistry",
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -878,7 +889,7 @@ def execute_confirm_action(action_id: str):
                 log_activity(
                     db, "ai", "approve", summary,
                     entity_type=tool_name,
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -898,7 +909,7 @@ def execute_confirm_action(action_id: str):
                     db, "ai", "reject",
                     f"Chyba při {tool_name}: {type(exc).__name__}: {str(exc)[:120]}",
                     entity_type=tool_name,
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
