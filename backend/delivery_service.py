@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 import webpush
 from models import Delivery, Notification, PushSubscription
 from time_utils import utc_now
+from env_config import env_bool
 
 logger = logging.getLogger("standa_hub.delivery")
 if not logger.handlers:
@@ -63,19 +64,16 @@ DEFAULT_PUSH_HOSTS = (
 def deliverable_types() -> tuple[str, ...]:
     """Typy notifikací, které jdou i ven: připomínky (Phase D), Denní přehled (Phase F, DAILY_BRIEFING_PUSH)
     a Týdenní přehled (Phase G, WEEKLY_REVIEW_PUSH)."""
-    def on(name: str) -> bool:
-        return os.environ.get(name, "true").strip().lower() in ("1", "true", "yes", "on")
-
     types = ["reminder"]
-    if on("DAILY_BRIEFING_PUSH"):
+    if env_bool("DAILY_BRIEFING_PUSH", True):
         types.append("daily_briefing")
-    if on("WEEKLY_REVIEW_PUSH"):
+    if env_bool("WEEKLY_REVIEW_PUSH", True):
         types.append("weekly_review")
     return tuple(types)
 
 
 def external_delivery_enabled() -> bool:
-    return os.environ.get("EXTERNAL_DELIVERY_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    return env_bool("EXTERNAL_DELIVERY_ENABLED", True)
 
 
 @dataclass(frozen=True)

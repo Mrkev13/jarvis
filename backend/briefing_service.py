@@ -28,6 +28,7 @@ from structured_llm import (
     request_params as _structured_params, usage_from,
 )
 from time_utils import local_day_bounds_utc, to_local, utc_now
+from env_config import env_bool
 
 logger = logging.getLogger("standa_hub.briefing")
 if not logger.handlers:
@@ -119,11 +120,7 @@ class BriefingInProgress(Exception):
 # ===== konfigurace =====
 
 def briefing_enabled() -> bool:
-    return os.environ.get("DAILY_BRIEFING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
-
-
-def briefing_push_enabled() -> bool:
-    return os.environ.get("DAILY_BRIEFING_PUSH", "true").strip().lower() in ("1", "true", "yes", "on")
+    return env_bool("DAILY_BRIEFING_ENABLED", True)
 
 
 def briefing_time() -> dtime:

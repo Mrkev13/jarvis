@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from env_config import TRUE_VALUES
 
 load_dotenv()
 
@@ -67,7 +68,7 @@ def _bool_env(env: dict, name: str, default: bool) -> bool:
     raw = (env.get(name) or "").strip().lower()
     if not raw:
         return default
-    return raw in ("1", "true", "yes", "on")
+    return raw in TRUE_VALUES  # stejná pravidla jako env_config.env_bool
 
 
 def load_llm_settings(env: dict | None = None) -> LLMSettings:

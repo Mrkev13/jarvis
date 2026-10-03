@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -6,21 +5,22 @@ from apscheduler.triggers.interval import IntervalTrigger
 from database import SessionLocal
 from notifications_service import create_all_overdue_and_upcoming_notifications
 from goal_history_service import ensure_goal_progress_snapshot_for_all_active_automatic_goals
+from env_config import env_bool, env_int
 
 _scheduler: BackgroundScheduler | None = None
-SCHEDULER_ENABLED = (os.environ.get("SCHEDULER_ENABLED", "false").lower() in ("1", "true", "yes"))
-SCHEDULER_INTERVAL_SECONDS = int(os.environ.get("SCHEDULER_INTERVAL_SECONDS", "3600"))
+SCHEDULER_ENABLED = env_bool("SCHEDULER_ENABLED", False)
+SCHEDULER_INTERVAL_SECONDS = env_int("SCHEDULER_INTERVAL_SECONDS", 3600, minimum=60)
 # Phase D: kontrola splatných připomínek – vlastní lehký job ve STEJNÉM scheduleru, defaultně zapnutý
 # i bez hodinového jobu. Zpracování je idempotentní (víc workerů / lazy kontrola při čtení notifikací
 # nic nezdvojí), takže krátký interval je bezpečný.
-REMINDERS_CHECK_ENABLED = (os.environ.get("REMINDERS_CHECK_ENABLED", "true").lower() in ("1", "true", "yes"))
-REMINDERS_CHECK_SECONDS = max(15, int(os.environ.get("REMINDERS_CHECK_SECONDS", "60")))
+REMINDERS_CHECK_ENABLED = env_bool("REMINDERS_CHECK_ENABLED", True)
+REMINDERS_CHECK_SECONDS = env_int("REMINDERS_CHECK_SECONDS", 60, minimum=15)
 # Phase F: Denní přehled – vlastní job (pomalé LLM volání nesmí brzdit připomínky). Čas v Europe/Prague.
-DAILY_BRIEFING_ENABLED = (os.environ.get("DAILY_BRIEFING_ENABLED", "true").lower() in ("1", "true", "yes"))
-DAILY_BRIEFING_CHECK_SECONDS = max(60, int(os.environ.get("DAILY_BRIEFING_CHECK_SECONDS", "300")))
+DAILY_BRIEFING_ENABLED = env_bool("DAILY_BRIEFING_ENABLED", True)  # stejný parser jako briefing_service
+DAILY_BRIEFING_CHECK_SECONDS = env_int("DAILY_BRIEFING_CHECK_SECONDS", 300, minimum=60)
 # Phase G: Týdenní přehled – další samostatný job (neblokuje připomínky ani Denní přehled).
-WEEKLY_REVIEW_ENABLED = (os.environ.get("WEEKLY_REVIEW_ENABLED", "true").lower() in ("1", "true", "yes"))
-WEEKLY_REVIEW_CHECK_SECONDS = max(60, int(os.environ.get("WEEKLY_REVIEW_CHECK_SECONDS", "900")))
+WEEKLY_REVIEW_ENABLED = env_bool("WEEKLY_REVIEW_ENABLED", True)  # stejný parser jako weekly_review_service
+WEEKLY_REVIEW_CHECK_SECONDS = env_int("WEEKLY_REVIEW_CHECK_SECONDS", 900, minimum=60)
 SINGLE_WORKER_ASSUMPTION_DOC = (
     "Scheduler assumes single backend worker (uvicorn --workers 1). "
     "If you run multiple workers, scheduler will fire multiple times per hour."

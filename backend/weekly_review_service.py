@@ -22,6 +22,7 @@ from sqlalchemy import update as _sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from env_config import env_bool
 from llm_budget import estimate_tokens
 from models import Notification, WeeklyReview
 from planner_guard import (
@@ -168,16 +169,8 @@ class WeeklyReviewInProgress(Exception):
 
 # ===== konfigurace =====
 
-def _flag(name: str, default: str = "true") -> bool:
-    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
-
-
 def review_enabled() -> bool:
-    return _flag("WEEKLY_REVIEW_ENABLED")
-
-
-def review_push_enabled() -> bool:
-    return _flag("WEEKLY_REVIEW_PUSH")
+    return env_bool("WEEKLY_REVIEW_ENABLED", True)
 
 
 def review_time() -> dtime:

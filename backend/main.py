@@ -46,6 +46,7 @@ import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
+from env_config import env_bool
 
 
 PLANNER_MODE_DAILY = "daily"
@@ -175,7 +176,7 @@ def _seed_default_subjects():
 
 
 BACKEND_DIR = Path(__file__).resolve().parent
-RUN_ALEMBIC_UPGRADE_AT_STARTUP = (os.environ.get("RUN_ALEMBIC_UPGRADE_AT_STARTUP", "true").lower() in ("1", "true", "yes"))
+RUN_ALEMBIC_UPGRADE_AT_STARTUP = env_bool("RUN_ALEMBIC_UPGRADE_AT_STARTUP", True)
 
 
 def run_migrations() -> None:

@@ -12,11 +12,12 @@ from sqlalchemy.engine import make_url
 from database import SessionLocal
 from models import BackupLog
 from time_utils import local_day_bounds_utc, now_local
+from env_config import env_bool, env_int
 
-BACKUP_ENABLED = (os.environ.get("BACKUP_ENABLED", "false").lower() in ("1", "true", "yes"))
+BACKUP_ENABLED = env_bool("BACKUP_ENABLED", False)
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "./backups")
-BACKUP_HOUR_OF_DAY = int(os.environ.get("BACKUP_HOUR_OF_DAY", "3"))
-BACKUP_RETENTION_DAYS = int(os.environ.get("BACKUP_RETENTION_DAYS", "30"))
+BACKUP_HOUR_OF_DAY = env_int("BACKUP_HOUR_OF_DAY", 3)
+BACKUP_RETENTION_DAYS = env_int("BACKUP_RETENTION_DAYS", 30, minimum=1)
 
 _DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+pysqlite:///./standa-hub.db")
 
