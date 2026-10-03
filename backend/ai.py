@@ -539,6 +539,7 @@ def _route_for_request(user_texts: list[str], context: CurrentContext | None) ->
         enabled=LLM_SETTINGS.tool_routing,
         context_areas=context.areas if context is not None else frozenset(),
         covered_tools=context.covered_tools if context is not None else frozenset(),
+        named_areas=context.named_areas if context is not None else frozenset(),
     )
 
 

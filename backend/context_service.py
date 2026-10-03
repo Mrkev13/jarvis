@@ -82,6 +82,8 @@ class CurrentContext:
     estimated_tokens: int
     areas: frozenset[str] = field(default_factory=frozenset)
     memory_text: str = ""  # jen RELEVANT MEMORY – pro grounding NENÍ zdrojem čísel
+    # Oblasti výslovně zmíněné jménem záznamu z DB, které router sám nezná (název aktivní připomínky).
+    named_areas: frozenset[str] = field(default_factory=frozenset)
 
 
 def _split_memory(text: str) -> str:
@@ -299,6 +301,17 @@ def _render(header_lines: list[str], sections: list[tuple[str, list[str]]], memo
     return "\n".join(out)
 
 
+def _named_reminder_areas(db: Session, message: str) -> frozenset[str]:
+    """Zmínka názvu aktivní připomínky („posuň fyzio o hodinu") = výslovně oblast připomínek."""
+    from models import Reminder
+
+    titles = [_fold(t).strip() for (t,) in db.query(Reminder.title).filter(Reminder.status.in_(("scheduled", "fired"))).all() if t]
+    folded = _fold(message)
+    # Celá slova („fyzio" ano, „fyzioterapeut" ne) – název připomínky bývá obyčejné slovo.
+    hit = any(len(t) >= 3 and re.search(rf"(?<!\w){re.escape(t)}(?!\w)", folded) for t in titles)
+    return frozenset({AREA_REMINDERS}) if hit else frozenset()
+
+
 def build_current_context(
     db: Session,
     message: str,
@@ -311,7 +324,8 @@ def build_current_context(
     today = local.date()
     projects = [p for (p,) in db.query(WorkSession.project).distinct().all() if p]
     tanks = [t for (t,) in db.query(WotGrind.tank).all() if t]
-    areas = classify_areas(message, projects, tanks)
+    named = _named_reminder_areas(db, message)
+    areas = classify_areas(message, projects, tanks) | named
     planner_like = is_planner_like(message)
 
     tomorrow = today + timedelta(days=1)
@@ -330,8 +344,8 @@ def build_current_context(
         AREA_REMINDERS: lambda: _reminder_lines(db, local),
     }
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
-    explicit = classify_areas(message, projects, tanks, implied=False)
-    ordered = sorted((k for k in _AREA_SECTIONS_ORDER if k in areas), key=lambda k: k not in explicit)
+    explicit = classify_areas(message, projects, tanks, implied=False) | named
+    ordered =sorted((k for k in _AREA_SECTIONS_ORDER if k in areas), key=lambda k: k not in explicit)
     sections = [(key, builders[key]()) for key in ordered]
 
     memories = rank_memories(db.query(Memory).filter(Memory.active.is_(True)).all(), message, areas, planner=planner_like)
@@ -341,7 +355,7 @@ def build_current_context(
     if not sections and not memory_lines:
         # Neznámý / obecný dotaz: jen datum (malý obecný souhrn), žádná data modulů.
         text = _render(header, [], [])
-        return CurrentContext(text, ("date",), frozenset(), estimate_tokens(text), areas)
+        return CurrentContext(text, ("date",), frozenset(), estimate_tokens(text), areas, named_areas=named)
 
     # Rozpočet: nejdřív zkrátit paměť, pak odebírat sekce od nejméně důležité (konec pořadí).
     text = _render(header, sections, memory_lines)
@@ -360,4 +374,5 @@ def build_current_context(
     if memory_checked and (memory_lines or planner_like):
         covered |= set(_COVERED_TOOLS[AREA_MEMORY])
     section_names = ("date", *included, *(("memory",) if memory_lines else ()))
-    return CurrentContext(text, section_names, frozenset(covered), estimate_tokens(text), areas, _split_memory(text))
+    return CurrentContext(text, section_names, frozenset(covered), estimate_tokens(text), areas, _split_memory(text),
+                          named_areas=named)

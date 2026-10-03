@@ -125,6 +125,27 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertEqual(mutate.reason, REASON_WRITE_UNKNOWN)
         self.assertEqual(_names(mutate) & WRITE_NAMES, {"modify_records", "manage_reminder"})
 
+    def test_named_reminder_routes_to_manage_reminder_not_work(self):
+        # Regrese (Phase D): „posuň fyzio o hodinu" bez slova „připomínka" → „hodin" = práce → dřív jen
+        # work/finance read tooly + modify_records a žádný reminder tool. Název aktivní připomínky
+        # (z CURRENT STATE, jako jména projektů/tanků) teď oblast připomínek určí výslovně.
+        route = route_tools(["posuň fyzio o hodinu"], named_areas=frozenset({"reminders"}))
+        names = _names(route)
+        self.assertIn("manage_reminder", names)
+        self.assertIn("get_reminders", names)
+        self.assertNotIn("add_reminder", names)  # úprava existující, ne nová připomínka
+
+    def test_named_reminder_never_removes_other_write_tools(self):
+        # Připomínka nazvaná „oběd" nesmí výdaji za oběd vzít modify_records.
+        names = _names(route_tools(["změň výdaj za oběd na 450 Kč"], named_areas=frozenset({"reminders"})))
+        self.assertIn("modify_records", names)
+        self.assertIn("manage_reminder", names)
+
+    def test_without_named_reminder_routing_is_unchanged(self):
+        names = _names(route_tools(["posuň fyzio o hodinu"]))
+        self.assertNotIn("manage_reminder", names)
+        self.assertIn("modify_records", names)
+
     def test_mutation_intent_exposes_modify_records_only(self):
         for msg, area_tool in (
             ("změň poslední výdaj za oběd na 450 Kč", "get_finance_transactions"),

@@ -198,15 +198,21 @@ def route_tools(
     enabled: bool = True,
     context_areas: frozenset[str] = frozenset(),
     covered_tools: frozenset[str] = frozenset(),
+    named_areas: frozenset[str] = frozenset(),
 ) -> ToolRoute:
-    """Vybere tooly pro request. context_areas/covered_tools pochází z CURRENT STATE (A3), pokud existuje."""
+    """Vybere tooly pro request. context_areas/covered_tools/named_areas pochází z CURRENT STATE (A3), pokud existuje.
+
+    named_areas = oblasti zmíněné jménem záznamu z DB (název aktivní připomínky) – výslovná zmínka, ale
+    write tooly té oblasti jen PŘIDÁ k ostatním (obyčejné slovo jako „oběd" nesmí vzít finance tooly).
+    """
     if not enabled:
         return all_tools_route()
 
     text = routing_text(user_texts)
     intents = intent_areas(text)
-    explicit = classify_areas(text, implied=False) | intents
-    areas = classify_areas(text) | intents | frozenset(context_areas)
+    keyword_explicit = classify_areas(text, implied=False) | intents
+    explicit = keyword_explicit | frozenset(named_areas)
+    areas = classify_areas(text) | intents | frozenset(context_areas) | frozenset(named_areas)
     write_intent = detect_write_intent(text)
 
     if not areas and not write_intent and _is_greeting(text):
@@ -240,7 +246,7 @@ def route_tools(
         write_areas = explicit & _WRITE_AREAS
         if _MEMORY_WRITE_RE.search(folded) and not (mutate or undo):
             write_areas = frozenset({AREA_MEMORY})
-        if AREA_REMINDERS in explicit and not undo:
+        if AREA_REMINDERS in keyword_explicit and not undo:
             # „připomeň mi za 2 hodiny…" / „posuň připomínku o hodinu": „hodin" není práce, jen čas připomínky.
             write_areas = frozenset({AREA_REMINDERS})
         if write_areas:
