@@ -28,8 +28,9 @@ from activity_service import log_activity
 from context_service import fold_text
 from database import SessionLocal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
-from read_queries import ASSIGNMENT_DONE_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
+from text_utils import clip
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -37,7 +38,7 @@ MAX_CANDIDATES = 5
 MAX_SCAN = 2000  # kolik nejnovějších řádků se prohledává textovým filtrem
 
 _PRIORITIES = ("high", "medium", "low")
-_ASSIGNMENT_DONE = ASSIGNMENT_DONE_STATUSES  # kanonická definice (read_queries)
+_ASSIGNMENT_DONE = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
 
 
 class MutationRefused(Exception):
@@ -84,8 +85,7 @@ def _d(value) -> str:
 
 
 def _short(text, limit: int = 60) -> str:
-    t = " ".join(str(text or "").split())
-    return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+    return clip(text, limit)
 
 
 def _plain(value):

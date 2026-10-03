@@ -1,20 +1,19 @@
-from datetime import date as date_type
 from datetime import date
 
 from database import SessionLocal
 from models import WotResource, WotGrind
 from models import FinanceTransaction
+from time_utils import today_local
 from models import Subject, Assignment, Exam
 from models import WorkSession
 from models import MffCharacter
 from models import Goal
 from models import Memory
-from models import Notification, GoalProgressHistory
+from models import GoalProgressHistory
 from models import (
     compute_mff_build_completeness,
     legacy_role_string_to_list,
     parse_legacy_uru_state,
-    MFF_ROLE_OPTIONS,
 )
 from activity_service import log_activity, delta_dict
 
@@ -33,7 +32,6 @@ def get_wot_resources():
     finally:
         db.close()
 
-from models import WotResource, WotGrind
 
 
 def get_wot_grinds():
@@ -221,7 +219,7 @@ def get_work_summary():
 
     try:
         items = db.query(WorkSession).all()
-        today = date_type.today()
+        today = today_local()
         this_month = (today.year, today.month)
 
         total_hours = 0.0
@@ -1199,21 +1197,6 @@ def get_mff_summary():
         db.close()
 
 
-def get_automatic_goal_current_value(source: str, target_value: float | None = None):
-    from goal_history_service import compute_automatic_goal_current_value_with_ok
-    db = SessionLocal()
-    try:
-        current_value, ok = compute_automatic_goal_current_value_with_ok(db, source)
-        if not ok:
-            return {"progress": 0, "current_value": None}
-        progress = 0
-        if target_value is not None and float(target_value) > 0:
-            progress = min(100, max(0, int(round(float(current_value) / float(target_value) * 100))))
-        return {"progress": progress, "current_value": float(current_value)}
-    finally:
-        db.close()
-
-
 def get_goals():
     db = SessionLocal()
 
@@ -1440,30 +1423,3 @@ def get_goal_progress_history(goal_id: int):
         ]
     finally:
         db.close()
-
-
-def create_weekly_plan():
-    return {
-        "mode": "planning",
-        "mandate": (
-            "ENTER PLANNING MODE. Now proceed in this EXACT order: "
-            "1) Call get_goals() to list active goals with areas, priorities, progress. "
-            "2) Call get_memories() to load long-term preferences, constraints, plans, routines. "
-            "3) Inspect goal areas. For EACH area present in active goals or the user question, "
-            "call ONLY the relevant READ tools (school → get_school_assignments + get_school_exams; "
-            "work → get_work_summary; finance → get_finance_summary; wot → get_wot_grinds + "
-            "get_wot_resources; mff → get_mff_characters). "
-            "DO NOT call tools for areas without active goals or explicit mention. "
-            "4) Combine all loaded data and rank 3-5 next actions using the priority tier: "
-            "(1) overdue tasks, (2) deadlines < 14 days, (3) finance/work targets lagging, "
-            "(4) high-priority goals < 50% progress, (5) medium goals, (6) low / nice-to-have. "
-            "5) FINAL OUTPUT: 1-2 natural Czech intro sentences. Then exactly ONE fenced "
-            "```json ... ``` block with keys {summary: str, actions: [{priority:int, "
-            "area:school|work|finance|wot|mff|personal|fitness|hobby|travel|general, "
-            "title: str (5-15 words), reason: str (< 25 words)}]}. "
-            "Never invent deadlines or numbers not returned by tools. "
-            "Planner is READ-ONLY: never auto-change data. If the user wants to persist "
-            "something, use WRITE tools afterwards and let them confirm."
-        ),
-        "rules_version": "1.0",
-    }

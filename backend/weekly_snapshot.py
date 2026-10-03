@@ -22,15 +22,16 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from briefing_snapshot import Item, _short, meaningful_activity
+from briefing_snapshot import Item, meaningful_activity
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from models import (
     ActivityLog, Assignment, Exam, FinanceTransaction, Goal, GoalProgressHistory, Notification, Reminder,
     WorkSession,
 )
-from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 from time_utils import local_to_utc, local_week_bounds_utc, to_local
+from text_utils import WEEKDAYS_CZ, clip as _short
 
 MAX_SNAPSHOT_TOKENS = 2200
 QUIET_MIN_SIGNALS = 4  # méně datových bodů → deterministický „málo dat" přehled bez LLM
@@ -54,8 +55,8 @@ SECTION_CAPS = {"school": 10, "goals": 8, "finance": 3, "reminders": 3, "activit
 TRIM_ORDER = ("activity", "finance", "reminders", "goals", "school", "next_week")
 
 CONFIDENCE_TEXT = {"high": "vysoká", "moderate": "střední", "low": "nízká"}
-_GOAL_INACTIVE = {"completed", "cancelled", "paused"}
-_WEEKDAY_NAMES = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
+_GOAL_INACTIVE = GOAL_INACTIVE_STATUSES
+_WEEKDAY_NAMES = WEEKDAYS_CZ
 
 
 # ===== týden =====

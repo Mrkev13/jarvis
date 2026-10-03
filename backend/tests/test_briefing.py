@@ -32,7 +32,8 @@ from llm_usage import LLMCallRecord  # noqa: E402
 from models import (  # noqa: E402
     ActivityLog, Assignment, DailyBriefing, Delivery, Exam, Goal, Notification, Reminder, Subject,
 )
-from tests.test_delivery import FakeProvider  # noqa: E402
+from tests import fakes  # noqa: E402
+from tests.fakes import FakeProvider, completion, groq_error  # noqa: E402
 
 # Úterý 6. 10. 2026; 07:00 Praha (SELČ) = 05:00 UTC
 SEVEN = datetime(2026, 10, 6, 5, 0)
@@ -394,42 +395,9 @@ class SchedulerTimingTestCase(BriefingTestBase):
         self.assertEqual(self.q(lambda db: db.query(DailyBriefing).count()), 1)
 
 
-class FakeGroq:
-    """Lokální HTTP fake Groq (httpx MockTransport) za skutečným OpenAI SDK klientem – žádná síť."""
-
-    def __init__(self, *responses):
-        self.responses = list(responses)
-        self.requests = []
-
-    def handler(self, request):
-        import httpx
-
-        self.requests.append(json.loads(request.content))
-        status, body = self.responses.pop(0) if self.responses else (200, completion(good_answer()))
-        if isinstance(body, str):
-            return httpx.Response(status, text=body, headers={"content-type": "text/plain"})
-        return httpx.Response(status, json=body)
-
-    def client(self):
-        import httpx
-        from openai import OpenAI
-
-        return OpenAI(api_key="test", base_url="http://groq.fake/openai/v1", max_retries=0,
-                      http_client=httpx.Client(transport=httpx.MockTransport(self.handler)))
-
-
-def completion(content, finish="stop", refusal=None, reasoning=150):
-    return {
-        "id": "chatcmpl-fake", "object": "chat.completion", "created": 0, "model": "openai/gpt-oss-120b",
-        "choices": [{"index": 0, "finish_reason": finish,
-                     "message": {"role": "assistant", "content": content, "refusal": refusal}}],
-        "usage": {"prompt_tokens": 900, "completion_tokens": 400, "total_tokens": 1300,
-                  "completion_tokens_details": {"reasoning_tokens": reasoning}},
-    }
-
-
-def groq_error(status, message, code=None):
-    return status, {"error": {"message": message, "type": "invalid_request_error", "code": code}}
+class FakeGroq(fakes.FakeGroq):
+    def default_response(self):
+        return 200, completion(good_answer())
 
 
 class StructuredOutputTestCase(BriefingTestBase):

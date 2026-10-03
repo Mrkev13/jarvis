@@ -3,14 +3,14 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta
 
 from database import SessionLocal
-from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
-from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
+from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -21,7 +21,6 @@ from auth_service import (
     cookie_params,
     AUTH_COOKIE_NAME,
 )
-from tools import get_finance_transactions
 from tools import get_school_subjects, get_school_assignments, get_school_exams
 from tools import get_work_sessions, get_work_summary
 from tools import get_mff_characters, get_mff_summary, upsert_mff_character
@@ -30,7 +29,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 
 
-from ai import DailyLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
+from ai import DailyLimitError, LLMRateLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
 import ai as _ai_module
 from history_service import prepare_conversation_history, window_client_messages
 from llm_config import LLM_SETTINGS
@@ -46,6 +45,7 @@ import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
+from env_config import env_bool
 
 
 PLANNER_MODE_DAILY = "daily"
@@ -175,7 +175,7 @@ def _seed_default_subjects():
 
 
 BACKEND_DIR = Path(__file__).resolve().parent
-RUN_ALEMBIC_UPGRADE_AT_STARTUP = (os.environ.get("RUN_ALEMBIC_UPGRADE_AT_STARTUP", "true").lower() in ("1", "true", "yes"))
+RUN_ALEMBIC_UPGRADE_AT_STARTUP = env_bool("RUN_ALEMBIC_UPGRADE_AT_STARTUP", True)
 
 
 def run_migrations() -> None:
@@ -645,9 +645,7 @@ def chat(request: ChatRequest):
     except RuntimeError as exc:
         from fastapi.responses import JSONResponse
         msg = str(exc)
-        status = 503
-        if "Rate limit" in msg or "překročen" in msg:
-            status = 429
+        status = 429 if isinstance(exc, LLMRateLimitError) else 503
         # Denní limit (TPD/RPD) se během sekund neobnoví → neslibovat krátké čekání.
         retry_hint = (
             "Denní limit se během pár sekund neobnoví – zkus to prosím později."
@@ -1989,14 +1987,13 @@ def planner_generate(mode: str = "weekly"):
 
 
 def _top_active_goals(db, limit: int = 3):
-    from datetime import date as _date
 
-    today = _date.today()
+    today = today_local()
     rows = db.query(Goal).all()
     enriched: list[dict] = []
     for g in rows:
         status = (g.status or "").lower()
-        if status in ("completed", "paused", "cancelled"):
+        if status in GOAL_INACTIVE_STATUSES:
             continue
         progress, current_value = compute_goal_progress_and_value(db, g, today=today)
         enriched.append({
@@ -2131,9 +2128,8 @@ def _get_finance_with_goal(db, today: date | None = None):
 
 
 def _get_upcoming(db, limit: int = 5, today: date | None = None):
-    from datetime import date as _d
 
-    today_use: date = today or _d.today()
+    today_use: date = today or today_local()
     entries: list[dict] = []
     assignments = db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
     for it in assignments:
@@ -2166,7 +2162,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
     goals = db.query(Goal).filter(Goal.target_date.is_not(None)).all()
     for g in goals:
         st = (g.status or "").lower()
-        if st in ("completed", "paused", "cancelled"):
+        if st in GOAL_INACTIVE_STATUSES:
             continue
         days = (g.target_date - today_use).days
         entries.append({
@@ -2366,7 +2362,7 @@ def activity_list(
     to_date: str | None = None,
     q: str | None = None,
 ):
-    from sqlalchemy import and_, or_
+    from sqlalchemy import and_
 
     limit_val = max(1, min(int(limit or 50), 500))
     offset_val = max(0, int(offset or 0))
@@ -2500,7 +2496,7 @@ def scheduler_status():
         "briefing_time": briefing_service.briefing_time().strftime("%H:%M"),
         "weekly_review_enabled": WEEKLY_REVIEW_ENABLED,
         "weekly_review_interval_seconds": WEEKLY_REVIEW_CHECK_SECONDS,
-        "weekly_review_schedule": weekly_review_service._schedule_label(),
+        "weekly_review_schedule": weekly_review_service.schedule_label(),
         "doc": SINGLE_WORKER_ASSUMPTION_DOC,
     }
 

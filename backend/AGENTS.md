@@ -320,6 +320,8 @@ v pražském čase (den = pražská půlnoc → půlnoc převedená do UTC), nez
 - Cookie: `HttpOnly`, `SameSite=Lax`, `Secure=AUTH_COOKIE_SECURE` (default **false** – produkci přes Tailscale HTTPS nastavit na true).
 - `validate_session()` refreshne `last_seen_at` každých 5 min (redukce writeů).
 - Expirace: `AUTH_SESSION_TTL_MINUTES` default = 1440 (24 h).
+  Alternativně `AUTH_SESSION_TTL_HOURS` (má přednost, např. `12` nebo `0.5`). Jméno cookie: `AUTH_COOKIE_NAME`
+  (default `standa_hub_session`, frontend middleware musí používat stejné).
 
 ### 8.4 Endpointy
 
@@ -800,3 +802,20 @@ print(_hash_pin("123456"))
   rušný ~810, nejhorší ořezaný ~1650 (strop 2200) → požadavek vč. stropu výstupu ≈ 2,9k / 3,2k / 4,0k.
 - Testy: `test_weekly_review.py` (falešné hodiny/LLM, reálná cesta SDK proti lokálnímu fake HTTP),
   migrace v `test_alembic_migration.py`, frontend `lib/weeklyReview.test.mjs`.
+
+## 24. Architektonická pravidla (Roadmap 3.5)
+
+- Trvalé principy: `docs/architecture-principles.md`; audit a dluh: `docs/architecture-audit.md`;
+  nové moduly: `docs/module-integration-checklist.md`; frontend směr: `docs/roadmap4-ui-foundation.md`.
+- **Kanonické moduly** (nic z nich neduplikovat lokálně):
+  - `statuses.py` – stavy záznamů (úkol hotový, zkouška otevřená/složená, cíl neaktivní, připomínka aktivní)
+    + `norm()` a predikáty. `read_queries` je jen re-exportuje.
+  - `env_config.py` – `env_bool/env_int/env_str` (ořez; prázdné = default; 1/true/yes/on). Žádné vlastní
+    parsování `os.environ`. Patří sem i `WEEKLY_REVIEW_ENABLED` / `DAILY_BRIEFING_ENABLED` (scheduler i služby
+    používají stejná pravidla).
+  - `time_utils.py` – UTC úložiště, Europe/Prague pro „dnes" a plány; nikdy `date.today()`.
+  - `text_utils.py` – `clip()` a české názvy dnů.
+  - `planner_guard.strict_text_problems` – přísný grounding pro přehledy.
+  - `ai.LLMRateLimitError` / `DailyLimitError` – chyby LLM se rozlišují typem, ne textem.
+- **Testy:** sdílené test doubles v `tests/fakes.py` (`FakeGroq`, `completion`, `groq_error`, `FakeProvider`);
+  testy neimportují z jiných testovacích modulů. Nikdy reálný Groq.

@@ -14,6 +14,7 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 import ai
+import tool_registry
 from llm_budget import estimate_fixed_overhead, estimate_tokens, estimate_tool_schema_tokens
 from llm_config import DEFAULT_GROQ_MODEL, load_llm_settings
 from time_utils import now_local
@@ -44,7 +45,7 @@ class TokenEstimatorTestCase(unittest.TestCase):
         self.assertEqual(estimate_tokens(ai.SYSTEM_PROMPT), estimate_tokens(ai.SYSTEM_PROMPT))
 
     def test_tool_schema_estimate_uses_compact_json(self):
-        tools = [ai._tool("x", "d", {"a": {"type": "string"}})]
+        tools = [tool_registry._tool("x", "d", {"a": {"type": "string"}})]
         compact = '[{"type":"function","function":{"name":"x","description":"d","parameters":' \
                   '{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false}}}]'
         self.assertEqual(estimate_tool_schema_tokens(tools), estimate_tokens(compact))

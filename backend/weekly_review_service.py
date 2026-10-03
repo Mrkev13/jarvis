@@ -22,15 +22,14 @@ from sqlalchemy import update as _sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from env_config import env_bool
 from llm_budget import estimate_tokens
 from models import Notification, WeeklyReview
-from planner_guard import (
-    _CAPITALIZED_RE, _DATE_DM_RE, _ISO_DATE_RE, _KNOWN_TERMS, _NUMBER_RE, _STOPWORDS, Evidence, _parse_number,
-    build_evidence,
-)
+from planner_guard import build_evidence, strict_text_problems
 from structured_llm import StructuredLLMError, call_structured, clip, make_ref_stripper, parse_json_object
 from structured_llm import request_params as _structured_params
 from time_utils import local_to_utc, to_local, utc_now
+from text_utils import WEEKDAYS_CZ
 from weekly_snapshot import (
     CONFIDENCE_TEXT, Forecast, Metric, WeeklySnapshot, build_weekly_snapshot, plural, week_bounds_utc, week_label,
     week_start_for,
@@ -78,7 +77,7 @@ ERROR_TEXT = {
     "request_rejected": "AI služba odmítla požadavek (nastavení) – zkusím to později.",
 }
 _DAYS = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6}
-_DAY_CZ = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
+_DAY_CZ = WEEKDAYS_CZ
 
 SYSTEM_PROMPT = """You write the user's WEEKLY REVIEW in Standa Hub. The user message is a SNAPSHOT of real data for one Europe/Prague week (Monday-Sunday). Every metric, item and forecast candidate starts with a [ref].
 Rules:
@@ -126,38 +125,6 @@ _CAUSAL_RE = re.compile(
 _CERTAIN_RE = re.compile(r"\b(?:určitě|jistě|zaručeně|stoprocentně|nevyhnutelně|definitely|certainly|surely)\b", re.I)
 
 
-def _text_problems(text: str, ev: Evidence) -> list[str]:
-    """Přísnější kontrola než u chatu: metriky jsou spočítané předem, takže číslo s jednotkou (nebo ≥ 100)
-    musí ve snímku být přímo – žádné dopočty. Data jen ze snímku. Jména (velké písmeno uprostřed věty)
-    musí ve snímku být, s tolerancí českého skloňování (shoda kmene: „Sadu" ~ „Sada")."""
-    problems: list[str] = []
-    without_dates = _DATE_DM_RE.sub(" ", _ISO_DATE_RE.sub(" ", text))
-    for m in _NUMBER_RE.finditer(without_dates):
-        value, has_unit = _parse_number(m)
-        if (has_unit or value >= 100) and not any(
-                abs(value - n) <= 0.51 or (n and abs(value - n) / abs(n) <= 0.01) for n in ev.numbers):
-            problems.append("number")
-    for d, mo in _DATE_DM_RE.findall(text):
-        if (int(d), int(mo)) not in ev.day_months:
-            problems.append("date")
-    for _y, mo, d in _ISO_DATE_RE.findall(text):
-        if (int(d), int(mo)) not in ev.day_months:
-            problems.append("date")
-    words = text.split()
-    for i, word in enumerate(words):
-        if i == 0 or words[i - 1].endswith((".", "!", "?", ":")):
-            continue  # začátek věty
-        m = _CAPITALIZED_RE.match(word.strip("„\"'“”()"))
-        if not m:
-            continue
-        token = m.group(0).split("/")[0].rstrip(".-").lower()
-        if len(token) <= 1 or token in _KNOWN_TERMS or token in _STOPWORDS:
-            continue
-        if token not in ev.text and token[: max(3, len(token) - 2)] not in ev.text:
-            problems.append("name")
-    return problems
-
-
 class WeeklyReviewError(StructuredLLMError):
     """Kategorie chyby přehledu (+ spotřeba i u nepovedené odpovědi)."""
 
@@ -168,16 +135,8 @@ class WeeklyReviewInProgress(Exception):
 
 # ===== konfigurace =====
 
-def _flag(name: str, default: str = "true") -> bool:
-    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
-
-
 def review_enabled() -> bool:
-    return _flag("WEEKLY_REVIEW_ENABLED")
-
-
-def review_push_enabled() -> bool:
-    return _flag("WEEKLY_REVIEW_PUSH")
+    return env_bool("WEEKLY_REVIEW_ENABLED", True)
 
 
 def review_time() -> dtime:
@@ -284,7 +243,7 @@ def ground(data: dict, snap: WeeklySnapshot) -> tuple[dict, int]:
     used_tone: set[str] = set()
 
     def ok(text: str, *, fact: bool = True) -> bool:
-        if not text or _text_problems(text, evidence) or _BANNED_RE.search(text):
+        if not text or strict_text_problems(text, evidence) or _BANNED_RE.search(text):
             return False
         return not (fact and _CAUSAL_RE.search(text))
 
@@ -594,7 +553,7 @@ def _clean_visible(content: dict) -> dict:
     return out
 
 
-def _schedule_label() -> str:
+def schedule_label() -> str:
     return f"{_DAY_CZ[review_day()]} {review_time():%H:%M}"
 
 
@@ -608,7 +567,7 @@ def week_payload(db: Session, ws: date, now: datetime | None = None, *, with_fal
         "is_current": ws == current,
         "can_generate": ws == current,
         "enabled": review_enabled(),
-        "schedule_label": _schedule_label(),
+        "schedule_label": schedule_label(),
         "scheduled_at": scheduled_at(ws).isoformat() + "Z",
         "status": row.status if row else "missing",
         "review": None,

@@ -9,6 +9,7 @@ import bcrypt
 
 from database import SessionLocal
 from models import AuthSession
+from env_config import env_bool, env_str
 
 
 def _utc_now() -> datetime:
@@ -28,9 +29,9 @@ def _ensure_utc_aware(dt: datetime | None) -> datetime | None:
 
 
 # ===== Configuration =====
-AUTH_PIN_HASH = os.environ.get("AUTH_PIN_HASH", "")  # bcrypt hash of PIN, empty = auth disabled
-AUTH_COOKIE_NAME = os.environ.get("AUTH_COOKIE_NAME", "standa_hub_session")
-AUTH_COOKIE_SECURE = (os.environ.get("AUTH_COOKIE_SECURE", "false").lower() in ("1", "true", "yes"))
+AUTH_PIN_HASH = env_str("AUTH_PIN_HASH")  # bcrypt hash of PIN, empty = auth disabled
+AUTH_COOKIE_NAME = env_str("AUTH_COOKIE_NAME", "standa_hub_session")
+AUTH_COOKIE_SECURE = env_bool("AUTH_COOKIE_SECURE", False)
 AUTH_COOKIE_HTTPONLY = True
 AUTH_COOKIE_SAMESITE = "Lax"
 
@@ -57,11 +58,6 @@ def auth_enabled() -> bool:
 
 def _hash_session_token(token_plaintext: str) -> str:
     return hashlib.sha256(token_plaintext.encode("utf-8")).hexdigest()
-
-def _bcrypt_hash_pin(pin: str) -> str:
-    """For setup script; production uses pre-computed AUTH_PIN_HASH."""
-    hashed = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
-    return hashed.decode("utf-8")
 
 def _bcrypt_verify_pin(pin_candidate: str) -> bool:
     if not AUTH_PIN_HASH:

@@ -17,8 +17,9 @@ from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, Notification, WorkSession, WotGrind, WotResource
-from read_queries import ASSIGNMENT_DONE_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_month_bounds_utc, now_local
+from text_utils import WEEKDAYS_CZ_SHORT, clip
 
 CONTEXT_TARGET_TOKENS = DEFAULT_CONTEXT_TARGET_TOKENS
 CONTEXT_MAX_TOKENS = DEFAULT_MAX_CONTEXT_TOKENS
@@ -34,11 +35,11 @@ AREA_MFF = "mff"
 # Phase D: připomínky (časové dotazy je zahrnují stejně jako školu a cíle).
 AREA_REMINDERS = "reminders"
 
-_DONE_STATUSES = ASSIGNMENT_DONE_STATUSES  # kanonická definice (read_queries)
-_EXAM_OPEN_STATUSES = {"upcoming", "scheduled", ""}
-_INACTIVE_GOAL_STATUSES = {"completed", "paused", "cancelled"}
+_DONE_STATUSES = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
+_EXAM_OPEN_STATUSES = EXAM_OPEN_STATUSES
+_INACTIVE_GOAL_STATUSES = GOAL_INACTIVE_STATUSES
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
-_WEEKDAYS = ("po", "út", "st", "čt", "pá", "so", "ne")
+_WEEKDAYS = WEEKDAYS_CZ_SHORT
 
 # Klíčová slova (bez diakritiky, podřetězce) → oblasti.
 _TIME_PLAN_WORDS = ("zitra", "dnes", "dneska", "tyden", "tydnu", "vikend", "pondeli", "utery", "streda", "ctvrtek",
@@ -147,8 +148,7 @@ def _fmt_num(value: float) -> str:
 
 
 def _short(text: str, limit: int = 60) -> str:
-    text = re.sub(r"\s+", " ", (text or "").strip())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return clip(text, limit)
 
 
 def _list_or_none(items: list[str], total: int) -> str:
@@ -246,7 +246,7 @@ def _reminder_lines(db: Session, local_now: datetime) -> list[str]:
 
     now_utc = local_now.astimezone(timezone.utc).replace(tzinfo=None)
     horizon = now_utc + timedelta(hours=48)
-    rows = db.query(Reminder).filter(Reminder.status.in_(("scheduled", "fired"))).all()
+    rows = db.query(Reminder).filter(Reminder.status.in_(REMINDER_ACTIVE_STATUSES)).all()
 
     def due(r):
         return r.snoozed_until if r.snoozed_until is not None and r.snoozed_until < r.due_at else r.due_at
@@ -306,7 +306,7 @@ def _named_reminder_areas(db: Session, message: str) -> frozenset[str]:
     """Zmínka názvu aktivní připomínky („posuň fyzio o hodinu") = výslovně oblast připomínek."""
     from models import Reminder
 
-    titles = [_fold(t).strip() for (t,) in db.query(Reminder.title).filter(Reminder.status.in_(("scheduled", "fired"))).all() if t]
+    titles = [_fold(t).strip() for (t,) in db.query(Reminder.title).filter(Reminder.status.in_(REMINDER_ACTIVE_STATUSES)).all() if t]
     folded = _fold(message)
     # Celá slova („fyzio" ano, „fyzioterapeut" ne) – název připomínky bývá obyčejné slovo.
     hit = any(len(t) >= 3 and re.search(rf"(?<!\w){re.escape(t)}(?!\w)", folded) for t in titles)

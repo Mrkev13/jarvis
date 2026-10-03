@@ -32,8 +32,7 @@ from models import (  # noqa: E402
     ActivityLog, Assignment, Delivery, Exam, FinanceTransaction, Goal, GoalProgressHistory, Notification, Reminder,
     Subject, WeeklyReview, WorkSession,
 )
-from tests.test_briefing import FakeGroq, completion, groq_error  # noqa: E402
-from tests.test_delivery import FakeProvider  # noqa: E402
+from tests.fakes import FakeGroq, FakeProvider, completion, groq_error  # noqa: E402
 
 W = date(2026, 10, 5)  # pondělí; týden 5.–11. 10. 2026 (SELČ, UTC+2)
 SUN19 = datetime(2026, 10, 11, 17, 0)  # neděle 19:00 Praha

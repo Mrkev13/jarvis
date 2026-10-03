@@ -15,16 +15,20 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models import ActivityLog, Assignment, Exam, FinanceTransaction, Subject, WorkSession
-from time_utils import local_day_bounds_utc, utc_now
+from time_utils import local_day_bounds_utc, to_local, utc_now
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 DEFAULT_ACTIVITY_DAYS = 7
 MAX_ACTIVITY_DAYS = 90
 
-ASSIGNMENT_DONE_STATUSES = frozenset({"done", "completed", "hotovo", "closed", "finished"})
-EXAM_OPEN_STATUSES = frozenset({"upcoming", "scheduled", ""})
-GOAL_OPEN_EXCLUDED = frozenset({"completed", "cancelled"})
+# Kanonické stavy žijí ve statuses.py (re-export kvůli stávajícím importům).
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_OPEN_EXCLUDED  # noqa: E402,F401
+
+
+def _local_iso(dt_utc):
+    """Časy pro AI v pražském čase s offsetem (DB ukládá naive UTC; jinak AI ukazuje 05:12 místo 07:12)."""
+    return to_local(dt_utc).isoformat() if dt_utc else None
 
 
 def _limit(value) -> int:
@@ -87,7 +91,7 @@ def query_finance_transactions(
             "category": t.category,
             "description": t.description,
             "transaction_type": t.transaction_type,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "created_at": _local_iso(t.created_at),
         }
         for t in rows
     ]
@@ -274,7 +278,7 @@ def query_recent_activity(
     items = [
         {
             "id": r.id,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "timestamp": _local_iso(r.timestamp),
             "area": r.area,
             "action_type": r.action_type,
             "entity_type": r.entity_type,

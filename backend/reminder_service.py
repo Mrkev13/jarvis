@@ -28,16 +28,18 @@ from sqlalchemy import update as _sql_update
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
+from statuses import REMINDER_ACTIVE_STATUSES
 from context_service import fold_text
 from models import Notification, Reminder
 from time_utils import local_to_utc, to_local, utc_now
+from text_utils import WEEKDAYS_CZ_SHORT
 
 STATUS_SCHEDULED, STATUS_FIRED, STATUS_DONE, STATUS_CANCELLED = "scheduled", "fired", "done", "cancelled"
-ACTIVE_STATUSES = (STATUS_SCHEDULED, STATUS_FIRED)
+ACTIVE_STATUSES = REMINDER_ACTIVE_STATUSES  # (STATUS_SCHEDULED, STATUS_FIRED), statuses.py
 RECURRENCES = ("none", "daily", "weekly")
 LATE_AFTER = timedelta(minutes=15)  # zpoždění po výpadku, které se v notifikaci výslovně uvede
 MAX_TITLE = 255
-_WEEKDAY_SHORT = ("po", "út", "st", "čt", "pá", "so", "ne")
+_WEEKDAY_SHORT = WEEKDAYS_CZ_SHORT
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -489,10 +491,3 @@ def list_reminders(db: Session, status: str | None = "active", limit: int = 100,
     # Splatné nahoře, pak podle příštího výskytu.
     items.sort(key=lambda i: (i["state"] != "due", i["next_label"] == "–", i["due_at"]))
     return items
-
-
-def today_bounds_local(now: datetime | None = None) -> tuple[datetime, datetime]:
-    local_day = to_local(now or utc_now()).date()
-    return local_to_utc(datetime.combine(local_day, time.min)), local_to_utc(datetime.combine(local_day + timedelta(days=1), time.min))
-
-

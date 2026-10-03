@@ -1,4 +1,5 @@
 import json
+import zlib
 import os
 import time
 import types
@@ -9,11 +10,12 @@ from fastapi import HTTPException
 from openai import OpenAI
 from sqlalchemy import update as _sql_update
 
-from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS, _tool  # noqa: F401 (_tool: zpětná kompatibilita)
-from activity_service import log_activity, delta_dict
+from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS
+from activity_service import log_activity
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
+from text_utils import WEEKDAYS_CZ
 from context_service import CurrentContext, build_current_context
 from llm_budget import estimate_fixed_overhead, estimate_tool_schema_tokens
 from llm_config import LLM_SETTINGS
@@ -89,7 +91,7 @@ AFFORDABILITY: get current resources, compare with the cost, state the exact sur
 LANGUAGE: the user writes Czech; reply in Czech unless the user switches language.
 """
 
-_CZECH_WEEKDAYS = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
+_CZECH_WEEKDAYS = WEEKDAYS_CZ
 
 
 def current_date_block(now: datetime | None = None) -> str:
@@ -175,6 +177,14 @@ def _check_pending_expired(db) -> int:
     return affected
 
 
+def _audit_entity_id(action_id) -> int:
+    """Stabilní id pro audit: id PendingAction. (Dřív hash() – v Pythonu se mění s každým startem.)"""
+    try:
+        return int(action_id)
+    except (TypeError, ValueError):
+        return zlib.crc32(str(action_id).encode("utf-8")) % (10**8)
+
+
 def _confirm_pending_action_atomically(db, pending_id: str) -> dict | None:
     try:
         pid = int(pending_id)
@@ -195,7 +205,9 @@ def _confirm_pending_action_atomically(db, pending_id: str) -> dict | None:
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(status_code=409, detail="Pending already processed")
-    db.flush()
+    # Claim se commitne hned (AGENTS.md §4.2): executor zapisuje ve vlastní session; kdyby proces spadl
+    # uprostřed, zůstane „executing" a start ho označí jako failed – akce se nedá potvrdit podruhé.
+    db.commit()
     db.refresh(pa)
     try:
         args = json.loads(pa.arguments) if pa.arguments else {}
@@ -405,7 +417,11 @@ PENDING_CONFIRMATION_ANSWER = "Připravil jsem změnu k potvrzení."
 DAILY_LIMIT_KINDS = frozenset({"TPD", "RPD"})
 
 
-class DailyLimitError(RuntimeError):
+class LLMRateLimitError(RuntimeError):
+    """Provider odmítl kvůli limitu (429). Volající rozhodují podle typu, ne podle textu zprávy."""
+
+
+class DailyLimitError(LLMRateLimitError):
     """Vyčerpaný denní limit (TPD/RPD) – krátké čekání nepomůže; /chat podle typu volí text pro uživatele."""
 
 
@@ -476,7 +492,7 @@ def _llm_create_with_retry(
                 log_retry(attempt, attempts, wait_s, "429", log_enabled)
                 time.sleep(wait_s)
                 continue
-            raise RuntimeError(
+            raise LLMRateLimitError(
                 "AI provider nedisponuje (Rate limit 8 000 tokenů/minutu byl překročen). "
                 "Zkus to prosím za 10-20 sekund znovu, nebo zjednoduš otázku."
             ) from last_exc
@@ -798,7 +814,7 @@ def execute_confirm_action(action_id: str):
                     db, "system", "error",
                     f"Potvrzení akce selhalo: action_id {action_id} - {he.detail}",
                     entity_type="PendingAction",
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -833,7 +849,7 @@ def execute_confirm_action(action_id: str):
                     db, "system", "error",
                     f"Neznámý write tool: {tool_name}",
                     entity_type="ToolRegistry",
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -878,7 +894,7 @@ def execute_confirm_action(action_id: str):
                 log_activity(
                     db, "ai", "approve", summary,
                     entity_type=tool_name,
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
@@ -898,7 +914,7 @@ def execute_confirm_action(action_id: str):
                     db, "ai", "reject",
                     f"Chyba při {tool_name}: {type(exc).__name__}: {str(exc)[:120]}",
                     entity_type=tool_name,
-                    entity_id=abs(hash(action_id)) % (10**8),
+                    entity_id=_audit_entity_id(action_id),
                     user_context="ai_confirm"
                 )
                 db.commit()
