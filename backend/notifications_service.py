@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
-from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
 
 ALLOWED_SEVERITIES = {"info", "warning", "important"}
@@ -229,7 +229,7 @@ def _deadline_candidates_for_goal(it: Goal, today: date) -> NotificationCandidat
     if not it.target_date:
         return None
     status = (it.status or "").lower()
-    if status in ("completed", "paused", "cancelled"):
+    if status in GOAL_INACTIVE_STATUSES:
         return None
 
     days_left = (it.target_date - today).days
@@ -277,7 +277,7 @@ def _stagnation_threshold_days(priority: str) -> int:
 
 def _stagnation_candidate_for_goal(db: Session, it: Goal, today: date) -> NotificationCandidate | None:
     status = (it.status or "").lower()
-    if status in ("completed", "paused", "cancelled"):
+    if status in GOAL_INACTIVE_STATUSES:
         return None
 
     info = compute_goal_stagnation(db, it.id, today=today)
@@ -310,7 +310,7 @@ def _work_behind_candidate_for_goal(db: Session, it: Goal, today: date) -> Notif
     if (it.source or "") != "work_month_hours":
         return None
     status = (it.status or "").lower()
-    if status in ("completed", "paused", "cancelled"):
+    if status in GOAL_INACTIVE_STATUSES:
         return None
     if it.target_value is None or float(it.target_value) <= 0:
         return None
@@ -352,7 +352,7 @@ def _finance_goal_stagnation_candidate(db: Session, it: Goal, today: date) -> No
     if (it.source or "") != "finance_balance":
         return None
     status = (it.status or "").lower()
-    if status in ("completed", "paused", "cancelled"):
+    if status in GOAL_INACTIVE_STATUSES:
         return None
     if (it.area or "").lower() != "finance":
         return None

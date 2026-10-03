@@ -28,12 +28,13 @@ from sqlalchemy import update as _sql_update
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
+from statuses import REMINDER_ACTIVE_STATUSES
 from context_service import fold_text
 from models import Notification, Reminder
 from time_utils import local_to_utc, to_local, utc_now
 
 STATUS_SCHEDULED, STATUS_FIRED, STATUS_DONE, STATUS_CANCELLED = "scheduled", "fired", "done", "cancelled"
-ACTIVE_STATUSES = (STATUS_SCHEDULED, STATUS_FIRED)
+ACTIVE_STATUSES = REMINDER_ACTIVE_STATUSES  # (STATUS_SCHEDULED, STATUS_FIRED), statuses.py
 RECURRENCES = ("none", "daily", "weekly")
 LATE_AFTER = timedelta(minutes=15)  # zpoždění po výpadku, které se v notifikaci výslovně uvede
 MAX_TITLE = 255

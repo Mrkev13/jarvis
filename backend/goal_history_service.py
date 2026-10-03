@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import FinanceTransaction, Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_PASSED_STATUSES, MFF_BUILT_STATUSES, norm
 from time_utils import local_month_bounds_utc, today_local
 
 
@@ -86,29 +87,26 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
         return float(amount or 0.0), True
 
     if source == "school_completed_assignments":
-        completed_statuses = ("completed", "hotovo", "done", "closed")
         total = (
             db.query(func.count(Assignment.id))
-            .filter(func.lower(func.coalesce(Assignment.status, "")).in_(completed_statuses))
+            .filter(func.lower(func.trim(func.coalesce(Assignment.status, ""))).in_(ASSIGNMENT_DONE_STATUSES))
             .scalar()
         )
         return float(total or 0), True
 
     if source == "school_open_assignments":
         total_all = db.query(func.count(Assignment.id)).scalar() or 0
-        completed_statuses = ("completed", "hotovo", "done", "closed")
         completed = (
             db.query(func.count(Assignment.id))
-            .filter(func.lower(func.coalesce(Assignment.status, "")).in_(completed_statuses))
+            .filter(func.lower(func.trim(func.coalesce(Assignment.status, ""))).in_(ASSIGNMENT_DONE_STATUSES))
             .scalar()
         ) or 0
         return float(total_all - completed), True
 
     if source == "school_exams_passed":
-        passed_statuses = ("passed", "hotovo", "done", "completed", "splneno", "prospel")
         total = (
             db.query(func.count(Exam.id))
-            .filter(func.lower(func.coalesce(Exam.status, "")).in_(passed_statuses))
+            .filter(func.lower(func.trim(func.coalesce(Exam.status, ""))).in_(EXAM_PASSED_STATUSES))
             .scalar()
         )
         return float(total or 0), True
@@ -123,7 +121,7 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
             sum(
                 1
                 for c in chars
-                if _is_tier_t4(c.tier) and (c.status or "").strip().lower() in ("built", "hotovo", "done", "completed")
+                if _is_tier_t4(c.tier) and norm(c.status) in MFF_BUILT_STATUSES
             )
         ), True
 
@@ -134,7 +132,7 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
                 1
                 for c in chars
                 if (c.priority or "").strip().lower() == "high"
-                and (c.status or "").strip().lower() in ("built", "hotovo", "done", "completed")
+                and norm(c.status) in MFF_BUILT_STATUSES
             )
         ), True
 

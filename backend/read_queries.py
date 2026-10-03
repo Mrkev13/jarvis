@@ -22,9 +22,8 @@ MAX_LIMIT = 100
 DEFAULT_ACTIVITY_DAYS = 7
 MAX_ACTIVITY_DAYS = 90
 
-ASSIGNMENT_DONE_STATUSES = frozenset({"done", "completed", "hotovo", "closed", "finished"})
-EXAM_OPEN_STATUSES = frozenset({"upcoming", "scheduled", ""})
-GOAL_OPEN_EXCLUDED = frozenset({"completed", "cancelled"})
+# Kanonické stavy žijí ve statuses.py (re-export kvůli stávajícím importům).
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_OPEN_EXCLUDED  # noqa: E402,F401
 
 
 def _limit(value) -> int:

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from models import ActivityLog, Assignment, Exam, FinanceTransaction, Goal, Notification, Reminder
-from read_queries import ASSIGNMENT_DONE_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_day_bounds_utc, local_month_bounds_utc, to_local
 
 SECTION_ORDER = ("today", "overdue", "soon", "attention", "goals", "finance", "changes")
@@ -40,9 +40,9 @@ EXAM_SOON_DAYS = 14
 GOAL_SOON_DAYS = 14
 LABEL_CHARS = 70
 
-_DONE = ASSIGNMENT_DONE_STATUSES  # kanonická definice (read_queries)
-_EXAM_OPEN = {"upcoming", "scheduled", ""}
-_GOAL_INACTIVE = {"completed", "cancelled", "paused"}
+_DONE = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
+_EXAM_OPEN = EXAM_OPEN_STATUSES
+_GOAL_INACTIVE = GOAL_INACTIVE_STATUSES
 _ATTENTION_TYPES = ("goal_stagnation", "work_behind", "finance_goal_stagnation")
 _WEEKDAYS = ("po", "út", "st", "čt", "pá", "so", "ne")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -217,7 +217,7 @@ def build_snapshot(
         sections["today" if delta == 0 else "soon"].append(item)
 
     # --- připomínky ---
-    for r in db.query(Reminder).filter(Reminder.status.in_(("scheduled", "fired"))).all():
+    for r in db.query(Reminder).filter(Reminder.status.in_(REMINDER_ACTIVE_STATUSES)).all():
         due = _reminder_due(r)
         t = to_local(due)
         when = f"{_day_label(t.date(), today)} {t:%H:%M}"

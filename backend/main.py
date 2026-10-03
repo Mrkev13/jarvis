@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, Notification, GoalProgressHistory, PlannerRecommendationHistory, ActivityLog, PendingAction, BackupLog, AuthSession
-from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -1996,7 +1996,7 @@ def _top_active_goals(db, limit: int = 3):
     enriched: list[dict] = []
     for g in rows:
         status = (g.status or "").lower()
-        if status in ("completed", "paused", "cancelled"):
+        if status in GOAL_INACTIVE_STATUSES:
             continue
         progress, current_value = compute_goal_progress_and_value(db, g, today=today)
         enriched.append({
@@ -2166,7 +2166,7 @@ def _get_upcoming(db, limit: int = 5, today: date | None = None):
     goals = db.query(Goal).filter(Goal.target_date.is_not(None)).all()
     for g in goals:
         st = (g.status or "").lower()
-        if st in ("completed", "paused", "cancelled"):
+        if st in GOAL_INACTIVE_STATUSES:
             continue
         days = (g.target_date - today_use).days
         entries.append({

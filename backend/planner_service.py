@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
-from read_queries import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES
+from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,7 @@ def _deadline_actions_for_goals(mode: str, db: Session, today: date) -> list[Pla
         if not it.target_date:
             continue
         status = (it.status or "").lower()
-        if status in ("completed", "paused", "cancelled"):
+        if status in GOAL_INACTIVE_STATUSES:
             continue
 
         dl = _days_left(it.target_date, today)
@@ -178,7 +178,7 @@ def _stagnation_actions(mode: str, db: Session, today: date) -> list[PlannerActi
     goals = db.query(Goal).all()
     for g in goals:
         status = (g.status or "").lower()
-        if status in ("completed", "paused", "cancelled"):
+        if status in GOAL_INACTIVE_STATUSES:
             continue
         info = compute_goal_stagnation(db, g.id, today=today)
         if info.days_since_last_positive is None:
@@ -217,7 +217,7 @@ def _work_behind_actions(mode: str, db: Session, today: date) -> list[PlannerAct
 
     for g in goals:
         status = (g.status or "").lower()
-        if status in ("completed", "paused", "cancelled"):
+        if status in GOAL_INACTIVE_STATUSES:
             continue
         if g.target_value is None or float(g.target_value) <= 0:
             continue
@@ -330,7 +330,7 @@ def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
         items = []
         for g in goals:
             status = (g.status or "").lower()
-            if status in ("completed", "paused", "cancelled"):
+            if status in GOAL_INACTIVE_STATUSES:
                 continue
 
             progress, current_value = compute_goal_progress_and_value(db, g, today=d)
