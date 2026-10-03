@@ -4,7 +4,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { confirmActionBody, normalizePendingActions, rejectActionPath } from "./pendingActions.ts";
+import {
+  confirmActionBody,
+  describePreview,
+  normalizePendingActions,
+  normalizePreview,
+  rejectActionPath,
+} from "./pendingActions.ts";
 
 // Přesný tvar položky z backendu: backend/ai.py `_run_tool_calls` → pending_actions.append({...}).
 const backendPendingAction = {
@@ -58,4 +64,77 @@ test("ids are URL-encoded in the reject path", () => {
 test("building a request for an action without id throws instead of sending {}", () => {
   assert.throws(() => confirmActionBody({ id: "", tool: "t", arguments: {} }));
   assert.throws(() => rejectActionPath({ id: "", tool: "t", arguments: {} }));
+});
+
+// ===== Phase B: úpravy / mazání / dokončení s náhledem z backendu =====
+const backendPreview = {
+  kind: "update",
+  entity: "finance_transaction",
+  title: "Upravit: transakce",
+  count: 1,
+  items: [{ id: 5, label: "−320 Kč Jídlo (oběd s kolegy) · 2. 10. 2026", changes: [
+    { field: "amount", label: "Částka", old: "320 Kč", new: "450 Kč" },
+  ] }],
+  warnings: [],
+};
+const modifyAction = {
+  id: "77",
+  tool: "modify_records",
+  arguments: { plan: { version: 1, preview: backendPreview } },
+  preview: backendPreview,
+  expires_at: null,
+};
+
+test("modify_records keeps the backend preview and the same confirm/reject id contract", () => {
+  const [action] = normalizePendingActions([modifyAction]);
+  assert.equal(action.preview.title, "Upravit: transakce");
+  assert.deepEqual(confirmActionBody(action), { action_id: "77" });
+  assert.equal(rejectActionPath(action), "/ai/reject/77");
+});
+
+test("preview falls back to the stored plan when the item has no top-level preview", () => {
+  const withoutTopLevel = { ...modifyAction };
+  delete withoutTopLevel.preview;
+  const [action] = normalizePendingActions([withoutTopLevel]);
+  assert.equal(action.preview.count, 1);
+});
+
+test("create actions have no preview (per-tool cards stay unchanged)", () => {
+  const [action] = normalizePendingActions([backendPendingAction]);
+  assert.equal(action.preview, null);
+});
+
+test("edit card shows target and old -> new value", () => {
+  const info = describePreview(normalizePreview(backendPreview));
+  assert.equal(info.title, "Upravit: transakce");
+  assert.deepEqual(info.fields, [
+    { label: "Akce", value: "Úprava" },
+    { label: "Záznam", value: "−320 Kč Jídlo (oběd s kolegy) · 2. 10. 2026" },
+    { label: "Částka", value: "320 Kč → 450 Kč" },
+  ]);
+  assert.equal(info.footer, null);
+});
+
+test("delete card shows the record and a count", () => {
+  const info = describePreview(normalizePreview({
+    kind: "delete", title: "Smazat: transakce", count: 1,
+    items: [{ label: "−1 Kč Ostatní (testovací výdaj)", changes: [] }], warnings: ["Navázaný příjem zůstane."],
+  }));
+  assert.equal(info.fields[0].value, "Smazání");
+  assert.equal(info.fields[1].value, "−1 Kč Ostatní (testovací výdaj)");
+  assert.deepEqual(info.fields[2], { label: "Upozornění", value: "Navázaný příjem zůstane." });
+  assert.deepEqual(info.footer, { label: "Počet záznamů", value: "1" });
+});
+
+test("batch card lists every affected record and the count", () => {
+  const items = Array.from({ length: 12 }, (_, i) => ({ label: `Úkol ${i + 1}`, changes: [] }));
+  const info = describePreview(normalizePreview({ kind: "complete", title: "Označit jako hotové: 12× úkol", count: 12, items }));
+  assert.deepEqual(info.footer, { label: "Počet záznamů", value: "12" });
+  assert.equal(info.fields.filter((f) => /^\d+\.$/.test(f.label)).length, 10);
+  assert.deepEqual(info.fields.at(-1), { label: "…", value: "a dalších 2" });
+});
+
+test("malformed previews are ignored instead of crashing the card", () => {
+  assert.equal(normalizePreview({ title: 5, items: [] }), null);
+  assert.equal(normalizePreview(null, { plan: "x" }), null);
 });

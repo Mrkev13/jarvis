@@ -48,12 +48,22 @@ _FOLLOW_UP_PREFIXES = ("a ", "a co", "a kolik", "a kdy", "jsi si jist", "proc", 
 # Rozkazovací / zápisová slovesa (bez diakritiky, začátek slova).
 _WRITE_VERB_RE = re.compile(
     r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|nastav|zmen(?:it|te|im)?\b|uprav|aktualiz|vytvor|zaloz|"
-    r"oznac|pamatuj|zapamatuj|poznamen|dopln|prepis|zvys|sniz|odecti|pricti|add\b|save\b|update\b)"
+    r"oznac|pamatuj|zapamatuj|poznamen|dopln|prepis|zvys|sniz|odecti|pricti|add\b|save\b|update\b|"
+    r"smaz|odstran|vymaz|zrus|oprav|posun|presun|deaktiv|delete\b)"
 )
+# Phase B: úprava / mazání / dokončení EXISTUJÍCÍHO záznamu → modify_records (write_intent="mutate").
+_MUTATION_VERB_RE = re.compile(
+    r"\b(zmen(?:it|te|im)?\b|uprav|oprav|aktualiz|prepis|smaz|odstran|vymaz|zrus|oznac|posun|presun|deaktiv|"
+    r"delete\b|update\b)"
+)
+_MUTATION_STATEMENT_RE = re.compile(r"\b(je hotov|jsou hotov|mam hotov|uz je hotov|jsem dokoncil|jsem splnil)")
+# Vytvoření nového záznamu – při současném mutačním slovese se create tooly posílají jen s tímto slovesem.
+_CREATE_VERB_RE = re.compile(r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|vytvor|zaloz|pamatuj|zapamatuj|"
+                             r"poznamen|add\b|save\b)")
 # Oznamovací věty o proběhlé události („utratil jsem 200 za oběd") – zápis jen mimo otázku.
 _STATEMENT_RE = re.compile(
     r"\b(utratil|zaplatil|koupil|nakoupil|dostal|vydelal|odpracoval|pracoval jsem|splnil|dokoncil|odevzdal|"
-    r"ziskal|prodal|platil|udelal jsem|napsal jsem|mam novy|mam novou|mam nove)"
+    r"ziskal|prodal|platil|udelal jsem|napsal jsem|mam novy|mam novou|mam nove|je hotov|jsou hotov|mam hotov)"
 )
 _MEMORY_WRITE_RE = re.compile(r"\b(pamatuj|zapamatuj|uloz si|poznamenej si|zapis si)")
 _AMOUNT_RE = re.compile(r"\d[\d\s.,]*\s?(kc|czk|korun)\b")
@@ -151,6 +161,19 @@ def detect_write_intent(text: str) -> bool:
     return False
 
 
+def detect_mutation_intent(text: str) -> bool:
+    """Záměr upravit / smazat / dokončit existující záznam (oznamovací „je hotový" jen mimo otázku)."""
+    for line in fold_text(text).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _MUTATION_VERB_RE.search(line):
+            return True
+        if not _is_question(line) and _MUTATION_STATEMENT_RE.search(line):
+            return True
+    return False
+
+
 def intent_areas(text: str) -> frozenset[str]:
     folded = f" {fold_text(text)} "
     return frozenset(area for area, words in _INTENT_WORDS.items() if any(w in folded for w in words))
@@ -198,14 +221,21 @@ def route_tools(
 
     reason = REASON_AREAS
     if write_intent:
+        folded = fold_text(text)
+        mutate = detect_mutation_intent(text)
+        # Úprava existujícího záznamu („změň výdaj na 450 Kč") nemá dostat create tool, pokud uživatel
+        # zároveň výslovně nežádá i nový záznam – model by jinak mohl přidat místo upravit.
+        create = not mutate or bool(_CREATE_VERB_RE.search(folded))
+        kinds = {k for k, on in (("mutate", mutate), ("create", create)) if on}
+        candidates = [s for s in WRITE_SPECS if s.write_intent in kinds]
         write_areas = explicit & _WRITE_AREAS
-        if _MEMORY_WRITE_RE.search(fold_text(text)):
+        if _MEMORY_WRITE_RE.search(folded) and not mutate:
             write_areas = frozenset({AREA_MEMORY})
         if write_areas:
-            names |= {s.name for s in WRITE_SPECS if set(s.areas) & write_areas}
+            names |= {s.name for s in candidates if set(s.areas) & write_areas}
             reason = REASON_WRITE
         else:
-            names |= {s.name for s in WRITE_SPECS}
+            names |= {s.name for s in candidates}
             reason = REASON_WRITE_UNKNOWN
     return ToolRoute(_ordered(_with_requirements(names)), reason, areas, write_intent)
 

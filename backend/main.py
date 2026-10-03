@@ -38,6 +38,7 @@ from llm_usage import log_history
 from goal_history_service import ensure_goal_progress_snapshot, compute_goal_progress_and_value
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
 from planner_service import generate_plan
+from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from time_utils import local_month_bounds_utc, today_local
 
@@ -65,6 +66,9 @@ def detect_planner_intent(prompt: str) -> tuple[str, str] | None:
 
     # Explicitní dotaz na datum/čas jde vždy na model (zná aktuální pražské datum), ne do planneru.
     if has(*DATE_TIME_QUESTION_SIGNALS):
+        return None
+    # Zápis / úprava („označ všechny dnešní úkoly jako hotové") není dotaz na plán → model + pending akce.
+    if detect_write_intent(prompt):
         return None
 
     goal_review_signals = (

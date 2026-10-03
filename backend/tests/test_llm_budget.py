@@ -19,9 +19,16 @@ from llm_config import DEFAULT_GROQ_MODEL, load_llm_settings
 from time_utils import now_local
 
 ALL_TOOL_FUNCTIONS = {**ai.READ_TOOL_FUNCTIONS, **ai.WRITE_TOOL_FUNCTIONS}
-WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_")
+WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_", "modify_")
 # Interní parametry funkcí, které LLM nesmí vidět ani nastavit (db = session AI requestu, A5 read_queries).
 INTERNAL_PARAMS = {"user_context", "db", "now_utc"}
+
+
+def _model_facing_callable(name: str):
+    """Funkce, kterou volají argumenty od modelu: u Phase B toolů resolver (executor dostane jen plán)."""
+    import tool_registry
+    spec = tool_registry.TOOLS_BY_NAME[name]
+    return spec.resolver or ALL_TOOL_FUNCTIONS[name]
 
 
 def _schema(tool: dict) -> dict:
@@ -45,7 +52,8 @@ class TokenEstimatorTestCase(unittest.TestCase):
 
 # Plná sada toolů (AI_TOOL_ROUTING=false / nouzový fallback) smí být nad AI_MAX_FIXED_TOKENS – běžné
 # requesty posílají jen routovanou podmnožinu (A5, test_tool_router.py hlídá AI_MAX_FIXED_TOKENS pro ni).
-FULL_TOOL_SET_MAX_FIXED_TOKENS = 4000
+# Phase B (modify_records + pravidlo v promptu) posunula plnou sadu na ~4 300 → strop 4 500.
+FULL_TOOL_SET_MAX_FIXED_TOKENS = 4500
 
 
 class FixedOverheadBudgetTestCase(unittest.TestCase):
@@ -85,7 +93,7 @@ class ToolRegistryTestCase(unittest.TestCase):
         for tool in ai.TOOLS:
             name = tool["function"]["name"]
             with self.subTest(tool=name):
-                params = inspect.signature(ALL_TOOL_FUNCTIONS[name]).parameters
+                params = inspect.signature(_model_facing_callable(name)).parameters
                 props = set(_schema(tool)["properties"])
                 self.assertLessEqual(props, set(params), msg="schema má parametr, který funkce nepřijme")
                 self.assertFalse(props & INTERNAL_PARAMS, msg="interní parametr je vystaven LLM")
@@ -97,7 +105,7 @@ class ToolRegistryTestCase(unittest.TestCase):
         for tool in ai.TOOLS:
             name = tool["function"]["name"]
             with self.subTest(tool=name):
-                params = inspect.signature(ALL_TOOL_FUNCTIONS[name]).parameters
+                params = inspect.signature(_model_facing_callable(name)).parameters
                 schema_required = set(_schema(tool).get("required", []))
                 py_required = {k for k, p in params.items() if p.default is inspect.Parameter.empty} - INTERNAL_PARAMS
                 self.assertLessEqual(schema_required, set(_schema(tool)["properties"]))

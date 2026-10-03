@@ -28,6 +28,7 @@ from tool_router import (  # noqa: E402
 )
 
 WRITE_NAMES = {s.name for s in reg.WRITE_SPECS}
+CREATE_NAMES = {s.name for s in reg.WRITE_SPECS if s.write_intent == "create"}
 READ_NAMES = {s.name for s in reg.READ_SPECS}
 
 # Reprezentativní dotazy (A5 měření) – bez kontextu (nejhorší případ: prefetch nic nepokryl).
@@ -114,9 +115,37 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertEqual(_names(route) & WRITE_NAMES, {"save_memory"})
 
     def test_write_with_unknown_area_exposes_all_write_tools(self):
+        # „zapiš to" = vytvoření → všechny create write tooly; mutační tool jen u mutačního slovesa.
         route = route_tools([REPRESENTATIVE["write_unknown"]])
         self.assertEqual(route.reason, REASON_WRITE_UNKNOWN)
-        self.assertLessEqual(WRITE_NAMES, _names(route))
+        self.assertEqual(_names(route) & WRITE_NAMES, CREATE_NAMES)
+        mutate = route_tools(["smaž to"])
+        self.assertEqual(mutate.reason, REASON_WRITE_UNKNOWN)
+        self.assertEqual(_names(mutate) & WRITE_NAMES, {"modify_records"})
+
+    def test_mutation_intent_exposes_modify_records_only(self):
+        for msg, area_tool in (
+            ("změň poslední výdaj za oběd na 450 Kč", "get_finance_transactions"),
+            ("smaž poslední testovací výdaj", "get_finance_transactions"),
+            ("označ úkol z práva jako hotový", "get_school_assignments"),
+            ("označ všechny dnešní úkoly jako hotové", "get_school_assignments"),
+            ("úkol z práva je hotový", "get_school_assignments"),
+            ("smaž z paměti tu poznámku o VZ.55", "get_memories"),
+        ):
+            with self.subTest(msg):
+                route = route_tools([msg])
+                self.assertEqual(_names(route) & WRITE_NAMES, {"modify_records"})
+                self.assertIn(area_tool, route.names)
+
+    def test_mutation_tool_not_exposed_for_questions_or_creates(self):
+        for msg in ("mám hotové všechny úkoly?", "kolik jsem utratil za oběd?", "přidej výdaj 300 Kč za oběd",
+                    "pamatuj si, že chci šetřit"):
+            with self.subTest(msg):
+                self.assertNotIn("modify_records", route_tools([msg]).names)
+
+    def test_create_and_mutation_verbs_together_expose_both(self):
+        names = _names(route_tools(["smaž ten výdaj za kávu a přidej nový za 120 Kč"]))
+        self.assertTrue({"modify_records", "add_finance_transaction"} <= names)
 
     def test_requirements_are_added(self):
         route = route_tools(["přidej mi zkoušku z matiky na 12. 1."])

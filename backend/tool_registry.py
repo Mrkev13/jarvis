@@ -25,6 +25,7 @@ from tools import add_school_subject, add_school_assignment, add_school_exam
 from tools import update_wot_resource, upsert_wot_grind
 from tools import upsert_mff_character, upsert_goal
 from tools import save_memory
+from mutation_service import ENTITIES as MUTATION_ENTITIES, execute_modify_records, propose_modify_records
 from read_queries import (
     query_finance_transactions,
     query_goals,
@@ -55,6 +56,10 @@ class ToolSpec:
     requires: tuple[str, ...] = ()  # tooly, bez kterých tento nejde smysluplně použít
     takes_db: bool = False  # funkce dostane db session AI requestu jako první argument
     explicit_only: bool = False  # detailní tool: jen při výslovně zmíněné oblasti (nebo jako requires)
+    # Phase B: write tool s resolverem – při návrhu resolver(db, **args) najde cíle a vrátí plán, který se
+    # uloží jako pending akce {"plan": ...}; func pak po potvrzení provede právě ten plán.
+    resolver: Callable | None = None
+    write_intent: str = "create"  # "create" (nový záznam / nastavení) nebo "mutate" (úprava/mazání/dokončení)
 
     @property
     def is_write(self) -> bool:
@@ -87,9 +92,10 @@ def _read(name, description, properties=None, required=None, *, func, areas, cov
                     covered, tuple(requires), takes_db, explicit_only)
 
 
-def _write(name, description, properties=None, required=None, *, func, areas, requires=()):
+def _write(name, description, properties=None, required=None, *, func, areas, requires=(), resolver=None,
+           write_intent="create"):
     return ToolSpec(name, WRITE, tuple(areas), _tool(name, description, properties, required), func,
-                    False, tuple(requires))
+                    False, tuple(requires), resolver=resolver, write_intent=write_intent)
 
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
@@ -343,6 +349,41 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ["content"],
         func=save_memory, areas=[AREA_MEMORY],
     ),
+    _write(
+        "modify_records",
+        "Prepare an edit, deletion or completion of EXISTING records. The server finds them from target and "
+        "shows the user a preview to confirm.",
+        {
+            "entity": {"type": "string", "enum": sorted(MUTATION_ENTITIES)},
+            "action": {"type": "string", "enum": ["update", "delete", "complete"]},
+            "target": {
+                "type": "object",
+                "description": "which record(s); id only from tool results",
+                "properties": {
+                    "id": _INT,
+                    "text": {"type": "string", "description": "words from title/description/category/subject"},
+                    "type": {"type": "string", "description": "income/expense, exam type, assignment status, area"},
+                    "date": _DATE,
+                    "date_from": _DATE,
+                    "date_to": _DATE,
+                    "latest": {"type": "boolean", "description": "newest match, only if the user said so"},
+                    "all_matching": _BOOL,
+                },
+                "additionalProperties": False,
+            },
+            "changes": {
+                "type": "object",
+                "description": "update only. finance: amount,category,description,transaction_type; work: date,"
+                               "hours,project,hourly_rate,description; assignment: title,description,due_date,"
+                               "priority,status; exam: title,exam_type,exam_date,status,notes; goal: title,"
+                               "description,status,priority,progress,target_date; wot_grind: xp_remaining,priority,"
+                               "status; memory: content,importance,category,area",
+            },
+        },
+        ["entity", "action", "target"],
+        func=execute_modify_records, resolver=propose_modify_records, write_intent="mutate",
+        areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
+    ),
 )
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
@@ -363,6 +404,8 @@ def _validate() -> None:
     for spec in TOOL_SPECS:
         if spec.kind not in (READ, WRITE) or spec.schema["function"]["name"] != spec.name:
             raise RuntimeError(f"tool_registry: nekonzistentní spec {spec.name}")
+        if spec.write_intent not in ("create", "mutate") or (spec.resolver is not None and not spec.is_write):
+            raise RuntimeError(f"tool_registry: neplatný write_intent/resolver u {spec.name}")
         missing = [r for r in spec.requires if r not in TOOLS_BY_NAME or TOOLS_BY_NAME[r].is_write]
         if missing:
             raise RuntimeError(f"tool_registry: {spec.name} vyžaduje neznámé/zápisové tooly {missing}")
