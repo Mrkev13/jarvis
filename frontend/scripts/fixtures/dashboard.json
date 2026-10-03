@@ -1,0 +1,232 @@
+{
+ "today": {
+  "summary": "Denní plán: nejdůležitější věci podle deadlinů, práce a stagnace.",
+  "actions": [
+   {
+    "priority": 1,
+    "area": "school",
+    "title": "Vyřešit overdue úkol: Sada",
+    "reason": "Deadline byl 2026-10-02 (po termínu)."
+   }
+  ],
+  "today_deadline": null
+ },
+ "notifications": {
+  "unread": 5,
+  "important": 2,
+  "warning": 1,
+  "info": 2,
+  "preview": [
+   {
+    "id": 3,
+    "area": "reminders",
+    "title": "⏰ Fyzioterapie",
+    "message": "Připomínka na ne 11. 10. 2026 18:30. Zpožděno – zobrazeno až ne 11. 10. 2026 19:00 (aplikace neběžela nebo nekontrolovala).",
+    "severity": "important",
+    "read": false,
+    "created_at": "2026-10-11T17:00:00",
+    "created_at_ts": 1791738000.0,
+    "expires_at": null,
+    "notification_type": "reminder",
+    "source_type": "reminder",
+    "source_id": 1,
+    "dedupe_key": "reminder:1:2026-10-11T16:30:00",
+    "last_triggered_at": "2026-10-11T17:00:00",
+    "resolved": false,
+    "action_url": "/reminders"
+   },
+   {
+    "id": 1,
+    "area": "school",
+    "title": "Po termínu: Sada",
+    "message": "Úkol měl termín 2. 10. a je po termínu.",
+    "severity": "important",
+    "read": false,
+    "created_at": "2026-10-11T17:00:00",
+    "created_at_ts": 1791738000.0,
+    "expires_at": null,
+    "notification_type": "overdue",
+    "source_type": "assignment",
+    "source_id": 1,
+    "dedupe_key": "n1",
+    "last_triggered_at": "2026-10-11T17:00:00",
+    "resolved": false,
+    "action_url": null
+   },
+   {
+    "id": 2,
+    "area": "finance",
+    "title": "Cíl spoření stagnuje",
+    "message": "Bez posunu 21 dní.",
+    "severity": "warning",
+    "read": false,
+    "created_at": "2026-10-11T17:00:00",
+    "created_at_ts": 1791738000.0,
+    "expires_at": null,
+    "notification_type": "finance_goal_stagnation",
+    "source_type": "goal",
+    "source_id": 1,
+    "dedupe_key": "n2",
+    "last_triggered_at": "2026-10-11T17:00:00",
+    "resolved": false,
+    "action_url": null
+   }
+  ]
+ },
+ "goals": {
+  "top": [
+   {
+    "id": 1,
+    "title": "Našetřit 150 000 Kč",
+    "area": "finance",
+    "priority": "high",
+    "progress": 10,
+    "current_value": null,
+    "target_value": null,
+    "target_date": "2026-10-30",
+    "tracking_type": "manual",
+    "source": null
+   },
+   {
+    "id": 3,
+    "title": "80 hodin práce za měsíc",
+    "area": "work",
+    "priority": "high",
+    "progress": 40,
+    "current_value": null,
+    "target_value": null,
+    "target_date": null,
+    "tracking_type": "manual",
+    "source": null
+   },
+   {
+    "id": 2,
+    "title": "Dokončit semestr bez nedodělků",
+    "area": "school",
+    "priority": "medium",
+    "progress": 62,
+    "current_value": null,
+    "target_value": null,
+    "target_date": "2026-12-20",
+    "tracking_type": "manual",
+    "source": null
+   }
+  ],
+  "count": 3
+ },
+ "work": {
+  "total_hours": 18.0,
+  "total_earnings": 3600.0,
+  "this_month_hours": 7.0,
+  "this_month_earnings": 1400.0,
+  "goal": null
+ },
+ "finance": {
+  "balance": -500.0,
+  "income": 1400.0,
+  "expenses": 1900.0,
+  "this_month_income": 1400.0,
+  "this_month_expenses": 1900.0,
+  "transactions_count": 4,
+  "goal": null
+ },
+ "upcoming": [
+  {
+   "type": "assignment",
+   "id": 1,
+   "title": "Sada",
+   "area": "school",
+   "date": "2026-10-02",
+   "days_left": -1,
+   "overdue": true
+  },
+  {
+   "type": "assignment",
+   "id": 3,
+   "title": "Projekt",
+   "area": "school",
+   "date": "2026-10-13",
+   "days_left": 10,
+   "overdue": false
+  },
+  {
+   "type": "assignment",
+   "id": 5,
+   "title": "Laboratoř",
+   "area": "school",
+   "date": "2026-10-14",
+   "days_left": 11,
+   "overdue": false
+  },
+  {
+   "type": "assignment",
+   "id": 4,
+   "title": "Referát",
+   "area": "school",
+   "date": "2026-10-14",
+   "days_left": 11,
+   "overdue": false
+  },
+  {
+   "type": "exam",
+   "id": 1,
+   "title": "Zkouška fyzika",
+   "area": "school",
+   "date": "2026-10-15",
+   "days_left": 12,
+   "overdue": false
+  }
+ ],
+ "wot": {
+  "top_grinds": [
+   {
+    "id": 1,
+    "tank": "Object 279 (e)",
+    "xp_remaining": 128000.0,
+    "priority": "high",
+    "status": "active"
+   }
+  ],
+  "credits": 8450000.0,
+  "free_xp": null,
+  "bonds": null
+ },
+ "mff": {
+  "tracked_characters": 1,
+  "t4_count": 1,
+  "priority_count": 1,
+  "average_build_completeness": 25
+ },
+ "recent_activity": [
+  {
+   "timestamp": "2026-10-08T17:00:00",
+   "area": "school",
+   "action_type": "complete",
+   "summary": "Dokončeno (AI): Esej"
+  },
+  {
+   "timestamp": "2026-10-03T11:39:21.863865",
+   "area": "reminders",
+   "action_type": "complete",
+   "summary": "Připomínka hotová: Koupit lístky · so 10. 10. 2026 09:00"
+  },
+  {
+   "timestamp": "2026-10-03T11:39:21.814694",
+   "area": "reminders",
+   "action_type": "create",
+   "summary": "Připomínka: Koupit lístky · so 10. 10. 2026 09:00"
+  },
+  {
+   "timestamp": "2026-10-03T11:39:21.807646",
+   "area": "reminders",
+   "action_type": "create",
+   "summary": "Připomínka: Ranní protažení · denně v 07:00"
+  },
+  {
+   "timestamp": "2026-10-03T11:39:21.807126",
+   "area": "reminders",
+   "action_type": "create",
+   "summary": "Připomínka: Odeslat fakturu · st 14. 10. 2026 10:00"
+  }
+ ]
+}

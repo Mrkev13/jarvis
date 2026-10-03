@@ -42,3 +42,6 @@ Thumbs.db
 .claude/settings.local.json
 .claude/launch.json
 .playwright-mcp/
+
+# lokální výstup vizuální kontroly UI (frontend/scripts/ui-check.mjs)
+frontend/scripts/.ui-check/

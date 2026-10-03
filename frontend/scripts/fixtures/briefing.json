@@ -1,0 +1,56 @@
+{
+ "date": "2026-10-11",
+ "enabled": true,
+ "scheduled_time": "07:00",
+ "status": "ready",
+ "briefing": {
+  "summary": "Dnes odevzdáváš esej a blíží se zkouška z fyziky.",
+  "priorities": [
+   {
+    "ref": "assignment:1",
+    "kind": "assignment",
+    "text": "Sada (Matematika)",
+    "label": "Sada (Matematika)",
+    "when": "termín pá 2. 10.",
+    "url": "/school",
+    "detail": "",
+    "new": false,
+    "why": "Je po termínu."
+   }
+  ],
+  "watch": [
+   {
+    "ref": "reminder:1",
+    "kind": "reminder",
+    "text": "Fyzioterapie dnes",
+    "label": "Fyzioterapie",
+    "when": "připomínka zazněla dnes 18:30, nevyřízená",
+    "url": "/reminders",
+    "detail": "",
+    "new": false
+   }
+  ],
+  "upcoming": [
+   {
+    "ref": "exam:1",
+    "kind": "exam",
+    "text": "Zkouška fyzika",
+    "label": "Zkouška fyzika (Matematika)",
+    "when": "zkouška čt 15. 10.",
+    "url": "/school",
+    "detail": "",
+    "new": false
+   }
+  ],
+  "note": null,
+  "quiet": false,
+  "date": "2026-10-11"
+ },
+ "generated_at": "2026-10-11T17:00:00Z",
+ "generated_label": "19:00",
+ "trigger": "scheduler",
+ "regenerated_count": 0,
+ "error_category": null,
+ "error_text": null,
+ "fallback": null
+}
