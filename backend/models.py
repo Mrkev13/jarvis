@@ -557,3 +557,39 @@ class DailyBriefing(Base):
 
 
 Index("ix_daily_briefings_date", DailyBriefing.briefing_date, unique=True)
+
+
+class WeeklyReview(Base):
+    """Týdenní přehled (Roadmap 3.0 Phase G) – jeden řádek na pražský kalendářní týden (pondělí = week_start).
+
+    `period_end` = okamžik (UTC), do kterého snímek data zahrnul (neděle 19:00 nebo konec týdne při catch-upu).
+    status: generating → ready | failed. Přegenerování přepíše obsah stejného řádku (regenerated_count).
+    Neukládá se prompt ani celý snímek – jen hash snímku a validovaný výsledek.
+    """
+    __tablename__ = "weekly_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    week_start = Column(Date, nullable=False)
+    period_end = Column(DateTime, nullable=True)
+    status = Column(String(20), nullable=False)
+    trigger = Column(String(20), nullable=False)  # scheduler | catchup | retry | manual
+    attempts = Column(Integer, default=0, nullable=False)
+    next_retry_at = Column(DateTime, nullable=True)
+    error_category = Column(String(60), nullable=True)
+    content = Column(Text, nullable=True)  # validovaný JSON přehledu
+    snapshot_hash = Column(String(64), nullable=True)
+    snapshot_tokens = Column(Integer, nullable=True)
+    model = Column(String(100), nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    grounding_fixes = Column(Integer, default=0, nullable=False)
+    regenerated_count = Column(Integer, default=0, nullable=False)
+    generated_at = Column(DateTime, nullable=True)
+    first_generated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+Index("ix_weekly_reviews_week_start", WeeklyReview.week_start, unique=True)
