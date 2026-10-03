@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   formatCzk,
+  formatCzkExact,
   formatDate,
   formatDateTime,
   formatDays,
@@ -87,4 +88,16 @@ test("Prague day keys and day bounds (summer, winter, DST switch)", () => {
   assert.equal(pragueDayStartIso("2026-10-25"), "2026-10-24T22:00:00.000Z");
   assert.equal(pragueDayEndIso("2026-10-25"), "2026-10-25T22:59:59.999Z");
   assert.equal(pragueDayStartIso("nope"), null);
+});
+
+test("exact money reconciles visible sums (work/finance rows)", () => {
+  assert.equal(n(formatCzkExact(2437.5)), "2 437,50 Kč");
+  assert.equal(n(formatCzkExact(4875)), "4 875 Kč");
+  assert.equal(n(formatCzkExact(189.9)), "189,90 Kč");
+  assert.equal(n(formatCzkExact(1250.004)), "1 250 Kč");
+  assert.equal(formatCzkExact(null), "–");
+  // dvě zobrazené položky se sečtou na zobrazený součet
+  const rows = [2437.5, 2437.5];
+  const parse = (s) => Number(n(s).replace(" Kč", "").replace(/ /g, "").replace(",", "."));
+  assert.equal(rows.map((r) => parse(formatCzkExact(r))).reduce((a, b) => a + b), parse(formatCzkExact(4875)));
 });

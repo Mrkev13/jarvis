@@ -22,7 +22,7 @@ import {
 import { useApiResource } from "@/hooks/useApiResource";
 import { financeCategoryLabel } from "@/lib/labels";
 import { apiJson, jsonBody } from "@/lib/api";
-import { formatCzk, formatDate, formatSigned, plural } from "@/lib/format";
+import { formatCzkExact, formatDate, formatSigned, plural } from "@/lib/format";
 import { staggerStyle, useNewIds } from "@/lib/motion";
 import { cx, type Tone } from "@/lib/ui";
 
@@ -51,7 +51,7 @@ const EMPTY_FORM = { amount: "", category: "", description: "" };
 
 /** Zůstatek: záporný se skutečným minus, kladný bez „+". */
 function formatBalance(value: number): string {
-  return value < 0 ? formatSigned(value, formatCzk(value)) : formatCzk(value);
+  return value < 0 ? formatSigned(value, formatCzkExact(value)) : formatCzkExact(value);
 }
 
 function balanceTone(value: number | undefined): Tone {
@@ -251,11 +251,11 @@ export default function FinancePage() {
               <MetricCard
                 label="Příjmy"
                 tone="success"
-                value={<AnimatedNumber value={s?.income} format={formatCzk} fallback="–" />}
+                value={<AnimatedNumber value={s?.income} format={formatCzkExact} fallback="–" />}
               />
               <MetricCard
                 label="Výdaje"
-                value={<AnimatedNumber value={s?.expenses} format={formatCzk} fallback="–" />}
+                value={<AnimatedNumber value={s?.expenses} format={formatCzkExact} fallback="–" />}
               />
             </StatGrid>
           </section>
@@ -355,7 +355,7 @@ function TransactionRow({
             isIncome ? "text-success" : "text-ink",
           )}
         >
-          {formatSigned(signed, formatCzk(tx.amount))}
+          {formatSigned(signed, formatCzkExact(tx.amount))}
         </span>
         <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat transakci ${title}`}>
           Smazat

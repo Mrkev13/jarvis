@@ -25,6 +25,17 @@ export function formatCzk(value: number | null | undefined): string {
   return `${formatNumber(value, Math.abs(value) >= 100 ? 0 : 2)} Kč`;
 }
 
+/**
+ * Přesná částka pro obrazovky, kde se řádky sčítají do viditelného součtu (Práce, Finance):
+ * celé koruny bez desetin („4 875 Kč"), jinak vždy na haléře („2 437,50 Kč"). Žádné „2 438 + 2 438 = 4 875".
+ */
+export function formatCzkExact(value: number | null | undefined): string {
+  if (!isNum(value)) return EMPTY;
+  const cents = Math.round(value * 100);
+  const whole = cents % 100 === 0;
+  return `${new Intl.NumberFormat(LOCALE, { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(cents / 100)} Kč`;
+}
+
 /** 12,5 h */
 export function formatHours(value: number | null | undefined): string {
   if (!isNum(value)) return EMPTY;

@@ -22,7 +22,7 @@ import {
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
-import { formatCzk, formatDate, formatHours, plural } from "@/lib/format";
+import { formatCzkExact, formatDate, formatHours, plural } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle, useNewIds } from "@/lib/motion";
 import { cx } from "@/lib/ui";
 import {
@@ -247,7 +247,7 @@ export default function WorkPage() {
               <p className="text-sm text-ink-muted" aria-live="polite">
                 {estimate !== null ? (
                   <>
-                    Odhad výdělku: <span className="font-medium tabular-nums text-ink">{formatCzk(estimate)}</span>
+                    Odhad výdělku: <span className="font-medium tabular-nums text-ink">{formatCzkExact(estimate)}</span>
                   </>
                 ) : null}
               </p>
@@ -283,7 +283,7 @@ export default function WorkPage() {
                 />
                 <MetricCard
                   label="Výdělek · tento měsíc"
-                  value={<AnimatedNumber value={summary?.this_month_earnings} format={formatCzk} fallback="–" />}
+                  value={<AnimatedNumber value={summary?.this_month_earnings} format={formatCzkExact} fallback="–" />}
                 />
                 <MetricCard
                   label="Hodiny · celkem"
@@ -291,7 +291,7 @@ export default function WorkPage() {
                 />
                 <MetricCard
                   label="Výdělek · celkem"
-                  value={<AnimatedNumber value={summary?.total_earnings} format={formatCzk} fallback="–" />}
+                  value={<AnimatedNumber value={summary?.total_earnings} format={formatCzkExact} fallback="–" />}
                 />
               </StatGrid>
             </div>
@@ -321,7 +321,7 @@ export default function WorkPage() {
                           {day.sessions.length > 1
                             ? `${day.sessions.length} ${plural(day.sessions.length, "záznam", "záznamy", "záznamů")} · `
                             : null}
-                          {formatHours(day.hours)} · {formatCzk(day.earnings)}
+                          {formatHours(day.hours)} · {formatCzkExact(day.earnings)}
                         </p>
                       </div>
                       <ul className="space-y-2 border-l border-line pl-3 md:pl-4">
@@ -388,12 +388,12 @@ function SessionRow({
           <div className="break-words font-medium text-ink">{s.project || "Bez projektu"}</div>
           {s.description ? <p className="mt-0.5 break-words text-sm text-ink-2">{s.description}</p> : null}
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
-            {s.hourly_rate > 0 ? <span className="tabular-nums">{formatCzk(s.hourly_rate)}/h</span> : null}
+            {s.hourly_rate > 0 ? <span className="tabular-nums">{formatCzkExact(s.hourly_rate)}/h</span> : null}
             {finance ? <StatusBadge tone={finance.tone}>{finance.label}</StatusBadge> : null}
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-base font-semibold tabular-nums text-ink">{formatCzk(s.earnings)}</span>
+          <span className="text-base font-semibold tabular-nums text-ink">{formatCzkExact(s.earnings)}</span>
           <Button
             size="sm"
             variant="ghost"
