@@ -319,6 +319,7 @@ class ApplyTestCase(MutationTestBase):
         self.db.add(Goal(area="personal", title="Přečíst knihu", status="active", progress=40, tracking_type="manual"))
         self.db.commit()
         plan = ms.resolve_mutation(self.db, "goal", "complete", {"text": "knihu"})
+        self.assertIn("100 %", plan["preview"]["warnings"][0])
         ms.apply_mutation_plan(plan)
         g = self.fresh().query(Goal).one()
         self.assertEqual((g.status, g.progress), ("completed", 100))

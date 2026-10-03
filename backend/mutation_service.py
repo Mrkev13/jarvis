@@ -521,6 +521,9 @@ def _warnings(entity: EntityDef, action: str, objs: list, changes: dict) -> list
     if entity.name == "goal" and "progress" in changes:
         if any((g.tracking_type or "manual").lower() != "manual" for g in objs):
             raise MutationRefused("invalid_changes", "Automatický cíl má progres počítaný z dat – nelze ho nastavit.")
+    if entity.name == "goal" and action == ACTION_COMPLETE:
+        if any((g.tracking_type or "manual").lower() == "manual" and int(g.progress or 0) < 100 for g in objs):
+            notes.append("Progres ručního cíle se nastaví na 100 %.")
     if entity.name == "memory" and action == ACTION_DELETE:
         notes.append("Paměť se deaktivuje (jako v aplikaci), obsah zůstane uložen.")
     return notes
