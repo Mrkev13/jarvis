@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4E).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4F).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -926,6 +926,241 @@ async function qaType(page, text) {
   await page.waitForTimeout(150);
   const anim = await qaDialog(page).evaluate((d) => getComputedStyle(d).animationName);
   check("quick add reduced motion: bez animace", anim === "none", anim);
+  await ctx.close();
+}
+
+// 18) Roadmap 4F – Řídicí centrum na míru: registr widgetů, rozložení v localStorage (klíč verze 1).
+const LAYOUT_KEY = "standa-hub:dashboard-layout:v1";
+const DEFAULT_ORDER = ["daily_briefing", "weekly_review", "today", "attention", "key_metrics", "goals", "upcoming", "work", "finance", "games", "quick_actions"];
+const widgetOrder = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("[data-widget]")].sort((a, b) => Number(a.style.order) - Number(b.style.order)).map((el) => el.getAttribute("data-widget")),
+  );
+const storedLayout = (page) => page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY);
+const focusedName = (page) => page.evaluate(() => document.activeElement?.getAttribute("aria-label") || document.activeElement?.textContent?.trim() || "");
+function countRequests(page) {
+  const counts = {};
+  page.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (["/dashboard", "/briefing/today", "/weekly-review"].includes(path)) counts[path] = (counts[path] || 0) + 1;
+  });
+  return counts;
+}
+{
+  let counts = {};
+  const { ctx, page, errors } = await open("/", { setup: async (p) => (counts = countRequests(p)) });
+  check("dashboard: výchozí pořadí widgetů", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER), (await widgetOrder(page)).join(","));
+  check("dashboard: normální režim bez ovládání úprav", (await page.getByRole("button", { name: /^Posunout/ }).count()) === 0 && (await page.getByRole("button", { name: /^Skrýt widget/ }).count()) === 0);
+  check("dashboard: bez uloženého rozložení nic v localStorage", (await storedLayout(page)) === null);
+  const widths = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-widget]")].map((el) => [el.getAttribute("data-widget"), Math.round(el.getBoundingClientRect().width)])));
+  check("dashboard: výchozí vyvážení (přehled 2/3, týden 1/3, čísla celá šířka)", widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.work === widths.goals, JSON.stringify(widths));
+  check("dashboard: jeden dotaz na každý zdroj", counts["/dashboard"] === 1 && counts["/briefing/today"] === 1 && counts["/weekly-review"] === 1, JSON.stringify(counts));
+  await page.screenshot({ path: `${OUT}dashboard-default.png`, fullPage: true });
+
+  await page.getByRole("button", { name: "Upravit dashboard" }).click();
+  await page.waitForTimeout(100);
+  check("dashboard úpravy: režim úprav je zřetelný", (await page.getByRole("note").filter({ hasText: "Režim úprav" }).count()) === 1);
+  check("dashboard úpravy: fokus na Hotovo", (await focusedName(page)) === "Hotovo");
+  check("dashboard úpravy: každý widget je pojmenovaná skupina", (await page.getByRole("group", { name: "Finance" }).count()) === 1 && (await page.locator('[role="group"][aria-labelledby^="widget-"]').count()) === 11);
+  check(
+    "dashboard úpravy: obsah widgetů je neaktivní (inert)",
+    await page.evaluate(() => {
+      const a = document.querySelector('[data-widget="today"] a[href="/planner"]');
+      a?.focus();
+      return Boolean(a?.closest("[inert]")) && document.activeElement !== a;
+    }),
+  );
+  check("dashboard úpravy: první nahoru / poslední dolů zakázané", (await page.getByRole("button", { name: "Posunout nahoru: Denní přehled" }).isDisabled()) && (await page.getByRole("button", { name: "Posunout dolů: Rychlé akce" }).isDisabled()));
+  check("dashboard úpravy: velikost jen z povolených", JSON.stringify(await page.getByLabel("Velikost: Práce").locator("option").allInnerTexts()) === JSON.stringify(["Malý", "Střední"]));
+  await page.screenshot({ path: `${OUT}dashboard-customize.png`, fullPage: true });
+
+  await page.getByRole("button", { name: "Posunout dolů: Denní přehled" }).click();
+  await page.waitForTimeout(100);
+  let order = await widgetOrder(page);
+  check("dashboard úpravy: přesun dolů", order[0] === "weekly_review" && order[1] === "daily_briefing", order.slice(0, 3).join(","));
+  check("dashboard úpravy: fokus zůstává na tlačítku", (await focusedName(page)) === "Posunout dolů: Denní přehled");
+  check("dashboard úpravy: přesun ohlášen čtečce", /Denní přehled: pozice 2 z 11/.test(await page.getByRole("status").filter({ hasText: "pozice" }).innerText().catch(() => "")));
+  check("dashboard úpravy: uloženo hned", JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "weekly_review");
+
+  await page.getByRole("button", { name: "Skrýt widget: Hry" }).click();
+  await page.waitForTimeout(100);
+  check("dashboard úpravy: skrytý widget zmizí", !(await widgetOrder(page)).includes("games"));
+  const restore = page.getByRole("button", { name: "Zobrazit widget: Hry" });
+  check("dashboard úpravy: Skryté widgety s obnovou + fokus", (await restore.count()) === 1 && (await focusedName(page)) === "Zobrazit widget: Hry");
+  await page.screenshot({ path: `${OUT}dashboard-hidden.png`, fullPage: true });
+
+  await page.getByLabel("Velikost: Finance").selectOption("medium");
+  await page.waitForTimeout(100);
+  const fin = page.locator('[data-widget="finance"]');
+  check("dashboard úpravy: změna velikosti hned v rozložení", (await fin.getAttribute("data-size")) === "medium" && Math.round((await fin.boundingBox()).width) > widths.finance * 1.3, String((await fin.boundingBox())?.width));
+  await page.screenshot({ path: `${OUT}dashboard-resized.png`, fullPage: true });
+  check("dashboard úpravy: úpravy nic znovu nenačítají", counts["/dashboard"] === 1 && counts["/briefing/today"] === 1 && counts["/weekly-review"] === 1, JSON.stringify(counts));
+
+  await page.getByRole("button", { name: "Hotovo" }).click();
+  await page.waitForTimeout(150);
+  check("dashboard: Hotovo vrátí čistý režim a fokus", (await page.getByRole("button", { name: /^Posunout/ }).count()) === 0 && (await focusedName(page)) === "Upravit dashboard");
+  await page.screenshot({ path: `${OUT}dashboard-reordered.png`, fullPage: true });
+
+  // regrese shellu: vyhledávání, Rychlé přidání, zvonek
+  await page.keyboard.press("Control+k");
+  check("dashboard: Ctrl+K dál otevírá vyhledávání", (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Shift+K");
+  check("dashboard: Ctrl+Shift+K dál otevírá Rychlé přidání", (await page.getByRole("dialog", { name: "Rychlé přidání" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^Notifikace/ }).click();
+  check("dashboard: zvonek dál otevírá notifikace", (await page.getByRole("dialog").count()) === 1);
+  await page.keyboard.press("Escape");
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  order = await widgetOrder(page);
+  check("dashboard: po obnovení stránky rozložení drží", order[0] === "weekly_review" && !order.includes("games") && (await page.locator('[data-widget="finance"]').getAttribute("data-size")) === "medium", order.join(","));
+
+  await page.getByRole("button", { name: "Upravit dashboard" }).click();
+  await page.getByRole("button", { name: "Zobrazit widget: Hry" }).click();
+  check("dashboard úpravy: obnova skrytého widgetu", (await widgetOrder(page)).includes("games") && (await focusedName(page)) === "Skrýt widget: Hry");
+  await page.getByRole("button", { name: "Obnovit výchozí rozložení" }).click();
+  const dlg = page.getByRole("dialog", { name: "Obnovit výchozí rozložení?" });
+  check("dashboard: reset se potvrzuje dialogem", (await dlg.count()) === 1 && JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "weekly_review");
+  await dlg.getByRole("button", { name: "Obnovit výchozí" }).click();
+  await page.waitForTimeout(150);
+  check("dashboard: reset = výchozí pořadí a velikosti", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER) && (await storedLayout(page)) === null && (await page.locator('[data-widget="finance"]').getAttribute("data-size")) === "small");
+  check("dashboard: reset tlačítko zakázané u výchozího", await page.getByRole("button", { name: "Obnovit výchozí rozložení" }).isDisabled());
+  check("dashboard: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// klávesnice: celé úpravy bez myši
+{
+  const { ctx, page, errors } = await open("/");
+  const tabTo = async (name, max = 60) => {
+    for (let i = 0; i < max; i++) {
+      if ((await focusedName(page)) === name) return true;
+      await page.keyboard.press("Tab");
+    }
+    return false;
+  };
+  check("klávesnice: Tab na Upravit dashboard", await tabTo("Upravit dashboard"));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  check("klávesnice: Enter zapne úpravy, fokus na Hotovo", (await focusedName(page)) === "Hotovo");
+  check("klávesnice: Tab k posunu widgetu", await tabTo("Posunout dolů: Týdenní přehled"));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  let order = await widgetOrder(page);
+  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 3 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
+  await page.keyboard.press("Shift+Tab");
+  check("klávesnice: posun nahoru", (await focusedName(page)) === "Posunout nahoru: Týdenní přehled");
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(100);
+  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 2);
+  check("klávesnice: Tab ke Skrýt", await tabTo("Skrýt widget: Týdenní přehled", 6));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  check("klávesnice: skrytí → fokus na obnovu", (await focusedName(page)) === "Zobrazit widget: Týdenní přehled");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  check("klávesnice: obnova → fokus na Skrýt", (await focusedName(page)) === "Skrýt widget: Týdenní přehled" && (await widgetOrder(page)).includes("weekly_review"));
+  await page.keyboard.press("Shift+Tab");
+  check("klávesnice: výběr velikosti má popisek", (await page.evaluate(() => document.activeElement?.labels?.[0]?.textContent?.trim())) === "Velikost: Týdenní přehled");
+  await page.keyboard.press("ArrowDown");
+  await page.waitForTimeout(100);
+  check("klávesnice: velikost šipkou", (await page.locator('[data-widget="weekly_review"]').getAttribute("data-size")) === "medium");
+  await page.getByRole("button", { name: "Obnovit výchozí rozložení" }).focus();
+  await page.keyboard.press("Enter");
+  const dlg = page.getByRole("dialog", { name: "Obnovit výchozí rozložení?" });
+  check("klávesnice: reset otevře dialog", (await dlg.count()) === 1);
+  check("klávesnice: v dialogu potvrzení", await tabTo("Obnovit výchozí", 4));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  check("klávesnice: reset proveden, fokus na Hotovo", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER) && (await focusedName(page)) === "Hotovo");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(100);
+  check("klávesnice: Hotovo Enterem", (await focusedName(page)) === "Upravit dashboard");
+  check("klávesnice: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// uložená data: poškozená, neznámá, vše skryté, žádné bliknutí výchozího
+async function openSeeded(value, opts = {}) {
+  let counts = {};
+  const res = await open("/", {
+    ...opts,
+    setup: async (p) => {
+      counts = countRequests(p);
+      await p.addInitScript(([k, v]) => {
+        if (!sessionStorage.getItem("seeded")) {
+          localStorage.setItem(k, v);
+          sessionStorage.setItem("seeded", "1");
+        }
+        window.__seenGames = false;
+        new MutationObserver(() => {
+          if (document.querySelector('[data-widget="games"]')) window.__seenGames = true;
+        }).observe(document, { subtree: true, childList: true });
+      }, [LAYOUT_KEY, value]);
+    },
+  });
+  return { ...res, counts };
+}
+{
+  const { ctx, page, errors } = await openSeeded("{not json");
+  check("dashboard: poškozený JSON → výchozí rozložení bez chyby", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER) && errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const seeded = JSON.stringify({ version: 1, widgets: [
+    { id: "finance", visible: true, order: 10, size: "medium" },
+    { id: "zastaraly_widget", visible: true, order: 20, size: "small" },
+    { id: "games", visible: false, order: 30, size: "full" },
+    { id: "work", visible: true, order: 40, size: "obrovsky" },
+  ] });
+  const { ctx, page, errors } = await openSeeded(seeded);
+  const order = await widgetOrder(page);
+  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno", order.length === 10 && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
+  check("dashboard: uložené rozložení bez bliknutí výchozího", !(await page.evaluate(() => window.__seenGames)));
+  check("dashboard: neplatná data bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const allHidden = JSON.stringify({ version: 1, widgets: DEFAULT_ORDER.map((id, i) => ({ id, visible: false, order: (i + 1) * 10, size: "full" })) });
+  const { ctx, page, counts } = await openSeeded(allHidden);
+  check("dashboard: vše skryté → prázdný stav s cestou zpět", (await page.getByText("Všechny widgety jsou skryté.").count()) === 1 && (await page.getByRole("button", { name: "Upravit dashboard" }).count()) >= 1);
+  check("dashboard: skryté widgety nic nenačítají", !counts["/dashboard"] && !counts["/briefing/today"] && !counts["/weekly-review"], JSON.stringify(counts));
+  await page.getByRole("button", { name: "Upravit dashboard" }).first().click();
+  await page.getByRole("button", { name: "Zobrazit widget: Finance" }).click();
+  await page.waitForTimeout(400);
+  check("dashboard: zobrazení widgetu načte jen jeho data", counts["/dashboard"] === 1 && !counts["/briefing/today"], JSON.stringify(counts));
+  await ctx.close();
+}
+// mobil 390 px: úpravy bez tažení, ovládání se vejde, rozložení drží po obnovení
+{
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  await page.getByRole("button", { name: "Upravit dashboard" }).tap();
+  await page.waitForTimeout(100);
+  const groups = page.locator('[role="group"][aria-labelledby^="widget-"]');
+  const boxes = await groups.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => [Math.round(r.x), Math.round(r.right)]));
+  check("dashboard mobil: jeden widget na řádek, ovládání se vejde", boxes.every(([x, r]) => x >= 0 && r <= 390) && new Set(boxes.map(([x]) => x)).size === 1, JSON.stringify(boxes.slice(0, 3)));
+  check("dashboard mobil: bez přetečení v úpravách", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const up = await page.getByRole("button", { name: "Posunout nahoru: Finance" }).boundingBox();
+  check("dashboard mobil: tlačítka ≥ 44 px", Boolean(up && up.height >= 44 && up.width >= 44), JSON.stringify(up));
+  await page.screenshot({ path: `${OUT}dashboard-mobile-customize.png` });
+  await page.getByRole("button", { name: "Posunout nahoru: Finance" }).tap();
+  await page.getByRole("button", { name: "Skrýt widget: Cíle" }).tap();
+  await page.waitForTimeout(100);
+  let order = await widgetOrder(page);
+  check("dashboard mobil: přesun a skrytí", order.indexOf("finance") === order.indexOf("work") - 1 && !order.includes("goals"), order.join(","));
+  await page.getByRole("button", { name: "Zobrazit widget: Cíle" }).tap();
+  check("dashboard mobil: obnova", (await widgetOrder(page)).includes("goals"));
+  await page.getByRole("button", { name: "Skrýt widget: Cíle" }).tap();
+  await page.getByRole("button", { name: "Hotovo" }).tap();
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  order = await widgetOrder(page);
+  check("dashboard mobil: po obnovení drží", order.indexOf("finance") === order.indexOf("work") - 1 && !order.includes("goals"));
+  check("dashboard mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}dashboard-mobile.png` });
+  check("dashboard mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
