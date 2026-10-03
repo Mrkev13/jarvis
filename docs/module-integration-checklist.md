@@ -50,14 +50,28 @@ it; skip what does not apply and say why in the PR. Principles: [architecture-pr
 - [ ] Page: entry in `lib/navigation.ts` (Czech label + keywords) – sidebar and Ctrl+K share it.
 - [ ] Tests: a representative hit in `backend/tests/test_search.py`; never index secrets, tokens, raw payloads or
       internal ids; a ui-check query for the module (mock `search.json` regenerated from the real service).
-- [ ] Search only navigates – creating/changing data from the palette belongs to Quick Add.
+- [ ] Search only navigates – creating data belongs to Quick Add (§7).
 
-## 7. Future surfaces (design for, do not build early)
-- [ ] Quick Add: a minimal create payload the service accepts.
+## 7. Quick Add integration (Roadmap 4E – Smart Quick Add)
+Only when the module has a record people create often from one sentence; otherwise skip.
+- [ ] A WRITE tool for creating the record already exists (`tools.py`, `tool_registry.py`) and writes its Activity
+      entry with the passed `user_context` – Quick Add never gets its own mutation code.
+- [ ] Parser (`backend/quick_add_service.py`): an explicit keyword set for the kind, its place in the fixed
+      `classify()` priority, a `_parse_<kind>()` that fills fields, asks via `need()` for anything missing and never
+      invents values (categories only from explicit rules, shown as a warning); Prague dates via `time_utils`.
+- [ ] Validation in `to_tool_call()` (ranges, dates, foreign keys must exist) – the frontend is never trusted.
+- [ ] `_display()` Czech title/subtitle (no raw enums/ISO dates); area for the badge.
+- [ ] Frontend: `QuickAddKind`, `FIELD_DEFS`, `KIND_AREAS`, `KIND_HREFS` and one example in `lib/quickAdd.ts`.
+- [ ] Tests: parser matrix incl. ambiguous and invalid input in `backend/tests/test_quick_add.py`, prepare → confirm
+      end to end (source `quick_add`, no AI approve log), `lib/quickAdd.test.mjs`; mock fixture regenerated from the
+      real parser and a ui-check case.
+- [ ] No undo promise for creates; no LLM call for unknown text.
+
+## 8. Future surfaces (design for, do not build early)
 - [ ] Dashboard widget: a compact summary endpoint or reuse of existing queries.
 - [ ] Today Mode: what "today" means for the module (Prague date semantics).
 
-## 8. Operations and quality
+## 9. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
 - [ ] Scheduler work (if any) as an isolated, idempotent, bounded job.
 - [ ] Logs without secrets or private content.

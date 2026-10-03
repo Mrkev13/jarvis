@@ -294,6 +294,42 @@ def _message_to_dict(m):
     return {"role": m.role, "content": m.content}
 
 
+# Zdroje pending akcí (kdo akci navrhl). Bez klíče = AI (dosavadní chování); Rychlé přidání (Roadmap 4E)
+# ukládá `_source` do argumentů, executor ho před voláním toolu odebere a použije jako user_context.
+PENDING_SOURCE_KEY = "_source"
+
+QUICK_ADD_SOURCE = "quick_add"
+
+
+def prepare_write_action(db, fn_name: str, arguments: dict, *, source: str | None = None) -> dict:
+    """Z WRITE toolu udělá pending akci (jediná cesta pro AI i Rychlé přidání – nic se neprovede).
+
+    Tool s resolverem (úpravy, připomínky, vrácení) dostane plán s náhledem ověřeným proti DB;
+    MutationRefused / TypeError z resolveru se propouští volajícímu.
+    """
+    # Zdroj určuje jen volající (Rychlé přidání). Argumenty od LLM ho nesmí podstrčit – jinak by se akce AI
+    # v auditu tvářila jako ruční Rychlé přidání.
+    arguments = {k: v for k, v in (arguments or {}).items() if k != PENDING_SOURCE_KEY}
+    stored_arguments = arguments
+    preview = None
+    spec = TOOLS_BY_NAME.get(fn_name)
+    if spec is not None and spec.resolver is not None:
+        plan = spec.resolver(db, **arguments)
+        stored_arguments = {"plan": plan}
+        preview = plan.get("preview")
+    if source:
+        stored_arguments = {**stored_arguments, PENDING_SOURCE_KEY: source}
+    action_id = _store_pending_action(db, fn_name, stored_arguments, ttl_minutes=30)
+    pending_info = _get_pending_action(db, action_id)
+    expires_at_iso = (
+        pending_info["expires_at"].isoformat() if pending_info and pending_info.get("expires_at") else None
+    )
+    item = {"id": action_id, "tool": fn_name, "arguments": stored_arguments, "expires_at": expires_at_iso}
+    if preview is not None:
+        item["preview"] = preview
+    return item
+
+
 def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     """Provede read tooly a z write toolů udělá pending akce.
 
@@ -327,54 +363,34 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
             continue
 
         if fn_name in WRITE_TOOL_NAMES:
-            preview = None
-            stored_arguments = arguments
-            spec = TOOLS_BY_NAME.get(fn_name)
-            if spec is not None and spec.resolver is not None:
-                # Phase B: cíle se dohledají v DB TEĎ; nejednoznačný / neplatný cíl = žádná pending akce.
-                try:
-                    plan = spec.resolver(db, **arguments)
-                except MutationRefused as refused:
-                    print(f"  [TOOL REFUSED] {fn_name}: {refused.code}")
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(refused.as_tool_result(), ensure_ascii=False, default=str),
-                    })
-                    continue
-                except TypeError as exc:
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps({"status": "not_prepared", "error": "invalid_arguments",
-                                               "detail": str(exc)}, ensure_ascii=False),
-                    })
-                    continue
-                stored_arguments = {"plan": plan}
-                preview = plan.get("preview")
-            action_id = _store_pending_action(db, fn_name, stored_arguments, ttl_minutes=30)
-            pending_info = _get_pending_action(db, action_id)
-            expires_at_iso = (
-                pending_info["expires_at"].isoformat()
-                if pending_info and pending_info.get("expires_at")
-                else None
-            )
-            pending_item = {
-                "id": action_id,
-                "tool": fn_name,
-                "arguments": stored_arguments,
-                "expires_at": expires_at_iso,
-            }
+            # Phase B: cíle se dohledají v DB TEĎ; nejednoznačný / neplatný cíl = žádná pending akce.
+            try:
+                pending_item = prepare_write_action(db, fn_name, arguments)
+            except MutationRefused as refused:
+                print(f"  [TOOL REFUSED] {fn_name}: {refused.code}")
+                tool_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(refused.as_tool_result(), ensure_ascii=False, default=str),
+                })
+                continue
+            except TypeError as exc:
+                tool_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps({"status": "not_prepared", "error": "invalid_arguments",
+                                           "detail": str(exc)}, ensure_ascii=False),
+                })
+                continue
             tool_result = {
                 "status": "confirmation_required",
-                "id": action_id,
+                "id": pending_item["id"],
                 "tool": fn_name,
                 "arguments": arguments,
-                "expires_at": expires_at_iso,
+                "expires_at": pending_item["expires_at"],
             }
-            if preview is not None:
-                pending_item["preview"] = preview
-                tool_result["preview"] = preview
+            if "preview" in pending_item:
+                tool_result["preview"] = pending_item["preview"]
             pending_actions.append(pending_item)
 
             tool_messages.append({
@@ -840,7 +856,11 @@ def execute_confirm_action(action_id: str):
             }
 
         tool_name = stored.get("tool")
-        arguments = stored.get("arguments") or {}
+        arguments = dict(stored.get("arguments") or {})
+        # Roadmap 4E: kdo akci navrhl (AI / Rychlé přidání) – klíč se toolu nepředává.
+        source = arguments.pop(PENDING_SOURCE_KEY, None)
+        quick_add = source == QUICK_ADD_SOURCE
+        user_context = "quick_add" if quick_add else "ai_confirm"
 
         if tool_name not in WRITE_TOOL_FUNCTIONS:
             _finalize_pending_status(db, action_id, "failed")
@@ -864,7 +884,7 @@ def execute_confirm_action(action_id: str):
         fn = WRITE_TOOL_FUNCTIONS[tool_name]
         try:
             fn_args = dict(arguments)
-            fn_args["user_context"] = "ai_confirm"
+            fn_args["user_context"] = user_context
             try:
                 import inspect
                 sig = inspect.signature(fn)
@@ -882,18 +902,20 @@ def execute_confirm_action(action_id: str):
             else:
                 _finalize_pending_status(db, action_id, "executed")
 
-            try:
-                # Roadmap 4C: lidský text místo „Potvrzena akce add_work_session (date_value=…)".
-                summary = ai_action_summary(tool_name, arguments)[:480]
-                log_activity(
-                    db, "ai", "approve", summary,
-                    entity_type=tool_name,
-                    entity_id=_audit_entity_id(action_id),
-                    user_context="ai_confirm"
-                )
-                db.commit()
-            except Exception:
-                pass
+            # Rychlé přidání: záznam do Aktivity zapsal sám tool (user_context=quick_add) – není to akce AI.
+            if not quick_add:
+                try:
+                    # Roadmap 4C: lidský text místo „Potvrzena akce add_work_session (date_value=…)".
+                    summary = ai_action_summary(tool_name, arguments)[:480]
+                    log_activity(
+                        db, "ai", "approve", summary,
+                        entity_type=tool_name,
+                        entity_id=_audit_entity_id(action_id),
+                        user_context="ai_confirm"
+                    )
+                    db.commit()
+                except Exception:
+                    pass
 
             return {
                 "ok": True,
@@ -905,11 +927,12 @@ def execute_confirm_action(action_id: str):
             _finalize_pending_status(db, action_id, "failed")
             try:
                 log_activity(
-                    db, "ai", "reject",
-                    f"Akci AI se nepodařilo provést – {ai_action_label(tool_name)}: {str(exc)[:120]}",
+                    db, "system" if quick_add else "ai", "error" if quick_add else "reject",
+                    (f"Rychlé přidání se nepodařilo – {ai_action_label(tool_name)}: {str(exc)[:120]}" if quick_add
+                     else f"Akci AI se nepodařilo provést – {ai_action_label(tool_name)}: {str(exc)[:120]}"),
                     entity_type=tool_name,
                     entity_id=_audit_entity_id(action_id),
-                    user_context="ai_confirm"
+                    user_context=user_context
                 )
                 db.commit()
             except Exception:

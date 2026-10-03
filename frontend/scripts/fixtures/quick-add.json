@@ -1,0 +1,548 @@
+{
+ "zítra fyzio v 17:00": {
+  "kind": "reminder",
+  "confidence": "high",
+  "fields": {
+   "title": "Fyzio",
+   "due_local": "2026-10-12T17:00"
+  },
+  "display": {
+   "title": "Fyzio",
+   "subtitle": "zítra v 17:00",
+   "area": "reminders"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "připomeň mi v pátek zavolat mámě": {
+  "kind": "reminder",
+  "confidence": "high",
+  "fields": {
+   "title": "Zavolat mámě",
+   "due_local": "2026-10-16T09:00"
+  },
+  "display": {
+   "title": "Zavolat mámě",
+   "subtitle": "pá 16. 10. 2026 v 09:00",
+   "area": "reminders"
+  },
+  "warnings": [
+   "Čas nezadán – nastaveno 09:00."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "za 2 hodiny vyndat prádlo": {
+  "kind": "reminder",
+  "confidence": "high",
+  "fields": {
+   "title": "Vyndat prádlo",
+   "due_local": "2026-10-11T21:00"
+  },
+  "display": {
+   "title": "Vyndat prádlo",
+   "subtitle": "dnes v 21:00",
+   "area": "reminders"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "Albert 820 Kč": {
+  "kind": "finance",
+  "confidence": "high",
+  "fields": {
+   "transaction_type": "expense",
+   "amount": 820.0,
+   "category": "Potraviny",
+   "description": "Albert"
+  },
+  "display": {
+   "title": "Albert",
+   "subtitle": "Výdaj · 820 Kč · Potraviny · dnes",
+   "area": "finance"
+  },
+  "warnings": [
+   "Kategorie „Potraviny“ podle slova „albert“."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "oběd 189,90 Kč": {
+  "kind": "finance",
+  "confidence": "high",
+  "fields": {
+   "transaction_type": "expense",
+   "amount": 189.9,
+   "category": "Jídlo",
+   "description": "Oběd"
+  },
+  "display": {
+   "title": "Oběd",
+   "subtitle": "Výdaj · 189,90 Kč · Jídlo · dnes",
+   "area": "finance"
+  },
+  "warnings": [
+   "Kategorie „Jídlo“ podle slova „obed“."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "příjem Servind 5000 Kč": {
+  "kind": "finance",
+  "confidence": "high",
+  "fields": {
+   "transaction_type": "income",
+   "amount": 5000.0,
+   "category": "Příjem",
+   "description": "Servind"
+  },
+  "display": {
+   "title": "Servind",
+   "subtitle": "Příjem · 5 000 Kč · dnes",
+   "area": "finance"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "2 h práce Servind": {
+  "kind": "work",
+  "confidence": "high",
+  "fields": {
+   "date": "2026-10-11",
+   "hours": 2.0,
+   "project": "Servind",
+   "hourly_rate": 0,
+   "sync_to_finance": true
+  },
+  "display": {
+   "title": "Servind",
+   "subtitle": "2 h · 11. 10. 2026",
+   "area": "work"
+  },
+  "warnings": [
+   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "6,5 h Workshop za 375 Kč/h": {
+  "kind": "work",
+  "confidence": "high",
+  "fields": {
+   "date": "2026-10-11",
+   "hours": 6.5,
+   "project": "Workshop",
+   "hourly_rate": 375.0,
+   "sync_to_finance": true
+  },
+  "display": {
+   "title": "Workshop",
+   "subtitle": "6,5 h · 375 Kč/h · 2 437,50 Kč · 11. 10. 2026",
+   "area": "work"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "dnes 3 hodiny RaceX": {
+  "kind": "work",
+  "confidence": "medium",
+  "fields": {
+   "date": "2026-10-11",
+   "hours": 3.0,
+   "project": "RaceX",
+   "hourly_rate": 0,
+   "sync_to_finance": true
+  },
+  "display": {
+   "title": "RaceX",
+   "subtitle": "3 h · 11. 10. 2026",
+   "area": "work"
+  },
+  "warnings": [
+   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše.",
+   "Rozpoznáno jako práce podle hodin – zkontroluj."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "test z práva 18. 10.": {
+  "kind": "exam",
+  "confidence": "medium",
+  "fields": {
+   "title": "Test z práva",
+   "subject_id": null,
+   "exam_date": "2026-10-18",
+   "exam_type": "test"
+  },
+  "display": {
+   "title": "Test z práva",
+   "subtitle": "Test · předmět? (doplň) · 18. 10. 2026",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [
+   {
+    "field": "subject_id",
+    "question": "Ke kterému předmětu to patří?"
+   }
+  ],
+  "errors": [],
+  "ready": false,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "test z fyziky 18. 10.": {
+  "kind": "exam",
+  "confidence": "high",
+  "fields": {
+   "title": "Test z fyziky",
+   "subject_id": 2,
+   "exam_date": "2026-10-18",
+   "exam_type": "test"
+  },
+  "display": {
+   "title": "Test z fyziky",
+   "subtitle": "Test · Fyzika · 18. 10. 2026",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "zkouška z dějepisu 5. 11.": {
+  "kind": "exam",
+  "confidence": "high",
+  "fields": {
+   "title": "Zkouška z dějepisu",
+   "subject_id": 3,
+   "exam_date": "2026-11-05",
+   "exam_type": "exam"
+  },
+  "display": {
+   "title": "Zkouška z dějepisu",
+   "subtitle": "Zkouška · Dějepis · 5. 11. 2026",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "úkol matematika do pátku": {
+  "kind": "assignment",
+  "confidence": "high",
+  "fields": {
+   "title": "Úkol matematika",
+   "subject_id": 1,
+   "due_date": "2026-10-16",
+   "priority": "medium"
+  },
+  "display": {
+   "title": "Úkol matematika",
+   "subtitle": "Úkol · Matematika · 16. 10. 2026",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": true,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "úkol algoritmizace do pátku": {
+  "kind": "assignment",
+  "confidence": "medium",
+  "fields": {
+   "title": "Úkol algoritmizace",
+   "subject_id": null,
+   "due_date": "2026-10-16",
+   "priority": "medium"
+  },
+  "display": {
+   "title": "Úkol algoritmizace",
+   "subtitle": "Úkol · předmět? (doplň) · 16. 10. 2026",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [
+   {
+    "field": "subject_id",
+    "question": "Ke kterému předmětu to patří?"
+   }
+  ],
+  "errors": [],
+  "ready": false,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "Albert 820": {
+  "kind": "finance",
+  "confidence": "medium",
+  "fields": {
+   "transaction_type": "expense",
+   "amount": 820.0,
+   "category": "Potraviny",
+   "description": "Albert"
+  },
+  "display": {
+   "title": "Albert",
+   "subtitle": "Výdaj · 820 Kč · Potraviny · dnes",
+   "area": "finance"
+  },
+  "warnings": [
+   "Kategorie „Potraviny“ podle slova „albert“."
+  ],
+  "needs_input": [
+   {
+    "field": "amount",
+    "question": "Je to 820 Kč?"
+   }
+  ],
+  "errors": [],
+  "ready": false
+ },
+ "test z fyziky": {
+  "kind": "exam",
+  "confidence": "medium",
+  "fields": {
+   "title": "Test z fyziky",
+   "subject_id": 2,
+   "exam_date": "",
+   "exam_type": "test"
+  },
+  "display": {
+   "title": "Test z fyziky",
+   "subtitle": "Test · Fyzika · termín? (doplň)",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [
+   {
+    "field": "exam_date",
+    "question": "Kdy je termín?"
+   }
+  ],
+  "errors": [],
+  "ready": false,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "2 h Servind": {
+  "kind": "work",
+  "confidence": "medium",
+  "fields": {
+   "date": "2026-10-11",
+   "hours": 2.0,
+   "project": "Servind",
+   "hourly_rate": 0,
+   "sync_to_finance": true
+  },
+  "display": {
+   "title": "Servind",
+   "subtitle": "2 h · 11. 10. 2026",
+   "area": "work"
+  },
+  "warnings": [
+   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše.",
+   "Rozpoznáno jako práce podle hodin – zkontroluj."
+  ],
+  "needs_input": [],
+  "errors": [],
+  "ready": true
+ },
+ "-500 Kč": {
+  "kind": "finance",
+  "confidence": "medium",
+  "fields": {
+   "transaction_type": "expense",
+   "amount": -500.0,
+   "category": "Ostatní",
+   "description": ""
+  },
+  "display": {
+   "title": "Ostatní",
+   "subtitle": "Výdaj · -500 Kč · Ostatní · dnes",
+   "area": "finance"
+  },
+  "warnings": [
+   "Kategorie neurčena – nastaveno „Ostatní“."
+  ],
+  "needs_input": [],
+  "errors": [
+   {
+    "field": "amount",
+    "message": "Částka musí být kladná."
+   }
+  ],
+  "ready": false
+ },
+ "40 h práce": {
+  "kind": "work",
+  "confidence": "medium",
+  "fields": {
+   "date": "2026-10-11",
+   "hours": 40.0,
+   "project": "",
+   "hourly_rate": 0,
+   "sync_to_finance": true
+  },
+  "display": {
+   "title": "Práce",
+   "subtitle": "40 h · 11. 10. 2026",
+   "area": "work"
+  },
+  "warnings": [
+   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše."
+  ],
+  "needs_input": [],
+  "errors": [
+   {
+    "field": "hours",
+    "message": "Hodiny musí být mezi 0 a 24."
+   }
+  ],
+  "ready": false
+ },
+ "test z fyziky 31. 2.": {
+  "kind": "exam",
+  "confidence": "medium",
+  "fields": {
+   "title": "Test z fyziky",
+   "subject_id": 2,
+   "exam_date": "",
+   "exam_type": "test"
+  },
+  "display": {
+   "title": "Test z fyziky",
+   "subtitle": "Test · Fyzika · termín? (doplň)",
+   "area": "school"
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [
+   {
+    "field": "date",
+    "message": "Datum 31. 2. neexistuje."
+   }
+  ],
+  "ready": false,
+  "subjects": [
+   {
+    "id": 3,
+    "name": "Dějepis"
+   },
+   {
+    "id": 2,
+    "name": "Fyzika"
+   },
+   {
+    "id": 1,
+    "name": "Matematika"
+   }
+  ]
+ },
+ "asdf qwer": {
+  "kind": "unknown",
+  "confidence": "low",
+  "fields": {},
+  "display": {
+   "title": "",
+   "subtitle": "",
+   "area": null
+  },
+  "warnings": [],
+  "needs_input": [],
+  "errors": [],
+  "ready": false
+ }
+}

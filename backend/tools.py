@@ -16,7 +16,7 @@ from models import (
     parse_legacy_uru_state,
 )
 from activity_service import log_activity, delta_dict
-from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz
+from text_utils import finance_summary_cz, format_czk_cz, format_date_cz, format_hours_cz
 
 
 def get_wot_resources():
@@ -495,7 +495,7 @@ def add_school_assignment(
 
         summary = f"Nový úkol: {title}"
         if due_date:
-            summary = f"{summary}, termín {due_date}"
+            summary = f"{summary}, termín {format_date_cz(item.due_date)}"
         log_activity(
             db, "school", "create", summary,
             entity_type="Assignment", entity_id=item.id,
@@ -543,11 +543,11 @@ def add_school_exam(
         db.add(item)
         db.flush()
 
-        type_map = {"exam": "Zkouška", "colloquium": "Kolokvium", "test": "Test"}
+        type_map = {"exam": "Zkouška", "colloquium": "Kolokvium", "test": "Test", "quiz": "Kvíz"}
         type_label = type_map.get(exam_type, exam_type)
         summary = f"{type_label}: {title}"
         if exam_date:
-            summary = f"{summary} ({exam_date})"
+            summary = f"{summary} ({format_date_cz(item.exam_date)})"
         log_activity(
             db, "school", "create", summary,
             entity_type="Exam", entity_id=item.id,

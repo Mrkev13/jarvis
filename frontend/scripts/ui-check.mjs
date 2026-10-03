@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A + 4B + 4B.1).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4E).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -756,6 +756,176 @@ for (const [scheme, motion] of [["dark", "reduce"], ["light", "no-preference"]])
   });
   if (motion === "reduce") check("hledání reduced motion: paleta bez animace", style.anim === "none", style.anim);
   else check("hledání (světlý motiv OS): paleta zůstává tmavá", !/255, 255, 255/.test(style.bg) && style.bg !== "", style.bg);
+  await ctx.close();
+}
+
+// 17) Roadmap 4E – Rychlé přidání (Ctrl+Shift+K / „+"), mock /quick-add/parse = odpovědi skutečného parseru.
+const quickAddLog = async () => (await fetch("http://127.0.0.1:8000/__mock/quick-add")).json();
+const qaDialog = (page) => page.getByRole("dialog", { name: "Rychlé přidání" });
+async function qaType(page, text) {
+  const input = qaDialog(page).getByLabel("Co chceš přidat?");
+  await input.fill(text);
+  await page.waitForTimeout(450);
+  return input;
+}
+{
+  const { ctx, page, errors } = await open("/");
+  await quickAddLog();
+  await page.keyboard.press("Control+Shift+K");
+  const dialog = qaDialog(page);
+  check("quick add: Ctrl+Shift+K otevře Rychlé přidání", (await dialog.count()) === 1);
+  check("quick add: Ctrl+Shift+K neotevře vyhledávání", (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 0);
+  const input = dialog.getByLabel("Co chceš přidat?");
+  check("quick add: fokus v poli", await input.evaluate((el) => el === document.activeElement));
+  check("quick add: prázdný stav s příklady", (await dialog.getByRole("list", { name: "Příklady" }).getByRole("button").count()) >= 5);
+  await page.screenshot({ path: `${OUT}quick-add-empty.png` });
+
+  // finance: náhled → úprava pole → Enter neukládá → Uložit
+  await qaType(page, "oběd 189,90 Kč");
+  const preview = dialog.getByTestId("quick-add-preview");
+  check("quick add: finance náhled", (await preview.getAttribute("data-kind")) === "finance" && (await preview.getByText("Rozpoznáno").count()) === 1);
+  check("quick add: finance částka a kategorie", (await dialog.getByLabel(/^Částka/).inputValue()) === "189,9" && (await dialog.getByLabel("Kategorie").inputValue()) === "Jídlo");
+  await page.screenshot({ path: `${OUT}quick-add-finance.png` });
+  await dialog.getByLabel("Kategorie").fill("Restaurace");
+  await input.press("Enter");
+  await page.waitForTimeout(450);
+  let log = await quickAddLog();
+  check("quick add: rozbor nezapisuje a Enter neukládá", log.prepared.length === 0 && log.confirmed.length === 0, `${log.parse.length} rozborů`);
+  await dialog.getByLabel("Kategorie").fill("Restaurace");
+  await dialog.getByTestId("quick-add-save").click();
+  await dialog.getByTestId("quick-add-saved").waitFor({ timeout: 4000 }).catch(() => undefined);
+  log = await quickAddLog();
+  check("quick add: Uložit = prepare + confirm s upraveným polem", log.prepared.length === 1 && log.prepared[0].fields.category === "Restaurace" && log.confirmed.length === 1, JSON.stringify(log.prepared[0]?.fields));
+  check("quick add: potvrzení se zdrojem „Rychlé přidání“", (await dialog.getByText("v Aktivitě jako „Rychlé přidání“", { exact: false }).count()) === 1 && (await dialog.getByText("Uloženo").count()) >= 1);
+  check("quick add: u vytvoření se nenabízí Vrátit", (await dialog.getByRole("button", { name: /Vrátit/ }).count()) === 0);
+  await dialog.getByRole("button", { name: "Přidat další" }).click();
+  check("quick add: Přidat další vyčistí pole a vrátí fokus", (await input.inputValue()) === "" && (await input.evaluate((el) => el === document.activeElement)));
+
+  // nejednoznačné: „Albert 820" → otázka, Uložit zakázané, Enter nic, „Ano" povolí
+  await qaType(page, "Albert 820");
+  const save = dialog.getByTestId("quick-add-save");
+  check("quick add: „Albert 820“ se ptá „Je to 820 Kč?“", (await dialog.getByText("Je to 820 Kč?").count()) >= 1 && (await preview.getByText("Zkontroluj").count()) === 1);
+  check("quick add: nejednoznačné nejde uložit", await save.isDisabled());
+  await input.press("Enter");
+  await page.waitForTimeout(400);
+  check("quick add: Enter nepotvrdí nejednoznačný náhled", (await quickAddLog()).prepared.length === 0);
+  await page.screenshot({ path: `${OUT}quick-add-ambiguous.png` });
+  await dialog.getByRole("button", { name: "Ano", exact: true }).click();
+  check("quick add: po „Ano“ jde uložit", await save.isEnabled());
+
+  // neznámé
+  await qaType(page, "asdf qwer");
+  check("quick add: „Tomu zatím nerozumím.“ + příklady", (await dialog.getByTestId("quick-add-unknown").count()) === 1 && (await dialog.getByRole("list", { name: "Příklady" }).count()) === 1);
+  check("quick add: neznámé nejde uložit", await save.isDisabled());
+  await page.screenshot({ path: `${OUT}quick-add-unknown.png` });
+
+  // příklad z prázdného stavu vyplní pole
+  await qaType(page, "");
+  await dialog.getByRole("button", { name: "6,5 h Workshop za 375 Kč/h" }).click();
+  await page.waitForTimeout(450);
+  check("quick add: práce – sazba a výdělek", (await preview.getAttribute("data-kind")) === "work" && /2\s437,50\sKč/.test(await preview.innerText()) && (await dialog.getByLabel(/^Sazba/).inputValue()) === "375");
+  await page.screenshot({ path: `${OUT}quick-add-work.png` });
+
+  // připomínka: relativní den
+  await qaType(page, "zítra fyzio v 17:00");
+  check("quick add: připomínka zítra v 17:00", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-12T17:00" && (await preview.getByText("zítra v 17:00").count()) === 1);
+  await page.screenshot({ path: `${OUT}quick-add-reminder.png` });
+
+  // škola: předmět + datum; neznámý předmět = otázka, výběr ze seznamu povolí uložení
+  await qaType(page, "test z fyziky 18. 10.");
+  check("quick add: škola – předmět a termín", (await preview.getAttribute("data-kind")) === "exam" && (await dialog.getByLabel(/^Předmět/).inputValue()) === "2" && (await dialog.getByLabel(/^Termín/).inputValue()) === "2026-10-18");
+  await page.screenshot({ path: `${OUT}quick-add-school.png` });
+  await qaType(page, "test z práva 18. 10.");
+  check("quick add: neznámý předmět se nehádá", (await dialog.getByText("Ke kterému předmětu to patří?").count()) >= 1 && (await dialog.getByLabel(/^Předmět/).inputValue()) === "" && (await save.isDisabled()));
+  await dialog.getByLabel(/^Předmět/).selectOption({ label: "Matematika" });
+  check("quick add: výběr předmětu povolí uložení", await save.isEnabled());
+
+  // neplatné: 40 h
+  await qaType(page, "40 h práce");
+  check("quick add: 40 h = chyba u pole", (await dialog.getByText("Hodiny musí být mezi 0 a 24.").count()) >= 1 && (await save.isDisabled()));
+
+  // chyba rozboru → znovu
+  await qaType(page, "simuluj chybu");
+  check("quick add: chyba rozboru s „Zkusit znovu“", (await dialog.getByRole("button", { name: /Zkusit znovu/ }).count()) === 1);
+
+  // selhání potvrzení → „Zkusit znovu" potvrdí TUTÉŽ pending akci
+  await quickAddLog();
+  await qaType(page, "oběd 189,90 Kč");
+  await dialog.getByLabel("Popis").fill("chyba");
+  await save.click();
+  await dialog.getByRole("alert").waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("quick add: selhání uložení je vidět", /simulace/.test(await dialog.getByRole("alert").innerText().catch(() => "")));
+  await dialog.getByTestId("quick-add-save").click();
+  await dialog.getByTestId("quick-add-saved").waitFor({ timeout: 4000 }).catch(() => undefined);
+  log = await quickAddLog();
+  check("quick add: opakování nevytvoří druhou akci", log.prepared.length === 1 && log.confirmed.length === 1 && (await dialog.getByTestId("quick-add-saved").count()) === 1, JSON.stringify({ p: log.prepared.length, c: log.confirmed.length }));
+
+  // Esc zavře a vrátí fokus na „+" v postranním panelu
+  await page.keyboard.press("Escape");
+  const plus = page.getByRole("button", { name: /^Rychlé přidání/ });
+  await plus.click();
+  check("quick add: „+“ v postranním panelu otevře dialog", (await dialog.count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(60);
+  check("quick add: Esc zavře a vrátí fokus", (await dialog.count()) === 0 && (await plus.evaluate((el) => el === document.activeElement)));
+  check("quick add: Ctrl+K dál otevírá vyhledávání", await (async () => {
+    await page.keyboard.press("Control+k");
+    const ok = (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 1 && (await dialog.count()) === 0;
+    await page.keyboard.press("Escape");
+    return ok;
+  })());
+  check("quick add: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// mobil 390 px: „+" v hlavičce, celá obrazovka, pole pod sebou, Uložit dosažitelné
+{
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  await page.getByRole("button", { name: "Rychlé přidání", exact: true }).tap();
+  const dialog = qaDialog(page);
+  const box = await dialog.boundingBox();
+  check("quick add mobil: přes celou obrazovku", Boolean(box && box.width >= 389 && box.height >= 843), `${box?.width}×${box?.height}`);
+  await qaType(page, "příjem Servind 5000 Kč");
+  const [a, b] = [await dialog.getByLabel("Typ").boundingBox(), await dialog.getByLabel(/^Částka/).boundingBox()];
+  check("quick add mobil: pole pod sebou", Boolean(a && b && Math.abs(a.x - b.x) < 2 && b.y > a.y), `${a?.x}/${b?.x}`);
+  const saveBox = await dialog.getByTestId("quick-add-save").boundingBox();
+  check("quick add mobil: Uložit ve výřezu a ≥ 44 px", Boolean(saveBox && saveBox.y + saveBox.height <= 844 && saveBox.height >= 44), JSON.stringify(saveBox));
+  check("quick add mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}quick-add-mobile.png` });
+  await dialog.getByTestId("quick-add-save").tap();
+  await dialog.getByTestId("quick-add-saved").waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("quick add mobil: uloženo", (await dialog.getByTestId("quick-add-saved").count()) === 1);
+  await page.screenshot({ path: `${OUT}quick-add-mobile-saved.png` });
+  check("quick add mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// login: žádné Rychlé přidání ani dotazy /quick-add; neautorizovaný dotaz = 401
+{
+  const requests = [];
+  const { ctx, page } = await open("/login", {
+    setup: async (p) => {
+      p.on("request", (r) => requests.push(new URL(r.url()).pathname));
+      await p.route("**/auth/session/validate", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) }),
+      );
+    },
+  });
+  await page.keyboard.press("Control+Shift+K");
+  await page.waitForTimeout(200);
+  check("login: bez Rychlého přidání", (await page.getByRole("dialog").count()) === 0 && (await page.getByRole("button", { name: /Rychlé přidání/ }).count()) === 0);
+  check("login: žádné dotazy /quick-add", !requests.some((r) => r.startsWith("/quick-add")));
+  await ctx.addCookies([{ name: "standa_hub_session", value: "expired", domain: "127.0.0.1", path: "/" }]);
+  const status = await page.evaluate(async () =>
+    (await fetch("http://127.0.0.1:8000/quick-add/parse", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "oběd 100 Kč" }) })).status,
+  );
+  check("quick add: bez platné session 401", status === 401, String(status));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/", { reducedMotion: "reduce" });
+  await page.keyboard.press("Control+Shift+K");
+  await page.waitForTimeout(150);
+  const anim = await qaDialog(page).evaluate((d) => getComputedStyle(d).animationName);
+  check("quick add reduced motion: bez animace", anim === "none", anim);
   await ctx.close();
 }
 

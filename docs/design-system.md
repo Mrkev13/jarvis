@@ -262,7 +262,7 @@ conversations always jumps to the latest message.
 ## 14. Global Search / Ctrl+K (Roadmap 4D)
 
 **What it is** – one command palette for the whole authenticated app (not on `/login`): find a page or a record
-and open it. It **only navigates**; creating or changing data is Smart Quick Add (later), never the palette.
+and open it. It **only navigates**; creating data is Smart Quick Add (§15), never the palette.
 Conversation history stays inside the AI assistant.
 
 **Architecture** – deterministic, no LLM, no index:
@@ -300,3 +300,67 @@ outlines it for ~2 s (static under reduced motion). If the record is not on the 
 
 **Look** – compact elevated panel near the top, a thin cyan line on its top edge, cyan rail on the selected
 row, mono group labels; no badges per row (the group names the area), no glow.
+
+## 15. Smart Quick Add (Roadmap 4E)
+
+**What it is** – one global entry point for creating a record from a short Czech sentence, available only in
+the authenticated shell: **Ctrl/Cmd+Shift+K**, the "+ Rychlé přidání" button under the search field in the
+sidebar, and the "+" icon in the mobile header. Search (Ctrl+K) only navigates; Quick Add only creates –
+the two never share a shortcut or a surface.
+
+**Supported types (only these)** – reminder, finance (expense/income), work session, school exam,
+school assignment. Goals, WoT, MFF and memory are deliberately not supported.
+
+**Architecture** – deterministic, no LLM, no DB writes while parsing:
+- `POST /quick-add/parse {text}` → `quick_add_service.parse()` → preview (read-only, < 1 ms per call;
+  the test budget is 50 ms);
+- `POST /quick-add/prepare {kind, fields}` → `to_tool_call()` re-validates the (possibly edited) fields on the
+  server and turns them into an existing WRITE tool call, then `ai.prepare_write_action(..., source="quick_add")`
+  stores a **normal pending action** (same table, TTL, atomic claim);
+- the UI then calls the existing `POST /actions/confirm` – the same executor, audit and expiry as AI proposals.
+  Nothing new executes mutations.
+- Frontend: `lib/quickAdd.ts` (field definitions, readiness, shortcut, examples – unit-tested),
+  `QuickAddProvider` (shortcut, rendered by `AppShell`), `QuickAddDialog`, `QuickAddButton`.
+
+**Preview model** – `{kind, confidence: high|medium|low, fields, display: {title, subtitle, area}, warnings[],
+needs_input: [{field, question}], errors: [{field, message}], ready, subjects?}`. Confidence is shown in words
+("Rozpoznáno" / "Zkontroluj" / "Nejisté"), never as a number.
+
+**Parser rules** (`backend/quick_add_service.py`) – normalise (lower case, no diacritics, same length so spans map
+back to the original), then classify by fixed priority: explicit reminder word ("připomeň", "nezapomeň") > exam
+word (test, zkouška, kvíz, zápočet) > assignment word (úkol, deadline, odevzdat) > work word or rate "Kč/h" >
+hours without a work word (work, *medium*) > relative time "za 2 hodiny" or a clock time > money / income /
+expense words > a bare number (finance, asks). Dates and times use the Prague calendar (`time_utils`): dnes /
+zítra / pozítří, weekdays ("v pátek" = nearest, "příští pátek" = next calendar week), "18. 10." (rolls to next year
+if already past), ISO dates; reminders without a time get 09:00 (shown as a warning); a time that already passed
+today moves to tomorrow (warning). Finance categories only from explicit words (Albert/Lidl → Potraviny,
+oběd/káva → Jídlo, MHD/benzín → Doprava, …); otherwise "Ostatní" with a visible warning. Subjects match by full
+name or code first, then by the stem of the first word ("z práva" → Právo); more candidates = no choice made.
+
+**Ambiguity – never guess silently** – "Albert 820" asks "Je to 820 Kč?" (one "Ano" resolves it); "test z práva"
+without a date asks "Kdy je termín?"; an unknown subject asks "Ke kterému předmětu to patří?" with a select;
+"2 h Servind" is work with *medium* confidence and a "zkontroluj" warning; no hourly rate is invented (0 Kč with a
+warning). Errors ("-500 Kč", "40 h práce", "31. 2.") are shown at the field and block saving.
+
+**Safe write** – "Uložit" is enabled only when every required field is filled, every question is resolved
+(edited or acknowledged) and no unedited field has an error. Enter in the input only re-parses, it never saves.
+A failed confirm keeps the same pending action, so "Zkusit znovu" cannot create a duplicate; changing the text or
+a field (or closing the dialog) rejects the stale pending action. Server-side validation: amount 0–10 M Kč,
+hours 0–24, rate 0–100 000 Kč/h, dates within a year, reminder in the future, subject must exist.
+
+**Source label** – the tools write their Activity entry with `user_context="quick_add"`, shown as "zdroj: Rychlé
+přidání" (`lib/labels.ts`); the executor skips the "AI approve" log because it is not an AI action.
+
+**Undo** – creates have no undo (same as AI creates), so none is offered; edits/deletes stay on the module pages.
+
+**States** – empty: hint + clickable examples; parsing: pulse in the input, previous preview dimmed; unknown:
+"Tomu zatím nerozumím." + examples; parse error: ErrorState with retry; saved: "Uloženo" card with "Přidat další"
+(focus back in the input) and a link to the module page.
+
+**Mobile** – the "+" in the header opens a full-screen surface: input on top, preview and fields stacked below,
+"Zrušit / Uložit" pinned at the bottom (≥ 44 px, safe-area aware), no horizontal overflow.
+
+**Future AI fallback boundary** – unknown text is never sent to an LLM. If a fallback is added later it must be
+an explicit user action ("Zeptat se AI") on the "unknown" state that hands the text to the AI assistant, whose
+proposals still go through pending actions; the deterministic parser stays first and authoritative.
+

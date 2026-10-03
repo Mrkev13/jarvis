@@ -406,6 +406,15 @@ class ConfirmActionRequest(BaseModel):
     action_id: str
 
 
+class QuickAddParseRequest(BaseModel):
+    text: str = ""
+
+
+class QuickAddPrepareRequest(BaseModel):
+    kind: str
+    fields: dict = {}
+
+
 class ReminderCreateRequest(BaseModel):
     title: str
     due_local: str | None = None
@@ -688,6 +697,42 @@ def global_search(q: str = "", limit: int = 30):
     db = SessionLocal()
     try:
         return search(db, q, limit)
+    finally:
+        db.close()
+
+
+@app.post("/quick-add/parse")
+def quick_add_parse(request: QuickAddParseRequest):
+    """Roadmap 4E: Rychlé přidání – deterministický náhled (bez LLM, bez zápisu). Text se neloguje."""
+    import quick_add_service
+
+    db = SessionLocal()
+    try:
+        return quick_add_service.parse(request.text, db=db)
+    finally:
+        db.close()
+
+
+@app.post("/quick-add/prepare")
+def quick_add_prepare(request: QuickAddPrepareRequest):
+    """Roadmap 4E: ověří (upravená) pole a vytvoří BĚŽNOU pending akci se zdrojem quick_add.
+
+    Nic nezapisuje – zápis provede až POST /actions/confirm (atomické potvrzení, audit, vypršení).
+    """
+    import quick_add_service
+    from mutation_service import MutationRefused
+
+    db = SessionLocal()
+    try:
+        try:
+            tool, args = quick_add_service.to_tool_call(db, request.kind, request.fields)
+        except quick_add_service.QuickAddInvalid as invalid:
+            raise HTTPException(status_code=422, detail={"errors": invalid.errors})
+        try:
+            pending = _ai_module.prepare_write_action(db, tool, args, source=_ai_module.QUICK_ADD_SOURCE)
+        except MutationRefused as refused:
+            raise HTTPException(status_code=422, detail={"errors": [{"field": "", "message": refused.detail}]})
+        return {"ok": True, "pending_action": pending}
     finally:
         db.close()
 

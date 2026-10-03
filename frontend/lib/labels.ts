@@ -67,6 +67,7 @@ export function entityRefLabel(entityType: string | null | undefined, entityId: 
 const SOURCE_LABELS: Record<string, string> = {
   manual: "ručně",
   ai_confirm: "AI, potvrzeno",
+  quick_add: "Rychlé přidání",
   ai: "AI",
   scheduler: "plánovač",
   system: "systém",
