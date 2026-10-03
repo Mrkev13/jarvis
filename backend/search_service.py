@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 
 from sqlalchemy.orm import Session
 
+from goal_history_service import compute_goal_progress_and_value
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, MffCharacter, Reminder, Subject, WorkSession, WotGrind
 from reminder_service import describe_recurrence, format_local
 from statuses import REMINDER_ACTIVE_STATUSES, is_assignment_done
@@ -111,7 +112,9 @@ def _candidates(db: Session, q: str):
         sub = _join(kind, format_czk_cz(t.amount), category if t.description else "", format_date_cz(t.created_at) if t.created_at else "")
         yield "transaction", t.id, title, sub, f"{category} {t.category or ''} {kind}", "finance", f"/finance?transaction={t.id}"
     for g in db.query(Goal).limit(ROW_LIMIT).all():
-        sub = _join("Cíl", _GOAL_STATUS.get((g.status or "").lower(), ""), f"{g.progress or 0} %", f"do {format_date_cz(g.target_date)}" if g.target_date else "")
+        # stejné procento jako stránka Cíle – automatické cíle mají `progress` ve sloupci 0, hodnota se počítá
+        pct, _ = compute_goal_progress_and_value(db, g)
+        sub = _join("Cíl", _GOAL_STATUS.get((g.status or "").lower(), ""), f"{pct} %", f"do {format_date_cz(g.target_date)}" if g.target_date else "")
         yield "goal", g.id, g.title, sub, f"{g.description or ''} cil", "goals", f"/goals?goal={g.id}"
     for m in db.query(Memory).filter(Memory.active == True).limit(ROW_LIMIT).all():  # noqa: E712
         content = " ".join((m.content or "").split())

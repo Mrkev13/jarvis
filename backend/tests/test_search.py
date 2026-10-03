@@ -132,6 +132,21 @@ class SearchTestCase(unittest.TestCase):
             self.assertTrue(all(r["type"] in {"subject", "assignment", "exam", "reminder", "work_session", "transaction", "goal", "memory", "wot_grind", "mff_character"} for r in results))
             self.assertFalse(any("Tajn" in r["title"] or "endpoint" in r["title"] for r in results), (q, results))
 
+    def test_automatic_goal_shows_computed_progress(self):
+        """Regrese 4D: automatický cíl (zůstatek financí) ukazoval „0 %" ze sloupce progress, stránka Cíle 10 %."""
+        db = self.Session()
+        db.add(Goal(area="finance", title="Našetřit 1 000 Kč", progress=0, tracking_type="automatic",
+                    source="finance_balance", target_value=1000))
+        db.add(FinanceTransaction(amount=310.1, category="other", description="vklad", transaction_type="income",
+                                  created_at=datetime(2026, 10, 1, 9)))
+        db.commit()
+        db.close()
+        goal = next(r for r in self._search("nasetrit")["results"] if r["type"] == "goal")
+        # zůstatek = 2437,5 + 310,1 − 189,9 = 2557,7 → nad cílem → 100 %
+        self.assertIn("100 %", goal["subtitle"])
+        manual = next(r for r in self._search("rezerva")["results"] if r["type"] == "goal")
+        self.assertIn("40 %", manual["subtitle"])
+
     def test_limits(self):
         db = self.Session()
         db.add_all([Goal(area="work", title=f"Projekt {i}") for i in range(20)])
