@@ -53,7 +53,7 @@
   "category": "food",
   "description": "Oběd",
   "transaction_type": "expense",
-  "created_at": "2026-10-03T13:46:32.141260"
+  "created_at": "2026-10-03T15:01:29.430780"
  },
  {
   "id": 10,
@@ -61,7 +61,7 @@
   "category": "work",
   "description": "Work: Klient XYZ – Workshop",
   "transaction_type": "income",
-  "created_at": "2026-10-03T13:46:32.131749"
+  "created_at": "2026-10-03T15:01:29.418917"
  },
  {
   "id": 9,
@@ -69,7 +69,7 @@
   "category": "work",
   "description": "Work: Klient XYZ – Workshop",
   "transaction_type": "income",
-  "created_at": "2026-10-03T13:46:32.116262"
+  "created_at": "2026-10-03T15:01:29.402678"
  },
  {
   "id": 3,

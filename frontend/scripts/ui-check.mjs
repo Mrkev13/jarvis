@@ -333,6 +333,8 @@ for (const width of [1920, 1366]) {
   check("aktivita: žádný surový zdroj (manual / ai_confirm)", !/zdroj: (manual|ai_confirm)\b/.test(text));
   check("aktivita: česká entita (např. Grind #)", /(Grind|Transakce|Pracovní záznam|Paměť|Úkol) #\d+/.test(text));
   check("aktivita: bez „Pamatka“ a „(hard)“", !/Pamatka|\(hard\)|\(soft\)/.test(text));
+  check("aktivita: finance bez „work (sync)“ a anglických znamének", !/work \(sync\)|^-\d/m.test(text));
+  check("aktivita: plánovač/práce bez desetinné tečky v hodinách", !/\d\.\d h\b/.test(text));
   const rows = page.getByRole("button", { name: "Detail" });
   const fieldNames = [];
   for (let i = 0; i < Math.min(await rows.count(), 6); i += 1) {
