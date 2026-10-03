@@ -51,6 +51,7 @@ STEP_0003_EXTRA = {"activity_logs", "pending_actions"}
 STEP_0004_EXTRA = {"activity_logs", "pending_actions"}
 STEP_0005_EXTRA = {"activity_logs", "pending_actions", "backup_logs"}
 STEP_0006_EXTRA = {"activity_logs", "pending_actions", "backup_logs", "auth_sessions"}
+STEP_0009_EXTRA = {"reminders"}
 
 
 def _sqlite_tables(conn):
@@ -159,7 +160,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -238,6 +239,28 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         self.assertNotIn("summary", cols)
         self.assertNotIn("summarized_until_message_id", cols)
         self.assertEqual(self.conn.execute(text("SELECT title FROM conversations")).scalar(), "Chat")
+
+    def test_0009_adds_reminders_table_and_downgrades_cleanly(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0008_conversation_summary")
+        self.conn.execute(text("INSERT INTO conversations (title, created_at, updated_at) "
+                               "VALUES ('Chat', '2026-10-01 10:00:00', '2026-10-01 10:00:00')"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0009_reminders")
+        self.assertIn("reminders", _sqlite_tables(self.conn))
+        indexes = {ix["name"] for ix in inspect(self.conn).get_indexes("reminders")}
+        self.assertIn("ix_reminders_status_due", indexes)
+        self.conn.execute(text(
+            "INSERT INTO reminders (title, due_at, status, recurrence, fire_count, created_at, updated_at) "
+            "VALUES ('fyzio', '2026-10-05 06:00:00', 'scheduled', 'none', 0, "
+            "'2026-10-04 10:00:00', '2026-10-04 10:00:00')"))
+        self.conn.commit()
+        alembic_cmd.downgrade(self.cfg, "0008_conversation_summary")
+        self.assertNotIn("reminders", _sqlite_tables(self.conn))
+        self.assertEqual(self.conn.execute(text("SELECT title FROM conversations")).scalar(), "Chat")
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertIn("reminders", _sqlite_tables(self.conn))
 
     def test_0007_downgrade_restores_0006_shape(self):
         alembic_cmd.upgrade(self.cfg, "0006_auth_sessions")
@@ -328,7 +351,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA)
 
             db = main.SessionLocal()
             try:
