@@ -95,11 +95,12 @@ class RouteSelectionTestCase(unittest.TestCase):
     def test_write_intent_detection(self):
         for msg in ("přidej výdaj 300 Kč za oběd", "utratil jsem 200 za kafe", "oběd 150 Kč",
                     "zapiš mi 4 hodiny na Servind", "pamatuj si, že chci šetřit", "změň stav cíle na hotovo",
-                    "nastav kredity na 2 000 000"):
+                    "nastav kredity na 2 000 000", "dneska jsem byl 6 hodin v práci", "ve WoT mám teď 2 500 000 kreditů"):
             with self.subTest(msg):
                 self.assertTrue(detect_write_intent(msg))
         for msg in ("kolik jsem utratil za jídlo?", "jaké byly změny", "kolik mám kreditů", "Co jsem dostal za úkol?",
-                    "kolik stál oběd za 300 Kč?"):
+                    "kolik stál oběd za 300 Kč?", "Ukaž mi posledních 5 finančních transakcí",
+                    "co mám dělat 3. 10.?"):
             with self.subTest(msg):
                 self.assertFalse(detect_write_intent(msg))
 

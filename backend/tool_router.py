@@ -10,7 +10,7 @@ Pravidla:
   (covered_by_context) se nepošle, když jeho oblast pokryl CURRENT STATE a uživatel se na ni výslovně neptá.
   Detailní tooly (explicit_only: předměty, historie cíle) jen při výslovně zmíněné oblasti.
 - WRITE tooly: jen při deterministickém write záměru (sloveso typu „přidej/ulož/zapiš", oznamovací věta
-  „utratil jsem…", částka v Kč mimo otázku). „Pamatuj si…" → jen save_memory. Oblast write záměru neznámá
+  „utratil jsem…", částka v Kč nebo číslo v konkrétní oblasti mimo otázku / žádost o výpis). „Pamatuj si…" → jen save_memory. Oblast write záměru neznámá
   → všechny write tooly (bezpečný fallback – zápis stejně vyžaduje potvrzení v UI).
 - Pozdrav bez dalšího obsahu → žádné tooly. Neznámý dotaz bez oblasti → všechny READ tooly.
 - requires (např. add_school_exam → get_school_subjects) se doplní vždy.
@@ -60,6 +60,11 @@ _AMOUNT_RE = re.compile(r"\d[\d\s.,]*\s?(kc|czk|korun)\b")
 _QUESTION_START_RE = re.compile(
     r"^(kolik|kdy|kde|jak|co|proc|ktery|ktera|ktere|kteri|je |jsou|mam |mel |mela |byl|bylo|byla|muzu|lze)"
 )
+# Žádost o zobrazení dat („ukaž mi posledních 5 transakcí") – číslo v ní není zápis.
+_READ_REQUEST_RE = re.compile(
+    r"^(ukaz|vypis|zobraz|rekni|shrn|porovnej|spocit|najdi|vyhledej|chci vedet|potrebuju vedet|dej mi|napis mi)"
+)
+_DIGIT_RE = re.compile(r"\d")
 _GREETING_RE = re.compile(
     r"^(ahoj|cau|cus|nazdar|zdravim|dobry den|dobre rano|dobry vecer|hey|hi|hello|diky|dekuji|dekuju|dik|"
     r"thanks|super|ok|okej|jasne|jak se mas)\b"
@@ -136,7 +141,12 @@ def detect_write_intent(text: str) -> bool:
             continue
         if _WRITE_VERB_RE.search(line):
             return True
-        if not _is_question(line) and (_STATEMENT_RE.search(line) or _AMOUNT_RE.search(line)):
+        if _is_question(line):
+            continue
+        if _STATEMENT_RE.search(line) or _AMOUNT_RE.search(line):
+            return True
+        # Oznamovací věta s číslem v konkrétní oblasti („dneska jsem byl 6 hodin v práci", „ve WoT mám 2 500 000 kreditů").
+        if not _READ_REQUEST_RE.match(line) and _DIGIT_RE.search(line) and classify_areas(line, implied=False):
             return True
     return False
 

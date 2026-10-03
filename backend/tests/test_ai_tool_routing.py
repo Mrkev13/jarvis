@@ -166,10 +166,19 @@ class AskAiRoutingTestCase(unittest.TestCase):
         summary = next(line for line in logs.output if "request calls=" in line)
         self.assertIn("tool_route=fallback route_widened=True", summary)
 
-    def test_second_tool_validation_error_is_reported(self):
+    def test_second_tool_validation_error_falls_back_to_no_tools(self):
+        result = self._ask("kolik jsem utratil za jídlo?", [
+            _tool_validation_error(), _tool_validation_error(), _message(content="Napiš prosím, co mám zapsat."),
+        ])
+        self.assertEqual(result["answer"], "Napiš prosím, co mám zapsat.")
+        self.assertEqual(len(self.calls), 3)
+        self.assertFalse(self._tool_names(self.calls[1]) & WRITE_NAMES, "bez write záměru ani ve fallbacku")
+        self.assertIsNone(self.calls[2]["tools"])
+
+    def test_third_tool_validation_error_is_reported(self):
         with self.assertRaises(RuntimeError):
-            self._ask("kolik mám kreditů ve WoT?", [_tool_validation_error(), _tool_validation_error()])
-        self.assertEqual(len(self.calls), 2)
+            self._ask("kolik mám kreditů ve WoT?", [_tool_validation_error()] * 3)
+        self.assertEqual(len(self.calls), 3)
 
     def test_no_widening_when_routing_disabled(self):
         with patch.object(ai, "LLM_SETTINGS", dataclasses.replace(ai.LLM_SETTINGS, tool_routing=False)):

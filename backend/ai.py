@@ -612,17 +612,25 @@ def ask_ai(messages):
                 )
             except RuntimeError as exc:
                 # Model chtěl tool mimo routovanou sadu → jednou rozšířit (všechny READ, WRITE jen při
-                # write záměru) a kolo zopakovat. Druhé selhání se hlásí jako dřív.
+                # write záměru) a kolo zopakovat; když ani to neprojde, poslední pokus bez toolů (textová
+                # odpověď místo chyby). WRITE tooly bez write záměru se nikdy nevystaví.
                 if not tool_route.routed or tool_route.reason == REASON_FALLBACK or not _is_tool_validation_error(exc):
                     raise
                 tool_route, route_widened = widen_route(tool_route), True
-                response = _llm_create_with_retry(
-                    api_messages=api_messages,
-                    tools=_route_tool_param(tool_route),
-                    tool_choice="auto",
-                    temperature=0.2,
-                    call_log=call_log,
-                )
+                try:
+                    response = _llm_create_with_retry(
+                        api_messages=api_messages,
+                        tools=_route_tool_param(tool_route),
+                        tool_choice="auto",
+                        temperature=0.2,
+                        call_log=call_log,
+                    )
+                except RuntimeError as exc2:
+                    if not _is_tool_validation_error(exc2):
+                        raise
+                    response = _llm_create_with_retry(
+                        api_messages=api_messages, tools=None, temperature=0.2, call_log=call_log,
+                    )
 
             choice = response.choices[0]
             assistant_msg = choice.message
