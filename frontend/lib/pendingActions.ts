@@ -81,7 +81,13 @@ export function normalizePreview(raw: unknown, args?: Record<string, unknown>): 
 export function describePreview(preview: PendingPreview): ActionCardInfo {
   const fields: { label: string; value: string }[] = [];
   const actionLabel =
-    preview.kind === "delete" ? "Smazání" : preview.kind === "complete" ? "Označit jako hotové" : "Úprava";
+    preview.kind === "delete"
+      ? "Smazání"
+      : preview.kind === "complete"
+        ? "Označit jako hotové"
+        : preview.kind === "undo"
+          ? "Vrácení změny"
+          : "Úprava";
   fields.push({ label: "Akce", value: actionLabel });
   if (preview.items.length === 1) {
     const [item] = preview.items;
@@ -142,6 +148,29 @@ export function normalizePendingActions(raw: unknown): PendingAction[] {
 export function confirmActionBody(action: PendingAction): { action_id: string } {
   if (!action.id) throw new Error("Pending akce nemá id – nelze ji potvrdit.");
   return { action_id: action.id };
+}
+
+/** Phase C: POST /actions/undo s id PROVEDENÉ akce → backend vrátí novou undo pending akci k potvrzení. */
+export const UNDO_PATH = "/actions/undo";
+
+export function undoActionBody(actionId: string): { action_id: string } {
+  if (!actionId) throw new Error("Chybí id provedené akce – nelze ji vrátit.");
+  return { action_id: actionId };
+}
+
+/**
+ * Motion třída stavové karty: s nabídkou „Vrátit" musí zůstat viditelná a klikatelná po celou dobu nabídky
+ * (běžná .motion-outcome po chvíli zmizí a nepřijímá kliknutí).
+ */
+export function outcomeMotionClass(undoActionId?: string): string {
+  return undoActionId ? "motion-outcome-undo" : "motion-outcome";
+}
+
+/** Potvrzená akce jde vrátit, jen když to backend výslovně řekne (result.undo_available === true). */
+export function isUndoAvailable(confirmResponse: unknown): boolean {
+  if (!isRecord(confirmResponse) || confirmResponse.ok !== true) return false;
+  const result = confirmResponse.result;
+  return isRecord(result) && result.undo_available === true;
 }
 
 /** Cesta pro POST zamítnutí stejné pending akce (stejné id jako u potvrzení). */

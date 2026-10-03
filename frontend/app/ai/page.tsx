@@ -6,6 +6,10 @@ import { MOTION } from "@/lib/motion";
 import {
   confirmActionBody,
   describePreview,
+  isUndoAvailable,
+  outcomeMotionClass,
+  UNDO_PATH,
+  undoActionBody,
   normalizePendingActions,
   rejectActionPath,
   type PendingAction,
@@ -37,7 +41,12 @@ type ActionOutcome = {
   key: string;
   title: string;
   kind: "success" | "rejected";
+  // Phase C: id provedené akce, kterou backend umí vrátit → u výsledku se ukáže „Vrátit".
+  undoActionId?: string;
 };
+
+// Jak dlouho zůstane nabídka „Vrátit" u potvrzené změny (pak jde vrátit přes chat „vrať poslední změnu").
+const UNDO_OFFER_MS = 20000;
 
 type ConversationItem = {
   id: number;
@@ -866,13 +875,13 @@ export default function AiPage() {
   const [actionOutcomes, setActionOutcomes] = useState<ActionOutcome[]>([]);
   const outcomeSeq = useRef(0);
 
-  function showActionOutcome(title: string, kind: ActionOutcome["kind"]) {
+  function showActionOutcome(title: string, kind: ActionOutcome["kind"], undoActionId?: string) {
     outcomeSeq.current += 1;
     const key = `${kind}-${outcomeSeq.current}`;
-    setActionOutcomes((prev) => [...prev, { key, title, kind }]);
+    setActionOutcomes((prev) => [...prev, { key, title, kind, undoActionId }]);
     window.setTimeout(() => {
       setActionOutcomes((prev) => prev.filter((o) => o.key !== key));
-    }, MOTION.highlightMs);
+    }, undoActionId ? UNDO_OFFER_MS : MOTION.highlightMs);
   }
 
   function markActionFailed(action: PendingAction) {
@@ -1163,6 +1172,36 @@ export default function AiPage() {
     });
   }, [loadConversations]);
 
+  // „Vrátit": backend připraví undo jako běžnou pending akci → stejná karta s náhledem a potvrzením.
+  async function requestUndo(outcome: ActionOutcome) {
+    if (!outcome.undoActionId) return;
+    setActionOutcomes((prev) => prev.filter((o) => o.key !== outcome.key));
+    let text: string | null = null;
+    try {
+      const response = await apiFetch(UNDO_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(undoActionBody(outcome.undoActionId)),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = (await response.json()) as { ok?: boolean; pending_action?: unknown; detail?: string };
+      const incoming = data.ok ? normalizePendingActions([data.pending_action]) : [];
+      if (incoming.length) {
+        setPendingActions((prev) => [...prev, ...incoming]);
+      } else {
+        text = `⚠️ Změnu nejde vrátit: ${data.detail ?? "neznámý důvod"}`;
+      }
+    } catch (err) {
+      console.error(err);
+      text = "⚠️ Vrácení se nepodařilo připravit.";
+    }
+    if (text) {
+      const msg = text;
+      setHistory((h) => [...h, { id: `a-${Date.now()}`, role: "assistant", content: msg, createdAt: Date.now() }]);
+      void appendLocalAssistantMessageToDb(msg);
+    }
+  }
+
   async function confirmAction(idx: number) {
     const action = pendingActions[idx];
     if (!action) return;
@@ -1221,7 +1260,7 @@ export default function AiPage() {
 
       if (data.ok) {
         setPendingActions((prev) => prev.filter((_, i) => i !== idx));
-        showActionOutcome(info.title, "success");
+        showActionOutcome(info.title, "success", isUndoAvailable(data) ? action.id : undefined);
       } else {
         markActionFailed(action);
       }
@@ -1923,15 +1962,24 @@ export default function AiPage() {
                 {actionOutcomes.map((o) => (
                   <div
                     key={o.key}
-                    className={`motion-outcome mx-2 rounded-2xl border px-4 py-3 text-sm flex items-center gap-2 ${
+                    className={`${outcomeMotionClass(o.undoActionId)} mx-2 rounded-2xl border px-4 py-3 text-sm flex items-center gap-2 ${
                       o.kind === "success"
                         ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
                         : "border-zinc-700 bg-zinc-800/60 text-zinc-300"
                     }`}
                   >
                     <span aria-hidden="true">{o.kind === "success" ? "✓" : "↩"}</span>
-                    <span className="font-medium">{o.kind === "success" ? "Potvrzeno" : "Zrušeno"}:</span>
-                    <span className="truncate">{o.title}</span>
+                    <span className="font-medium">{o.kind === "success" ? "Hotovo" : "Zrušeno"}:</span>
+                    <span className="truncate flex-1">{o.title}</span>
+                    {o.undoActionId && (
+                      <button
+                        type="button"
+                        onClick={() => void requestUndo(o)}
+                        className="motion-press shrink-0 rounded-lg border border-emerald-500/40 px-2.5 py-1 text-xs font-medium text-emerald-100 hover:bg-emerald-500/20 transition-colors"
+                      >
+                        Vrátit
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

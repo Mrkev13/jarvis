@@ -25,7 +25,14 @@ from tools import add_school_subject, add_school_assignment, add_school_exam
 from tools import update_wot_resource, upsert_wot_grind
 from tools import upsert_mff_character, upsert_goal
 from tools import save_memory
-from mutation_service import ENTITIES as MUTATION_ENTITIES, execute_modify_records, propose_modify_records
+from mutation_service import (
+    ENTITIES as MUTATION_ENTITIES,
+    UNDO_AREAS,
+    execute_modify_records,
+    execute_undo,
+    propose_modify_records,
+    propose_undo,
+)
 from read_queries import (
     query_finance_transactions,
     query_goals,
@@ -59,7 +66,8 @@ class ToolSpec:
     # Phase B: write tool s resolverem – při návrhu resolver(db, **args) najde cíle a vrátí plán, který se
     # uloží jako pending akce {"plan": ...}; func pak po potvrzení provede právě ten plán.
     resolver: Callable | None = None
-    write_intent: str = "create"  # "create" (nový záznam / nastavení) nebo "mutate" (úprava/mazání/dokončení)
+    # "create" (nový záznam / nastavení), "mutate" (úprava/mazání/dokončení), "undo" (vrácení provedené změny)
+    write_intent: str = "create"
 
     @property
     def is_write(self) -> bool:
@@ -384,6 +392,17 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         func=execute_modify_records, resolver=propose_modify_records, write_intent="mutate",
         areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
     ),
+    _write(
+        "undo_change",
+        "Prepare undoing a recently confirmed edit/delete/completion from stored data (user confirms).",
+        {
+            "area": {"type": "string", "enum": list(UNDO_AREAS)},
+            "action_id": {"type": "string", "description": "only from undo_change candidates"},
+            "latest": {"type": "boolean", "description": "most recent, only if the user said so"},
+        },
+        func=execute_undo, resolver=propose_undo, write_intent="undo",
+        areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
+    ),
 )
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
@@ -404,7 +423,7 @@ def _validate() -> None:
     for spec in TOOL_SPECS:
         if spec.kind not in (READ, WRITE) or spec.schema["function"]["name"] != spec.name:
             raise RuntimeError(f"tool_registry: nekonzistentní spec {spec.name}")
-        if spec.write_intent not in ("create", "mutate") or (spec.resolver is not None and not spec.is_write):
+        if spec.write_intent not in ("create", "mutate", "undo") or (spec.resolver is not None and not spec.is_write):
             raise RuntimeError(f"tool_registry: neplatný write_intent/resolver u {spec.name}")
         missing = [r for r in spec.requires if r not in TOOLS_BY_NAME or TOOLS_BY_NAME[r].is_write]
         if missing:

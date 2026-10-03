@@ -19,7 +19,7 @@ from llm_config import DEFAULT_GROQ_MODEL, load_llm_settings
 from time_utils import now_local
 
 ALL_TOOL_FUNCTIONS = {**ai.READ_TOOL_FUNCTIONS, **ai.WRITE_TOOL_FUNCTIONS}
-WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_", "modify_")
+WRITE_PREFIXES = ("add_", "update_", "upsert_", "save_", "modify_", "undo_")
 # Interní parametry funkcí, které LLM nesmí vidět ani nastavit (db = session AI requestu, A5 read_queries).
 INTERNAL_PARAMS = {"user_context", "db", "now_utc"}
 

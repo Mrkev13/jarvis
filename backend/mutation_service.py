@@ -15,18 +15,20 @@ Plán se ukládá do stávajícího `PendingAction.arguments` jako `{"plan": {..
 """
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 from sqlalchemy import text as _sql_text
+from sqlalchemy import update as _sql_update
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
 from context_service import fold_text
 from database import SessionLocal
-from models import Assignment, Exam, FinanceTransaction, Goal, Memory, WorkSession, WotGrind
-from time_utils import to_local
+from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
+from time_utils import to_local, utc_now
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -615,13 +617,25 @@ def _refresh_auto_goals(db: Session, sources: set[str], user_context: str) -> No
         db.commit()
 
 
-def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, user_context: str) -> None:
+def _row_dump(obj) -> dict:
+    """Všechny sloupce řádku (JSON-bezpečně) – pro obnovu smazaného záznamu při undo (Phase C)."""
+    return {col.key: _plain(getattr(obj, col.key)) for col in obj.__mapper__.column_attrs}
+
+
+def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, user_context: str) -> dict:
+    """Provede jednu položku plánu. Vrací vedlejší efekty potřebné pro undo (Phase C)."""
+    effects: dict = {}
     label = ent.describe(obj)
     old_values = {k: _plain(getattr(obj, ent.fields[k].attr)) for k in changes if k in ent.fields}
 
     if action == ACTION_DELETE:
         delta = {attr: {"old": _plain(getattr(obj, attr, None)), "new": None} for attr in ent.snapshot_attrs}
+        if ent.name != "memory":
+            effects["row"] = _row_dump(obj)
         if ent.name == "finance_transaction":
+            effects["unlinked_work_sessions"] = [
+                sid for (sid,) in db.query(WorkSession.id).filter(WorkSession.finance_transaction_id == obj.id).all()
+            ]
             db.execute(
                 _sql_text("UPDATE work_sessions SET finance_transaction_id = NULL WHERE finance_transaction_id = :tid"),
                 {"tid": obj.id},
@@ -633,7 +647,7 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
                      entity_type=ent.entity_type, entity_id=obj.id, delta=delta, user_context=user_context)
         if ent.name != "memory":
             db.delete(obj)
-        return
+        return effects
 
     for key, value in changes.items():
         setattr(obj, ent.fields[key].attr, _coerce(ent, key, value))
@@ -651,12 +665,14 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
                              entity_type="FinanceTransaction", entity_id=tx.id,
                              delta={"amount": {"old": float(tx.amount or 0), "new": new_amount}},
                              user_context=user_context)
+                effects["linked_income"] = {"id": tx.id, "before": float(tx.amount or 0), "after": new_amount}
                 tx.amount = new_amount
     delta = {k: {"old": old_values.get(k), "new": _plain(v)} for k, v in changes.items()}
     verb = "Dokončeno" if action == ACTION_COMPLETE else "Upraveno"
     log_activity(db, ent.area, "complete" if action == ACTION_COMPLETE else "update",
                  _short(f"{verb} (AI): {label}", 480),
                  entity_type=ent.entity_type, entity_id=obj.id, delta=delta, user_context=user_context)
+    return effects
 
 
 def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
@@ -684,8 +700,16 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
             if _snapshot(ent, obj) != t.get("snapshot"):
                 raise StaleTarget(f"{ent.label} (id {t['id']}) se od návrhu změnil – nic jsem nezměnil.")
             objs.append(obj)
-        for obj in objs:
-            _apply_one(db, ent, action, obj, changes, user_context)
+        undo_items = []
+        for t, obj in zip(targets, objs):
+            label = ent.describe(obj)  # před provedením – smazaný řádek už popsat nejde
+            effects = _apply_one(db, ent, action, obj, changes, user_context)
+            item = {"id": int(t["id"]), "label": label, "before": t.get("snapshot"), **effects}
+            if action != ACTION_DELETE or ent.name == "memory":
+                db.flush()
+                item["after"] = _snapshot(ent, obj)
+            undo_items.append(item)
+        undo = build_undo_record(plan, ent, action, undo_items)
         db.commit()
         if ent.name in ("finance_transaction", "work_session"):
             try:
@@ -693,12 +717,329 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
             except Exception as exc:  # noqa: BLE001 - změna je už uložená; snímek cíle se dopočítá později
                 db.rollback()
                 print(f"[mutation] goal snapshot refresh selhal ({type(exc).__name__})")
-        return {"entity": ent.name, "action": action, "count": len(objs), "ids": [t["id"] for t in targets]}
+        return {"entity": ent.name, "action": action, "count": len(objs), "ids": [t["id"] for t in targets],
+                "undo": undo}
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+
+# ===== Phase C: undo potvrzené změny =====
+#
+# Při provedení plánu se do původní pending akce uloží undo záznam (arguments["undo"]): snímek PŘED
+# (z plánu) a PO změně, u smazání celý řádek a navázané vazby. Undo je zase pending akce (tool
+# undo_change) se stejným potvrzením. Při provedení: podmíněný UPDATE původní akce executed → undone
+# (nejvýš jednou) + obnovení všech položek v JEDNÉ transakci; aktuální stav musí přesně odpovídat
+# snímku PO, jinak se nic nezmění. Model nikdy nerekonstruuje staré hodnoty.
+
+UNDO_WINDOW_HOURS = 24
+UNDO_STATUS = "undone"
+UNDO_SUPPORTED = frozenset({
+    ("finance_transaction", ACTION_UPDATE), ("finance_transaction", ACTION_DELETE),
+    ("work_session", ACTION_UPDATE), ("work_session", ACTION_DELETE),
+    ("school_assignment", ACTION_UPDATE), ("school_assignment", ACTION_DELETE),
+    ("school_assignment", ACTION_COMPLETE),
+    ("school_exam", ACTION_UPDATE), ("school_exam", ACTION_DELETE),
+    ("goal", ACTION_UPDATE), ("goal", ACTION_COMPLETE),
+    ("wot_grind", ACTION_UPDATE), ("wot_grind", ACTION_DELETE),
+    ("memory", ACTION_UPDATE), ("memory", ACTION_DELETE),
+})
+UNDO_UNSUPPORTED_REASONS = {
+    ("goal", ACTION_DELETE): "smazání cíle smaže i jeho historii progresu, tu nelze obnovit",
+}
+UNDO_AREAS = tuple(sorted({e.area for e in ENTITIES.values()}))
+
+
+def build_undo_record(plan: dict, ent: EntityDef, action: str, items: list[dict]) -> dict:
+    supported = (ent.name, action) in UNDO_SUPPORTED
+    rec = {
+        "version": 1,
+        "executed_at": utc_now().isoformat(),
+        "entity": ent.name,
+        "action": action,
+        "title": (plan.get("preview") or {}).get("title") or f"{_ACTION_TITLES[action]}: {ent.label}",
+        "supported": supported,
+    }
+    if supported:
+        rec["items"] = items
+    else:
+        rec["reason"] = UNDO_UNSUPPORTED_REASONS.get((ent.name, action), "tuto změnu nelze vrátit")
+    return rec
+
+
+def _coerce_column(model, attr: str, value):
+    """Hodnota ze snímku (JSON) → typ sloupce modelu."""
+    if value is None:
+        return None
+    col = model.__table__.columns[attr]
+    try:
+        py = col.type.python_type
+    except NotImplementedError:
+        return value
+    if py is datetime:
+        return datetime.fromisoformat(value) if isinstance(value, str) else value
+    if py is date:
+        return date.fromisoformat(value[:10]) if isinstance(value, str) else value
+    if py is bool:
+        return bool(value)
+    if py is int:
+        return int(value)
+    if py is float:
+        return float(value)
+    return str(value) if py is str else value
+
+
+def _undo_item(db: Session, ent: EntityDef, action: str, item: dict, *, apply: bool) -> list[dict]:
+    """Ověří, že položku lze vrátit (aktuální stav = stav po změně), a při apply ji obnoví.
+
+    Vrací seznam změn pro náhled/audit [{label, old (teď), new (po vrácení)}]. Nesoulad → StaleTarget.
+    """
+    model = ent.model
+    obj = db.get(model, int(item["id"]))
+    hard_delete = action == ACTION_DELETE and ent.name != "memory"
+    if hard_delete:
+        if obj is not None:
+            raise StaleTarget(f"{ent.label} (id {item['id']}) už existuje – obnovení by ho přepsalo.")
+        row = item.get("row") or {}
+        if ent.name == "work_session" and row.get("finance_transaction_id") is not None:
+            if db.get(FinanceTransaction, int(row["finance_transaction_id"])) is None:
+                raise StaleTarget("Navázaný příjem pracovního záznamu mezitím zmizel.")
+        if ent.name in ("school_assignment", "school_exam") and row.get("subject_id") is not None:
+            from models import Subject
+            if db.get(Subject, int(row["subject_id"])) is None:
+                raise StaleTarget("Předmět záznamu mezitím zmizel.")
+        if ent.name == "wot_grind" and db.query(WotGrind).filter(WotGrind.tank == row.get("tank")).first():
+            raise StaleTarget(f"Grind '{row.get('tank')}' mezitím vznikl znovu.")
+        sessions = []
+        for sid in item.get("unlinked_work_sessions") or []:
+            sess = db.get(WorkSession, int(sid))
+            if sess is None or sess.finance_transaction_id is not None:
+                raise StaleTarget("Pracovní záznam navázaný na transakci se mezitím změnil.")
+            sessions.append(sess)
+        if apply:
+            restored = model(**{k: _coerce_column(model, k, v) for k, v in row.items()})
+            db.add(restored)
+            db.flush()
+            for sess in sessions:
+                sess.finance_transaction_id = restored.id
+        return [{"label": "Záznam", "old": "smazán", "new": "obnoven"}]
+
+    if obj is None:
+        raise StaleTarget(f"{ent.label} (id {item['id']}) mezitím zmizel – nic jsem nevrátil.")
+    if _snapshot(ent, obj) != item.get("after"):
+        raise StaleTarget(f"{ent.label} (id {item['id']}) se od změny upravil – nic jsem nevrátil.")
+    linked = item.get("linked_income")
+    tx = None
+    if linked:
+        tx = db.get(FinanceTransaction, int(linked["id"]))
+        if tx is None or float(tx.amount or 0) != float(linked["after"]):
+            raise StaleTarget("Navázaný příjem z práce se mezitím změnil – nic jsem nevrátil.")
+    before, after = item.get("before") or {}, item.get("after") or {}
+    labels = {fd.attr: fd for fd in ent.fields.values()}
+    diff = []
+    for attr in ent.snapshot_attrs:
+        if before.get(attr) == after.get(attr):
+            continue
+        fd = labels.get(attr)
+        cur = getattr(obj, attr, None)
+        old_val = _coerce_column(model, attr, before.get(attr))
+        diff.append({"label": fd.label if fd else ("Aktivní" if attr == "active" else attr),
+                     "old": (fd.fmt if fd else _short)(cur), "new": (fd.fmt if fd else _short)(old_val)})
+        if apply:
+            setattr(obj, attr, old_val)
+    if linked:
+        diff.append({"label": "Příjem z práce", "old": _fmt_money(linked["after"]), "new": _fmt_money(linked["before"])})
+        if apply:
+            tx.amount = float(linked["before"])
+    return diff
+
+
+def _undo_record_of(pa: PendingAction) -> dict | None:
+    try:
+        args = _json.loads(pa.arguments) if pa.arguments else {}
+    except ValueError:
+        return None
+    rec = args.get("undo") if isinstance(args, dict) else None
+    return rec if isinstance(rec, dict) and rec.get("version") == 1 else None
+
+
+def _within_window(rec: dict, now: datetime) -> bool:
+    try:
+        executed = datetime.fromisoformat(rec["executed_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return now - executed <= timedelta(hours=UNDO_WINDOW_HOURS)
+
+
+def _undo_candidates(db: Session, area: str | None) -> list[tuple[PendingAction, dict]]:
+    now = utc_now()
+    since = now - timedelta(hours=UNDO_WINDOW_HOURS + 1)
+    rows = (
+        db.query(PendingAction)
+        .filter(PendingAction.tool == "modify_records", PendingAction.status == "executed",
+                PendingAction.created_at >= since)
+        .order_by(PendingAction.id.desc())
+        .limit(50)
+        .all()
+    )
+    out = []
+    for pa in rows:
+        rec = _undo_record_of(pa)
+        if not rec or not rec.get("supported") or not _within_window(rec, now):
+            continue
+        ent = ENTITIES.get(rec.get("entity"))
+        if ent is None or (area and ent.area != area):
+            continue
+        out.append((pa, rec))
+    out.sort(key=lambda pr: (pr[1]["executed_at"], pr[0].id), reverse=True)
+    return out
+
+
+def _undo_candidate(pa: PendingAction, rec: dict) -> dict:
+    return {"action_id": str(pa.id), "label": rec.get("title"), "executed_at": rec.get("executed_at")}
+
+
+def resolve_undo(db: Session, action_id=None, area: str | None = None, latest: bool = False) -> dict:
+    """Najde přesně jednu vratnou provedenou změnu a sestaví undo plán. Jen čte DB."""
+    area = (str(area).strip().lower() or None) if area else None
+    if area and area not in UNDO_AREAS:
+        raise MutationRefused("invalid_target", f"Oblast musí být jedna z {list(UNDO_AREAS)}")
+    if action_id not in (None, ""):
+        try:
+            pid = int(action_id)
+        except (TypeError, ValueError):
+            raise MutationRefused("invalid_target", "action_id musí být id provedené akce") from None
+        pa = db.get(PendingAction, pid)
+        if pa is None or pa.tool != "modify_records":
+            raise MutationRefused("target_not_found", "Taková provedená AI změna neexistuje.")
+        if pa.status == UNDO_STATUS:
+            raise MutationRefused("already_undone", "Tahle změna už byla vrácena.")
+        if pa.status != "executed":
+            raise MutationRefused("not_executed", "Změna nebyla provedena, není co vracet.")
+        rec = _undo_record_of(pa)
+        if not rec:
+            raise MutationRefused("unsupported", "U této změny nejsou uložená data pro vrácení.")
+        if not rec.get("supported"):
+            raise MutationRefused("unsupported", f"Tuto změnu nelze vrátit: {rec.get('reason')}.")
+        if not _within_window(rec, utc_now()):
+            raise MutationRefused("expired", f"Vrátit jde jen změny z posledních {UNDO_WINDOW_HOURS} h.")
+    else:
+        candidates = _undo_candidates(db, area)
+        if not candidates:
+            raise MutationRefused("target_not_found", "Nenašel jsem žádnou nedávnou AI změnu, kterou jde vrátit.")
+        if len(candidates) > 1 and not latest:
+            raise MutationRefused(
+                "ambiguous_target",
+                f"Vratných změn je {len(candidates)}. Zeptej se uživatele, kterou vrátit (nebo poslední).",
+                [_undo_candidate(pa, rec) for pa, rec in candidates[:MAX_CANDIDATES]],
+            )
+        pa, rec = candidates[0]
+
+    ent = ENTITIES[rec["entity"]]
+    items = []
+    try:
+        for item in rec.get("items") or []:
+            items.append({"id": item["id"], "label": item.get("label"),
+                          "changes": _undo_item(db, ent, rec["action"], item, apply=False)})
+    except StaleTarget as exc:
+        raise MutationRefused("stale_target", str(exc)) from None
+    if not items:
+        raise MutationRefused("unsupported", "Změna nemá žádné položky k vrácení.")
+    warnings = ["Smazané záznamy se obnoví včetně původního id."] if rec["action"] == ACTION_DELETE \
+        and ent.name != "memory" else []
+    return {
+        "version": 1,
+        "kind": "undo",
+        "original_action_id": pa.id,
+        "entity": ent.name,
+        "action": rec["action"],
+        "preview": {
+            "kind": "undo",
+            "entity": ent.name,
+            "title": _short(f"Vrátit: {rec.get('title')}", 120),
+            "count": len(items),
+            "items": items,
+            "warnings": warnings,
+        },
+    }
+
+
+def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
+    """Provede potvrzené undo: nejvýš jednou, atomicky, jen pokud nic nezastaralo."""
+    if not isinstance(plan, dict) or plan.get("version") != 1 or plan.get("kind") != "undo":
+        raise ValueError("Neplatný undo plán")
+    try:
+        original_id = int(plan["original_action_id"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("Undo plán nemá platné original_action_id") from None
+
+    db = SessionLocal()
+    try:
+        pa = db.get(PendingAction, original_id)
+        if pa is None or pa.tool != "modify_records":
+            raise StaleTarget("Původní akce neexistuje.")
+        rec = _undo_record_of(pa)
+        if not rec or not rec.get("supported"):
+            raise StaleTarget("Původní akci nelze vrátit.")
+        if rec.get("entity") != plan.get("entity") or rec.get("action") != plan.get("action"):
+            raise StaleTarget("Undo plán neodpovídá původní akci.")
+        if not _within_window(rec, utc_now()):
+            raise StaleTarget(f"Vrátit jde jen změny z posledních {UNDO_WINDOW_HOURS} h.")
+        # Nejvýš jednou: přepnout executed → undone podmíněně, ve stejné transakci jako obnovení.
+        flipped = db.execute(
+            _sql_update(PendingAction)
+            .where(PendingAction.id == original_id, PendingAction.status == "executed")
+            .values(status=UNDO_STATUS)
+        )
+        if flipped.rowcount != 1:
+            raise StaleTarget("Tahle změna už byla vrácena (nebo není provedená).")
+
+        ent = ENTITIES[rec["entity"]]
+        ids = []
+        for item in rec.get("items") or []:
+            diff = _undo_item(db, ent, rec["action"], item, apply=True)
+            ids.append(int(item["id"]))
+            log_activity(
+                db, ent.area, "undo", _short(f"Vráceno (AI): {item.get('label') or ent.label}", 480),
+                entity_type=ent.entity_type, entity_id=int(item["id"]),
+                delta={"undo_of_action": original_id, "restored": diff}, user_context=user_context,
+                dedupe_key=f"undo:{original_id}:{item['id']}",
+            )
+        log_activity(
+            db, "ai", "undo", _short(f"Vrácena AI akce #{original_id}: {rec.get('title')}", 480),
+            entity_type="PendingAction", entity_id=original_id,
+            delta={"undo_of_action": original_id, "entity": ent.name, "action": rec["action"], "ids": ids},
+            user_context=user_context, dedupe_key=f"undo:{original_id}",
+        )
+        args = _json.loads(pa.arguments) if pa.arguments else {}
+        args["undo"] = {**rec, "undone_at": utc_now().isoformat()}
+        pa.arguments = _json.dumps(args, ensure_ascii=False, default=str)
+        db.commit()
+        if ent.name in ("finance_transaction", "work_session"):
+            try:
+                _refresh_auto_goals(db, {"finance_balance", "work_month_hours"}, user_context)
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                print(f"[undo] goal snapshot refresh selhal ({type(exc).__name__})")
+        return {"undone_action_id": original_id, "entity": ent.name, "action": rec["action"],
+                "count": len(ids), "ids": ids}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def propose_undo(db: Session, area: str | None = None, action_id: str | None = None, latest: bool = False) -> dict:
+    """Resolver AI toolu undo_change."""
+    return resolve_undo(db, action_id=action_id, area=area, latest=latest)
+
+
+def execute_undo(plan: dict, user_context: str = "manual") -> dict:
+    """Executor potvrzené undo pending akce."""
+    return apply_undo_plan(plan, user_context=user_context)
 
 
 # ===== vstupy pro tool registry (modify_records) =====
