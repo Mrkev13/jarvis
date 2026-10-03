@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
+from text_utils import days_left_cz, format_date_cz
 from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
@@ -55,8 +56,8 @@ def _deadline_actions_for_assignments(mode: str, db: Session, today: date) -> li
                 PlannerActionCandidate(
                     mode=mode,
                     area="school",
-                    title=f"Vyřešit overdue úkol: {it.title}",
-                    reason=f"Deadline byl {it.due_date.isoformat()} (po termínu).",
+                    title=f"Dokončit úkol po termínu: {it.title}",
+                    reason=f"Termín byl {format_date_cz(it.due_date)} (po termínu).",
                     priority=1,
                     recommendation_key=f"assignment:overdue:{it.id}",
                 )
@@ -76,7 +77,7 @@ def _deadline_actions_for_assignments(mode: str, db: Session, today: date) -> li
                 mode=mode,
                 area="school",
                 title=f"Připravit/odevzdat úkol: {it.title}",
-                reason=f"Deadline {it.due_date.isoformat()} (zbývá {dl} dní).",
+                reason=f"Termín {format_date_cz(it.due_date)} ({days_left_cz(dl)}).",
                 priority=2 if dl > 0 else 1,
                 recommendation_key=f"assignment:deadline:{dl}:{it.id}",
             )
@@ -100,8 +101,8 @@ def _deadline_actions_for_exams(mode: str, db: Session, today: date) -> list[Pla
                 PlannerActionCandidate(
                     mode=mode,
                     area="school",
-                    title=f"Zkontrolovat overdue zkoušku: {it.title}",
-                    reason=f"Termín byl {it.exam_date.isoformat()} (po termínu).",
+                    title=f"Zkontrolovat zkoušku po termínu: {it.title}",
+                    reason=f"Termín byl {format_date_cz(it.exam_date)} (po termínu).",
                     priority=1,
                     recommendation_key=f"exam:overdue:{it.id}",
                 )
@@ -119,7 +120,7 @@ def _deadline_actions_for_exams(mode: str, db: Session, today: date) -> list[Pla
                 mode=mode,
                 area="school",
                 title=f"Připravit se na zkoušku: {it.title}",
-                reason=f"Termín {it.exam_date.isoformat()} (zbývá {dl} dní).",
+                reason=f"Termín {format_date_cz(it.exam_date)} ({days_left_cz(dl)}).",
                 priority=2 if dl > 0 else 1,
                 recommendation_key=f"exam:deadline:{dl}:{it.id}",
             )
@@ -145,8 +146,8 @@ def _deadline_actions_for_goals(mode: str, db: Session, today: date) -> list[Pla
                 PlannerActionCandidate(
                     mode=mode,
                     area=(it.area or "general"),
-                    title=f"Řešit overdue cíl: {it.title}",
-                    reason=f"Target date byl {it.target_date.isoformat()} (po termínu).",
+                    title=f"Vyřešit cíl po termínu: {it.title}",
+                    reason=f"Cílové datum bylo {format_date_cz(it.target_date)} (po termínu).",
                     priority=1,
                     recommendation_key=f"goal:overdue:{it.id}",
                 )
@@ -165,7 +166,7 @@ def _deadline_actions_for_goals(mode: str, db: Session, today: date) -> list[Pla
                 mode=mode,
                 area=(it.area or "general"),
                 title=f"Posunout cíl: {it.title}",
-                reason=f"Target date {it.target_date.isoformat()} (zbývá {dl} dní).",
+                reason=f"Cílové datum {format_date_cz(it.target_date)} ({days_left_cz(dl)}).",
                 priority=2,
                 recommendation_key=f"goal:deadline:{dl}:{it.id}",
             )
@@ -234,7 +235,7 @@ def _work_behind_actions(mode: str, db: Session, today: date) -> list[PlannerAct
             PlannerActionCandidate(
                 mode=mode,
                 area="work",
-                title=f"Zvýšit work tempo: {g.title}",
+                title=f"Zvýšit pracovní tempo: {g.title}",
                 reason=f"Aktuálně {float(current_value):.1f} h, očekávaně ~{expected:.1f} h.",
                 priority=3 if mode == "daily" else 4,
                 recommendation_key=f"work:behind:{g.id}",

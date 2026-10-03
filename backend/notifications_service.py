@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_stagnation, compute_goal_progress_and_value
 from models import Assignment, Exam, Goal, Notification
+from text_utils import days_left_cz, format_date_cz
 from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 
@@ -158,8 +159,8 @@ def _deadline_candidates_for_assignment(it: Assignment, today: date) -> Notifica
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area="school",
-            title=f"Overdue: {it.title}",
-            message=f"Úkol měl deadline {it.due_date.isoformat()} a je po termínu.",
+            title=f"Po termínu: {it.title}",
+            message=f"Úkol měl termín {format_date_cz(it.due_date)} a je po termínu.",
             severity="important",
             notification_type="overdue",
             source_type="assignment",
@@ -174,8 +175,8 @@ def _deadline_candidates_for_assignment(it: Assignment, today: date) -> Notifica
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area="school",
-            title=f"Deadline: {it.title}",
-            message=f"Deadline úkolu je {it.due_date.isoformat()} (zbývá {days_left} dní).",
+            title=f"Termín: {it.title}",
+            message=f"Termín úkolu je {format_date_cz(it.due_date)} ({days_left_cz(days_left)}).",
             severity=sev,
             notification_type="deadline",
             source_type="assignment",
@@ -197,8 +198,8 @@ def _deadline_candidates_for_exam(it: Exam, today: date) -> NotificationCandidat
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area="school",
-            title=f"Overdue: {it.title}",
-            message=f"Zkouška měla termín {it.exam_date.isoformat()} a je po termínu.",
+            title=f"Po termínu: {it.title}",
+            message=f"Zkouška měla termín {format_date_cz(it.exam_date)} a je po termínu.",
             severity="important",
             notification_type="overdue",
             source_type="exam",
@@ -213,8 +214,8 @@ def _deadline_candidates_for_exam(it: Exam, today: date) -> NotificationCandidat
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area="school",
-            title=f"Deadline: {it.title}",
-            message=f"Zkouška je {it.exam_date.isoformat()} (zbývá {days_left} dní).",
+            title=f"Termín: {it.title}",
+            message=f"Zkouška je {format_date_cz(it.exam_date)} ({days_left_cz(days_left)}).",
             severity=sev,
             notification_type="deadline",
             source_type="exam",
@@ -238,8 +239,8 @@ def _deadline_candidates_for_goal(it: Goal, today: date) -> NotificationCandidat
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area=it.area or "general",
-            title=f"Overdue: {it.title}",
-            message=f"Cíl měl target date {it.target_date.isoformat()} a je po termínu.",
+            title=f"Po termínu: {it.title}",
+            message=f"Cíl měl cílové datum {format_date_cz(it.target_date)} a je po termínu.",
             severity="important",
             notification_type="overdue",
             source_type="goal",
@@ -254,8 +255,8 @@ def _deadline_candidates_for_goal(it: Goal, today: date) -> NotificationCandidat
         return NotificationCandidate(
             dedupe_key=dedupe_key,
             area=it.area or "general",
-            title=f"Deadline: {it.title}",
-            message=f"Target date cíle je {it.target_date.isoformat()} (zbývá {days_left} dní).",
+            title=f"Termín: {it.title}",
+            message=f"Cílové datum je {format_date_cz(it.target_date)} ({days_left_cz(days_left)}).",
             severity=sev,
             notification_type="deadline",
             source_type="goal",
@@ -331,7 +332,7 @@ def _work_behind_candidate_for_goal(db: Session, it: Goal, today: date) -> Notif
     return NotificationCandidate(
         dedupe_key=dedupe_key,
         area="work",
-        title=f"Work za plánem: {it.title}",
+        title=f"Práce za plánem: {it.title}",
         message=(
             f"Aktuálně {float(current_value):.1f} h, očekávaně ~{expected_value:.1f} h "
             f"({int(round(elapsed_fraction * 100))} % měsíce)."
@@ -369,8 +370,8 @@ def _finance_goal_stagnation_candidate(db: Session, it: Goal, today: date) -> No
     return NotificationCandidate(
         dedupe_key=dedupe_key,
         area="finance",
-        title=f"Finance cíl stagnuje: {it.title}",
-        message=f"Finance cíl se {info.days_since_last_positive} dní neposunul.",
+        title=f"Finanční cíl stagnuje: {it.title}",
+        message=f"Finanční cíl se {info.days_since_last_positive} dní neposunul.",
         severity=sev,
         notification_type="finance_goal_stagnation",
         source_type="goal",
