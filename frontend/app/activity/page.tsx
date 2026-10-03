@@ -130,7 +130,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
             <p className="mt-0.5 break-words font-mono text-[11px] text-ink-faint">
               {item.entity_type ? `${item.entity_type}${item.entity_id != null ? ` #${item.entity_id}` : ""}` : null}
               {item.entity_type && item.user_context ? " · " : null}
-              {item.user_context ? `zdroj: ${item.user_context}` : null}
+              {item.user_context ? `zdroj: ${item.user_context === "manual" ? "ručně" : item.user_context}` : null}
             </p>
           ) : null}
         </div>

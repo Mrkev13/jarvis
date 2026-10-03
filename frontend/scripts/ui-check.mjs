@@ -240,6 +240,10 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   const panel = page.getByRole("dialog", { name: "Notifikace" });
   await page.waitForTimeout(1500); // generate (POST) + seznam
   check(`notifikace @${label}: panel je dialog s popiskem`, (await panel.count()) === 1);
+  // Panel přes celou výšku okna (dřív ho sticky hlavička s backdrop-filter ořízla na svou výšku).
+  const box = await panel.boundingBox();
+  const vh = page.viewportSize().height;
+  check(`notifikace @${label}: panel přes celou výšku`, Boolean(box && box.height >= vh - 2), `${box?.height}/${vh}`);
   check(`notifikace @${label}: fokus v panelu`, await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]'))));
   const items = await panel.locator("li").count();
   check(`notifikace @${label}: seznam položek`, items > 0, String(items));
@@ -264,6 +268,38 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
     return el ? getComputedStyle(el).animationName : "missing";
   });
   check("reduced motion: Drawer bez animace", anim === "none", anim);
+  await ctx.close();
+}
+
+// 11) Filtry (FilterBar): Aktivita posílá správné parametry, Paměť hledá s debounce.
+{
+  const urls = [];
+  const { ctx, page, errors } = await open("/activity", {
+    setup: async (p) => p.on("request", (r) => r.url().includes("/activity?") && urls.push(r.url())),
+  });
+  await page.getByRole("button", { name: "Finance", exact: true }).click();
+  await page.getByRole("button", { name: "Práce", exact: true }).click();
+  await page.getByLabel("Od").fill("2026-10-01");
+  await page.waitForTimeout(800);
+  const last = new URL(urls.at(-1) || "http://x/");
+  check("aktivita: více oblastí v jednom dotazu", last.searchParams.get("area") === "finance,work", last.search);
+  check("aktivita: datum jako from_date (začátek pražského dne)", last.searchParams.get("from_date") === "2026-09-30T22:00:00.000Z", last.search);
+  check("aktivita: čip má aria-pressed", (await page.getByRole("button", { name: "Finance", exact: true }).getAttribute("aria-pressed")) === "true");
+  check("aktivita: Zrušit filtry", (await page.getByRole("button", { name: /Zrušit filtry/ }).count()) >= 1);
+  await page.getByRole("button", { name: "Detail" }).first().click();
+  await page.waitForTimeout(300);
+  check("aktivita: detail se rozbalí", (await page.locator('[id^="activity-detail-"]').count()) === 1);
+  check("aktivita: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const urls = [];
+  const { ctx, page } = await open("/memory", {
+    setup: async (p) => p.on("request", (r) => r.url().includes("/memories?q=") && urls.push(r.url())),
+  });
+  await page.getByLabel("Hledat v paměti").pressSequentially("ráno", { delay: 60 });
+  await page.waitForTimeout(800);
+  check("paměť: hledání s debounce (1 dotaz na slovo)", urls.length === 1, String(urls.length));
   await ctx.close();
 }
 

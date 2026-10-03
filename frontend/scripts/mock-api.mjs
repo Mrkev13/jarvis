@@ -59,6 +59,13 @@ createServer((req, res) => {
       const mode = url.searchParams.get("mode") || "daily";
       return respond(200, fixture(["daily", "weekly", "goal_review"].includes(mode) ? `planner-${mode}` : "planner-daily"));
     }
+    const activityDetail = /^\/activity\/(\d+)$/.exec(url.pathname);
+    if (activityDetail) {
+      const item = fixture("activity").items.find((i) => String(i.id) === activityDetail[1]);
+      return item
+        ? respond(200, { ...item, delta: { status: { old: "todo", new: "done" }, title: { old: item.summary, new: item.summary } } })
+        : respond(404, { detail: "ActivityLog not found" });
+    }
     if (url.pathname.startsWith("/weekly-review/week/")) return respond(200, fixture("weekly-review"));
     const route = GET_ROUTES[url.pathname];
     return route ? respond(200, route()) : respond(404, { detail: "Mock: neznámá cesta" });
