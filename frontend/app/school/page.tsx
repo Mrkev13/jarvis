@@ -1,9 +1,41 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  EntityList,
+  EntityRow,
+  ErrorState,
+  FormField,
+  fieldClass,
+  HudLabel,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  PageSection,
+  StatGrid,
+  StatusBadge,
+} from "@/components/ui";
 import { apiFetch } from "@/lib/api";
-import ConfirmDialog from "@/components/ConfirmDialog";
+import { formatDate, formatRelativeDays } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
+import {
+  assignmentStatusMeta,
+  creditsLabel,
+  daysUntil,
+  deadlineMeta,
+  examStatusMeta,
+  examTypeLabel,
+  isDoneStatus,
+  isExamClosed,
+  sortByDate,
+} from "@/lib/school";
+import { cx, priorityTone } from "@/lib/ui";
 
 type Subject = {
   id: number;
@@ -38,68 +70,51 @@ type Exam = {
 
 type FormKind = "subject" | "assignment" | "exam" | null;
 
+type AgendaItem =
+  | { kind: "assignment"; key: string; date: string | null; item: Assignment }
+  | { kind: "exam"; key: string; date: string | null; item: Exam };
+
 const PRIORITIES = ["low", "medium", "high"];
 const ASSIGNMENT_STATUSES = ["todo", "in_progress", "done"];
 const EXAM_TYPES = ["exam", "test", "quiz", "midterm", "oral", "other"];
 const EXAM_STATUSES = ["upcoming", "passed", "failed"];
 
-function formatDate(value?: string | null) {
-  if (!value) return "";
-  const d = new Date(value + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return value;
-  return new Intl.DateTimeFormat("cs-CZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(d);
+const FORM_IDS = {
+  subject: "school-subject-form",
+  assignment: "school-assignment-form",
+  exam: "school-exam-form",
+} as const;
+
+function capitalize(text: string) {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
 }
 
-function daysUntil(value?: string | null) {
-  if (!value) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(value + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return null;
-  const ms = d.getTime() - today.getTime();
-  return Math.ceil(ms / (1000 * 60 * 60 * 24));
-}
-
-function priorityClass(priority: string) {
-  switch (priority.toLowerCase()) {
-    case "high":
-      return "bg-red-500/15 text-red-400 border-red-500/30";
-    case "low":
-      return "bg-blue-500/15 text-blue-400 border-blue-500/30";
-    case "medium":
-    default:
-      return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+/** Štítek termínu: „Po termínu · před 2 dny", „Zítra", „Za 5 dní", „Bez termínu". */
+function DeadlineBadge({ date, kind, closed }: { date: string | null; kind: "assignment" | "exam"; closed: boolean }) {
+  const days = daysUntil(date);
+  if (days === null) {
+    return closed ? null : <StatusBadge tone="neutral">Bez termínu</StatusBadge>;
   }
-}
-
-/** Stavy úkolu, které se zobrazují jako hotové (ztlumení + jemný posun). */
-const DONE_STATUSES = ["done", "passed", "completed", "hotovo"];
-
-function statusClass(status: string) {
-  const s = status.toLowerCase();
-  if (["done", "passed"].includes(s))
-    return "bg-green-500/15 text-green-400 border-green-500/30";
-  if (["todo", "upcoming"].includes(s))
-    return "bg-zinc-500/15 text-zinc-300 border-zinc-500/30";
-  if (["in_progress"].includes(s))
-    return "bg-blue-500/15 text-blue-400 border-blue-500/30";
-  if (["failed"].includes(s))
-    return "bg-red-500/15 text-red-400 border-red-500/30";
-  return "bg-zinc-500/15 text-zinc-400 border-zinc-500/30";
+  const meta = deadlineMeta(days, kind, closed);
+  const rel = formatRelativeDays(days);
+  return (
+    <StatusBadge tone={meta.tone} dot={meta.overdue}>
+      {meta.prefix ? `${meta.prefix} · ${rel}` : capitalize(rel)}
+    </StatusBadge>
+  );
 }
 
 export default function SchoolPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [retrying, setRetrying] = useState(false);
 
   const [formKind, setFormKind] = useState<FormKind>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [deletingAssignment, setDeletingAssignment] = useState<Assignment | null>(null);
   const [deletingExam, setDeletingExam] = useState<Exam | null>(null);
 
@@ -156,8 +171,10 @@ export default function SchoolPage() {
       }
 
       setError(null);
+      setLoadState("ready");
     } catch {
       setError("Nepodařilo se načíst školní data z backendu.");
+      setLoadState((s) => (s === "ready" ? s : "error"));
     }
   }, []);
 
@@ -167,18 +184,34 @@ export default function SchoolPage() {
     });
   }, [loadData]);
 
-  function openForm(kind: "subject" | "assignment" | "exam") {
-    setFormKind(kind);
+  async function retryLoad() {
+    setRetrying(true);
+    try {
+      await loadData();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  function toggleForm(kind: "subject" | "assignment" | "exam") {
+    setFormError(null);
+    setFormKind((k) => (k === kind ? null : kind));
+  }
+
+  function closeForm() {
+    setFormError(null);
+    setFormKind(null);
   }
 
   async function handleSubjectSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!subjectDraft.name.trim()) {
-      setError("Vyplň název předmětu.");
+      setFormError("Vyplň název předmětu.");
       return;
     }
     setSubmitting(true);
     setError(null);
+    setFormError(null);
     try {
       const body = {
         name: subjectDraft.name.trim(),
@@ -214,11 +247,12 @@ export default function SchoolPage() {
   async function handleAssignmentSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!assignmentDraft.title.trim() || !assignmentDraft.subject_id) {
-      setError("Vyplň název úkolu a vyber předmět.");
+      setFormError("Vyplň název úkolu a vyber předmět.");
       return;
     }
     setSubmitting(true);
     setError(null);
+    setFormError(null);
     try {
       const body = {
         title: assignmentDraft.title.trim(),
@@ -257,11 +291,12 @@ export default function SchoolPage() {
   async function handleExamSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!examDraft.title.trim() || !examDraft.subject_id) {
-      setError("Vyplň název zkoušky a vyber předmět.");
+      setFormError("Vyplň název zkoušky a vyber předmět.");
       return;
     }
     setSubmitting(true);
     setError(null);
+    setFormError(null);
     try {
       const body = {
         title: examDraft.title.trim(),
@@ -329,606 +364,500 @@ export default function SchoolPage() {
   }
 
   const activeSubjects = subjects.filter((s) => s.active).length;
-  const openAssignments = assignments.filter((a) =>
+  const openAssignmentList = assignments.filter((a) =>
     ["todo", "in_progress"].includes(a.status.toLowerCase()),
-  ).length;
+  );
+  const openAssignments = openAssignmentList.length;
+  const overdueAssignments = openAssignmentList.filter((a) => {
+    const d = daysUntil(a.due_date);
+    return d !== null && d < 0;
+  }).length;
   const upcomingExams = exams.filter((e) =>
     ["upcoming"].includes(e.status.toLowerCase()),
   ).length;
 
-  return (
-    <main className="p-4 md:p-8 max-w-6xl mx-auto space-y-8 md:space-y-10">
-      <header>
-        <h1 className="text-2xl md:text-4xl font-bold">School</h1>
-        <p className="text-zinc-400 mt-2">
-          Subjects, assignments, exams and progress.
+  const toAgenda = (closed: boolean): AgendaItem[] => [
+    ...assignments
+      .filter((a) => isDoneStatus(a.status) === closed)
+      .map((a): AgendaItem => ({ kind: "assignment", key: `a-${a.id}`, date: a.due_date, item: a })),
+    ...exams
+      .filter((e) => isExamClosed(e.status) === closed)
+      .map((e): AgendaItem => ({ kind: "exam", key: `e-${e.id}`, date: e.exam_date, item: e })),
+  ];
+  const openAgenda = sortByDate(toAgenda(false), (x) => x.date);
+  const closedAgenda = sortByDate(toAgenda(true), (x) => x.date, true);
+
+  function renderAgendaRow(entry: AgendaItem, idx: number) {
+    const stagger = staggerStyle(Math.min(idx, MAX_STAGGER));
+    if (entry.kind === "assignment") {
+      const a = entry.item;
+      const done = isDoneStatus(a.status);
+      const days = daysUntil(a.due_date);
+      const overdue = deadlineMeta(days, "assignment", done).overdue;
+      const status = assignmentStatusMeta(a.status);
+      const priority = priorityTone(a.priority);
+      return (
+        <EntityRow
+          key={entry.key}
+          style={stagger}
+          className={cx("motion-card motion-done-transition", done && "motion-done", overdue && "motion-attention")}
+          tone={overdue ? "danger" : "neutral"}
+          muted={done}
+          badges={
+            <>
+              <DeadlineBadge date={a.due_date} kind="assignment" closed={done} />
+              <StatusBadge tone="neutral">Úkol</StatusBadge>
+              <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              <StatusBadge tone={done ? "neutral" : priority.tone}>Priorita: {priority.label.toLowerCase()}</StatusBadge>
+            </>
+          }
+          title={a.title}
+          meta={
+            <>
+              {a.subject_name || "—"}
+              {a.due_date ? ` · termín ${formatDate(a.due_date)}` : ""}
+            </>
+          }
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => setDeletingAssignment(a)} aria-label={`Smazat úkol ${a.title}`}>
+              Smazat
+            </Button>
+          }
+        >
+          {a.description ? <p className="mt-1 max-w-prose whitespace-pre-wrap break-words text-sm text-ink-2">{a.description}</p> : null}
+        </EntityRow>
+      );
+    }
+    const e = entry.item;
+    const closed = isExamClosed(e.status);
+    const status = examStatusMeta(e.status);
+    return (
+      <EntityRow
+        key={entry.key}
+        style={stagger}
+        className="motion-card"
+        muted={closed}
+        badges={
+          <>
+            <DeadlineBadge date={e.exam_date} kind="exam" closed={closed} />
+            <StatusBadge tone="neutral">{examTypeLabel(e.exam_type)}</StatusBadge>
+            <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          </>
+        }
+        title={e.title}
+        meta={
+          <>
+            {e.subject_name || "—"}
+            {e.exam_date ? ` · ${formatDate(e.exam_date)}` : ""}
+          </>
+        }
+        actions={
+          <Button size="sm" variant="ghost" onClick={() => setDeletingExam(e)} aria-label={`Smazat zkoušku ${e.title}`}>
+            Smazat
+          </Button>
+        }
+      >
+        {e.notes ? <p className="mt-1 max-w-prose whitespace-pre-wrap break-words text-sm text-ink-2">{e.notes}</p> : null}
+      </EntityRow>
+    );
+  }
+
+  const formActions = (label: string) => (
+    <>
+      {formError ? (
+        <p role="alert" className="text-sm text-danger">
+          {formError}
         </p>
-      </header>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" busy={submitting} busyLabel="Ukládám…">
+          {label}
+        </Button>
+        <Button variant="ghost" onClick={closeForm}>
+          Zrušit
+        </Button>
+      </div>
+    </>
+  );
 
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3">
-          {error}
-        </div>
+  const subjectOptions = subjects.map((s) => (
+    <option key={s.id} value={String(s.id)}>
+      {s.name}
+    </option>
+  ));
+  const subjectHint = subjects.length === 0 ? "Nejdřív přidej předmět." : undefined;
+
+  return (
+    <ContentContainer>
+      <PageHeader
+        eyebrow={<HudLabel>Modul · škola</HudLabel>}
+        title="Škola"
+        subtitle="Termíny úkolů a zkoušek, předměty a jejich stav."
+      />
+
+      {loadState === "loading" ? (
+        <LoadingState lines={5} label="Načítám školní data…" />
+      ) : loadState === "error" ? (
+        <ErrorState message={error ?? "Nepodařilo se načíst školní data z backendu."} onRetry={() => void retryLoad()} retrying={retrying} />
+      ) : (
+        <>
+          {error ? <ErrorState message={error} /> : null}
+
+          <StatGrid cols={3}>
+            <MetricCard
+              label="Otevřené úkoly"
+              value={openAssignments}
+              hint={overdueAssignments > 0 ? undefined : "nic po termínu"}
+              trend={overdueAssignments > 0 ? `${overdueAssignments} po termínu` : undefined}
+              trendTone="danger"
+            />
+            <MetricCard label="Nadcházející zkoušky" value={upcomingExams} />
+            <MetricCard label="Aktivní předměty" value={activeSubjects} className="col-span-2 md:col-span-1" />
+          </StatGrid>
+
+          {/* ===== TERMÍNY ===== */}
+          <PageSection
+            labelledBy="school-deadlines"
+            title="Termíny"
+            description="Otevřené úkoly a zkoušky seřazené podle data."
+            actions={
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-expanded={formKind === "assignment"}
+                  aria-controls={FORM_IDS.assignment}
+                  onClick={() => toggleForm("assignment")}
+                >
+                  Přidat úkol
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-expanded={formKind === "exam"}
+                  aria-controls={FORM_IDS.exam}
+                  onClick={() => toggleForm("exam")}
+                >
+                  Přidat zkoušku
+                </Button>
+              </>
+            }
+          >
+            {formKind === "assignment" && (
+              <Card as="div" id={FORM_IDS.assignment}>
+                <CardHeader as="h3" title="Nový úkol" />
+                <form onSubmit={handleAssignmentSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <FormField label="Název *" className="md:col-span-2">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="text"
+                          value={assignmentDraft.title}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, title: e.target.value }))}
+                          className={fieldClass}
+                          placeholder="např. Naučit se kapitolu 3"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Popis" hint="Nepovinné" className="md:col-span-2">
+                      {(p) => (
+                        <textarea
+                          {...p}
+                          value={assignmentDraft.description}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, description: e.target.value }))}
+                          className={cx(fieldClass, "resize-none")}
+                          rows={2}
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Předmět *" hint={subjectHint}>
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={assignmentDraft.subject_id}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, subject_id: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {subjectOptions}
+                        </select>
+                      )}
+                    </FormField>
+                    <FormField label="Termín">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="date"
+                          value={assignmentDraft.due_date}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, due_date: e.target.value }))}
+                          className={fieldClass}
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Priorita">
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={assignmentDraft.priority}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, priority: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {PRIORITIES.map((v) => (
+                            <option key={v} value={v}>
+                              {priorityTone(v).label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
+                    <FormField label="Stav">
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={assignmentDraft.status}
+                          onChange={(e) => setAssignmentDraft((d) => ({ ...d, status: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {ASSIGNMENT_STATUSES.map((v) => (
+                            <option key={v} value={v}>
+                              {assignmentStatusMeta(v).label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
+                  </div>
+                  {formActions("Uložit úkol")}
+                </form>
+              </Card>
+            )}
+
+            {formKind === "exam" && (
+              <Card as="div" id={FORM_IDS.exam}>
+                <CardHeader as="h3" title="Nová zkouška" />
+                <form onSubmit={handleExamSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <FormField label="Název *" className="md:col-span-2">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="text"
+                          value={examDraft.title}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, title: e.target.value }))}
+                          className={fieldClass}
+                          placeholder="např. Zkouška z práva"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Předmět *" hint={subjectHint}>
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={examDraft.subject_id}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, subject_id: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {subjectOptions}
+                        </select>
+                      )}
+                    </FormField>
+                    <FormField label="Datum">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="date"
+                          value={examDraft.exam_date}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, exam_date: e.target.value }))}
+                          className={fieldClass}
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Typ">
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={examDraft.exam_type}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, exam_type: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {EXAM_TYPES.map((v) => (
+                            <option key={v} value={v}>
+                              {examTypeLabel(v)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
+                    <FormField label="Stav">
+                      {(p) => (
+                        <select
+                          {...p}
+                          value={examDraft.status}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, status: e.target.value }))}
+                          className={fieldClass}
+                        >
+                          {EXAM_STATUSES.map((v) => (
+                            <option key={v} value={v}>
+                              {examStatusMeta(v).label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </FormField>
+                    <FormField label="Poznámky" hint="Témata, místo, pomůcky…" className="md:col-span-2">
+                      {(p) => (
+                        <textarea
+                          {...p}
+                          value={examDraft.notes}
+                          onChange={(e) => setExamDraft((d) => ({ ...d, notes: e.target.value }))}
+                          className={cx(fieldClass, "resize-none")}
+                          rows={2}
+                        />
+                      )}
+                    </FormField>
+                  </div>
+                  {formActions("Uložit zkoušku")}
+                </form>
+              </Card>
+            )}
+
+            {openAgenda.length > 0 ? (
+              <EntityList label="Otevřené úkoly a zkoušky">{openAgenda.map(renderAgendaRow)}</EntityList>
+            ) : (
+              <EmptyState compact>
+                {assignments.length === 0 && exams.length === 0
+                  ? "Zatím žádné úkoly ani zkoušky."
+                  : "Žádné otevřené úkoly ani zkoušky."}
+              </EmptyState>
+            )}
+          </PageSection>
+
+          {/* ===== HOTOVÉ A UZAVŘENÉ ===== */}
+          {closedAgenda.length > 0 && (
+            <PageSection
+              labelledBy="school-closed"
+              title="Hotové a uzavřené"
+              description="Dokončené úkoly a zkoušky s výsledkem, nejnovější nahoře."
+            >
+              <EntityList label="Hotové úkoly a uzavřené zkoušky">{closedAgenda.map(renderAgendaRow)}</EntityList>
+            </PageSection>
+          )}
+
+          {/* ===== PŘEDMĚTY ===== */}
+          <PageSection
+            labelledBy="school-subjects"
+            title="Předměty"
+            actions={
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-expanded={formKind === "subject"}
+                aria-controls={FORM_IDS.subject}
+                onClick={() => toggleForm("subject")}
+              >
+                Přidat předmět
+              </Button>
+            }
+          >
+            {formKind === "subject" && (
+              <Card as="div" id={FORM_IDS.subject}>
+                <CardHeader as="h3" title="Nový předmět" />
+                <form onSubmit={handleSubjectSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <FormField label="Název *">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="text"
+                          value={subjectDraft.name}
+                          onChange={(e) => setSubjectDraft((d) => ({ ...d, name: e.target.value }))}
+                          className={fieldClass}
+                          placeholder="např. English in IT"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Kód" hint="Nepovinné">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="text"
+                          value={subjectDraft.code}
+                          onChange={(e) => setSubjectDraft((d) => ({ ...d, code: e.target.value }))}
+                          className={fieldClass}
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Semestr">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="text"
+                          value={subjectDraft.semester}
+                          onChange={(e) => setSubjectDraft((d) => ({ ...d, semester: e.target.value }))}
+                          className={fieldClass}
+                          placeholder="např. LS 2026/27"
+                        />
+                      )}
+                    </FormField>
+                    <FormField label="Kredity">
+                      {(p) => (
+                        <input
+                          {...p}
+                          type="number"
+                          min="0"
+                          inputMode="numeric"
+                          value={subjectDraft.credits}
+                          onChange={(e) => setSubjectDraft((d) => ({ ...d, credits: e.target.value }))}
+                          className={fieldClass}
+                          placeholder="0"
+                        />
+                      )}
+                    </FormField>
+                    <label className="flex min-h-10 cursor-pointer select-none items-center gap-2 text-sm text-ink-2 md:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={subjectDraft.active}
+                        onChange={(e) => setSubjectDraft((d) => ({ ...d, active: e.target.checked }))}
+                        className="h-4 w-4 accent-[var(--color-accent)]"
+                      />
+                      Aktivní předmět
+                    </label>
+                  </div>
+                  {formActions("Uložit předmět")}
+                </form>
+              </Card>
+            )}
+
+            {subjects.length === 0 ? (
+              <EmptyState compact>Zatím žádné předměty.</EmptyState>
+            ) : (
+              <ul aria-label="Předměty" className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {subjects.map((s) => (
+                  <Card as="li" inset key={s.id} className={cx("min-w-0", !s.active && "opacity-70")}>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <h3 className="min-w-0 break-words font-medium text-ink">{s.name}</h3>
+                      {s.code ? <span className="font-mono text-xs text-ink-muted">{s.code}</span> : null}
+                      {!s.active ? <StatusBadge tone="neutral">Neaktivní</StatusBadge> : null}
+                    </div>
+                    {s.semester || s.credits > 0 ? (
+                      <p className="mt-0.5 text-sm text-ink-muted">
+                        {[s.semester, s.credits > 0 ? creditsLabel(s.credits) : ""].filter(Boolean).join(" · ")}
+                      </p>
+                    ) : null}
+                  </Card>
+                ))}
+              </ul>
+            )}
+          </PageSection>
+        </>
       )}
-
-      {/* ===== OVERVIEW ===== */}
-      <section id="overview">
-        <h2 className="text-2xl font-semibold mb-4">Overview</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <div className="text-sm text-zinc-400">Active subjects</div>
-            <div className="text-3xl font-semibold mt-1">{activeSubjects}</div>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <div className="text-sm text-zinc-400">Open assignments</div>
-            <div className="text-3xl font-semibold mt-1 text-yellow-400">
-              {openAssignments}
-            </div>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <div className="text-sm text-zinc-400">Upcoming exams</div>
-            <div className="text-3xl font-semibold mt-1 text-red-400">
-              {upcomingExams}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ===== SUBJECTS ===== */}
-      <section id="subjects">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-semibold">Subjects</h2>
-          <button
-            type="button"
-            onClick={() => openForm("subject")}
-            className="bg-white text-black text-sm font-medium px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
-          >
-            Add subject
-          </button>
-        </div>
-
-        {subjects.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center text-zinc-400">
-            Zatím žádné předměty.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {subjects.map((s) => (
-              <div
-                key={s.id}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-start justify-between gap-4"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="text-lg font-semibold truncate">
-                      {s.name}
-                    </div>
-                    {s.code && (
-                      <span className="text-xs text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
-                        {s.code}
-                      </span>
-                    )}
-                    {!s.active && (
-                      <span className="text-xs text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
-                        inactive
-                      </span>
-                    )}
-                  </div>
-                  {(s.semester || s.credits > 0) && (
-                    <div className="text-sm text-zinc-400 mt-1 flex gap-3 flex-wrap">
-                      {s.semester && <span>{s.semester}</span>}
-                      {s.credits > 0 && <span>{s.credits} credits</span>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {formKind === "subject" && (
-          <form
-            onSubmit={handleSubjectSubmit}
-            className="mt-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-6"
-          >
-            <h3 className="text-lg font-semibold mb-4">Add subject</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-1">
-                <label className="block text-sm text-zinc-400 mb-1">Name *</label>
-                <input
-                  type="text"
-                  value={subjectDraft.name}
-                  onChange={(e) =>
-                    setSubjectDraft((p) => ({ ...p, name: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="např. English in IT"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Code</label>
-                <input
-                  type="text"
-                  value={subjectDraft.code}
-                  onChange={(e) =>
-                    setSubjectDraft((p) => ({ ...p, code: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="volitelné"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Semester</label>
-                <input
-                  type="text"
-                  value={subjectDraft.semester}
-                  onChange={(e) =>
-                    setSubjectDraft((p) => ({ ...p, semester: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="např. LS 2026/27"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Credits</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={subjectDraft.credits}
-                  onChange={(e) =>
-                    setSubjectDraft((p) => ({ ...p, credits: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="0"
-                />
-              </div>
-              <div className="md:col-span-2 flex items-center gap-2">
-                <input
-                  id="subj-active"
-                  type="checkbox"
-                  checked={subjectDraft.active}
-                  onChange={(e) =>
-                    setSubjectDraft((p) => ({ ...p, active: e.target.checked }))
-                  }
-                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-800"
-                />
-                <label
-                  htmlFor="subj-active"
-                  className="text-sm text-zinc-300 select-none"
-                >
-                  Active
-                </label>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="bg-white text-black font-medium px-5 py-2 rounded-lg disabled:opacity-50"
-              >
-                {submitting ? "Ukládám..." : "Uložit"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormKind(null)}
-                className="bg-zinc-800 text-white font-medium px-5 py-2 rounded-lg hover:bg-zinc-700"
-              >
-                Zrušit
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
-
-      {/* ===== ASSIGNMENTS ===== */}
-      <section id="assignments">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-semibold">Upcoming assignments</h2>
-          <button
-            type="button"
-            onClick={() => openForm("assignment")}
-            className="bg-white text-black text-sm font-medium px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
-          >
-            Add assignment
-          </button>
-        </div>
-
-        {assignments.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center text-zinc-400">
-            Zatím žádné úkoly.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {assignments.map((a, ai) => {
-              const days = daysUntil(a.due_date);
-              const isDone = DONE_STATUSES.includes(a.status.toLowerCase());
-              const isOverdue = !isDone && days !== null && days < 0;
-              return (
-                <div
-                  key={a.id}
-                  className={`motion-card motion-done-transition bg-zinc-900 border border-zinc-800 rounded-2xl p-5 ${
-                    isDone ? "motion-done" : ""
-                  } ${isOverdue ? "motion-attention" : ""}`}
-                  style={staggerStyle(Math.min(ai, MAX_STAGGER))}
-                >
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-zinc-400 text-sm">
-                        {a.subject_name || "—"}
-                      </div>
-                      <div className="text-lg font-semibold mt-0.5 truncate">
-                        {a.title}
-                      </div>
-                      {a.description && (
-                        <div className="text-sm text-zinc-400 mt-1 max-w-xl">
-                          {a.description}
-                        </div>
-                      )}
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {a.due_date && (
-                          <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-zinc-800 text-zinc-300 border-zinc-700">
-                            Due: {formatDate(a.due_date)}
-                            {days !== null && days >= 0 && (
-                              <span className="ml-2 opacity-80">
-                                ({days === 0 ? "dnes" : `${days} d`})
-                              </span>
-                            )}
-                            {days !== null && days < 0 && (
-                              <span className="ml-2 text-red-400">
-                                (po termínu)
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border ${priorityClass(
-                            a.priority,
-                          )}`}
-                        >
-                          {a.priority}
-                        </span>
-                        <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border transition-colors ${statusClass(
-                            a.status,
-                          )}`}
-                        >
-                          {a.status}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setDeletingAssignment(a)}
-                      className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded transition-colors shrink-0"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {formKind === "assignment" && (
-          <form
-            onSubmit={handleAssignmentSubmit}
-            className="mt-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-6"
-          >
-            <h3 className="text-lg font-semibold mb-4">Add assignment</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1">Title *</label>
-                <input
-                  type="text"
-                  value={assignmentDraft.title}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({ ...p, title: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="např. Naučit se kapitolu 3"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={assignmentDraft.description}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({
-                      ...p,
-                      description: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500 resize-none"
-                  rows={2}
-                  placeholder="volitelný popis"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Subject *</label>
-                <select
-                  value={assignmentDraft.subject_id}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({
-                      ...p,
-                      subject_id: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {subjects.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Due date</label>
-                <input
-                  type="date"
-                  value={assignmentDraft.due_date}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({
-                      ...p,
-                      due_date: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Priority</label>
-                <select
-                  value={assignmentDraft.priority}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({ ...p, priority: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Status</label>
-                <select
-                  value={assignmentDraft.status}
-                  onChange={(e) =>
-                    setAssignmentDraft((p) => ({ ...p, status: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {ASSIGNMENT_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="bg-white text-black font-medium px-5 py-2 rounded-lg disabled:opacity-50"
-              >
-                {submitting ? "Ukládám..." : "Uložit"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormKind(null)}
-                className="bg-zinc-800 text-white font-medium px-5 py-2 rounded-lg hover:bg-zinc-700"
-              >
-                Zrušit
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
-
-      {/* ===== EXAMS ===== */}
-      <section id="exams">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-semibold">Upcoming exams</h2>
-          <button
-            type="button"
-            onClick={() => openForm("exam")}
-            className="bg-white text-black text-sm font-medium px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
-          >
-            Add exam
-          </button>
-        </div>
-
-        {exams.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center text-zinc-400">
-            Zatím žádné zkoušky / testy.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {exams.map((e, ei) => {
-              const days = daysUntil(e.exam_date);
-              return (
-                <div
-                  key={e.id}
-                  className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
-                  style={staggerStyle(Math.min(ei, MAX_STAGGER))}
-                >
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-zinc-400 text-sm">
-                        {e.subject_name || "—"}
-                      </div>
-                      <div className="text-lg font-semibold mt-0.5 truncate">
-                        {e.title}
-                      </div>
-                      {e.notes && (
-                        <div className="text-sm text-zinc-400 mt-1 max-w-xl">
-                          {e.notes}
-                        </div>
-                      )}
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-zinc-800 text-zinc-300 border-zinc-700">
-                          {e.exam_type}
-                        </span>
-                        {e.exam_date && (
-                          <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-md border bg-zinc-800 text-zinc-300 border-zinc-700">
-                            {formatDate(e.exam_date)}
-                            {days !== null && days >= 0 && (
-                              <span className="ml-2 opacity-80">
-                                ({days === 0 ? "dnes" : `zbývá ${days} d`})
-                              </span>
-                            )}
-                            {days !== null && days < 0 && (
-                              <span className="ml-2 text-zinc-500">
-                                (proběhlo)
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        <span
-                          className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-md border transition-colors ${statusClass(
-                            e.status,
-                          )}`}
-                        >
-                          {e.status}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setDeletingExam(e)}
-                      className="text-red-400 hover:text-white text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded transition-colors shrink-0"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {formKind === "exam" && (
-          <form
-            onSubmit={handleExamSubmit}
-            className="mt-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-6"
-          >
-            <h3 className="text-lg font-semibold mb-4">Add exam</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1">Title *</label>
-                <input
-                  type="text"
-                  value={examDraft.title}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, title: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                  placeholder="např. Zkouška z práva"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Subject *</label>
-                <select
-                  value={examDraft.subject_id}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, subject_id: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {subjects.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={examDraft.exam_date}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, exam_date: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Type</label>
-                <select
-                  value={examDraft.exam_type}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, exam_type: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {EXAM_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-zinc-400 mb-1">Status</label>
-                <select
-                  value={examDraft.status}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, status: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500"
-                >
-                  {EXAM_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm text-zinc-400 mb-1">Notes</label>
-                <textarea
-                  value={examDraft.notes}
-                  onChange={(e) =>
-                    setExamDraft((p) => ({ ...p, notes: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-zinc-500 resize-none"
-                  rows={2}
-                  placeholder="poznámky, témata, lokace..."
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="bg-white text-black font-medium px-5 py-2 rounded-lg disabled:opacity-50"
-              >
-                {submitting ? "Ukládám..." : "Uložit"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormKind(null)}
-                className="bg-zinc-800 text-white font-medium px-5 py-2 rounded-lg hover:bg-zinc-700"
-              >
-                Zrušit
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
 
       <ConfirmDialog
         open={deletingAssignment != null}
         title={`Smazat úkol ${deletingAssignment?.title ?? ""}?`}
         message="Tato akce je nevratná. Úkol bude odstraněn ze Standa Hubu."
+        confirmLabel="Smazat úkol"
+        busyLabel="Mažu…"
         onConfirm={confirmDeleteAssignment}
         onCancel={() => setDeletingAssignment(null)}
       />
@@ -937,9 +866,11 @@ export default function SchoolPage() {
         open={deletingExam != null}
         title={`Smazat zkoušku ${deletingExam?.title ?? ""}?`}
         message="Tato akce je nevratná. Zkouška bude odstraněna ze Standa Hubu."
+        confirmLabel="Smazat zkoušku"
+        busyLabel="Mažu…"
         onConfirm={confirmDeleteExam}
         onCancel={() => setDeletingExam(null)}
       />
-    </main>
+    </ContentContainer>
   );
 }
