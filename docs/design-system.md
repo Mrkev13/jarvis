@@ -258,3 +258,45 @@ voice settings behind a labelled disclosure, the locale `<select>` has a label; 
 conversation actions are labelled and visible on focus/hover (always on touch).
 **Scrolling** – new content scrolls into view only while the user is near the bottom; sending or switching
 conversations always jumps to the latest message.
+
+## 14. Global Search / Ctrl+K (Roadmap 4D)
+
+**What it is** – one command palette for the whole authenticated app (not on `/login`): find a page or a record
+and open it. It **only navigates**; creating or changing data is Smart Quick Add (later), never the palette.
+Conversation history stays inside the AI assistant.
+
+**Architecture** – deterministic, no LLM, no index:
+- pages: `lib/navigation.ts` (Czech label + keywords, shared with the sidebar), matched locally and instantly;
+- records: `GET /search?q=` (`backend/search_service.py`), behind the global session auth, query not logged,
+  bounded reads (500 rows/table), max. 6 per type and 30 total, min. 2 characters;
+- UI: `SearchProvider` (Ctrl/Cmd+K, rendered by `AppShell`), `CommandPalette`, `useGlobalSearch`
+  (180 ms debounce via `useApiResource`, stale requests aborted, responses checked against the current query),
+  `SearchButton` (sidebar field with the shortcut hint, mobile header icon), `SearchHighlighter` (deep links).
+
+**Result model** – `{id: "exam:12", type, title, subtitle, area, href, score}`; subtitle is Czech context built by
+the backend ("Test · Fyzika · 3. 10. 2026", "Výdaj · 189,90 Kč · Jídlo"). Indexed: subjects, assignments,
+exams, active reminders, work sessions, transactions, goals, active memories, WoT grinds, MFF characters.
+
+**Ranking** (same numbers in `lib/search.ts` and `search_service.py`, tested): normalise (lower case, no
+diacritics – "zkouska" finds "Zkouška"), then exact 100 > title prefix 85 > word prefix 70 > substring 55 >
+all query words anywhere 45 > match in other fields 30. Pages get +5; page keywords score one step below the
+name. Groups (Navigace, Škola, Připomínky, Práce, Finance, Cíle, Paměť, World of Tanks, Marvel FF) appear only
+when non-empty, the group with the best hit first, so Enter opens the best result.
+
+**Keyboard** – Ctrl+K / Cmd+K toggles (works in forms too – a deliberate app shortcut); focus starts in the
+input (`role=combobox`, `aria-activedescendant`); ↑/↓ move through all rows (wrapping), Enter opens, Esc or
+the backdrop closes and focus returns to where it was; Tab stays inside the dialog. The status line
+(`role=status`) announces "Hledám…", the result count, "Nic nenalezeno." or an error.
+
+**States** – empty query: "Nedávno otevřené" (last 5 destinations in localStorage – destinations, never
+queries) + all pages; searching: pulse in the input, pages still visible; error: retry, pages still work;
+no results only after the answer arrives.
+
+**Mobile** – the header magnifier opens a full-screen palette with the input on top, rows ≥ 44 px, "Zavřít".
+
+**Deep links** – `href` opens the module page with a record param (`/school?exam=12`, `/mff?character=3`, …);
+`SearchHighlighter` waits for `[data-search-target="exam-12"]`, scrolls it to the centre, focuses it and
+outlines it for ~2 s (static under reduced motion). If the record is not on the page, the module page stays.
+
+**Look** – compact elevated panel near the top, a thin cyan line on its top edge, cyan rail on the selected
+row, mono group labels; no badges per row (the group names the area), no glow.
