@@ -7,6 +7,12 @@
    "area": "school",
    "title": "Dokončit úkol po termínu: Sada",
    "reason": "Stále platí: Termín byl 2. 10. 2026 (po termínu)."
+  },
+  {
+   "priority": 2,
+   "area": "school",
+   "title": "Připravit se na zkoušku: test",
+   "reason": "Stále platí: Termín 3. 10. 2026 (dnes)."
   }
  ],
  "meta": {

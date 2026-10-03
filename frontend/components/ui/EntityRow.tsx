@@ -24,6 +24,7 @@ export function EntityRow({
   className,
   style,
   busy,
+  searchTarget,
 }: {
   title: React.ReactNode;
   badges?: React.ReactNode;
@@ -35,11 +36,14 @@ export function EntityRow({
   className?: string;
   style?: React.CSSProperties;
   busy?: boolean;
+  /** Cíl odkazu z globálního vyhledávání (např. „exam-12", viz components/search/SearchHighlighter). */
+  searchTarget?: string;
 }) {
   return (
     <li
       style={style}
       aria-busy={busy || undefined}
+      data-search-target={searchTarget}
       className={cx(
         "rounded-[var(--radius-control)] border px-3 py-3 md:px-4",
         tone === "neutral" ? "border-line-subtle bg-surface-2" : CARD_TONE[tone],

@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NotificationsBell from "@/components/NotificationsBell";
+import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
+import { NAV_PAGES } from "@/lib/navigation";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
@@ -14,22 +16,8 @@ interface SidebarProps {
   onNavigate?: (href: string) => void;
 }
 
-// Česká navigace (Roadmap 4A); vlastní jména her zůstávají.
-export const NAV_LINKS = [
-  { href: "/", label: "Řídicí centrum" },
-  { href: "/review", label: "Týdenní přehled" },
-  { href: "/planner", label: "Plánovač" },
-  { href: "/reminders", label: "Připomínky" },
-  { href: "/goals", label: "Cíle" },
-  { href: "/school", label: "Škola" },
-  { href: "/work", label: "Práce" },
-  { href: "/finance", label: "Finance" },
-  { href: "/wot", label: "World of Tanks" },
-  { href: "/mff", label: "Marvel Future Fight" },
-  { href: "/activity", label: "Aktivita" },
-  { href: "/memory", label: "Paměť" },
-  { href: "/ai", label: "AI asistent" },
-];
+// Česká navigace (Roadmap 4A); seznam stránek sdílí s globálním vyhledáváním (lib/navigation.ts).
+export const NAV_LINKS = NAV_PAGES.map(({ href, label }) => ({ href, label }));
 
 export function isActiveLink(href: string, pathname: string | null): boolean {
   return href === "/" ? pathname === "/" : Boolean(pathname?.startsWith(href));
@@ -114,6 +102,7 @@ export function MobileHeader() {
         <Brand />
         <div className="flex items-center gap-1">
           {/* Jen jeden zvonek v celé aplikaci (dřív se mobilní i desktopový dotazovaly zároveň). */}
+          <SearchButton variant="icon" />
           {isDesktop === false ? <NotificationsBell /> : null}
           <button
             type="button"
@@ -157,6 +146,9 @@ export function DesktopSidebar() {
       <div className="mb-6 flex items-center justify-between gap-2 px-1">
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}
+      </div>
+      <div className="mb-4">
+        <SearchButton variant="field" />
       </div>
       <Sidebar />
     </aside>

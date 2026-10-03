@@ -47,6 +47,17 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4D (Global Search / Ctrl+K)
+
+| Item | Status |
+|---|---|
+| Command palette (Ctrl/Cmd+K, sidebar field, mobile header button) | ✅ design-system §14 |
+| `GET /search` – deterministic, authenticated, bounded, Czech subtitles | ✅ `search_service.py`, tests |
+| Czech normalisation + ranking shared by backend and frontend | ✅ `lib/search.ts` ↔ `search_service.py` |
+| Deep links to records with focus + highlight on 8 modules | ✅ `SearchHighlighter`, `data-search-target` |
+| Search integration step for future modules | ✅ `module-integration-checklist.md` §6 |
+| Mutations from the palette | ❌ by design – Smart Quick Add (Roadmap 4E) |
+
 ## Status after Roadmap 4C (AI assistant)
 
 | Item | Status |

@@ -90,7 +90,7 @@
  },
  "22": {
   "id": 22,
-  "timestamp": "2026-10-03T15:01:29.469816",
+  "timestamp": "2026-10-03T17:06:31.400386",
   "area": "wot",
   "action_type": "update",
   "entity_type": "WotGrind",
@@ -115,7 +115,7 @@
  },
  "21": {
   "id": 21,
-  "timestamp": "2026-10-03T15:01:29.458470",
+  "timestamp": "2026-10-03T17:06:31.388265",
   "area": "memory",
   "action_type": "delete",
   "entity_type": "Memory",
@@ -148,7 +148,7 @@
  },
  "20": {
   "id": 20,
-  "timestamp": "2026-10-03T15:01:29.451859",
+  "timestamp": "2026-10-03T17:06:31.381869",
   "area": "memory",
   "action_type": "create",
   "entity_type": "Memory",
@@ -181,7 +181,7 @@
  },
  "19": {
   "id": 19,
-  "timestamp": "2026-10-03T15:01:29.445449",
+  "timestamp": "2026-10-03T17:06:31.374524",
   "area": "memory",
   "action_type": "create",
   "entity_type": "Memory",
@@ -214,7 +214,7 @@
  },
  "18": {
   "id": 18,
-  "timestamp": "2026-10-03T15:01:29.431504",
+  "timestamp": "2026-10-03T17:06:31.359924",
   "area": "finance",
   "action_type": "create",
   "entity_type": "FinanceTransaction",
@@ -243,7 +243,7 @@
  },
  "17": {
   "id": 17,
-  "timestamp": "2026-10-03T15:01:29.420579",
+  "timestamp": "2026-10-03T17:06:31.348573",
   "area": "finance",
   "action_type": "sync",
   "entity_type": "FinanceTransaction",
@@ -272,7 +272,7 @@
  },
  "16": {
   "id": 16,
-  "timestamp": "2026-10-03T15:01:29.419953",
+  "timestamp": "2026-10-03T17:06:31.347922",
   "area": "work",
   "action_type": "create",
   "entity_type": "WorkSession",
@@ -309,7 +309,7 @@
  },
  "15": {
   "id": 15,
-  "timestamp": "2026-10-03T15:01:29.405028",
+  "timestamp": "2026-10-03T17:06:31.331344",
   "area": "finance",
   "action_type": "sync",
   "entity_type": "FinanceTransaction",
@@ -338,7 +338,7 @@
  },
  "14": {
   "id": 14,
-  "timestamp": "2026-10-03T15:01:29.404330",
+  "timestamp": "2026-10-03T17:06:31.330525",
   "area": "work",
   "action_type": "create",
   "entity_type": "WorkSession",
@@ -375,7 +375,7 @@
  },
  "13": {
   "id": 13,
-  "timestamp": "2026-10-03T15:01:29.382407",
+  "timestamp": "2026-10-03T17:06:31.307478",
   "area": "reminders",
   "action_type": "complete",
   "entity_type": "Reminder",
@@ -383,11 +383,11 @@
   "summary": "Připomínka hotová: Koupit lístky · so 10. 10. 2026 09:00",
   "delta": null,
   "user_context": "manual",
-  "dedupe_key": "reminder-done:5:2026-10-03T15:01:29.381048"
+  "dedupe_key": "reminder-done:5:2026-10-03T17:06:31.306457"
  },
  "12": {
   "id": 12,
-  "timestamp": "2026-10-03T15:01:29.315672",
+  "timestamp": "2026-10-03T17:06:31.251281",
   "area": "reminders",
   "action_type": "create",
   "entity_type": "Reminder",
@@ -399,7 +399,7 @@
  },
  "11": {
   "id": 11,
-  "timestamp": "2026-10-03T15:01:29.303830",
+  "timestamp": "2026-10-03T17:06:31.243590",
   "area": "reminders",
   "action_type": "create",
   "entity_type": "Reminder",
@@ -411,7 +411,7 @@
  },
  "10": {
   "id": 10,
-  "timestamp": "2026-10-03T15:01:29.302776",
+  "timestamp": "2026-10-03T17:06:31.242980",
   "area": "reminders",
   "action_type": "create",
   "entity_type": "Reminder",
@@ -423,7 +423,7 @@
  },
  "9": {
   "id": 9,
-  "timestamp": "2026-10-03T15:01:29.301730",
+  "timestamp": "2026-10-03T17:06:31.241912",
   "area": "reminders",
   "action_type": "create",
   "entity_type": "Reminder",
@@ -435,7 +435,7 @@
  },
  "8": {
   "id": 8,
-  "timestamp": "2026-10-03T15:01:29.300314",
+  "timestamp": "2026-10-03T17:06:31.241079",
   "area": "reminders",
   "action_type": "create",
   "entity_type": "Reminder",

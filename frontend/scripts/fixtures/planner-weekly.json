@@ -11,30 +11,30 @@
   {
    "priority": 2,
    "area": "school",
+   "title": "Připravit se na zkoušku: test",
+   "reason": "Termín 3. 10. 2026 (dnes)."
+  },
+  {
+   "priority": 3,
+   "area": "school",
    "title": "Připravit se na zkoušku: Zkouška fyzika",
    "reason": "Termín 15. 10. 2026 (zbývá 12 dní)."
   },
   {
-   "priority": 3,
+   "priority": 4,
    "area": "school",
    "title": "Připravit/odevzdat úkol: Laboratorní protokol č. 3",
    "reason": "Termín 16. 10. 2026 (zbývá 13 dní)."
   },
   {
-   "priority": 4,
+   "priority": 5,
    "area": "school",
    "title": "Připravit/odevzdat úkol: Laboratoř",
    "reason": "Termín 14. 10. 2026 (zbývá 11 dní)."
-  },
-  {
-   "priority": 5,
-   "area": "school",
-   "title": "Připravit/odevzdat úkol: Projekt",
-   "reason": "Termín 13. 10. 2026 (zbývá 10 dní)."
   }
  ],
  "meta": {
-  "history_created": 6,
+  "history_created": 7,
   "memories": [
    {
     "id": 3,

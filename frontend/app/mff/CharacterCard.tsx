@@ -36,7 +36,7 @@ export function CharacterCard({
   if (ob > 0) details.push(["Odin's Blessings", String(ob)]);
 
   return (
-    <Card as="li" index={index} aria-labelledby={titleId} className="flex min-w-0 flex-col gap-3">
+    <Card as="li" index={index} aria-labelledby={titleId} data-search-target={`character-${c.id}`} className="flex min-w-0 flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">

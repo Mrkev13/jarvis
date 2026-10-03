@@ -120,6 +120,7 @@ export default function RemindersPage() {
     return (
       <EntityRow
         key={r.id}
+        searchTarget={`reminder-${r.id}`}
         style={staggerStyle(idx)}
         className={cx("motion-card", due && "motion-attention")}
         tone={due ? "warning" : "neutral"}

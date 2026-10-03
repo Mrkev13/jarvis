@@ -321,6 +321,7 @@ export default function MemoryPage() {
                 return (
                   <EntityRow
                     key={it.id}
+                    searchTarget={`memory-${it.id}`}
                     muted={!it.active}
                     busy={busyId === it.id}
                     badges={

@@ -681,7 +681,7 @@ function ActiveGoalCard({
   const priority = priorityTone(g.priority);
   const pct = clamp(g.progress ?? 0);
   return (
-    <Card as="li" index={index} className="flex min-w-0 flex-col gap-3">
+    <Card as="li" index={index} data-search-target={`goal-${g.id}`} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <AreaBadge area={g.area} />
         <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
@@ -739,6 +739,7 @@ function SecondaryGoalRow({
   const pct = clamp(g.progress ?? 0);
   return (
     <EntityRow
+      searchTarget={`goal-${g.id}`}
       className={cx("motion-card", !completed && "opacity-80")}
       style={staggerStyle(index)}
       muted={completed}

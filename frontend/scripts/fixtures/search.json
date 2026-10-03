@@ -1,0 +1,1058 @@
+{
+ "test": {
+  "query": "test",
+  "results": [
+   {
+    "id": "exam:3",
+    "type": "exam",
+    "title": "test",
+    "subtitle": "Test · Fyzika · 3. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=3",
+    "score": 100
+   },
+   {
+    "id": "exam:2",
+    "type": "exam",
+    "title": "Zápočtový test",
+    "subtitle": "Test · Dějepis · 30. 9. 2026",
+    "area": "school",
+    "href": "/school?exam=2",
+    "score": 70
+   }
+  ],
+  "total": 2
+ },
+ "luna": {
+  "query": "luna",
+  "results": [
+   {
+    "id": "mff_character:4",
+    "type": "mff_character",
+    "title": "Luna Snow",
+    "subtitle": "T4 · Lv. 80 · rozpracováno · Neon Genesis",
+    "area": "mff",
+    "href": "/mff?character=4",
+    "score": 85
+   }
+  ],
+  "total": 1
+ },
+ "luna snow": {
+  "query": "luna snow",
+  "results": [
+   {
+    "id": "mff_character:4",
+    "type": "mff_character",
+    "title": "Luna Snow",
+    "subtitle": "T4 · Lv. 80 · rozpracováno · Neon Genesis",
+    "area": "mff",
+    "href": "/mff?character=4",
+    "score": 100
+   }
+  ],
+  "total": 1
+ },
+ "tvp": {
+  "query": "tvp",
+  "results": [
+   {
+    "id": "wot_grind:4",
+    "type": "wot_grind",
+    "title": "TVP T 50/51",
+    "subtitle": "Grind · zbývá 96 000 XP · aktivní · vysoká priorita",
+    "area": "wot",
+    "href": "/wot?grind=4",
+    "score": 85
+   }
+  ],
+  "total": 1
+ },
+ "fyzika": {
+  "query": "fyzika",
+  "results": [
+   {
+    "id": "subject:2",
+    "type": "subject",
+    "title": "Fyzika",
+    "subtitle": "Předmět · FYZ1 · ZS 2026",
+    "area": "school",
+    "href": "/school?subject=2",
+    "score": 100
+   },
+   {
+    "id": "exam:1",
+    "type": "exam",
+    "title": "Zkouška fyzika",
+    "subtitle": "Zkouška · Matematika · 15. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=1",
+    "score": 70
+   },
+   {
+    "id": "assignment:6",
+    "type": "assignment",
+    "title": "Laboratorní protokol č. 3",
+    "subtitle": "Úkol · Fyzika · termín 16. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=6",
+    "score": 30
+   },
+   {
+    "id": "exam:3",
+    "type": "exam",
+    "title": "test",
+    "subtitle": "Test · Fyzika · 3. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=3",
+    "score": 30
+   }
+  ],
+  "total": 4
+ },
+ "zkouska": {
+  "query": "zkouska",
+  "results": [
+   {
+    "id": "exam:1",
+    "type": "exam",
+    "title": "Zkouška fyzika",
+    "subtitle": "Zkouška · Matematika · 15. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=1",
+    "score": 85
+   },
+   {
+    "id": "exam:3",
+    "type": "exam",
+    "title": "test",
+    "subtitle": "Test · Fyzika · 3. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=3",
+    "score": 30
+   },
+   {
+    "id": "exam:2",
+    "type": "exam",
+    "title": "Zápočtový test",
+    "subtitle": "Test · Dějepis · 30. 9. 2026",
+    "area": "school",
+    "href": "/school?exam=2",
+    "score": 30
+   }
+  ],
+  "total": 3
+ },
+ "zkouška": {
+  "query": "zkouska",
+  "results": [
+   {
+    "id": "exam:1",
+    "type": "exam",
+    "title": "Zkouška fyzika",
+    "subtitle": "Zkouška · Matematika · 15. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=1",
+    "score": 85
+   },
+   {
+    "id": "exam:3",
+    "type": "exam",
+    "title": "test",
+    "subtitle": "Test · Fyzika · 3. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=3",
+    "score": 30
+   },
+   {
+    "id": "exam:2",
+    "type": "exam",
+    "title": "Zápočtový test",
+    "subtitle": "Test · Dějepis · 30. 9. 2026",
+    "area": "school",
+    "href": "/school?exam=2",
+    "score": 30
+   }
+  ],
+  "total": 3
+ },
+ "prace": {
+  "query": "prace",
+  "results": [
+   {
+    "id": "transaction:4",
+    "type": "transaction",
+    "title": "Práce",
+    "subtitle": "Příjem · 1 400 Kč · 7. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=4",
+    "score": 100
+   },
+   {
+    "id": "goal:3",
+    "type": "goal",
+    "title": "80 hodin práce za měsíc",
+    "subtitle": "Cíl · aktivní · 40 %",
+    "area": "goals",
+    "href": "/goals?goal=3",
+    "score": 70
+   },
+   {
+    "id": "work_session:7",
+    "type": "work_session",
+    "title": "Interní",
+    "subtitle": "Práce · 24. 9. 2026 · 4 h · Dokumentace",
+    "area": "work",
+    "href": "/work?session=7",
+    "score": 30
+   },
+   {
+    "id": "work_session:5",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 9. 10. 2026 · 5 h · Úpravy webu",
+    "area": "work",
+    "href": "/work?session=5",
+    "score": 30
+   },
+   {
+    "id": "work_session:6",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 2. 10. 2026 · 6,5 h · Analýza",
+    "area": "work",
+    "href": "/work?session=6",
+    "score": 30
+   },
+   {
+    "id": "memory:2",
+    "type": "memory",
+    "title": "Klient ABC platí do 14 dnů od faktury.",
+    "subtitle": "Paměť · Kontext · Práce",
+    "area": "memory",
+    "href": "/memory?memory=2",
+    "score": 30
+   },
+   {
+    "id": "work_session:9",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=9",
+    "score": 30
+   },
+   {
+    "id": "work_session:8",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=8",
+    "score": 30
+   },
+   {
+    "id": "work_session:2",
+    "type": "work_session",
+    "title": "Pracovní záznam",
+    "subtitle": "Práce · 8. 10. 2026 · 3 h",
+    "area": "work",
+    "href": "/work?session=2",
+    "score": 30
+   },
+   {
+    "id": "transaction:10",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=10",
+    "score": 30
+   },
+   {
+    "id": "transaction:9",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=9",
+    "score": 30
+   }
+  ],
+  "total": 14
+ },
+ "práce": {
+  "query": "prace",
+  "results": [
+   {
+    "id": "transaction:4",
+    "type": "transaction",
+    "title": "Práce",
+    "subtitle": "Příjem · 1 400 Kč · 7. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=4",
+    "score": 100
+   },
+   {
+    "id": "goal:3",
+    "type": "goal",
+    "title": "80 hodin práce za měsíc",
+    "subtitle": "Cíl · aktivní · 40 %",
+    "area": "goals",
+    "href": "/goals?goal=3",
+    "score": 70
+   },
+   {
+    "id": "work_session:7",
+    "type": "work_session",
+    "title": "Interní",
+    "subtitle": "Práce · 24. 9. 2026 · 4 h · Dokumentace",
+    "area": "work",
+    "href": "/work?session=7",
+    "score": 30
+   },
+   {
+    "id": "work_session:5",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 9. 10. 2026 · 5 h · Úpravy webu",
+    "area": "work",
+    "href": "/work?session=5",
+    "score": 30
+   },
+   {
+    "id": "work_session:6",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 2. 10. 2026 · 6,5 h · Analýza",
+    "area": "work",
+    "href": "/work?session=6",
+    "score": 30
+   },
+   {
+    "id": "memory:2",
+    "type": "memory",
+    "title": "Klient ABC platí do 14 dnů od faktury.",
+    "subtitle": "Paměť · Kontext · Práce",
+    "area": "memory",
+    "href": "/memory?memory=2",
+    "score": 30
+   },
+   {
+    "id": "work_session:9",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=9",
+    "score": 30
+   },
+   {
+    "id": "work_session:8",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=8",
+    "score": 30
+   },
+   {
+    "id": "work_session:2",
+    "type": "work_session",
+    "title": "Pracovní záznam",
+    "subtitle": "Práce · 8. 10. 2026 · 3 h",
+    "area": "work",
+    "href": "/work?session=2",
+    "score": 30
+   },
+   {
+    "id": "transaction:10",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=10",
+    "score": 30
+   },
+   {
+    "id": "transaction:9",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=9",
+    "score": 30
+   }
+  ],
+  "total": 14
+ },
+ "obed": {
+  "query": "obed",
+  "results": [
+   {
+    "id": "transaction:11",
+    "type": "transaction",
+    "title": "Oběd",
+    "subtitle": "Výdaj · 189,90 Kč · Jídlo · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=11",
+    "score": 100
+   }
+  ],
+  "total": 1
+ },
+ "oběd": {
+  "query": "obed",
+  "results": [
+   {
+    "id": "transaction:11",
+    "type": "transaction",
+    "title": "Oběd",
+    "subtitle": "Výdaj · 189,90 Kč · Jídlo · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=11",
+    "score": 100
+   }
+  ],
+  "total": 1
+ },
+ "rezerva": {
+  "query": "rezerva",
+  "results": [
+   {
+    "id": "goal:4",
+    "type": "goal",
+    "title": "Finanční rezerva 50 000 Kč",
+    "subtitle": "Cíl · aktivní · 72 % · do 31. 12. 2026",
+    "area": "goals",
+    "href": "/goals?goal=4",
+    "score": 70
+   }
+  ],
+  "total": 1
+ },
+ "kvetiny": {
+  "query": "kvetiny",
+  "results": [
+   {
+    "id": "reminder:2",
+    "type": "reminder",
+    "title": "Zalít květiny",
+    "subtitle": "Připomínka · po 12. 10. 2026 08:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=2",
+    "score": 70
+   }
+  ],
+  "total": 1
+ },
+ "ranni": {
+  "query": "ranni",
+  "results": [
+   {
+    "id": "reminder:4",
+    "type": "reminder",
+    "title": "Ranní protažení",
+    "subtitle": "Připomínka · denně v 07:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=4",
+    "score": 85
+   }
+  ],
+  "total": 1
+ },
+ "klient": {
+  "query": "klient",
+  "results": [
+   {
+    "id": "work_session:5",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 9. 10. 2026 · 5 h · Úpravy webu",
+    "area": "work",
+    "href": "/work?session=5",
+    "score": 85
+   },
+   {
+    "id": "work_session:6",
+    "type": "work_session",
+    "title": "Klient ABC",
+    "subtitle": "Práce · 2. 10. 2026 · 6,5 h · Analýza",
+    "area": "work",
+    "href": "/work?session=6",
+    "score": 85
+   },
+   {
+    "id": "memory:2",
+    "type": "memory",
+    "title": "Klient ABC platí do 14 dnů od faktury.",
+    "subtitle": "Paměť · Kontext · Práce",
+    "area": "memory",
+    "href": "/memory?memory=2",
+    "score": 85
+   },
+   {
+    "id": "work_session:9",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=9",
+    "score": 85
+   },
+   {
+    "id": "work_session:8",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=8",
+    "score": 85
+   },
+   {
+    "id": "transaction:10",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=10",
+    "score": 70
+   },
+   {
+    "id": "transaction:9",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=9",
+    "score": 70
+   },
+   {
+    "id": "reminder:3",
+    "type": "reminder",
+    "title": "Odeslat fakturu",
+    "subtitle": "Připomínka · st 14. 10. 2026 10:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=3",
+    "score": 30
+   }
+  ],
+  "total": 8
+ },
+ "finance": {
+  "query": "finance",
+  "results": [
+   {
+    "id": "memory:3",
+    "type": "memory",
+    "title": "Chci mít rezervu na 3 měsíce výdajů.",
+    "subtitle": "Paměť · Cíl · Finance",
+    "area": "memory",
+    "href": "/memory?memory=3",
+    "score": 30
+   }
+  ],
+  "total": 1
+ },
+ "pamet": {
+  "query": "pamet",
+  "results": [
+   {
+    "id": "memory:3",
+    "type": "memory",
+    "title": "Chci mít rezervu na 3 měsíce výdajů.",
+    "subtitle": "Paměť · Cíl · Finance",
+    "area": "memory",
+    "href": "/memory?memory=3",
+    "score": 30
+   },
+   {
+    "id": "memory:4",
+    "type": "memory",
+    "title": "Fyzioterapie je každou neděli.",
+    "subtitle": "Paměť · Kontext · Obecné",
+    "area": "memory",
+    "href": "/memory?memory=4",
+    "score": 30
+   },
+   {
+    "id": "memory:2",
+    "type": "memory",
+    "title": "Klient ABC platí do 14 dnů od faktury.",
+    "subtitle": "Paměť · Kontext · Práce",
+    "area": "memory",
+    "href": "/memory?memory=2",
+    "score": 30
+   },
+   {
+    "id": "memory:1",
+    "type": "memory",
+    "title": "Nejlíp se učím ráno do 10:00.",
+    "subtitle": "Paměť · Preference · Škola",
+    "area": "memory",
+    "href": "/memory?memory=1",
+    "score": 30
+   },
+   {
+    "id": "memory:5",
+    "type": "memory",
+    "title": "Zkoušku z fyziky dát v prvním termínu.",
+    "subtitle": "Paměť · Plán · Škola",
+    "area": "memory",
+    "href": "/memory?memory=5",
+    "score": 30
+   }
+  ],
+  "total": 5
+ },
+ "rano": {
+  "query": "rano",
+  "results": [
+   {
+    "id": "memory:1",
+    "type": "memory",
+    "title": "Nejlíp se učím ráno do 10:00.",
+    "subtitle": "Paměť · Preference · Škola",
+    "area": "memory",
+    "href": "/memory?memory=1",
+    "score": 70
+   }
+  ],
+  "total": 1
+ },
+ "work": {
+  "query": "work",
+  "results": [
+   {
+    "id": "transaction:10",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=10",
+    "score": 85
+   },
+   {
+    "id": "transaction:9",
+    "type": "transaction",
+    "title": "Work: Klient XYZ – Workshop",
+    "subtitle": "Příjem · 2 437,50 Kč · Práce · 3. 10. 2026",
+    "area": "finance",
+    "href": "/finance?transaction=9",
+    "score": 85
+   },
+   {
+    "id": "work_session:9",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=9",
+    "score": 30
+   },
+   {
+    "id": "work_session:8",
+    "type": "work_session",
+    "title": "Klient XYZ",
+    "subtitle": "Práce · 10. 10. 2026 · 6,5 h · Workshop",
+    "area": "work",
+    "href": "/work?session=8",
+    "score": 30
+   }
+  ],
+  "total": 4
+ },
+ "goal": {
+  "query": "goal",
+  "results": [],
+  "total": 0
+ },
+ "memory": {
+  "query": "memory",
+  "results": [],
+  "total": 0
+ },
+ "projekt": {
+  "query": "projekt",
+  "results": [
+   {
+    "id": "assignment:3",
+    "type": "assignment",
+    "title": "Projekt",
+    "subtitle": "Úkol · Matematika · termín 13. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=3",
+    "score": 100
+   }
+  ],
+  "total": 1
+ },
+ "sada": {
+  "query": "sada",
+  "results": [
+   {
+    "id": "assignment:1",
+    "type": "assignment",
+    "title": "Sada",
+    "subtitle": "Úkol · Matematika · termín 2. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=1",
+    "score": 100
+   }
+  ],
+  "total": 1
+ },
+ "cil": {
+  "query": "cil",
+  "results": [
+   {
+    "id": "goal:3",
+    "type": "goal",
+    "title": "80 hodin práce za měsíc",
+    "subtitle": "Cíl · aktivní · 40 %",
+    "area": "goals",
+    "href": "/goals?goal=3",
+    "score": 30
+   },
+   {
+    "id": "memory:3",
+    "type": "memory",
+    "title": "Chci mít rezervu na 3 měsíce výdajů.",
+    "subtitle": "Paměť · Cíl · Finance",
+    "area": "memory",
+    "href": "/memory?memory=3",
+    "score": 30
+   },
+   {
+    "id": "goal:2",
+    "type": "goal",
+    "title": "Dokončit semestr bez nedodělků",
+    "subtitle": "Cíl · aktivní · 62 % · do 20. 12. 2026",
+    "area": "goals",
+    "href": "/goals?goal=2",
+    "score": 30
+   },
+   {
+    "id": "goal:4",
+    "type": "goal",
+    "title": "Finanční rezerva 50 000 Kč",
+    "subtitle": "Cíl · aktivní · 72 % · do 31. 12. 2026",
+    "area": "goals",
+    "href": "/goals?goal=4",
+    "score": 30
+   },
+   {
+    "id": "goal:1",
+    "type": "goal",
+    "title": "Našetřit 150 000 Kč",
+    "subtitle": "Cíl · aktivní · 10 % · do 30. 10. 2026",
+    "area": "goals",
+    "href": "/goals?goal=1",
+    "score": 30
+   },
+   {
+    "id": "goal:5",
+    "type": "goal",
+    "title": "Přečíst 12 knih",
+    "subtitle": "Cíl · pozastavený · 25 %",
+    "area": "goals",
+    "href": "/goals?goal=5",
+    "score": 30
+   },
+   {
+    "id": "goal:6",
+    "type": "goal",
+    "title": "Zápočet z dějepisu",
+    "subtitle": "Cíl · splněný · 100 %",
+    "area": "goals",
+    "href": "/goals?goal=6",
+    "score": 30
+   }
+  ],
+  "total": 7
+ },
+ "pripominka": {
+  "query": "pripominka",
+  "results": [
+   {
+    "id": "reminder:1",
+    "type": "reminder",
+    "title": "Fyzioterapie",
+    "subtitle": "Připomínka · ne 11. 10. 2026 18:30",
+    "area": "reminders",
+    "href": "/reminders?reminder=1",
+    "score": 30
+   },
+   {
+    "id": "reminder:3",
+    "type": "reminder",
+    "title": "Odeslat fakturu",
+    "subtitle": "Připomínka · st 14. 10. 2026 10:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=3",
+    "score": 30
+   },
+   {
+    "id": "reminder:4",
+    "type": "reminder",
+    "title": "Ranní protažení",
+    "subtitle": "Připomínka · denně v 07:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=4",
+    "score": 30
+   },
+   {
+    "id": "reminder:2",
+    "type": "reminder",
+    "title": "Zalít květiny",
+    "subtitle": "Připomínka · po 12. 10. 2026 08:00",
+    "area": "reminders",
+    "href": "/reminders?reminder=2",
+    "score": 30
+   }
+  ],
+  "total": 4
+ },
+ "ucim": {
+  "query": "ucim",
+  "results": [
+   {
+    "id": "memory:1",
+    "type": "memory",
+    "title": "Nejlíp se učím ráno do 10:00.",
+    "subtitle": "Paměť · Preference · Škola",
+    "area": "memory",
+    "href": "/memory?memory=1",
+    "score": 70
+   }
+  ],
+  "total": 1
+ },
+ "kyvadla": {
+  "query": "kyvadla",
+  "results": [
+   {
+    "id": "assignment:6",
+    "type": "assignment",
+    "title": "Laboratorní protokol č. 3",
+    "subtitle": "Úkol · Fyzika · termín 16. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=6",
+    "score": 30
+   }
+  ],
+  "total": 1
+ },
+ "xyznic": {
+  "query": "xyznic",
+  "results": [],
+  "total": 0
+ },
+ "captain": {
+  "query": "captain",
+  "results": [
+   {
+    "id": "mff_character:1",
+    "type": "mff_character",
+    "title": "Captain Marvel",
+    "subtitle": "T4 · Lv. 80 · postaveno",
+    "area": "mff",
+    "href": "/mff?character=1",
+    "score": 85
+   }
+  ],
+  "total": 1
+ },
+ "object": {
+  "query": "object",
+  "results": [
+   {
+    "id": "wot_grind:1",
+    "type": "wot_grind",
+    "title": "Object 279 (e)",
+    "subtitle": "Grind · zbývá 128 000 XP · aktivní · vysoká priorita",
+    "area": "wot",
+    "href": "/wot?grind=1",
+    "score": 85
+   }
+  ],
+  "total": 1
+ },
+ "wot": {
+  "query": "wot",
+  "results": [
+   {
+    "id": "wot_grind:2",
+    "type": "wot_grind",
+    "title": "Kranvagn",
+    "subtitle": "Grind · zbývá 52 000 XP · aktivní · vysoká priorita",
+    "area": "wot",
+    "href": "/wot?grind=2",
+    "score": 30
+   },
+   {
+    "id": "wot_grind:1",
+    "type": "wot_grind",
+    "title": "Object 279 (e)",
+    "subtitle": "Grind · zbývá 128 000 XP · aktivní · vysoká priorita",
+    "area": "wot",
+    "href": "/wot?grind=1",
+    "score": 30
+   },
+   {
+    "id": "wot_grind:3",
+    "type": "wot_grind",
+    "title": "T-100 LT",
+    "subtitle": "Grind · zbývá 0 XP · dokončeno",
+    "area": "wot",
+    "href": "/wot?grind=3",
+    "score": 30
+   },
+   {
+    "id": "wot_grind:4",
+    "type": "wot_grind",
+    "title": "TVP T 50/51",
+    "subtitle": "Grind · zbývá 96 000 XP · aktivní · vysoká priorita",
+    "area": "wot",
+    "href": "/wot?grind=4",
+    "score": 30
+   }
+  ],
+  "total": 4
+ },
+ "mff": {
+  "query": "mff",
+  "results": [
+   {
+    "id": "mff_character:3",
+    "type": "mff_character",
+    "title": "Black Widow",
+    "subtitle": "T4 · Lv. 80 · postaveno · Black Widow (2021)",
+    "area": "mff",
+    "href": "/mff?character=3",
+    "score": 30
+   },
+   {
+    "id": "mff_character:1",
+    "type": "mff_character",
+    "title": "Captain Marvel",
+    "subtitle": "T4 · Lv. 80 · postaveno",
+    "area": "mff",
+    "href": "/mff?character=1",
+    "score": 30
+   },
+   {
+    "id": "mff_character:4",
+    "type": "mff_character",
+    "title": "Luna Snow",
+    "subtitle": "T4 · Lv. 80 · rozpracováno · Neon Genesis",
+    "area": "mff",
+    "href": "/mff?character=4",
+    "score": 30
+   },
+   {
+    "id": "mff_character:2",
+    "type": "mff_character",
+    "title": "Thor",
+    "subtitle": "T3 · Lv. 80 · rozpracováno · Ragnarok",
+    "area": "mff",
+    "href": "/mff?character=2",
+    "score": 30
+   }
+  ],
+  "total": 4
+ },
+ "laborator": {
+  "query": "laborator",
+  "results": [
+   {
+    "id": "assignment:5",
+    "type": "assignment",
+    "title": "Laboratoř",
+    "subtitle": "Úkol · Matematika · termín 14. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=5",
+    "score": 100
+   },
+   {
+    "id": "assignment:6",
+    "type": "assignment",
+    "title": "Laboratorní protokol č. 3",
+    "subtitle": "Úkol · Fyzika · termín 16. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=6",
+    "score": 85
+   }
+  ],
+  "total": 2
+ },
+ "fyz": {
+  "query": "fyz",
+  "results": [
+   {
+    "id": "subject:2",
+    "type": "subject",
+    "title": "Fyzika",
+    "subtitle": "Předmět · FYZ1 · ZS 2026",
+    "area": "school",
+    "href": "/school?subject=2",
+    "score": 85
+   },
+   {
+    "id": "reminder:1",
+    "type": "reminder",
+    "title": "Fyzioterapie",
+    "subtitle": "Připomínka · ne 11. 10. 2026 18:30",
+    "area": "reminders",
+    "href": "/reminders?reminder=1",
+    "score": 85
+   },
+   {
+    "id": "memory:4",
+    "type": "memory",
+    "title": "Fyzioterapie je každou neděli.",
+    "subtitle": "Paměť · Kontext · Obecné",
+    "area": "memory",
+    "href": "/memory?memory=4",
+    "score": 85
+   },
+   {
+    "id": "exam:1",
+    "type": "exam",
+    "title": "Zkouška fyzika",
+    "subtitle": "Zkouška · Matematika · 15. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=1",
+    "score": 70
+   },
+   {
+    "id": "memory:5",
+    "type": "memory",
+    "title": "Zkoušku z fyziky dát v prvním termínu.",
+    "subtitle": "Paměť · Plán · Škola",
+    "area": "memory",
+    "href": "/memory?memory=5",
+    "score": 70
+   },
+   {
+    "id": "assignment:6",
+    "type": "assignment",
+    "title": "Laboratorní protokol č. 3",
+    "subtitle": "Úkol · Fyzika · termín 16. 10. 2026",
+    "area": "school",
+    "href": "/school?assignment=6",
+    "score": 30
+   },
+   {
+    "id": "exam:3",
+    "type": "exam",
+    "title": "test",
+    "subtitle": "Test · Fyzika · 3. 10. 2026",
+    "area": "school",
+    "href": "/school?exam=3",
+    "score": 30
+   }
+  ],
+  "total": 7
+ }
+}

@@ -607,6 +607,158 @@ async function aiSend(page, text) {
   await ctx.close();
 }
 
+// 16) Roadmap 4D – globální vyhledávání (Ctrl+K), mock /search = odpovědi skutečné search_service.
+const MOCK_API = process.env.MOCK_API_URL || "http://127.0.0.1:8000";
+async function searchCalls() {
+  return (await fetch(`${MOCK_API}/__mock/search-calls`)).json();
+}
+{
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
+  check("hledání: paleta na začátku zavřená", (await page.getByRole("dialog").count()) === 0);
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  check("hledání: Ctrl+K otevře paletu", (await dialog.count()) === 1);
+  const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
+  await page.waitForTimeout(80);
+  check("hledání: fokus v poli (combobox s popiskem)", await input.evaluate((el) => el === document.activeElement));
+  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 13);
+  await page.screenshot({ path: `${OUT}search-empty.png` });
+
+  const first = async () => (await dialog.getByRole("option").first().innerText()).split("\n")[0];
+  await input.fill("prace");
+  await page.waitForTimeout(500);
+  check("hledání: „prace“ najde stránku Práce (bez diakritiky)", (await first()) === "Práce", await first());
+  await input.fill("test");
+  await page.waitForTimeout(500);
+  const school = dialog.getByRole("group", { name: "Škola" });
+  check("hledání: zkouška „test“ ve skupině Škola", (await school.getByRole("option", { name: /^test Test · Fyzika/ }).count()) === 1);
+  for (const [q, re, group] of [
+    ["tvp", /^TVP T 50\/51/, "World of Tanks"],
+    ["luna", /^Luna Snow/, "Marvel FF"],
+    ["ucim", /^Nejlíp se učím ráno/, "Paměť"],
+    ["obed", /^Oběd Výdaj · 189,90\s?Kč · Jídlo/, "Finance"],
+    ["kvetiny", /^Zalít květiny/, "Připomínky"],
+  ]) {
+    await input.fill(q);
+    await page.waitForTimeout(500);
+    const hit = dialog.getByRole("group", { name: group }).getByRole("option", { name: re });
+    check(`hledání: „${q}“ → ${group}`, (await hit.count()) === 1);
+  }
+  await input.fill("fyzika");
+  await page.waitForTimeout(500);
+  check("hledání: více skupin a počet ve stavu", /\d+ výsled/.test(await dialog.getByRole("status").innerText()));
+  await page.screenshot({ path: `${OUT}search-results.png` });
+
+  // debounce: psaní po znacích = málo dotazů
+  await input.fill("");
+  await searchCalls();
+  await input.pressSequentially("luna snow", { delay: 35 });
+  await page.waitForTimeout(600);
+  const calls = await searchCalls();
+  check("hledání: debounce (psaní nespouští dotaz na každý znak)", calls.length >= 1 && calls.length <= 2, calls.join(" | "));
+
+  // prázdný výsledek
+  await input.fill("xyznic");
+  await page.waitForTimeout(600);
+  check("hledání: „Nic nenalezeno“", (await dialog.getByText("Nic nenalezeno.", { exact: false }).count()) >= 1);
+  await page.screenshot({ path: `${OUT}search-none.png` });
+
+  // šipky + Enter → přímo na záznam
+  await input.fill("fyzika");
+  await page.waitForTimeout(500);
+  const sel = async () => input.getAttribute("aria-activedescendant");
+  const count = await dialog.getByRole("option").count();
+  const a0 = await sel();
+  await input.press("ArrowDown");
+  const a1 = await sel();
+  await input.press("ArrowUp");
+  const back = await sel();
+  await input.press("ArrowUp");
+  const wrapped = await sel();
+  const lastId = await dialog.getByRole("option").nth(count - 1).getAttribute("id");
+  check("hledání: šipky mění vybraný řádek a cyklí", Boolean(a0) && a1 !== a0 && back === a0 && wrapped === lastId, `${count} řádků`);
+  await input.fill("luna");
+  await page.waitForTimeout(500);
+  check("hledání: vybraný řádek má aria-selected", (await dialog.locator('[role="option"][aria-selected="true"]').count()) === 1);
+  await input.press("Enter");
+  await page.waitForURL("**/mff?character=*", { timeout: 5000 }).catch(() => undefined);
+  check("hledání: Enter otevře záznam", /\/mff\?character=\d+$/.test(page.url()), page.url());
+  await page.waitForTimeout(1200);
+  const target = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { attr: el?.getAttribute("data-search-target") ?? "", highlighted: Boolean(el?.classList.contains("search-target-active")) };
+  });
+  check("hledání: záznam má fokus a zvýraznění", target.attr.startsWith("character-") && target.highlighted, JSON.stringify(target));
+  check("hledání: paleta po otevření výsledku zavřená", (await page.getByRole("dialog").count()) === 0);
+  await page.screenshot({ path: `${OUT}search-deeplink.png` });
+
+  // nedávno otevřené + Esc vrací fokus na tlačítko v shellu
+  const field = page.getByRole("button", { name: /^Hledat…/ });
+  await field.click();
+  await page.waitForTimeout(100);
+  check("hledání: nedávno otevřené", (await page.getByRole("group", { name: "Nedávno otevřené" }).getByRole("option", { name: /^Luna Snow/ }).count()) === 1);
+  await page.keyboard.press("Escape");
+  check("hledání: Esc zavře", (await page.getByRole("dialog").count()) === 0);
+  await page.waitForTimeout(60);
+  check("hledání: fokus zpět na spouštěč", await field.evaluate((el) => el === document.activeElement));
+  check("hledání: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// mobil: tlačítko v hlavičce, celá obrazovka, ťuknutí otevře záznam
+{
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  await page.getByRole("button", { name: "Hledat", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  check("hledání mobil: otevře se tlačítkem v hlavičce", (await dialog.count()) === 1);
+  const box = await dialog.boundingBox();
+  check("hledání mobil: přes celou obrazovku", Boolean(box && box.width >= 389 && box.height >= 843), `${box?.width}×${box?.height}`);
+  await page.keyboard.type("tvp");
+  await page.waitForTimeout(600);
+  const opt = dialog.getByRole("option", { name: /^TVP T 50\/51/ });
+  const optBox = await opt.boundingBox();
+  check("hledání mobil: dotykový cíl ≥ 44 px", Boolean(optBox && optBox.height >= 44), String(optBox?.height));
+  check("hledání mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}search-mobile.png` });
+  await opt.tap();
+  await page.waitForURL("**/wot?grind=*", { timeout: 5000 }).catch(() => undefined);
+  check("hledání mobil: ťuknutí otevře záznam", /\/wot\?grind=\d+$/.test(page.url()), page.url());
+  await page.getByRole("button", { name: "Hledat", exact: true }).click();
+  await page.getByRole("button", { name: "Zavřít" }).click();
+  check("hledání mobil: Zavřít", (await page.getByRole("dialog").count()) === 0);
+  check("hledání mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// login: žádné vyhledávání ani dotazy /search; omezený pohyb; světlý motiv OS
+{
+  const requests = [];
+  const { ctx, page } = await open("/login", {
+    setup: async (p) => {
+      p.on("request", (r) => requests.push(new URL(r.url()).pathname));
+      await p.route("**/auth/session/validate", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) }),
+      );
+    },
+  });
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(200);
+  check("login: bez vyhledávání (Ctrl+K nic neotevře)", (await page.getByRole("dialog").count()) === 0 && (await page.getByRole("button", { name: /^Hledat/ }).count()) === 0);
+  check("login: žádné dotazy /search", !requests.some((r) => r.startsWith("/search")));
+  await ctx.close();
+}
+for (const [scheme, motion] of [["dark", "reduce"], ["light", "no-preference"]]) {
+  const { ctx, page } = await open("/", { scheme, reducedMotion: motion });
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(150);
+  const style = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]');
+    const cs = d ? getComputedStyle(d) : null;
+    return { anim: cs?.animationName ?? "missing", bg: cs?.backgroundColor ?? "" };
+  });
+  if (motion === "reduce") check("hledání reduced motion: paleta bez animace", style.anim === "none", style.anim);
+  else check("hledání (světlý motiv OS): paleta zůstává tmavá", !/255, 255, 255/.test(style.bg) && style.bg !== "", style.bg);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);
