@@ -391,7 +391,7 @@ print(_hash_pin("123456"))
   `estimate_fixed_overhead(system_prompt, tools)` = system prompt (vč. A1 data/času) + kompaktní JSON tool schémat.
 - **Groq free tier = 8 000 TPM** a celá fixní režie se posílá v *každém* LLM volání (i v každém tool kole).
   Proto platí pevný limit **3 500 odhadovaných tokenů** pro *routovanou* sadu toolů (A5, kap. 17), hlídaný
-  `test_tool_router.py`; plná sada všech toolů (`AI_TOOL_ROUTING=false` / nouzový fallback) má strop 4 000
+  `test_tool_router.py`; plná sada všech toolů (`AI_TOOL_ROUTING=false` / nouzový fallback) má strop 4 500 (Phase B: ~4 340)
   (`FixedOverheadBudgetTestCase`, všechny dny v týdnu, CET i CEST). Za běhu `ask_ai` jen loguje warning,
   pokud režie poslané sady překročí `AI_MAX_FIXED_TOKENS` (request neblokuje).
 - **Pravidla pro tool schémata** (přidávej do `tool_registry.TOOL_SPECS`, kap. 17): obecná pravidla (potvrzení zápisu, paměť,
@@ -535,4 +535,41 @@ print(_hash_pin("123456"))
 - **Měření** (odhad schémat, bez kontextu → s CURRENT STATE): všechny tooly 28 / ~2 730; škola 7 → 4 tooly
   (~600 → ~400), finance 4 → 3 (~300 → ~255), WoT 2 (~100), pozdrav 0, obecný dotaz 18 READ (~1 310),
   zápis výdaje 5 → 4 (~430 → ~380), zápis s neznámou oblastí 12 (~1 560). Skript `backend/scripts/measure_tool_routing.py`.
+
+---
+
+## 18. AI úpravy, mazání a dokončení (Phase B, `mutation_service.py`, tool `modify_records`)
+
+- **Žádná AI mutace se neprovede hned.** Úprava / smazání / dokončení existujícího záznamu je vždy pending akce
+  ve stávající architektuře (`pending_actions`, `/actions/confirm`, `/ai/reject/{id}`, expirace, FSM
+  pending → executing → executed/failed, ochrana proti dvojímu potvrzení, session auth) – žádný druhý systém.
+- **Tool `modify_records(entity, action, target, changes)`** – `entity`: finance_transaction, work_session,
+  school_assignment, school_exam, goal, wot_grind, memory; `action`: update / delete / complete.
+  V registru má `resolver` (běží při návrhu) a `write_intent="mutate"`; router ho vystaví jen při mutačním
+  slovese (změň, uprav, oprav, smaž, odstraň, zruš, označ, „je hotový"…) a create tooly pak skryje, pokud
+  zároveň nezazní create sloveso („přidej", „zapiš"…). Otázky ho nedostanou nikdy.
+- **Návrh (`resolve_mutation`)**: cíl se dohledá v DB podle `target` (id, text bez diakritiky přes název /
+  popis / kategorii / předmět, datum, období, typ, `latest`, `all_matching`). ID od modelu se jen ověří
+  (musí existovat a sedět s ostatními filtry). Nepopsaný / nejednoznačný / nenalezený cíl, neplatné nebo
+  prázdné změny → `MutationRefused` → model dostane `not_prepared` (+ kandidáty) a **žádná pending akce
+  nevznikne**; model se má doptat.
+- **Plán v pending akci** (`arguments = {"plan": {...}}`, bez migrace): `version`, `entity`, `action`,
+  `targets[{id, snapshot}]`, `changes`, `preview{kind, title, count, items[{id, label, changes[{label, old,
+  new}]}], warnings}`. `/chat` vrací `preview` i u položky `pending_actions`.
+- **Potvrzení (`apply_mutation_plan`)**: stávající `execute_confirm_action` zavolá executor s uloženým plánem.
+  Každý cíl se načte podle ID a porovná se snímkem – smazaný nebo mezitím změněný = `StaleTarget`, akce
+  `failed`, **nic se nezmění**. Vše v jedné transakci (dávka je atomická), audit log za každou položku
+  (`user_context=ai_confirm`) + souhrnný `approve` záznam. Cíl se při potvrzení nikdy znovu nevyhledává.
+- **Podpora**: finance (úprava, smazání – odpojí pracovní session jako REST), práce (úprava – navázaný příjem
+  se přepočítá; smazání – příjem zůstane jako v REST), úkoly (úprava, smazání, dokončení, **dávkové dokončení
+  max 20**), zkoušky (úprava, smazání), cíle (úprava, smazání, dokončení – ruční progres 100 %; automatický
+  progres nastavit nelze), WoT grindy (úprava, smazání), paměť (úprava, smazání = deaktivace jako REST).
+- **Nepodporováno**: MFF postavy, WoT zdroje (už mají `update_wot_resource`), předměty, notifikace, planner,
+  dávky jiné než dokončení úkolů, „dokončení" zkoušky (výsledek passed/failed → úprava stavu).
+- **Planner fast-path** (`main.detect_planner_intent`) při write záměru vrací None – „označ všechny dnešní
+  úkoly jako hotové" jde na model, ne do denního planneru.
+- **Frontend**: `lib/pendingActions.ts` → `normalizePreview` + `describePreview` vykreslí kartu obecně
+  (akce, záznam, staré → nové, upozornění, u dávky seznam a počet); create karty zůstávají beze změny.
+- Testy: `test_mutation_service.py`, `test_ai_mutations.py`, router v `test_tool_router.py`,
+  frontend `lib/pendingActions.test.mjs`.
 
