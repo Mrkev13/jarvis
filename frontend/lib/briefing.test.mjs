@@ -7,7 +7,6 @@ import {
   fallbackGroups,
   generateAction,
   generatedCaption,
-  generateErrorText,
   pragueHHMM,
   safeHref,
 } from "./briefing.ts";
@@ -95,10 +94,4 @@ test("fallback groups keep order overdue → today → soon and drop empty", () 
   const groups = fallbackGroups({ ...base, fallback: { today: [item], overdue: [], soon: [item] } });
   assert.deepEqual(groups.map((g) => g.title), ["Dnes", "Brzy"]);
   assert.deepEqual(fallbackGroups({ ...base, fallback: null }), []);
-});
-
-test("generate error texts", () => {
-  assert.match(generateErrorText(409), /právě vytváří/);
-  assert.match(generateErrorText(401), /Přihlášení/);
-  assert.match(generateErrorText(500, "boom"), /boom/);
 });

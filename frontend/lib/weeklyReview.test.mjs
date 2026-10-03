@@ -4,13 +4,10 @@ import { test } from "node:test";
 
 import {
   confidenceLabel,
-  countsLine,
   displayContent,
   generateAction,
-  generateErrorText,
   metaCaption,
   reviewView,
-  trendTone,
 } from "./weeklyReview.ts";
 
 const content = {
@@ -72,13 +69,6 @@ test("fallback content is flagged", () => {
   assert.equal(displayContent({ ...base, review: content, fallback: content }).isFallback, false);
 });
 
-test("trend tones: polarity only for better/worse", () => {
-  assert.equal(trendTone("better").tone, "good");
-  assert.equal(trendTone("worse").tone, "bad");
-  assert.equal(trendTone("down").tone, "neutral");
-  assert.equal(trendTone("same").label, "beze změny");
-});
-
 test("forecast confidence labels", () => {
   assert.equal(confidenceLabel("high"), "vysoká jistota");
   assert.equal(confidenceLabel("low"), "nízká jistota");
@@ -92,10 +82,4 @@ test("meta caption and counts", () => {
       period_end_label: "neděle 11. 10. 19:00", regenerated_count: 2 }),
     "Vytvořeno neděle 11. 10. 19:00 (ručně) · data do neděle 11. 10. 19:00 · přegenerováno 2×",
   );
-  assert.equal(countsLine(content), "1× dobře · 1× příští týden · 1× odhad");
-});
-
-test("generate errors", () => {
-  assert.match(generateErrorText(409), /právě vytváří/);
-  assert.match(generateErrorText(500, "x"), /x/);
 });

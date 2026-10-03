@@ -102,24 +102,6 @@ export function generateAction(p: WeeklyPayload | null): { label: string; regene
   return p.review ? { label: "Přegenerovat", regenerate: true } : { label: "Vytvořit přehled", regenerate: false };
 }
 
-/** Barva/šipka srovnání: lepší/horší jen u veličin s jasnou polaritou, jinak neutrálně. */
-export function trendTone(trend: string): { tone: "good" | "bad" | "neutral"; arrow: string; label: string } {
-  switch (trend) {
-    case "better":
-      return { tone: "good", arrow: "▲", label: "lepší" };
-    case "worse":
-      return { tone: "bad", arrow: "▼", label: "horší" };
-    case "up":
-      return { tone: "neutral", arrow: "↑", label: "víc" };
-    case "down":
-      return { tone: "neutral", arrow: "↓", label: "méně" };
-    case "same":
-      return { tone: "neutral", arrow: "=", label: "beze změny" };
-    default:
-      return { tone: "neutral", arrow: "", label: "" };
-  }
-}
-
 /** „vysoká jistota" apod. – jistota je pravidlo z dat, ne odhad modelu. */
 export function confidenceLabel(confidence: string): string {
   return { high: "vysoká jistota", moderate: "střední jistota", low: "nízká jistota" }[confidence] ?? "jistota neuvedena";
@@ -141,19 +123,3 @@ export function displayContent(p: WeeklyPayload): { content: WeeklyContent | nul
   return { content: p.fallback, isFallback: Boolean(p.fallback) };
 }
 
-/** Krátké počty pro kartu na dashboardu. */
-export function countsLine(c: WeeklyContent): string {
-  const parts: string[] = [];
-  if (c.wins.length) parts.push(`${c.wins.length}× dobře`);
-  if (c.concerns.length) parts.push(`${c.concerns.length}× pozor`);
-  if (c.next_week.length) parts.push(`${c.next_week.length}× příští týden`);
-  if (c.forecasts.length) parts.push(`${c.forecasts.length}× odhad`);
-  return parts.join(" · ");
-}
-
-/** Chyba z POST /weekly-review/generate → česká hláška. */
-export function generateErrorText(status: number, detail?: string | null): string {
-  if (status === 401) return "Přihlášení vypršelo – přihlas se znovu.";
-  if (status === 409) return "Přehled se už právě vytváří – chvíli počkej.";
-  return detail ? `Nepovedlo se: ${detail}` : "Přehled se nepodařilo vytvořit.";
-}
