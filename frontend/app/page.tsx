@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { areaMeta } from "@/components/PlannerCards";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { staggerStyle } from "@/lib/motion";
+import DailyBriefingCard from "@/components/DailyBriefingCard";
 
 type NotificationPreview = {
   id: number;
@@ -337,6 +338,9 @@ export default function Home() {
           {error}
         </div>
       ) : null}
+
+      {/* DAILY BRIEFING (Phase F) */}
+      <DailyBriefingCard index={0} />
 
       {/* TODAY */}
       <Card index={0}
