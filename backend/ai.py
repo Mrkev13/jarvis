@@ -26,6 +26,7 @@ from llm_usage import (
     ratelimit_remaining_tokens,
     retry_wait_seconds,
 )
+from mutation_service import MutationRefused
 from tool_router import REASON_FALLBACK, ToolRoute, route_tools, widen_route
 from planner_guard import (
     build_evidence,
@@ -49,7 +50,7 @@ SYSTEM_PROMPT = """
 You are the AI assistant inside Standa Hub, a personal dashboard: finances, work, school, goals, World of Tanks (WoT), Marvel Future Fight (MFF), long-term memory.
 
 TOOLS
-- READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
+- READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory, modify_records): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
 - CURRENT STATE (system message) is live module data: if it answers the question, answer directly. Never re-fetch what it contains; call READ tools only for missing data, all needed ones in one turn. No identical repeated calls.
 - Tool results are authoritative for current data, like CURRENT STATE. RELEVANT MEMORY is context only.
 
@@ -58,6 +59,7 @@ WRITE SAFETY
 - Never say "uložil jsem", "změnil jsem", "přidal jsem" or otherwise imply a change happened before confirmation succeeded. After confirmation_required say e.g. "Připravil jsem změnu k potvrzení."
 - Use exact argument names. Never guess a missing value that would materially change the record; ask instead.
 - Relative dates ("dnes", "zítra", "včera", weekdays) are computed from CURRENT APPLICATION DATE below. Dates are YYYY-MM-DD.
+- Edit/delete/complete existing records only via modify_records: describe the target from the user's words (latest only if they said "poslední"; all_matching only if they said all). Never guess ids. not_prepared (ambiguous_target, target_not_found…) → ask the user which record; never retry with guesses.
 
 DATA RULES
 - Never invent data: game mechanics, currencies, rates, rewards, prices, events, features, deadlines, exam dates, XP, money, hours or goal progress. If information is missing, say so; if current external data would be needed, say it must be checked.
@@ -272,30 +274,60 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
             continue
 
         if fn_name in WRITE_TOOL_NAMES:
-            action_id = _store_pending_action(db, fn_name, arguments, ttl_minutes=30)
+            preview = None
+            stored_arguments = arguments
+            spec = TOOLS_BY_NAME.get(fn_name)
+            if spec is not None and spec.resolver is not None:
+                # Phase B: cíle se dohledají v DB TEĎ; nejednoznačný / neplatný cíl = žádná pending akce.
+                try:
+                    plan = spec.resolver(db, **arguments)
+                except MutationRefused as refused:
+                    print(f"  [TOOL REFUSED] {fn_name}: {refused.code}")
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(refused.as_tool_result(), ensure_ascii=False, default=str),
+                    })
+                    continue
+                except TypeError as exc:
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps({"status": "not_prepared", "error": "invalid_arguments",
+                                               "detail": str(exc)}, ensure_ascii=False),
+                    })
+                    continue
+                stored_arguments = {"plan": plan}
+                preview = plan.get("preview")
+            action_id = _store_pending_action(db, fn_name, stored_arguments, ttl_minutes=30)
             pending_info = _get_pending_action(db, action_id)
             expires_at_iso = (
                 pending_info["expires_at"].isoformat()
                 if pending_info and pending_info.get("expires_at")
                 else None
             )
-            pending_actions.append({
+            pending_item = {
+                "id": action_id,
+                "tool": fn_name,
+                "arguments": stored_arguments,
+                "expires_at": expires_at_iso,
+            }
+            tool_result = {
+                "status": "confirmation_required",
                 "id": action_id,
                 "tool": fn_name,
                 "arguments": arguments,
                 "expires_at": expires_at_iso,
-            })
+            }
+            if preview is not None:
+                pending_item["preview"] = preview
+                tool_result["preview"] = preview
+            pending_actions.append(pending_item)
 
             tool_messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps({
-                    "status": "confirmation_required",
-                    "id": action_id,
-                    "tool": fn_name,
-                    "arguments": arguments,
-                    "expires_at": expires_at_iso,
-                }, ensure_ascii=False),
+                "content": json.dumps(tool_result, ensure_ascii=False, default=str),
             })
 
             continue
@@ -775,10 +807,14 @@ def execute_confirm_action(action_id: str):
             _finalize_pending_status(db, action_id, "executed")
 
             try:
-                args_preview = ", ".join(f"{k}={v}" for k, v in list(arguments.items())[:3])
-                if len(arguments) > 3:
-                    args_preview += ", ..."
-                summary = f"Potvrzena akce {tool_name} ({args_preview})"
+                plan_preview = (arguments.get("plan") or {}).get("preview") if isinstance(arguments.get("plan"), dict) else None
+                if plan_preview:
+                    args_preview = f"{plan_preview.get('title')}, záznamů {plan_preview.get('count')}"
+                else:
+                    args_preview = ", ".join(f"{k}={v}" for k, v in list(arguments.items())[:3])
+                    if len(arguments) > 3:
+                        args_preview += ", ..."
+                summary = f"Potvrzena akce {tool_name} ({args_preview})"[:480]
                 log_activity(
                     db, "ai", "approve", summary,
                     entity_type=tool_name,
