@@ -56,7 +56,7 @@ export function Composer({
 
   return (
     <div className="border-t border-line bg-app/85 backdrop-blur safe-bottom">
-      <div className="mx-auto w-full max-w-3xl space-y-2 px-4 py-3 md:px-6">
+      <div className="mx-auto w-full max-w-4xl space-y-2 px-4 py-3 md:px-6">
         {failure ? (
           <div className="flex items-start gap-1">
             <ErrorState

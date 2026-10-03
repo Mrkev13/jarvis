@@ -18,23 +18,25 @@ export function ChatHeader({
   creating: boolean;
 }) {
   return (
-    <header className="flex items-center gap-3 border-b border-line px-4 py-3 md:px-6">
-      <div className="min-w-0 flex-1">
-        <HudLabel className="hidden items-center gap-1.5 sm:flex">
-          <StatusPulse tone="ai" className="h-1.5 w-1.5" /> Standa AI · asistent
-        </HudLabel>
-        <h1 className="text-lg font-semibold leading-tight text-ink md:text-xl">AI asistent</h1>
-        <p className="truncate text-sm text-ink-muted" title={title ?? undefined}>
-          {title ?? "Konverzace s přístupem k tvým datům"}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2 lg:hidden">
-        <Button size="sm" variant="secondary" onClick={onOpenConversations} aria-haspopup="dialog" aria-expanded={conversationsOpen}>
-          Konverzace
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onNew} busy={creating} busyLabel="…" aria-label="Nový chat">
-          + Nový
-        </Button>
+    <header className="border-b border-line">
+      <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3 md:px-6">
+        <div className="min-w-0 flex-1">
+          <HudLabel className="hidden items-center gap-1.5 sm:flex">
+            <StatusPulse tone="ai" className="h-1.5 w-1.5" /> Standa AI · asistent
+          </HudLabel>
+          <h1 className="text-lg font-semibold leading-tight text-ink md:text-xl">AI asistent</h1>
+          <p className="truncate text-sm text-ink-muted" title={title ?? undefined}>
+            {title ?? "Konverzace s přístupem k tvým datům"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 lg:hidden">
+          <Button size="sm" variant="secondary" onClick={onOpenConversations} aria-haspopup="dialog" aria-expanded={conversationsOpen}>
+            Konverzace
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onNew} busy={creating} busyLabel="…" aria-label="Nový chat">
+            + Nový
+          </Button>
+        </div>
       </div>
     </header>
   );

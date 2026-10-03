@@ -146,15 +146,15 @@ export function ConversationPanel({
   const [deleting, setDeleting] = useState<Conversation | null>(null);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        {showHeading ? <h2 className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">Konverzace</h2> : <span />}
-        <Button size="sm" variant="ghost" onClick={onRefresh} busy={refreshing} busyLabel="Obnovuji…" disabled={loading}>
+      {showHeading ? <h2 className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-muted">Konverzace</h2> : null}
+      <div className="flex items-center gap-2">
+        <Button variant="secondary" onClick={onNew} busy={creating} busyLabel="Zakládám…" className="flex-1">
+          + Nový chat
+        </Button>
+        <Button variant="ghost" onClick={onRefresh} busy={refreshing} busyLabel="Obnovuji…" disabled={loading}>
           Obnovit
         </Button>
       </div>
-      <Button variant="secondary" onClick={onNew} busy={creating} busyLabel="Zakládám…" className="w-full">
-        + Nový chat
-      </Button>
       <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1" aria-busy={loading || refreshing}>
         {loading && !conversations.length ? (
           <LoadingState lines={3} label="Načítám konverzace…" />

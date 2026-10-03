@@ -272,7 +272,12 @@ function fromPreview(action: PendingAction, preview: PendingPreview): ActionView
     count: preview.count,
     warnings: preview.warnings,
     footer: preview.count > 1 || kind === "delete" ? { label: "Počet záznamů", value: String(preview.count) } : null,
-    detailLines: [...shown.map((i) => i.label), ...(preview.count > 1 ? [`Záznamů: ${preview.count}`] : [])],
+    // do zprávy v chatu jen první tři záznamy (celý seznam je v kartě před potvrzením)
+    detailLines: [
+      ...items.slice(0, 3).map((i) => i.label),
+      ...(items.length > 3 ? [`a dalších ${items.length - 3}`] : []),
+      ...(preview.count > 1 ? [`Záznamů: ${preview.count}`] : []),
+    ],
   };
 }
 

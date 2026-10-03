@@ -87,3 +87,10 @@ test("every write tool has Czech labels; unknown tools never show internal names
   assert.ok(!RAW.test(JSON.stringify(v)), JSON.stringify(v));
   assert.equal(rejectedMessage(v), "❌ Akce byla zrušena: Akce AI.");
 });
+
+test("confirmed batch message lists at most three records", () => {
+  const [a] = normalizePendingActions([
+    { id: 11, tool: "modify_records", arguments: {}, preview: { kind: "delete", title: "Smazat transakce", count: 5, items: ["a", "b", "c", "d", "e"].map((l) => ({ label: l, changes: [] })) } },
+  ]);
+  assert.equal(confirmedMessage(describeAction(a), true), "✅ Hotovo – Smazat transakce.\n\na\nb\nc\na dalších 2\nZáznamů: 5");
+});

@@ -81,7 +81,7 @@ export function MessageList({
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       aria-busy={loading || sending}
     >
-      <div className="mx-auto w-full max-w-3xl px-4 py-5 md:px-6 md:py-6">
+      <div className="mx-auto w-full max-w-4xl px-4 py-5 md:px-6 md:py-6">
         {loading && history.length === 0 ? (
           <LoadingState lines={4} label="Načítám historii konverzace…" />
         ) : error ? (
