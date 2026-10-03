@@ -165,6 +165,36 @@ class ResolveTestCase(MutationTestBase):
         self.assertEqual(plan["preview"]["count"], 2)
         self.assertEqual(len(plan["targets"]), 2)
 
+    def test_update_to_done_status_is_treated_as_complete_batch(self):
+        # Regrese (live Phase B E): „označ všechny dnešní úkoly jako hotové" → model poslal
+        # update + {status: done} + all_matching → batch_not_supported a žádná pending akce.
+        self.seed_school()
+        plan = ms.resolve_mutation(self.db, "school_assignment", "update",
+                                   {"date": "2026-10-03", "all_matching": True}, {"status": "done"})
+        self.assertEqual(plan["action"], "complete")
+        self.assertEqual(plan["preview"]["kind"], "complete")
+        self.assertEqual(plan["preview"]["count"], 2)  # hotový Referát se přeskočí jako u complete
+        self.assertEqual(plan["changes"], {"status": "done"})
+
+    def test_single_update_to_done_status_is_labelled_complete(self):
+        self.seed_school()
+        plan = ms.resolve_mutation(self.db, "school_assignment", "update", {"text": "ústavě"}, {"status": "done"})
+        self.assertEqual(plan["action"], "complete")
+        self.assertEqual([t["id"] for t in plan["targets"]], [plan["preview"]["items"][0]["id"]])
+
+    def test_update_with_other_changes_stays_update(self):
+        self.seed_school()
+        plan = ms.resolve_mutation(self.db, "school_assignment", "update", {"text": "ústavě"},
+                                   {"status": "done", "priority": "low"})
+        self.assertEqual(plan["action"], "update")
+
+    def test_goal_status_completed_update_is_not_converted(self):
+        # Dokončení cíle navíc nastaví progres na 100 % → není to stejná změna jako update stavu.
+        self.db.add(Goal(area="personal", title="Přečíst knihu", status="active", progress=40, tracking_type="manual"))
+        self.db.commit()
+        plan = ms.resolve_mutation(self.db, "goal", "update", {"text": "knihu"}, {"status": "completed"})
+        self.assertEqual(plan["action"], "update")
+
     def test_batch_without_all_matching_is_ambiguous(self):
         self.seed_school()
         with self.assertRaises(ms.MutationRefused) as ctx:

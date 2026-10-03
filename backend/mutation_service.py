@@ -544,6 +544,15 @@ def resolve_mutation(db: Session, entity: str, action: str, target: dict, change
         raise MutationRefused("invalid_changes", f"Akce '{action}' nepřijímá changes; pro úpravu použij update.")
 
     parsed = _parse_changes(ent, action, changes)
+    if (
+        action == ACTION_UPDATE
+        and ACTION_COMPLETE in ent.actions
+        and ent.name != "goal"  # dokončení cíle navíc nastaví progres 100 % → není to stejná změna
+        and parsed == dict(ent.complete_changes)
+    ):
+        # „Označ jako hotové" posílá model často jako update {status: done} – je to přesně dokončení
+        # (stejná DB změna), takže platí jeho pravidla: dávka, přeskočení už hotových, náhled „Dokončit".
+        action = ACTION_COMPLETE
     objs = _find_targets(db, ent, action, target or {})
 
     items = []
