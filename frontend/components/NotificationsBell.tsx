@@ -168,16 +168,17 @@ export default function NotificationsBell() {
     <>
       <button
         type="button"
-        aria-label="Notifikace"
+        aria-label={unread > 0 ? `Notifikace, ${unread} nepřečtených` : "Notifikace"}
         onClick={() => (open ? setOpen(false) : void openPanel())}
-        className="motion-press relative px-3 py-2 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800 transition-colors text-sm"
+        className="motion-press relative grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface text-sm transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
       >
-        <span className="select-none">🔔</span>
+        <span aria-hidden="true" className="select-none">🔔</span>
         {unread > 0 && (
           <span
             // key se mění jen při NÁRŮSTU unread → puls se přehraje, ne při každém obnovení
             key={unreadIncrease}
-            className={`ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-200 ${unreadIncrease > 0 ? "motion-pulse" : ""}`}
+            aria-hidden="true"
+            className={`absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-warning/50 bg-app px-1 text-[11px] font-semibold tabular-nums text-warning ${unreadIncrease > 0 ? "motion-pulse" : ""}`}
           >
             {unread}
           </span>

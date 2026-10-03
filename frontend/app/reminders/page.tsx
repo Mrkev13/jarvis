@@ -1,9 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import ConfirmDialog from "@/components/ConfirmDialog";
+import { useMemo, useState } from "react";
 import PushSettings from "@/components/PushSettings";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  ContentContainer,
+  EmptyState,
+  EntityList,
+  EntityRow,
+  ErrorState,
+  FormField,
+  fieldClass,
+  HudLabel,
+  LoadingState,
+  PageHeader,
+  PageSection,
+  StatusBadge,
+  StatusPulse,
+  Tabs,
+} from "@/components/ui";
+import { useApiResource } from "@/hooks/useApiResource";
+import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import { staggerStyle } from "@/lib/motion";
 import {
   createBody,
@@ -15,23 +35,19 @@ import {
   type Reminder,
   type ReminderForm,
 } from "@/lib/reminders";
+import { cx } from "@/lib/ui";
 
 // Splatné připomínky se zazvoní i bez scheduleru při čtení – stránka se obnovuje jako zvonek.
 const REFRESH_MS = 30000;
 
-async function readError(res: Response): Promise<string> {
-  try {
-    const data = (await res.json()) as { detail?: unknown };
-    return typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`;
-  } catch {
-    return `HTTP ${res.status}`;
-  }
-}
+type View = "upcoming" | "history";
 
 export default function RemindersPage() {
-  const [items, setItems] = useState<Reminder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("upcoming");
+  const reminders = useApiResource<Reminder[]>(`/reminders?status=${view === "history" ? "all" : "active"}`, {
+    refreshMs: REFRESH_MS,
+  });
+  const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState<ReminderForm>(() => emptyForm());
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -39,42 +55,18 @@ export default function RemindersPage() {
   const [editTitle, setEditTitle] = useState("");
   const [editDue, setEditDue] = useState("");
   const [cancelTarget, setCancelTarget] = useState<Reminder | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/reminders?status=${showHistory ? "all" : "active"}`);
-      if (!res.ok) throw new Error(await readError(res));
-      setItems((await res.json()) as Reminder[]);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Nepodařilo se načíst připomínky.");
-    } finally {
-      setLoading(false);
-    }
-  }, [showHistory]);
+  const groups = useMemo(() => groupReminders(reminders.data ?? []), [reminders.data]);
 
-  useEffect(() => {
-    queueMicrotask(() => void load());
-    const t = window.setInterval(() => void load(), REFRESH_MS);
-    return () => window.clearInterval(t);
-  }, [load]);
-
-  const groups = useMemo(() => groupReminders(items), [items]);
-
-  async function act(id: number, path: string, body?: unknown, method = "POST") {
+  async function act(id: number, path: string, body?: unknown, method = "POST"): Promise<boolean> {
     setBusyId(id);
+    setActionError(null);
     try {
-      const res = await apiFetch(path, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      await load();
+      await apiJson(path, jsonBody(method, body));
+      await reminders.reload();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Akce se nepovedla.");
+      setActionError(errorMessage(err, "Akce se nepovedla."));
       return false;
     } finally {
       setBusyId(null);
@@ -87,22 +79,17 @@ export default function RemindersPage() {
     try {
       body = createBody(form);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
       return;
     }
     setSaving(true);
+    setActionError(null);
     try {
-      const res = await apiFetch("/reminders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await readError(res));
+      await apiJson("/reminders", jsonBody("POST", body));
       setForm(emptyForm());
-      setError(null);
-      await load();
+      await reminders.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Připomínku se nepodařilo uložit.");
+      setActionError(errorMessage(err, "Připomínku se nepodařilo uložit."));
     } finally {
       setSaving(false);
     }
@@ -125,258 +112,262 @@ export default function RemindersPage() {
     if (await act(r.id, `/reminders/${r.id}`, body, "PATCH")) setEditingId(null);
   }
 
-  function renderCard(r: Reminder, idx: number) {
+  function renderRow(r: Reminder, idx: number) {
     const due = r.state === "due";
     const closed = r.status === "done" || r.status === "cancelled";
     const busy = busyId === r.id;
     const editing = editingId === r.id;
     return (
-      <div
+      <EntityRow
         key={r.id}
         style={staggerStyle(idx)}
-        aria-busy={busy}
-        className={`motion-card rounded-2xl border p-4 md:p-5 transition-colors ${
-          due
-            ? "motion-attention border-amber-500/50 bg-amber-500/10"
-            : closed
-              ? "border-zinc-800/60 bg-zinc-900/40 text-zinc-400"
-              : "border-zinc-800 bg-zinc-900"
-        }`}
-      >
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap text-xs">
-              <span
-                className={`rounded-full border px-2 py-0.5 font-semibold uppercase tracking-wider ${
-                  due ? "border-amber-400/50 text-amber-200" : "border-zinc-700 text-zinc-400"
-                }`}
-              >
-                {stateLabel(r)}
-              </span>
-              <span className="text-zinc-500">{r.recurrence_label}</span>
-            </div>
-            {editing ? (
-              <div className="mt-2 flex flex-col sm:flex-row gap-2">
+        className={cx("motion-card", due && "motion-attention")}
+        tone={due ? "warning" : "neutral"}
+        muted={closed}
+        busy={busy}
+        badges={
+          <>
+            <StatusBadge tone={due ? "warning" : closed ? "neutral" : "accent"} dot={due}>
+              {stateLabel(r)}
+            </StatusBadge>
+            <span className="text-xs text-ink-muted">{r.recurrence_label}</span>
+          </>
+        }
+        title={
+          editing ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className={fieldClass}
+                aria-label="Text připomínky"
+              />
+              {r.recurrence === "none" && (
                 <input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 outline-none focus:border-zinc-500"
-                  aria-label="Text připomínky"
+                  type="datetime-local"
+                  value={editDue}
+                  onChange={(e) => setEditDue(e.target.value)}
+                  className={cx(fieldClass, "sm:w-auto")}
+                  aria-label="Nový čas (Praha)"
                 />
-                {r.recurrence === "none" && (
-                  <input
-                    type="datetime-local"
-                    value={editDue}
-                    onChange={(e) => setEditDue(e.target.value)}
-                    className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 outline-none focus:border-zinc-500"
-                    aria-label="Nový čas (Praha)"
-                  />
-                )}
-              </div>
-            ) : (
-              <div className={`mt-1.5 text-base md:text-lg font-semibold ${closed ? "line-through" : "text-white"}`}>
-                {r.title}
-              </div>
-            )}
-            <div className="mt-1 text-sm text-zinc-400">
-              {closed ? `Původně: ${r.due_label}` : due ? `Mělo zaznít: ${r.next_label}` : `Kdy: ${r.next_label}`}
-              {r.snoozed_label ? ` · odloženo na ${r.snoozed_label}` : ""}
-            </div>
-            {r.note && <div className="mt-1 text-sm text-zinc-500 whitespace-pre-wrap">{r.note}</div>}
-          </div>
-          {!closed && (
-            <div className="flex flex-wrap gap-2">
-              {editing ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void saveEdit(r)}
-                    className="motion-press rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 px-3 py-2 text-sm font-medium text-white"
-                  >
-                    Uložit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(null)}
-                    className="motion-press rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-sm"
-                  >
-                    Zpět
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void act(r.id, `/reminders/${r.id}/done`)}
-                    className="motion-press rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 px-3 py-2 text-sm font-medium text-white"
-                  >
-                    Hotovo
-                  </button>
-                  {snoozeOptions().map((o) => (
-                    <button
-                      key={o.label}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void act(r.id, `/reminders/${r.id}/snooze`, o.body)}
-                      className="motion-press rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 py-2 text-sm"
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => startEdit(r)}
-                    className="motion-press rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 py-2 text-sm"
-                  >
-                    Upravit
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setCancelTarget(r)}
-                    className="motion-press rounded-xl border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50 px-3 py-2 text-sm"
-                  >
-                    Zrušit
-                  </button>
-                </>
               )}
             </div>
-          )}
-        </div>
-      </div>
+          ) : (
+            r.title
+          )
+        }
+        meta={
+          <>
+            {closed ? `Původně: ${r.due_label}` : due ? `Mělo zaznít: ${r.next_label}` : `Kdy: ${r.next_label}`}
+            {r.snoozed_label ? ` · odloženo na ${r.snoozed_label}` : ""}
+          </>
+        }
+        actions={
+          closed ? undefined : editing ? (
+            <>
+              <Button size="sm" variant="primary" busy={busy} busyLabel="Ukládám…" onClick={() => void saveEdit(r)}>
+                Uložit
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                Zpět
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant={due ? "success" : "secondary"}
+                disabled={busy}
+                onClick={() => void act(r.id, `/reminders/${r.id}/done`)}
+              >
+                Hotovo
+              </Button>
+              {snoozeOptions().map((o) => (
+                <Button
+                  key={o.label}
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void act(r.id, `/reminders/${r.id}/snooze`, o.body)}
+                >
+                  {o.label}
+                </Button>
+              ))}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(r)}>
+                Upravit
+              </Button>
+              <Button size="sm" variant="danger" disabled={busy} onClick={() => setCancelTarget(r)}>
+                Zrušit
+              </Button>
+            </>
+          )
+        }
+      >
+        {r.note ? <p className="mt-1 whitespace-pre-wrap text-sm text-ink-2">{r.note}</p> : null}
+      </EntityRow>
     );
   }
 
+  const listItems = view === "history" ? groups.history : groups.upcoming;
+
   return (
-    <main className="motion-page p-4 md:p-8 max-w-4xl mx-auto space-y-8">
-      <header>
-        <h1 className="text-2xl md:text-4xl font-bold">⏰ Připomínky</h1>
-        <p className="text-zinc-400 mt-2">
-          Časy jsou v pražském čase. Zazněná připomínka se objeví i ve zvonku notifikací.
-        </p>
-      </header>
+    <ContentContainer>
+      <PageHeader
+        eyebrow={<HudLabel>Modul · připomínky</HudLabel>}
+        title="Připomínky"
+        subtitle="Časy jsou v pražském čase. Zazněná připomínka se objeví i ve zvonku notifikací."
+      />
 
-      {error && (
-        <div role="alert" className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl px-4 py-3">
-          {error}
-        </div>
-      )}
+      {actionError ? <ErrorState message={actionError} /> : null}
 
-      <PushSettings />
-
-      <form onSubmit={create} className="motion-card bg-zinc-900 border border-zinc-800 rounded-2xl p-4 md:p-6 space-y-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <input
-            value={form.title}
-            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-            placeholder="Co připomenout (např. fyzio)"
-            aria-label="Text připomínky"
-            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-          />
-          <select
-            value={form.mode}
-            onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value as ReminderForm["mode"] }))}
-            aria-label="Opakování"
-            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-          >
-            <option value="once">Jednorázově</option>
-            <option value="daily">Denně</option>
-            <option value="weekly">Každý týden</option>
-          </select>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {form.mode === "once" ? (
-            <input
-              type="datetime-local"
-              value={form.dueLocal}
-              onChange={(e) => setForm((f) => ({ ...f, dueLocal: e.target.value }))}
-              aria-label="Kdy (Praha)"
-              className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-            />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+        <div className="min-w-0 space-y-6">
+          {reminders.loading ? (
+            <LoadingState lines={4} label="Načítám připomínky…" />
+          ) : reminders.status === "error" ? (
+            <ErrorState message={reminders.error} onRetry={() => void reminders.reload()} />
           ) : (
-            <input
-              type="time"
-              value={form.timeLocal}
-              onChange={(e) => setForm((f) => ({ ...f, timeLocal: e.target.value }))}
-              aria-label="Čas (Praha)"
-              className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-            />
-          )}
-          {form.mode === "weekly" && (
-            <div className="flex gap-1.5" role="group" aria-label="Dny v týdnu">
-              {WEEKDAY_LABELS.map((label, day) => {
-                const on = form.weekdays.includes(day);
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() =>
-                      setForm((f) => ({
-                        ...f,
-                        weekdays: on ? f.weekdays.filter((d) => d !== day) : [...f.weekdays, day],
-                      }))
-                    }
-                    className={`motion-press h-9 w-9 rounded-lg border text-sm ${
-                      on ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-100" : "border-zinc-700 bg-zinc-800"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <input
-            value={form.note}
-            onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-            placeholder="Poznámka (nepovinné)"
-            aria-label="Poznámka"
-            className="flex-1 min-w-[180px] bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 outline-none focus:border-zinc-500"
-          />
-          <button
-            type="submit"
-            disabled={saving}
-            className="motion-press rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 px-4 py-2.5 font-medium text-white"
-          >
-            {saving ? "Ukládám…" : "Přidat"}
-          </button>
-        </div>
-      </form>
+            <>
+              {reminders.error ? <ErrorState message={`Obnovení selhalo: ${reminders.error}`} /> : null}
+              {groups.due.length > 0 && (
+                <PageSection
+                  labelledBy="reminders-now"
+                  title={
+                    <span className="flex items-center gap-2 text-warning">
+                      <StatusPulse tone="warning" live /> Teď ({groups.due.length})
+                    </span>
+                  }
+                >
+                  <EntityList label="Splatné připomínky">{groups.due.map(renderRow)}</EntityList>
+                </PageSection>
+              )}
 
-      {loading ? (
-        <div className="text-zinc-500">Načítám…</div>
-      ) : (
-        <>
-          {groups.due.length > 0 && (
-            <section className="space-y-3" aria-live="polite">
-              <h2 className="text-lg font-semibold text-amber-200">Teď ({groups.due.length})</h2>
-              {groups.due.map(renderCard)}
-            </section>
+              <section className="space-y-3" aria-label="Seznam připomínek">
+                <Tabs
+                  id="reminders-view"
+                  label="Zobrazení připomínek"
+                  value={view}
+                  onChange={setView}
+                  items={[
+                    { value: "upcoming", label: "Nadcházející", count: view === "upcoming" ? groups.upcoming.length : undefined },
+                    { value: "history", label: "Hotové a zrušené" },
+                  ]}
+                />
+                <div role="tabpanel" id="reminders-view-panel" aria-labelledby={`reminders-view-${view}`} aria-busy={reminders.refreshing}>
+                  {listItems.length ? (
+                    <EntityList>{listItems.map(renderRow)}</EntityList>
+                  ) : (
+                    <EmptyState compact>
+                      {view === "history" ? "Zatím žádné hotové ani zrušené připomínky." : "Žádné naplánované připomínky."}
+                    </EmptyState>
+                  )}
+                </div>
+              </section>
+            </>
           )}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold">Nadcházející</h2>
-            {groups.upcoming.length ? (
-              groups.upcoming.map(renderCard)
-            ) : (
-              <div className="text-zinc-500 text-sm">Žádné naplánované připomínky.</div>
-            )}
-          </section>
-          <section className="space-y-3">
-            <button
-              type="button"
-              onClick={() => setShowHistory((v) => !v)}
-              className="motion-press text-sm text-zinc-400 hover:text-zinc-200"
-            >
-              {showHistory ? "Skrýt hotové a zrušené" : "Zobrazit hotové a zrušené"}
-            </button>
-            {showHistory && groups.history.map(renderCard)}
-          </section>
-        </>
-      )}
+        </div>
+
+        <div className="space-y-6">
+          <Card as="section" aria-labelledby="new-reminder">
+            <CardHeader as="h2" title={<span id="new-reminder">Nová připomínka</span>} />
+            <form onSubmit={create} className="space-y-3">
+              <FormField label="Co připomenout">
+                {(p) => (
+                  <input
+                    {...p}
+                    value={form.title}
+                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                    placeholder="např. fyzio"
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Opakování">
+                  {(p) => (
+                    <select
+                      {...p}
+                      value={form.mode}
+                      onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value as ReminderForm["mode"] }))}
+                      className={fieldClass}
+                    >
+                      <option value="once">Jednorázově</option>
+                      <option value="daily">Denně</option>
+                      <option value="weekly">Každý týden</option>
+                    </select>
+                  )}
+                </FormField>
+                {form.mode === "once" ? (
+                  <FormField label="Kdy (Praha)" className="col-span-2 sm:col-span-1 lg:col-span-2">
+                    {(p) => (
+                      <input
+                        {...p}
+                        type="datetime-local"
+                        value={form.dueLocal}
+                        onChange={(e) => setForm((f) => ({ ...f, dueLocal: e.target.value }))}
+                        className={fieldClass}
+                      />
+                    )}
+                  </FormField>
+                ) : (
+                  <FormField label="Čas (Praha)">
+                    {(p) => (
+                      <input
+                        {...p}
+                        type="time"
+                        value={form.timeLocal}
+                        onChange={(e) => setForm((f) => ({ ...f, timeLocal: e.target.value }))}
+                        className={fieldClass}
+                      />
+                    )}
+                  </FormField>
+                )}
+              </div>
+              {form.mode === "weekly" && (
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dny v týdnu">
+                  {WEEKDAY_LABELS.map((label, day) => {
+                    const on = form.weekdays.includes(day);
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            weekdays: on ? f.weekdays.filter((d) => d !== day) : [...f.weekdays, day],
+                          }))
+                        }
+                        className={cx(
+                          "motion-press h-10 w-10 rounded-lg border text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
+                          on ? "border-accent/60 bg-accent/15 text-accent-strong" : "border-line bg-surface-2 text-ink-2",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <FormField label="Poznámka" hint="Nepovinné">
+                {(p) => (
+                  <input
+                    {...p}
+                    value={form.note}
+                    onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                    className={fieldClass}
+                  />
+                )}
+              </FormField>
+              <Button type="submit" variant="primary" busy={saving} busyLabel="Ukládám…" className="w-full">
+                Přidat připomínku
+              </Button>
+            </form>
+          </Card>
+
+          <PushSettings />
+        </div>
+      </div>
 
       <ConfirmDialog
         open={cancelTarget !== null}
@@ -384,13 +375,15 @@ export default function RemindersPage() {
         message={cancelTarget ? `${cancelTarget.title} · ${cancelTarget.recurrence_label}` : undefined}
         confirmLabel="Zrušit připomínku"
         cancelLabel="Ponechat"
-        onConfirm={() => {
+        busyLabel="Ruším…"
+        onConfirm={async () => {
           const target = cancelTarget;
+          // Dialog drží busy stav do odpovědi; chyba se pak ukáže na stránce.
+          if (target) await act(target.id, `/reminders/${target.id}/cancel`);
           setCancelTarget(null);
-          if (target) void act(target.id, `/reminders/${target.id}/cancel`);
         }}
         onCancel={() => setCancelTarget(null)}
       />
-    </main>
+    </ContentContainer>
   );
 }
