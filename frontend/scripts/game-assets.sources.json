@@ -1,20 +1,24 @@
 {
-  "$comment": "Game Enrichment A – oficiální zdroje obrázků, které Tankopedia API neposkytuje. Doplň https URL z oficiálních zdrojů (Wargaming / Netmarble), skript je stáhne do public/game-assets. Prázdné = záložní monogram. Tanky se stahují automaticky z Tankopedia API (WG_APPLICATION_ID).",
+  "$comment": "Game Enrichment A – oficiální zdroje obrázků (scripts/fetch-game-assets.mjs, docs/game-assets.md). Tanky se berou automaticky z Tankopedia API (WG_APPLICATION_ID) – žádný seznam tanků tady není.",
   "attribution": {
     "wot": "© Wargaming.net",
     "mff": "© Netmarble Corp. / © Marvel"
   },
   "resources": {
-    "credits": "",
-    "gold": "",
-    "bonds": "",
-    "free_xp": ""
+    "$comment": "Ikony měn z oficiálního stylu portálu World of Tanks (SVG vložené do CSS). Adresa stylu se najde na portal_page; stylesheet je záloha (verze v cestě se mění s aktualizacemi portálu). Interní názvy: credits = silver, Free XP = experience__free.",
+    "portal_page": "https://worldoftanks.eu/en/tankopedia/",
+    "stylesheet": "https://eu-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css",
+    "icons": {
+      "credits": ".currency__silver::after",
+      "gold": ".currency__gold::after",
+      "bonds": ".modules_info-box-text__bonds-farmer::after",
+      "free_xp": ".experience__free::after"
+    }
   },
   "characters": {
     "thor": "", "white_fox": "", "green_goblin": "", "venom": "", "storm": "", "black_bolt": "", "mephisto": "",
     "carnage": "", "valkyrie": "", "luna_snow": "", "magneto": "", "mysterio": "", "namor": "", "ghost_rider": "",
     "sentry": "", "drax": "", "doctor_voodoo": "", "cyclops": "", "shuri": "", "satana": "", "ghost_panther": "",
     "captain_marvel": "", "black_widow": ""
-  },
-  "tank_overrides": {}
+  }
 }

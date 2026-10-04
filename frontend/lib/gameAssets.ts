@@ -1,10 +1,13 @@
 /**
- * Herní obrázky (Game Enrichment A) – registr, normalizace názvů a cesty k lokálním assetům. Čistá logika
- * bez Reactu (testy: gameAssets.test.mjs), sdílená se skriptem scripts/fetch-game-assets.mjs.
+ * Herní obrázky (Game Enrichment A) – normalizace názvů, rozlišení tanků podle Tankopedie a cesty k lokálním
+ * assetům. Čistá logika bez Reactu (testy: gameAssets.test.mjs), sdílená se skriptem scripts/fetch-game-assets.mjs.
  *
  * Assety NEJSOU v repozitáři (autorská práva Wargaming / Netmarble / Marvel): skript je stáhne z oficiálních
  * zdrojů do public/game-assets/ (gitignore) a zapíše manifest.json. Aplikace manifest načte za běhu; co
  * v něm není (nebo se nenačte), ukáže čitelný záložní monogram. Žádné generované „podobné" obrázky.
+ *
+ * Tanky nemají ruční registr: manifest obsahuje všechna vozidla z Tankopedie (název, short_name, soubor) a název
+ * grindu se k nim přiřadí za běhu (`resolveTank`). Nový tank = jen znovu spustit skript, žádná úprava kódu.
  */
 
 export type GameAssetKind = "tank" | "character" | "resource";
@@ -20,38 +23,13 @@ export function imageBox(kind: GameAssetKind, size: GameImageSize): { width: num
 }
 
 interface RegistryEntry {
-  /** Oficiální název (podle něj skript hledá v Tankopedii / zobrazuje se v dokumentaci). */
+  /** Oficiální název (zobrazuje se v dokumentaci, podle něj se páruje). */
   name: string;
-  /** Další zápisy, které uživatel používá („Obj. 268 V4", „Progetto 65"…). */
+  /** Další zápisy, které uživatel používá („Dr. Voodoo", „Luna"…). */
   aliases?: string[];
 }
 
-/**
- * Tanky – stabilní slug = název souboru. Pokrývá tanky z reálných dat (zadání 4G) i z fixtures.
- * Nový tank: přidat sem → spustit skript (stáhne ikonu z Tankopedie) → hotovo.
- */
-export const TANKS: Record<string, RegistryEntry> = {
-  type_5_heavy: { name: "Type 5 Heavy" },
-  type_71: { name: "Type 71" },
-  strv_103b: { name: "Strv 103B", aliases: ["Strv 103 B"] },
-  st_ii: { name: "ST-II", aliases: ["ST 2"] },
-  object_268_v4: { name: "Object 268 Version 4", aliases: ["Object 268 V4", "Obj. 268 V4", "Object 268/4", "268 V4"] },
-  progetto_65: { name: "Progetto M40 mod. 65", aliases: ["Progetto 65", "Progetto M40 65"] },
-  wz_111_5a: { name: "WZ-111 model 5A", aliases: ["WZ-111 5A", "WZ 111 5A"] },
-  t57_heavy: { name: "T57 Heavy Tank", aliases: ["T57 Heavy", "T57"] },
-  object_261: { name: "Object 261", aliases: ["Obj. 261"] },
-  fv215b_183: { name: "FV215b (183)", aliases: ["FV215b 183", "FV 183", "FV215B183"] },
-  dravec: { name: "Dravec" },
-  object_140: { name: "Object 140", aliases: ["Obj. 140"] },
-  grille_15: { name: "Grille 15" },
-  tvp_t_50_51: { name: "TVP T 50/51", aliases: ["TVP 50/51", "TVP T50/51"] },
-  vz_55: { name: "Vz. 55", aliases: ["VZ 55", "Vz55"] },
-  object_279e: { name: "Object 279 (e)", aliases: ["Object 279e", "Obj. 279 (e)", "279e"] },
-  kranvagn: { name: "Kranvagn" },
-  t_100_lt: { name: "T-100 LT", aliases: ["T100 LT"] },
-};
-
-/** MFF postavy (sledované v aplikaci + fixtures). */
+/** MFF postavy (sledované v aplikaci + fixtures). Portréty nemají veřejné API → pevný seznam se slugy. */
 export const CHARACTERS: Record<string, RegistryEntry> = {
   thor: { name: "Thor" },
   white_fox: { name: "White Fox" },
@@ -89,6 +67,19 @@ export const RESOURCES: Record<string, RegistryEntry> = {
 /** Monogram záložní ikony měny (neutrální text, ne napodobenina herní grafiky). */
 export const RESOURCE_MONOGRAMS: Record<string, string> = { credits: "Cr", gold: "G", bonds: "B", free_xp: "XP" };
 
+/**
+ * Ruční aliasy tanků – JEN skutečné rozdíly v pojmenování, které normalizace ani short_name z Tankopedie nepokryjí
+ * (zápis uživatele → oficiální název v Tankopedii). Běžné varianty („VZ.55", „T34/100", „Obj. 268 V4",
+ * „Hirschkafer") se párují samy.
+ */
+export const TANK_ALIASES: Record<string, string> = {
+  "268 V4": "Object 268 Version 4",
+  "279e": "Object 279 early", // short_name „Obj. 279 (e)" pokryje „Object 279 (e)", ale ne holé „279e"
+  "FV 183": "FV215b (183)",
+  "TVP 50/51": "TVP T 50/51",
+  "T57 Heavy Tank": "T57 Heavy", // starší oficiální název
+};
+
 const ROMAN: Record<string, string> = { i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
 
 /**
@@ -110,12 +101,12 @@ export function normalizeGameName(raw: string | null | undefined): string {
     .join(" ");
 }
 
-/** Bez mezer – „WZ-111 5A" = „WZ111 5A", „FV215b 183" = „FV215B183". */
+/** Bez mezer – „WZ-111 5A" = „WZ111 5A", „T34/100" = „T-34/100". Jen jako poslední, jednoznačný stupeň. */
 function compact(s: string): string {
   return normalizeGameName(s).replace(/\s+/g, "");
 }
 
-function buildIndex(registry: Record<string, RegistryEntry>): Map<string, string> {
+function buildRegistryIndex(registry: Record<string, RegistryEntry>): Map<string, string> {
   const index = new Map<string, string>();
   for (const [slug, entry] of Object.entries(registry)) {
     for (const n of [entry.name, ...(entry.aliases ?? []), slug.replace(/_/g, " ")]) {
@@ -126,16 +117,81 @@ function buildIndex(registry: Record<string, RegistryEntry>): Map<string, string
   return index;
 }
 
-const INDEX: Record<GameAssetKind, Map<string, string>> = {
-  tank: buildIndex(TANKS),
-  character: buildIndex(CHARACTERS),
-  resource: buildIndex(RESOURCES),
+const REGISTRY_INDEX: Record<"character" | "resource", Map<string, string>> = {
+  character: buildRegistryIndex(CHARACTERS),
+  resource: buildRegistryIndex(RESOURCES),
 };
 
-/** Stabilní klíč assetu („tank/kranvagn") pro název z aplikace, nebo null (neznámý → záložní monogram). */
-export function assetKey(kind: GameAssetKind, name: string | null | undefined): string | null {
-  const slug = INDEX[kind].get(compact(name ?? ""));
+/** Klíč assetu postavy / měny („character/luna_snow"), nebo null. Tanky se řeší přes manifest (`resolveTank`). */
+export function assetKey(kind: "character" | "resource", name: string | null | undefined): string | null {
+  const slug = REGISTRY_INDEX[kind].get(compact(name ?? ""));
   return slug ? `${kind}/${slug}` : null;
+}
+
+/** Vozidlo z Tankopedie v manifestu (skript ho zapíše, aplikace ho jen čte). */
+export interface TankEntry {
+  vehicle_id: string;
+  name: string;
+  short_name: string;
+  nation?: string;
+  tier?: number;
+  /** Relativní cesta uvnitř /game-assets („wot/tanks/7169.png"). */
+  path: string;
+  source?: string;
+  attribution?: string;
+}
+
+/** Vyhledávací index tanků: normalizovaný název / short_name / tvar bez mezer → id vozidel. */
+export interface TankIndex {
+  entries: Map<string, TankEntry>;
+  byName: Map<string, string[]>;
+  byShort: Map<string, string[]>;
+  byCompact: Map<string, string[]>;
+}
+
+function addTo(map: Map<string, string[]>, key: string, id: string) {
+  if (!key) return;
+  const list = map.get(key);
+  if (!list) map.set(key, [id]);
+  else if (!list.includes(id)) list.push(id);
+}
+
+export function buildTankIndex(tanks: TankEntry[]): TankIndex {
+  const index: TankIndex = { entries: new Map(), byName: new Map(), byShort: new Map(), byCompact: new Map() };
+  for (const t of tanks) {
+    index.entries.set(t.vehicle_id, t);
+    addTo(index.byName, normalizeGameName(t.name), t.vehicle_id);
+    addTo(index.byShort, normalizeGameName(t.short_name), t.vehicle_id);
+    addTo(index.byCompact, compact(t.name), t.vehicle_id);
+    addTo(index.byCompact, compact(t.short_name), t.vehicle_id);
+  }
+  return index;
+}
+
+/** Výsledek stupně: jednoznačné vozidlo, nejednoznačné (stop – raději monogram než špatný tank), nebo nic. */
+function pick(index: TankIndex, ids: string[] | undefined): TankEntry | "ambiguous" | null {
+  if (!ids?.length) return null;
+  return ids.length === 1 ? index.entries.get(ids[0]) ?? null : "ambiguous";
+}
+
+const ALIAS_INDEX = new Map(Object.entries(TANK_ALIASES).map(([alias, official]) => [normalizeGameName(alias), normalizeGameName(official)]));
+
+/**
+ * Název grindu → vozidlo z Tankopedie. Pořadí: 1) přesný normalizovaný název, 2) short_name, 3) ruční alias,
+ * 4) tvar bez mezer/pomlček – jen když určí jediné vozidlo („T34/100" = „T-34/100"; „T34" ≠ „T-34", ty se
+ * rozliší už v 1.). Nejednoznačný stupeň končí monogramem, nikdy se nehádá.
+ */
+export function resolveTank(index: TankIndex, name: string | null | undefined): TankEntry | null {
+  const key = normalizeGameName(name);
+  if (!key) return null;
+  const aliased = ALIAS_INDEX.get(key);
+  const tiers = [index.byName.get(key), index.byShort.get(key), aliased ? index.byName.get(aliased) : undefined, index.byCompact.get(compact(key))];
+  for (const ids of tiers) {
+    const hit = pick(index, ids);
+    if (hit === "ambiguous") return null;
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export interface ManifestEntry {
@@ -145,9 +201,12 @@ export interface ManifestEntry {
 }
 export interface GameAssetManifest {
   version: number;
+  /** Měny a postavy („resource/credits", „character/luna_snow"). */
   assets: Record<string, ManifestEntry>;
+  tanks: TankIndex;
 }
-export const EMPTY_MANIFEST: GameAssetManifest = { version: 1, assets: {} };
+export const MANIFEST_VERSION = 2;
+export const EMPTY_MANIFEST: GameAssetManifest = { version: MANIFEST_VERSION, assets: {}, tanks: buildTankIndex([]) };
 export const MANIFEST_URL = "/game-assets/manifest.json";
 
 /** Jen bezpečná relativní cesta k obrázku uvnitř /game-assets (žádné URL, žádné „..", jen obrázkové přípony). */
@@ -157,28 +216,60 @@ export function safeAssetFile(file: unknown): string | null {
   return file;
 }
 
+const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
+
+function parseTank(id: string, value: unknown): TankEntry | null {
+  if (!/^\d{1,10}$/.test(id) || typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const name = str(v.name, 120);
+  const path = safeAssetFile(v.path);
+  if (!name || !path || !path.startsWith("wot/tanks/")) return null;
+  return {
+    vehicle_id: id,
+    name,
+    short_name: str(v.short_name, 120) ?? name,
+    ...(typeof v.nation === "string" ? { nation: v.nation } : {}),
+    ...(typeof v.tier === "number" ? { tier: v.tier } : {}),
+    path,
+    ...(typeof v.source === "string" && v.source.startsWith("https://") ? { source: v.source } : {}),
+    ...(typeof v.attribution === "string" ? { attribution: v.attribution } : {}),
+  };
+}
+
 /** Manifest ze serveru → ověřený tvar; nesmysl / jiná verze → prázdný (všude záložní monogram). */
 export function parseManifest(raw: unknown): GameAssetManifest {
-  if (typeof raw !== "object" || raw === null || (raw as { version?: unknown }).version !== 1) return EMPTY_MANIFEST;
-  const assets = (raw as { assets?: unknown }).assets;
-  if (typeof assets !== "object" || assets === null) return EMPTY_MANIFEST;
+  if (typeof raw !== "object" || raw === null || (raw as { version?: unknown }).version !== MANIFEST_VERSION) return EMPTY_MANIFEST;
+  const { assets, wot_tanks: wotTanks } = raw as { assets?: unknown; wot_tanks?: unknown };
   const out: Record<string, ManifestEntry> = {};
-  for (const [key, value] of Object.entries(assets as Record<string, unknown>)) {
-    if (!/^(tank|character|resource)\/[a-z0-9_]+$/.test(key) || typeof value !== "object" || value === null) continue;
-    const file = safeAssetFile((value as { file?: unknown }).file);
-    if (!file) continue;
-    const v = value as { source?: unknown; attribution?: unknown };
-    out[key] = {
-      file,
-      ...(typeof v.source === "string" ? { source: v.source } : {}),
-      ...(typeof v.attribution === "string" ? { attribution: v.attribution } : {}),
-    };
+  if (typeof assets === "object" && assets !== null) {
+    for (const [key, value] of Object.entries(assets as Record<string, unknown>)) {
+      if (!/^(character|resource)\/[a-z0-9_]+$/.test(key) || typeof value !== "object" || value === null) continue;
+      const file = safeAssetFile((value as { file?: unknown }).file);
+      if (!file) continue;
+      const v = value as { source?: unknown; attribution?: unknown };
+      out[key] = {
+        file,
+        ...(typeof v.source === "string" ? { source: v.source } : {}),
+        ...(typeof v.attribution === "string" ? { attribution: v.attribution } : {}),
+      };
+    }
   }
-  return { version: 1, assets: out };
+  const tanks: TankEntry[] = [];
+  if (typeof wotTanks === "object" && wotTanks !== null) {
+    for (const [id, value] of Object.entries(wotTanks as Record<string, unknown>)) {
+      const t = parseTank(id, value);
+      if (t) tanks.push(t);
+    }
+  }
+  return { version: MANIFEST_VERSION, assets: out, tanks: buildTankIndex(tanks) };
 }
 
 /** URL obrázku (lokální, same-origin) nebo null → záložní monogram. */
 export function assetSrc(manifest: GameAssetManifest, kind: GameAssetKind, name: string | null | undefined): string | null {
+  if (kind === "tank") {
+    const tank = resolveTank(manifest.tanks, name);
+    return tank ? `/game-assets/${tank.path}` : null;
+  }
   const key = assetKey(kind, name);
   const entry = key ? manifest.assets[key] : undefined;
   return entry ? `/game-assets/${entry.file}` : null;
