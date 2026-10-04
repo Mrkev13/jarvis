@@ -47,6 +47,20 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Roadmap 4H (Act from Today)
+
+| Item | Status |
+|---|---|
+| Reminder Hotovo / Odložit from Today (existing endpoints, `?source=today`) | ✅ design-system §18 |
+| Assignment Hotovo via existing pending action + `/actions/confirm`, with existing undo | ✅ |
+| Exam → "Zapsat výsledek →" link to School | ✅ (no inline editor) |
+| Server-computed Prague snooze options (incl. DST, after midnight) | ✅ tested |
+| One refresh after an action, focus to the next actionable row, stale/error handling | ✅ |
+| Activity source "Dnes" (`today`), not AI; undo keeps the source | ✅ |
+| Today actions integration step for modules | ✅ `module-integration-checklist.md` §10 |
+| Recurring reminder actions, exam result editing, free-text snooze | ❌ by design (see §18) |
+| Today manual reload limitation from 4G | ✅ resolved for actions taken on the page |
+
 ## Status after Roadmap 4G (Today Mode)
 
 | Item | Status |
@@ -58,7 +72,7 @@ visual polish.
 | Per-section partial failure, empty day, Quick Add entry | ✅ |
 | Today Mode integration step for modules | ✅ `module-integration-checklist.md` §9 |
 | Daily Briefing inside Today | ❌ by design (stays on the dashboard) |
-| Live clock / polling | ❌ by design (computed at load; reload or "Obnovit") |
+| Live clock / polling | ❌ by design (computed at load; reload, "Obnovit" or any Today action refreshes) |
 
 ## Status after Roadmap 4F (Custom Dashboard / Command Center)
 

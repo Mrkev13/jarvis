@@ -486,7 +486,57 @@ duplicate moves to the kept row as a badge ("Plán #2", "Důležité"). Tested i
 
 **Daily Briefing** – deliberately not embedded: it stays the dashboard's AI summary; Today is deterministic.
 
+**Direct actions** – see §18 (Roadmap 4H).
+
 **Look** – narrow single column (`ContentContainer width="narrow"`), one accent-lined summary card, charcoal
 cards, mono times, semantic red/amber only for overdue/attention. Mobile: next item in the first viewport,
 rows ≥ 44 px, Quick Add in the header and page header.
+
+## 18. Act from Today (Roadmap 4H)
+
+Today stays read-mostly: a row gets at most one primary action and one secondary one, only where the backend
+already has clean semantics. The backend decides (`TodayItem.actions`); the UI never guesses from the title.
+
+| Row | Actions | Path (reused, not new) |
+|---|---|---|
+| One-off reminder, active (today or overdue) | **Hotovo**, **Odložit** | `POST /reminders/{id}/done` · `/snooze` with `?source=today` (same as the Reminders page) |
+| Open assignment (today, overdue, or a planner row with `ref assignment:N`) | **Hotovo** | `POST /today/actions/prepare` → existing `modify_records` complete pending action → `POST /actions/confirm` |
+| Past exam still open | **Zapsat výsledek →** (link) | navigates to `/school?exam=N`; no exam editor in Today |
+| Recurring reminder, done/past rows, notifications, Potom | none | – |
+
+**Skipped on purpose** – recurring reminders (their "done" confirms the occurrence without moving it and snooze
+only shifts one occurrence – the Reminders page handles that), exam results/status (no simple unambiguous
+flow), assignment editing, free-text snooze.
+
+**Confirmation policy** – proportional to risk and identical to existing surfaces: reminder Hotovo is
+immediate (as on the Reminders page); Odložit is an explicit choice from a small inline group; assignment
+Hotovo is one click that runs the safe pending-action pipeline (snapshot stale check, audit, undo) – the
+click is the confirmation, as in Quick Add.
+
+**Snooze** – options come from `GET /today` (`snooze_options`), computed on the server in Europe/Prague:
++15 min, +1 h, +3 h (added to the UTC instant, so DST cannot skip or repeat time) and "Zítra 8:00" = the next
+Prague calendar day at 08:00 (also right after midnight). No browser dates, no free text.
+
+**Undo** – only where the backend supports it: completing an assignment shows "Vrátit" in the notice (existing
+`/actions/undo` + confirm). Reminder actions have no undo, so none is shown.
+
+**Refresh and focus** – one action at a time; after it exactly one `GET /today` (no page reload, no polling).
+Focus moves to the next actionable row in the same list (else the previous one, else the notice). The notice
+(`role=status`) announces "Připomínka „Fyzioterapie“ je hotová." / "Odloženo: …" / "Vráceno: …".
+
+**Stale and errors** – already done / changed / deleted elsewhere (HTTP 400/404/409, `no_change`, snapshot
+mismatch, already processed) → warning notice "… Stav jsem obnovil." and a refresh, no retry. Any other failure
+→ the row stays with an inline alert and "Zkusit znovu"; for assignments the retry re-confirms the SAME
+pending action, so a double click or retry never creates a second change. The rest of the page keeps working.
+Notifications about a record that is already finished are not shown in Vyžaduje pozornost (read-only twin of
+the notification generator's relevance rule), so a completed item disappears immediately.
+
+**Source attribution** – Activity `user_context="today"`, shown as "zdroj: Dnes"; never labelled as AI. The
+caller cannot spoof it (`?source=` accepts only `today`, pending-action sources are set server-side, an undo
+inherits the source stored with the original action).
+
+**Accessibility** – controls are named with the record ("Dokončit připomínku: Fyzioterapie", "Odložit
+připomínku: …", "Zapsat výsledek zkoušky: …"); "Odložit" is a disclosure (`aria-expanded`, `aria-controls`)
+opening a labelled group, Esc closes it and returns focus; busy state is text ("Ukládám…"); errors are
+`role=alert`; nothing is conveyed by colour only. Mobile: actions sit under the title, all ≥ 44 px.
 
