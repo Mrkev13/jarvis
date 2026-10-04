@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import {
   assetAlt, assetKey, assetSrc, CHARACTERS, EMPTY_MANIFEST, GAME_IMAGE_SIZES, imageBox, monogram, normalizeGameName,
-  parseManifest, RESOURCES, safeAssetFile, TANKS,
+  parseManifest, RESOURCES, safeAssetFile, TANKS, tankopediaImageUrl,
 } from "./gameAssets.ts";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../scripts/fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -101,4 +101,20 @@ test("fallback monograms, alt text and sizes", () => {
   assert.deepEqual(Object.values(GAME_IMAGE_SIZES), [24, 40, 56, 88]);
   assert.deepEqual(imageBox("tank", "sm"), { width: 64, height: 40 });
   assert.deepEqual(imageBox("character", "md"), { width: 56, height: 56 });
+});
+
+// Regrese: Tankopedia vrací images.big_icon jako http:// → skript (jen https) nestáhl ani jeden tank.
+test("tankopedia image URL: http upgraded to https only on official Wargaming hosts", () => {
+  const icon = "/static/2.77.0/wot/encyclopedia/vehicle/ussr-R169_ST_II.png";
+  assert.equal(tankopediaImageUrl(`http://api.worldoftanks.eu${icon}`), `https://api.worldoftanks.eu${icon}`);
+  assert.equal(tankopediaImageUrl(`https://api.worldoftanks.eu${icon}`), `https://api.worldoftanks.eu${icon}`);
+  assert.equal(tankopediaImageUrl(`http://api.worldoftanks.com${icon}`), `https://api.worldoftanks.com${icon}`);
+  assert.equal(tankopediaImageUrl(`http://api.worldoftanks.asia${icon}`), `https://api.worldoftanks.asia${icon}`);
+  // cizí hosty se nepovyšují (skript je pak odmítne), podvržené domény taky ne
+  assert.equal(tankopediaImageUrl("http://example.com/tank.png"), null);
+  assert.equal(tankopediaImageUrl("http://api.worldoftanks.eu.evil.com/x.png"), null);
+  assert.equal(tankopediaImageUrl("http://evilworldoftanks.eu/x.png"), null);
+  assert.equal(tankopediaImageUrl("ftp://api.worldoftanks.eu/x.png"), null);
+  assert.equal(tankopediaImageUrl(undefined), null);
+  assert.equal(tankopediaImageUrl("nesmysl"), null);
 });

@@ -7,7 +7,7 @@ text (names, numbers, statuses) always stays next to them and the app works with
 
 | Asset | Source | How | Notes |
 |---|---|---|---|
-| Tank icons | **Official Wargaming Tankopedia API** – `https://api.worldoftanks.{eu,com,asia}/wot/encyclopedia/vehicles/?application_id=…&fields=name,short_name,images` → `images.big_icon` (160 × 100 PNG on Wargaming's CDN) | `scripts/fetch-game-assets.mjs` matches every tank in the registry by official name / aliases | Needs a free `application_id` from https://developers.wargaming.net. Stable, versioned by Wargaming. |
+| Tank icons | **Official Wargaming Tankopedia API** – `https://api.worldoftanks.{eu,com,asia}/wot/encyclopedia/vehicles/?application_id=…&fields=name,short_name,images` → `images.big_icon` (160 × 100 transparent PNG; the API returns it as `http://` on the same API host – the script upgrades it to `https://`, official hosts only) | `scripts/fetch-game-assets.mjs` matches every tank in the registry by official name / aliases | Needs a free `application_id` from https://developers.wargaming.net. Stable, versioned by Wargaming. |
 | Currency icons (Credits, Gold, Bonds, Free XP) | Official Wargaming sources (the API does not expose them) | explicit https URLs in `frontend/scripts/game-assets.sources.json` → `resources` | Leave empty to keep the neutral monogram. |
 | MFF portraits | Official Netmarble / Marvel sources (no public API exists) | explicit https URLs in `game-assets.sources.json` → `characters` | Leave empty to keep the monogram. |
 | Your own files | any image you are allowed to use | copy `<slug>.png|webp|jpg|svg` into the folder, run `--manifest-only` | Slugs are the keys in `frontend/lib/gameAssets.ts`. |

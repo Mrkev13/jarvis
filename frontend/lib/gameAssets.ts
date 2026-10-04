@@ -184,6 +184,25 @@ export function assetSrc(manifest: GameAssetManifest, kind: GameAssetKind, name:
   return entry ? `/game-assets/${entry.file}` : null;
 }
 
+/** Hosty oficiálního Tankopedia API (stejné, na které se skript ptá). */
+export const TANKOPEDIA_HOSTS = ["api.worldoftanks.eu", "api.worldoftanks.com", "api.worldoftanks.asia"];
+
+/**
+ * Tankopedia vrací `images.big_icon` jako http:// – tentýž soubor je na stejném hostu i přes https. Povýší
+ * jen oficiální hosty; cokoli jiného → null (skript stahuje výhradně https).
+ */
+export function tankopediaImageUrl(raw: string | null | undefined): string | null {
+  let url: URL;
+  try {
+    url = new URL(String(raw ?? ""));
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !TANKOPEDIA_HOSTS.includes(url.hostname)) return null;
+  url.protocol = "https:";
+  return url.toString();
+}
+
 /** Čitelný monogram pro záložní obrázek: „Kranvagn" → „KR", „Object 279 (e)" → „O279", „Luna Snow" → „LS". */
 export function monogram(kind: GameAssetKind, name: string | null | undefined): string {
   if (kind === "resource") {

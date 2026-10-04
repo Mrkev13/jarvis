@@ -7,13 +7,13 @@
 // Zdroje:
 // - tanky: oficiální Wargaming Tankopedia API (encyclopedia/vehicles, pole images.big_icon 160×100 PNG z CDN
 //   Wargamingu); application_id zdarma na https://developers.wargaming.net. Shoda podle registru v lib/gameAssets.ts
-//   (oficiální název + aliasy, normalizace stejná jako v aplikaci). Ruční výjimky: tank_overrides v sources JSON.
+//   (oficiální název + aliasy, normalizace stejná jako v aplikaci). Tankopedia vrací http:// → povýší se na https. Ruční výjimky: tank_overrides v sources JSON.
 // - ikony měn a portréty MFF: explicitní https URL z oficiálních zdrojů v scripts/game-assets.sources.json.
 // - soubory, které do složek nakopíruješ ručně (<slug>.png|webp|jpg|svg), se do manifestu zapíšou taky.
 // Nic se nestahuje z libovolných URL za běhu aplikace; aplikace čte jen manifest a lokální soubory.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { assetKey, CHARACTERS, normalizeGameName, RESOURCES, TANKS } from "../lib/gameAssets.ts";
+import { assetKey, CHARACTERS, normalizeGameName, RESOURCES, TANKS, tankopediaImageUrl } from "../lib/gameAssets.ts";
 
 const ROOT = fileURLToPath(new URL("../public/game-assets/", import.meta.url));
 const SOURCES = JSON.parse(readFileSync(new URL("./game-assets.sources.json", import.meta.url), "utf8"));
@@ -69,7 +69,9 @@ async function fetchTanks() {
   for (const slug of Object.keys(TANKS)) {
     const key = `tank/${slug}`;
     const override = SOURCES.tank_overrides?.[slug];
-    const url = override || byName.get(key)?.images?.big_icon;
+    const icon = byName.get(key)?.images?.big_icon;
+    // Tankopedia vrací http:// – povýšit na https (jen oficiální hosty, viz tankopediaImageUrl)
+    const url = override || tankopediaImageUrl(icon) || icon;
     if (!url) {
       log(`! ${TANKS[slug].name}: v Tankopedii nenalezen (zkus alias v lib/gameAssets.ts nebo tank_overrides)`);
       continue;
