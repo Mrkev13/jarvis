@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -7,6 +7,7 @@
 //           jinak `import("playwright")`; prohlížeč: PLAYWRIGHT_CHROMIUM=/cesta/k/chromium volitelně)
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
 import { mkdirSync, readFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
@@ -1441,6 +1442,132 @@ async function countTodayGets(page) {
   check("dnes mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
   await todayMock("/__mock/today/reset");
+}
+
+// 21) Game Enrichment A – herní obrázky. Skutečné assety se necommitují (public/game-assets je gitignore), proto
+// test podstrčí manifest a neutrální testovací PNG (jednobarevné, NE herní grafika) přes page.route.
+function stubPng(w, h, [r, g, b]) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set([r, g, b], y * (w * 3 + 1) + 1 + x * 3);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+const TEST_MANIFEST = {
+  version: 1,
+  assets: {
+    "tank/kranvagn": { file: "wot/tanks/kranvagn.png" },
+    "tank/object_279e": { file: "wot/tanks/object_279e.png" }, // soubor chybí → chyba načtení → monogram
+    "character/luna_snow": { file: "mff/characters/luna_snow.png" },
+    "resource/credits": { file: "wot/resources/credits.png" },
+  },
+};
+async function withGameAssets(p, manifest = TEST_MANIFEST) {
+  await p.route("**/game-assets/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/game-assets/manifest.json") {
+      return manifest ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(manifest) }) : route.fulfill({ status: 404, body: "" });
+    }
+    const stubs = {
+      "/game-assets/wot/tanks/kranvagn.png": stubPng(160, 100, [62, 74, 70]),
+      "/game-assets/mff/characters/luna_snow.png": stubPng(96, 96, [70, 86, 110]),
+      "/game-assets/wot/resources/credits.png": stubPng(32, 32, [120, 120, 120]),
+    };
+    return stubs[path] ? route.fulfill({ status: 200, contentType: "image/png", body: stubs[path] }) : route.fulfill({ status: 404, body: "" });
+  });
+}
+const imageState = (page, sel) =>
+  page.locator(sel).evaluateAll((els) =>
+    els.map((el) => {
+      const img = el.querySelector("img");
+      const r = el.getBoundingClientRect();
+      return {
+        state: el.getAttribute("data-state"),
+        alt: img?.getAttribute("alt") ?? el.getAttribute("aria-label"),
+        loaded: img ? img.complete && img.naturalWidth > 0 : null,
+        text: el.textContent,
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    }),
+  );
+{
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  await page.waitForTimeout(800);
+  const row = (tank) => page.locator(`[data-search-target]`).filter({ hasText: tank }).locator('[data-game-image="tank"]');
+  const [kranvagn] = await imageState(page, '[data-search-target] [data-game-image="tank"]').then((all) => all.filter((x) => x.alt === "Tank Kranvagn"));
+  check("wot obrázky: tank s assetem se načte (alt = název)", kranvagn?.state === "image" && kranvagn.loaded === true, JSON.stringify(kranvagn));
+  const tvp = (await imageState(page, '[data-game-image="tank"]')).find((x) => x.alt === "Tank TVP T 50/51");
+  check("wot obrázky: známý tank bez souboru → monogram s popiskem", tvp?.state === "fallback" && tvp.text === "TT", JSON.stringify(tvp));
+  await page.waitForTimeout(300);
+  const obj = (await imageState(page, '[data-game-image="tank"]')).find((x) => x.alt === "Tank Object 279 (e)");
+  check("wot obrázky: chyba načtení → monogram, žádný rozbitý obrázek", obj?.state === "fallback" && obj.text === "O279", JSON.stringify(obj));
+  const sizes = await imageState(page, '[data-game-image="tank"]');
+  check("wot obrázky: pevný rámeček 64 × 40 (žádný posun)", sizes.every((x) => x.w === 64 && x.h === 40), JSON.stringify(sizes.map((x) => [x.w, x.h])));
+  check("wot obrázky: dokončený grind má tank taky", (await row("T-100 LT").count()) === 1);
+  const res = await imageState(page, '#resources [data-game-image="resource"]');
+  check("wot měny: ikona u každé měny, dekorativní", res.length === 4 && res.some((x) => x.state === "image" && x.alt === "") && res.filter((x) => x.state === "fallback").every((x) => x.alt === null));
+  check("wot měny: textové popisky zůstávají", (await page.locator("#resources").innerText()).includes("CREDITS") || (await page.locator("#resources").innerText()).includes("Credits"));
+  await page.screenshot({ path: `${OUT}wot-assets.png`, fullPage: true });
+  await page.locator("#resources").screenshot({ path: `${OUT}wot-resources.png` });
+  check("wot obrázky: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p, null) });
+  await page.waitForTimeout(600);
+  const all = await imageState(page, "[data-game-image]");
+  check("wot bez assetů: všude monogram, žádný <img>", all.length >= 8 && all.every((x) => x.state === "fallback") && (await page.locator("[data-game-image] img").count()) === 0, JSON.stringify(all.map((x) => x.state)));
+  await page.screenshot({ path: `${OUT}wot-assets-fallback.png`, fullPage: true });
+  check("wot bez assetů: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/mff", { setup: (p) => withGameAssets(p) });
+  await page.waitForTimeout(800);
+  const portraits = await imageState(page, '[data-game-image="character"]');
+  const luna = portraits.find((x) => x.alt === "Portrét: Luna Snow");
+  check("mff portréty: postava s assetem", luna?.state === "image" && luna.loaded === true && luna.w === 56 && luna.h === 56, JSON.stringify(luna));
+  const thor = portraits.find((x) => x.alt === "Portrét: Thor");
+  check("mff portréty: bez assetu → monogram s popiskem", thor?.state === "fallback" && thor.text === "TH", JSON.stringify(thor));
+  check("mff portréty: na každé kartě", portraits.length === (await page.locator('[aria-label="Sledované postavy"] > li').count()));
+  check("mff portréty: jméno zůstává nadpisem", (await page.getByRole("heading", { level: 3, name: "Luna Snow" }).count()) === 1);
+  await page.screenshot({ path: `${OUT}mff-assets.png`, fullPage: true });
+  check("mff portréty: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+for (const path of ["/wot", "/mff"]) {
+  const { ctx, page, errors } = await open(path, { width: 390, height: 844, setup: (p) => withGameAssets(p) });
+  await page.waitForTimeout(700);
+  check(`${path} obrázky mobil: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const imgs = await imageState(page, path === "/wot" ? '[data-game-image="tank"]' : '[data-game-image="character"]');
+  check(`${path} obrázky mobil: menší miniatury zůstávají`, imgs.length >= 3 && imgs.every((x) => x.h === 40), JSON.stringify(imgs.map((x) => [x.w, x.h])));
+  const titleSel = path === "/wot" ? "[data-search-target] div.break-words.font-medium" : '[aria-label="Sledované postavy"] h3';
+  const widths = await page.locator(titleSel).evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  check(`${path} obrázky mobil: názvy mají místo (≥ 180 px)`, widths.length >= 3 && widths.every((w) => w >= 180), JSON.stringify(widths));
+  await page.screenshot({ path: `${OUT}${path.slice(1)}-assets-mobile.png`, fullPage: true });
+  check(`${path} obrázky mobil: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
 }
 
 await browser.close();
