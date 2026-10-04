@@ -621,6 +621,14 @@ def _row_dump(obj) -> dict:
     return {col.key: _plain(getattr(obj, col.key)) for col in obj.__mapper__.column_attrs}
 
 
+# Roadmap 4H: změna / vrácení z ručního povrchu (ne AI) – původ v textu Aktivity.
+_MANUAL_ORIGIN = {"today": "Dnes"}
+
+
+def _origin(user_context: str) -> str:
+    return _MANUAL_ORIGIN.get(user_context, "AI")
+
+
 def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, user_context: str) -> dict:
     """Provede jednu položku plánu. Vrací vedlejší efekty potřebné pro undo (Phase C)."""
     effects: dict = {}
@@ -642,7 +650,7 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
         if ent.name == "memory":
             obj.active = False  # soft delete jako DELETE /memory/{id}
             delta = {"active": {"old": True, "new": False}}
-        log_activity(db, ent.area, "delete", _short(f"Smazáno (AI): {label}", 480),
+        log_activity(db, ent.area, "delete", _short(f"Smazáno ({_origin(user_context)}): {label}", 480),
                      entity_type=ent.entity_type, entity_id=obj.id, delta=delta, user_context=user_context)
         if ent.name != "memory":
             db.delete(obj)
@@ -660,7 +668,7 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
             new_amount = round(float(obj.hours) * float(obj.hourly_rate), 2)
             if float(tx.amount or 0) != new_amount:
                 log_activity(db, "finance", "update",
-                             _short(f"Příjem z práce upraven (AI): {_num(tx.amount)} → {_num(new_amount)} Kč", 480),
+                             _short(f"Příjem z práce upraven ({_origin(user_context)}): {_num(tx.amount)} → {_num(new_amount)} Kč", 480),
                              entity_type="FinanceTransaction", entity_id=tx.id,
                              delta={"amount": {"old": float(tx.amount or 0), "new": new_amount}},
                              user_context=user_context)
@@ -669,7 +677,7 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
     delta = {k: {"old": old_values.get(k), "new": _plain(v)} for k, v in changes.items()}
     verb = "Dokončeno" if action == ACTION_COMPLETE else "Upraveno"
     log_activity(db, ent.area, "complete" if action == ACTION_COMPLETE else "update",
-                 _short(f"{verb} (AI): {label}", 480),
+                 _short(f"{verb} ({_origin(user_context)}): {label}", 480),
                  entity_type=ent.entity_type, entity_id=obj.id, delta=delta, user_context=user_context)
     return effects
 
@@ -732,9 +740,6 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
 # undo_change) se stejným potvrzením. Při provedení: podmíněný UPDATE původní akce executed → undone
 # (nejvýš jednou) + obnovení všech položek v JEDNÉ transakci; aktuální stav musí přesně odpovídat
 # snímku PO, jinak se nic nezmění. Model nikdy nerekonstruuje staré hodnoty.
-
-# Roadmap 4H: vrácení akce z ručního povrchu (ne AI) – text v Aktivitě.
-_UNDO_ORIGIN = {"today": "Dnes"}
 
 UNDO_WINDOW_HOURS = 24
 UNDO_STATUS = "undone"
@@ -1004,12 +1009,12 @@ def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
             diff = _undo_item(db, ent, rec["action"], item, apply=True)
             ids.append(int(item["id"]))
             log_activity(
-                db, ent.area, "undo", _short(f"Vráceno ({_UNDO_ORIGIN.get(user_context, 'AI')}): {item.get('label') or ent.label}", 480),
+                db, ent.area, "undo", _short(f"Vráceno ({_origin(user_context)}): {item.get('label') or ent.label}", 480),
                 entity_type=ent.entity_type, entity_id=int(item["id"]),
                 delta={"undo_of_action": original_id, "restored": diff}, user_context=user_context,
                 dedupe_key=f"undo:{original_id}:{item['id']}",
             )
-        if user_context not in _UNDO_ORIGIN:  # vrácení ruční akce (Dnes) není akce AI → bez záznamu v oblasti AI
+        if user_context not in _MANUAL_ORIGIN:  # vrácení ruční akce (Dnes) není akce AI → bez záznamu v oblasti AI
             log_activity(
                 db, "ai", "undo", _short(f"Vrácena AI akce #{original_id}: {rec.get('title')}", 480),
                 entity_type="PendingAction", entity_id=original_id,

@@ -220,6 +220,9 @@ class TodayActionsApiTestCase(unittest.TestCase):
         logs = self.logs()
         self.assertEqual([(a, t, ctx) for a, t, ctx in logs if a == "school"], [("school", "complete", "today")])
         self.assertFalse(any(a == "ai" for a, _, _ in logs), "akce z Dnes není akce AI")
+        # Regrese 4H: text v Aktivitě uváděl „Dokončeno (AI)" i u akce z Dnes.
+        summary = self.q(lambda db: db.query(ActivityLog).filter_by(area="school").one().summary)
+        self.assertTrue(summary.startswith("Dokončeno (Dnes): "), summary)
         out = self.q(lambda db: ts.build_today(db, now_utc=NOW))
         everywhere = [it["id"] for k in ("timeline", "attention", "priorities", "upcoming") for it in out[k]]
         self.assertNotIn("assignment:1", everywhere, "hotový úkol po termínu zmizí z aktivních sekcí")
