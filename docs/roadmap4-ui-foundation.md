@@ -47,6 +47,18 @@ visual polish.
 | `middleware.ts` → `proxy.ts` (Next 16) | ✅ Roadmap 4C |
 | Light theme | ⏳ out of scope (Themes phase) |
 
+## Status after Game Enrichment A (Visual assets)
+
+| Item | Status |
+|---|---|
+| Shared `GameImage` (size tokens, fixed frame, lazy, monogram fallback) | ✅ design-system §19 |
+| Tanks resolved from the Tankopedia manifest (no registry), character/currency registry, normalization, minimal aliases | ✅ `lib/gameAssets.ts`, tests |
+| Real assets from official sources into a gitignored local cache + manifest | ✅ `scripts/fetch-game-assets.mjs`, `docs/game-assets.md` |
+| Tank thumbnails on grinds, currency icons, MFF portraits | ✅ |
+| Remote image hosts in Next config | ❌ not needed (same-origin files) |
+| Assets committed to Git | ❌ by design (third-party copyright) |
+| Grind completion, Mko gallery, replays, MFF T4 events | ⏳ Game Enrichment B/C |
+
 ## Status after Roadmap 4H (Act from Today)
 
 | Item | Status |
