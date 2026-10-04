@@ -51,8 +51,12 @@ export function GameImage({
   } as React.CSSProperties;
 
   if (showImage) {
+    // Rendery tanků z Tankopedie jsou tmavé a průhledné → na tmavé ploše splývají. Jen prezentace (zdroj beze změny):
+    // jemné světlejší pozadí uprostřed rámečku + mírné zjasnění obrázku.
+    const tankBackdrop =
+      kind === "tank" ? "bg-[radial-gradient(ellipse_at_center,color-mix(in_srgb,var(--color-ink-2)_24%,transparent),transparent_72%)]" : null;
     return (
-      <span className={frame} style={style} data-game-image={kind} data-state="image">
+      <span className={cx(frame, tankBackdrop)} style={style} data-game-image={kind} data-state="image">
         <Image
           src={src}
           alt={alt}
@@ -61,7 +65,7 @@ export function GameImage({
           unoptimized
           loading="lazy"
           onError={() => setFailed(src)}
-          className={cx("h-full w-full", kind === "tank" ? "object-contain p-0.5" : "object-cover")}
+          className={cx("h-full w-full", kind === "tank" ? "object-contain p-0.5 brightness-[1.2] contrast-[1.05]" : "object-cover")}
         />
       </span>
     );
