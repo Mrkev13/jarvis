@@ -20,8 +20,7 @@
    "href": "/reminders?reminder=1",
    "source_id": 1,
    "actions": [
-    "complete",
-    "snooze"
+    "complete"
    ],
    "minutes_until": 240
   }
@@ -74,8 +73,7 @@
    "href": "/reminders?reminder=1",
    "source_id": 1,
    "actions": [
-    "complete",
-    "snooze"
+    "complete"
    ]
   },
   {

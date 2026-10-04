@@ -7,9 +7,9 @@
   "done": 2,
   "attention": 4,
   "next": {
-   "id": "reminder:1",
+   "id": "reminder:7",
    "type": "reminder",
-   "title": "Fyzioterapie",
+   "title": "Vyndat prádlo",
    "subtitle": "Připomínka",
    "area": "reminders",
    "date": "2026-10-11",
@@ -17,11 +17,10 @@
    "status": "upcoming",
    "priority": null,
    "severity": null,
-   "href": "/reminders?reminder=1",
-   "source_id": 1,
+   "href": "/reminders?reminder=7",
+   "source_id": 7,
    "actions": [
-    "complete",
-    "snooze"
+    "complete"
    ],
    "minutes_until": 60
   }
@@ -49,15 +48,14 @@
    "subtitle": "Připomínka",
    "area": "reminders",
    "date": "2026-10-11",
-   "time": "13:45",
-   "status": "due",
+   "time": "15:30",
+   "status": "upcoming",
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=7",
    "source_id": 7,
    "actions": [
-    "complete",
-    "snooze"
+    "complete"
    ]
   },
   {
@@ -67,15 +65,14 @@
    "subtitle": "Připomínka",
    "area": "reminders",
    "date": "2026-10-11",
-   "time": "15:30",
+   "time": "18:30",
    "status": "upcoming",
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=1",
    "source_id": 1,
    "actions": [
-    "complete",
-    "snooze"
+    "complete"
    ]
   },
   {

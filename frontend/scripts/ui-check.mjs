@@ -1283,6 +1283,8 @@ async function countTodayGets(page) {
   const { ctx, page, errors } = await open("/today", { setup: async (p) => (gets = await countTodayGets(p)) });
   const r7 = rowOf(page, "reminder:7");
   check("dnes akce: připomínka má Hotovo + Odložit", (await r7.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).count()) === 1 && (await r7.getByRole("button", { name: "Odložit připomínku: Vyndat prádlo" }).count()) === 1);
+  // Regrese 4H: „+N min" se počítá od teď – budoucí připomínku by odložení přiblížilo → jen Hotovo
+  check("dnes akce: nadcházející připomínka jen Hotovo", (await rowOf(page, "reminder:1").getByRole("button").count()) === 1 && (await rowOf(page, "reminder:1").getByRole("button", { name: /^Odložit/ }).count()) === 0);
   check("dnes akce: opakovaná / hotová / Potom bez akcí", (await rowOf(page, "reminder:4").getByRole("button").count()) === 0 && (await page.locator('[data-section="upcoming"] button').count()) === 0);
   check("dnes akce: úkol jen Hotovo", (await rowOf(page, "assignment:1").getByRole("button").count()) === 1);
   check("dnes akce: zkouška = odkaz Zapsat výsledek", (await rowOf(page, "exam:3").getByRole("link", { name: "Zapsat výsledek zkoušky: test" }).getAttribute("href")) === "/school?exam=3");
@@ -1304,21 +1306,21 @@ async function countTodayGets(page) {
   await todayMock("/__mock/today/reset");
   await page.getByRole("button", { name: "Obnovit", exact: true }).click();
   await page.waitForTimeout(500);
-  const toggle = rowOf(page, "reminder:1").getByRole("button", { name: "Odložit připomínku: Fyzioterapie" });
+  const toggle = rowOf(page, "reminder:7").getByRole("button", { name: "Odložit připomínku: Vyndat prádlo" });
   await toggle.click();
-  const group = page.getByRole("group", { name: "Odložit „Fyzioterapie“ – na kdy?" });
+  const group = page.getByRole("group", { name: "Odložit „Vyndat prádlo“ – na kdy?" });
   check("dnes odložit: nabídka s pevnými volbami", JSON.stringify(await group.getByRole("button").allInnerTexts()) === JSON.stringify(["+15 min", "+1 h", "+3 h", "Zítra 8:00", "Zrušit"]) && (await toggle.getAttribute("aria-expanded")) === "true");
-  check("dnes odložit: fokus na první volbu", (await focusedLabel(page)) === "+15 min: Fyzioterapie");
+  check("dnes odložit: fokus na první volbu", (await focusedLabel(page)) === "+15 min: Vyndat prádlo");
   await page.screenshot({ path: `${OUT}today-snooze.png` });
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
-  check("dnes odložit: Esc zavře a vrátí fokus", (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Fyzioterapie");
+  check("dnes odložit: Esc zavře a vrátí fokus", (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
   check("dnes odložit: Esc nespustí globální zkratky", (await page.getByRole("dialog").count()) === 0);
   await toggle.click();
-  await group.getByRole("button", { name: "Zítra 8:00: Fyzioterapie" }).click();
-  await page.getByText(/^Odloženo: Fyzioterapie/).waitFor({ timeout: 5000 }).catch(() => undefined);
-  check("dnes odložit: zítra 8:00 (pražské datum ze serveru)", (await todayCalls()).includes("snooze:reminder:1:2026-10-12T08:00"));
-  check("dnes odložit: obnoveno", (await page.locator('[data-today-notice]').innerText()).includes("Odloženo: Fyzioterapie (Zítra 8:00)"));
+  await group.getByRole("button", { name: "Zítra 8:00: Vyndat prádlo" }).click();
+  await page.getByText(/^Odloženo: Vyndat prádlo/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes odložit: zítra 8:00 (pražské datum ze serveru)", (await todayCalls()).includes("snooze:reminder:7:2026-10-12T08:00"));
+  check("dnes odložit: obnoveno", (await page.locator('[data-today-notice]').innerText()).includes("Odloženo: Vyndat prádlo (Zítra 8:00)"));
 
   // úkol: prepare + confirm, zmizí z Pozornosti, Vrátit = existující undo
   await todayMock("/__mock/today/reset");
@@ -1401,15 +1403,20 @@ async function countTodayGets(page) {
   await page.getByText("Připomínka „Vyndat prádlo“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
   check("klávesnice dnes: Enter dokončí, fokus dál", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie");
+  // Odložit jen u připomínky, která už zazněla (nadcházející „Fyzioterapie" ho nenabízí)
+  await todayMock("/__mock/today/reset");
+  await page.reload();
+  await page.waitForTimeout(500);
+  await tabTo("Dokončit připomínku: Vyndat prádlo");
   await page.keyboard.press("Tab");
-  check("klávesnice dnes: Tab na Odložit", (await focusedLabel(page)) === "Odložit připomínku: Fyzioterapie");
+  check("klávesnice dnes: Tab na Odložit", (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(80);
   await page.keyboard.press("Tab");
-  check("klávesnice dnes: Tab na volbu +1 h", (await focusedLabel(page)) === "+1 h: Fyzioterapie");
+  check("klávesnice dnes: Tab na volbu +1 h", (await focusedLabel(page)) === "+1 h: Vyndat prádlo");
   await page.keyboard.press("Enter");
-  await page.getByText(/^Odloženo: Fyzioterapie \(\+1 h\)/).waitFor({ timeout: 5000 }).catch(() => undefined);
-  check("klávesnice dnes: odloženo o hodinu", (await todayCalls()).includes("snooze:reminder:1:+60"));
+  await page.getByText(/^Odloženo: Vyndat prádlo \(\+1 h\)/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("klávesnice dnes: odloženo o hodinu", (await todayCalls()).includes("snooze:reminder:7:+60"));
   check("klávesnice dnes: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
@@ -1417,20 +1424,20 @@ async function countTodayGets(page) {
 {
   await todayMock("/__mock/today/reset");
   const { ctx, page, errors } = await open("/today", { width: 390, height: 844 });
-  const row = rowOf(page, "reminder:1");
-  const done = await row.getByRole("button", { name: "Dokončit připomínku: Fyzioterapie" }).boundingBox();
+  const row = rowOf(page, "reminder:7");
+  const done = await row.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).boundingBox();
   check("dnes mobil: Hotovo ≥ 44 px", Boolean(done && done.height >= 44), JSON.stringify(done));
-  await row.getByRole("button", { name: "Odložit připomínku: Fyzioterapie" }).tap();
+  await row.getByRole("button", { name: "Odložit připomínku: Vyndat prádlo" }).tap();
   const opts = await row.getByRole("group").getByRole("button").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), Math.round(r.height)]; }));
   check("dnes mobil: volby odložení se vejdou a jsou ≥ 44 px", opts.every(([l, r, h]) => l >= 0 && r <= 390 && h >= 44), JSON.stringify(opts));
   check("dnes mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
-  const title = await row.getByText(/Fyzioterapie$/).first().boundingBox();
+  const title = await row.getByText(/Vyndat prádlo$/).first().boundingBox();
   const rowBox = await row.boundingBox();
   check("dnes mobil: název nahoře v řádku", Boolean(title && rowBox && title.y - rowBox.y < 80), JSON.stringify({ t: title?.y, r: rowBox?.y }));
   await row.screenshot({ path: `${OUT}today-mobile-actions.png` });
-  await row.getByRole("button", { name: "+15 min: Fyzioterapie" }).tap();
-  await page.getByText(/^Odloženo: Fyzioterapie/).waitFor({ timeout: 5000 }).catch(() => undefined);
-  check("dnes mobil: odložení ťuknutím", (await todayCalls()).includes("snooze:reminder:1:+15"));
+  await row.getByRole("button", { name: "+15 min: Vyndat prádlo" }).tap();
+  await page.getByText(/^Odloženo: Vyndat prádlo/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes mobil: odložení ťuknutím", (await todayCalls()).includes("snooze:reminder:7:+15"));
   check("dnes mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
   await todayMock("/__mock/today/reset");
