@@ -1,0 +1,20 @@
+{
+  "$comment": "Game Enrichment A – oficiální zdroje obrázků, které Tankopedia API neposkytuje. Doplň https URL z oficiálních zdrojů (Wargaming / Netmarble), skript je stáhne do public/game-assets. Prázdné = záložní monogram. Tanky se stahují automaticky z Tankopedia API (WG_APPLICATION_ID).",
+  "attribution": {
+    "wot": "© Wargaming.net",
+    "mff": "© Netmarble Corp. / © Marvel"
+  },
+  "resources": {
+    "credits": "",
+    "gold": "",
+    "bonds": "",
+    "free_xp": ""
+  },
+  "characters": {
+    "thor": "", "white_fox": "", "green_goblin": "", "venom": "", "storm": "", "black_bolt": "", "mephisto": "",
+    "carnage": "", "valkyrie": "", "luna_snow": "", "magneto": "", "mysterio": "", "namor": "", "ghost_rider": "",
+    "sentry": "", "drax": "", "doctor_voodoo": "", "cyclops": "", "shuri": "", "satana": "", "ghost_panther": "",
+    "captain_marvel": "", "black_widow": ""
+  },
+  "tank_overrides": {}
+}
