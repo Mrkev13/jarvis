@@ -16,28 +16,39 @@ export function GameImage({
   kind,
   name,
   size = "sm",
+  mobileSize,
   className,
 }: {
   kind: GameAssetKind;
   /** Název z aplikace (tank, postava) nebo klíč měny (credits, gold, bonds, free_xp). */
   name: string;
   size?: GameImageSize;
+  /** Menší rámeček pod breakpointem md (mobil) – text vedle obrázku dostane víc místa. */
+  mobileSize?: GameImageSize;
   className?: string;
 }) {
   const manifest = useGameAssetManifest();
   const src = manifest ? assetSrc(manifest, kind, name) : null;
   const [failed, setFailed] = useState<string | null>(null);
   const { width, height } = imageBox(kind, size);
+  const small = imageBox(kind, mobileSize ?? size);
   const alt = assetAlt(kind, name);
   const decorative = alt === "";
   const showImage = src !== null && failed !== src;
 
   const frame = cx(
     "relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-line-subtle bg-surface-2",
+    // rozměry z proměnných: pevný rámeček na každé šířce (žádný layout shift), menší na mobilu
+    "h-[var(--gi-h-sm)] w-[var(--gi-w-sm)] md:h-[var(--gi-h)] md:w-[var(--gi-w)]",
     kind === "resource" ? "rounded-md" : kind === "character" ? "rounded-[var(--radius-control)]" : "rounded-[var(--radius-control)]",
     className,
   );
-  const style = { width, height };
+  const style = {
+    "--gi-w": `${width}px`,
+    "--gi-h": `${height}px`,
+    "--gi-w-sm": `${small.width}px`,
+    "--gi-h-sm": `${small.height}px`,
+  } as React.CSSProperties;
 
   if (showImage) {
     return (
@@ -71,7 +82,8 @@ export function GameImage({
         <span
           className={cx(
             "select-none font-mono font-semibold uppercase tracking-wide text-ink-muted",
-            size === "xs" ? "text-[9px]" : size === "sm" ? "text-[11px]" : size === "md" ? "text-sm" : "text-base",
+            (mobileSize ?? size) === "xs" ? "text-[9px]" : (mobileSize ?? size) === "sm" ? "text-[11px]" : "text-sm",
+            size === "md" ? "md:text-sm" : size === "lg" ? "md:text-base" : null,
           )}
         >
           {monogram(kind, name)}

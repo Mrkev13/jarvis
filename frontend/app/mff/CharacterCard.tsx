@@ -39,7 +39,7 @@ export function CharacterCard({
   return (
     <Card as="li" index={index} aria-labelledby={titleId} data-search-target={`character-${c.id}`} className="flex min-w-0 flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <GameImage kind="character" name={c.name} size="md" />
+        <GameImage kind="character" name={c.name} size="md" mobileSize="sm" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusBadge className="font-mono font-semibold text-ink">{tierStr}</StatusBadge>

@@ -184,7 +184,7 @@ export function assetSrc(manifest: GameAssetManifest, kind: GameAssetKind, name:
   return entry ? `/game-assets/${entry.file}` : null;
 }
 
-/** Čitelný monogram pro záložní obrázek: „Kranvagn" → „KR", „Object 279 (e)" → „O2", „Luna Snow" → „LS". */
+/** Čitelný monogram pro záložní obrázek: „Kranvagn" → „KR", „Object 279 (e)" → „O279", „Luna Snow" → „LS". */
 export function monogram(kind: GameAssetKind, name: string | null | undefined): string {
   if (kind === "resource") {
     const key = assetKey("resource", name)?.split("/")[1];
@@ -197,6 +197,8 @@ export function monogram(kind: GameAssetKind, name: string | null | undefined): 
     .filter(Boolean);
   if (!words.length) return "?";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  // „Object 279 (e)" → „O279", „Type 71" → „T71" (ne „O2", které se plete s „02")
+  if (kind === "tank" && /^\d+$/.test(words[1])) return (words[0][0] + words[1]).slice(0, 4).toUpperCase();
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 

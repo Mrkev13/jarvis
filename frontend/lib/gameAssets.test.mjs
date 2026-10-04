@@ -86,7 +86,9 @@ test("manifest: only safe local files, missing → fallback", () => {
 
 test("fallback monograms, alt text and sizes", () => {
   assert.equal(monogram("tank", "Kranvagn"), "KR");
-  assert.equal(monogram("tank", "Object 279 (e)"), "O2");
+  assert.equal(monogram("tank", "Object 279 (e)"), "O279");
+  assert.equal(monogram("tank", "Type 71"), "T71");
+  assert.equal(monogram("tank", "Object 268 Version 4"), "O268");
   assert.equal(monogram("tank", "TVP T 50/51"), "TT");
   assert.equal(monogram("character", "Luna Snow"), "LS");
   assert.equal(monogram("character", "Thor"), "TH");
