@@ -294,7 +294,7 @@ class TodayApiTestCase(unittest.TestCase):
         self.assertEqual(self.client.post("/auth/login", json={"pin": self.PIN}).status_code, 200)
         r = self.client.get("/today")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(r.json()), {"date", "date_label", "now_local", "summary", "timeline", "attention", "priorities", "upcoming", "errors"})
+        self.assertEqual(set(r.json()), {"date", "date_label", "now_local", "summary", "timeline", "attention", "priorities", "upcoming", "snooze_options", "errors"})
 
 
 if __name__ == "__main__":

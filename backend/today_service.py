@@ -59,6 +59,9 @@ class TodayItem:
     severity: str | None = None  # important | warning | info (upozornění)
     href: str | None = None
     source_id: int | None = None
+    # Roadmap 4H: co jde udělat přímo z řádku (jen id akcí, žádné URL ani příkazy):
+    # complete (připomínka / úkol), snooze (připomínka), record_result (zkouška → otevřít záznam).
+    actions: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -86,6 +89,24 @@ def _exam_kind(exam_type: str | None) -> str:
         norm(exam_type), "Zkouška")
 
 
+# ---------- akce (Roadmap 4H) ----------
+
+def _reminder_actions(r: Reminder) -> list[str]:
+    """Hotovo / odložit jen u aktivní JEDNORÁZOVÉ připomínky: u opakované „hotovo" výskyt neposune
+    (reminder_service.complete) a odložení mění jen jeden výskyt – to patří na stránku Připomínky."""
+    return ["complete", "snooze"] if r.status in ("scheduled", "fired") and r.recurrence == "none" else []
+
+
+def snooze_options(today: date) -> list[dict]:
+    """Pevné volby odložení; „zítra" = další pražský kalendářní den v 08:00 (i těsně po půlnoci)."""
+    return [
+        {"id": "15m", "label": "+15 min", "minutes": 15},
+        {"id": "1h", "label": "+1 h", "minutes": 60},
+        {"id": "3h", "label": "+3 h", "minutes": 180},
+        {"id": "tomorrow", "label": "Zítra 8:00", "until_local": f"{(today + timedelta(days=1)).isoformat()}T08:00"},
+    ]
+
+
 # ---------- časová osa ----------
 
 def _reminder_items_today(c: _Ctx) -> list[TodayItem]:
@@ -106,7 +127,7 @@ def _reminder_items_today(c: _Ctx) -> list[TodayItem]:
                 id=f"reminder:{r.id}", type="reminder", title=r.title,
                 subtitle="Připomínka" + (f" · {rs.describe_recurrence(r)}" if r.recurrence != "none" else ""),
                 area="reminders", date=local.date().isoformat(), time=f"{local:%H:%M}", status=status,
-                href=f"/reminders?reminder={r.id}", source_id=r.id,
+                href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r),
             ))
         elif r.recurrence != "none" and r.last_fired_at is not None and start <= r.last_fired_at < end:
             # opakovaná připomínka dnes už zazněla (due_at se posunul na další výskyt) – proběhlo
@@ -134,7 +155,7 @@ def _school_items_today(c: _Ctx) -> list[TodayItem]:
             id=f"assignment:{a.id}", type="assignment", title=a.title,
             subtitle=_school_subtitle("Úkol · termín dnes", c.subjects.get(a.subject_id)),
             area="school", date=c.today.isoformat(), status="done" if is_assignment_done(a.status) else "open",
-            href=f"/school?assignment={a.id}", source_id=a.id,
+            href=f"/school?assignment={a.id}", source_id=a.id, actions=[] if is_assignment_done(a.status) else ["complete"],
         ))
     return items
 
@@ -161,7 +182,7 @@ def _overdue_items(c: _Ctx) -> list[TodayItem]:
             id=f"assignment:{a.id}", type="assignment", title=a.title,
             subtitle=_school_subtitle("Úkol po termínu", c.subjects.get(a.subject_id), f"termín {format_date_cz(a.due_date)}"),
             area="school", date=a.due_date.isoformat(), status="overdue", severity="important",
-            href=f"/school?assignment={a.id}", source_id=a.id,
+            href=f"/school?assignment={a.id}", source_id=a.id, actions=["complete"],
         ))
     for e in c.db.query(Exam).filter(Exam.exam_date.is_not(None), Exam.exam_date < c.today).all():
         if not is_exam_open(e.status):
@@ -171,7 +192,7 @@ def _overdue_items(c: _Ctx) -> list[TodayItem]:
             subtitle=_school_subtitle(f"{_exam_kind(e.exam_type)} proběhla – zapiš výsledek", c.subjects.get(e.subject_id),
                                       format_date_cz(e.exam_date)),
             area="school", date=e.exam_date.isoformat(), status="overdue", severity="warning",
-            href=f"/school?exam={e.id}", source_id=e.id,
+            href=f"/school?exam={e.id}", source_id=e.id, actions=["record_result"],
         ))
     for r in c.db.query(Reminder).filter(Reminder.status == "fired").all():
         if r.due_at >= start:
@@ -181,7 +202,7 @@ def _overdue_items(c: _Ctx) -> list[TodayItem]:
             id=f"reminder:{r.id}", type="reminder", title=r.title,
             subtitle=f"Nevyřízená připomínka · {format_date_cz(local.date())} {local:%H:%M}", area="reminders",
             date=local.date().isoformat(), time=f"{local:%H:%M}", status="overdue", severity="warning",
-            href=f"/reminders?reminder={r.id}", source_id=r.id,
+            href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r),
         ))
     return items
 
@@ -240,6 +261,7 @@ def build_priorities(c: _Ctx) -> list[TodayItem]:
             id=ref or f"planner:{a.get('priority')}", type="planner", title=a.get("title") or "",
             subtitle=a.get("reason") or "", area=a.get("area"), status="open", priority=int(a.get("priority") or 0) or None,
             href=_ref_href(ref) or "/planner", source_id=int(ref.split(":")[1]) if ref else None,
+            actions=["complete"] if ref and ref.startswith("assignment:") else [],
         ))
     return items
 
@@ -357,5 +379,6 @@ def build_today(db: Session, now_utc: datetime | None = None) -> dict:
         "attention": [it.as_dict() for it in sections["attention"]],
         "priorities": [it.as_dict() for it in sections["priorities"]],
         "upcoming": [it.as_dict() for it in sections["upcoming"]],
+        "snooze_options": snooze_options(c.today),
         "errors": errors,
     }
