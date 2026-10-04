@@ -64,7 +64,8 @@ class ActionMetadataTestCase(unittest.TestCase):
         self.db.commit()
         out = ts.build_today(self.db, now_utc=NOW)
         acts = {it["id"]: it["actions"] for k in ("timeline", "attention", "priorities", "upcoming") for it in out[k]}
-        self.assertEqual(acts["reminder:1"], ["complete", "snooze"])
+        # Regrese 4H: „+N min" se počítá od teď – budoucí připomínku by „odložení" přiblížilo → jen Hotovo
+        self.assertEqual(acts["reminder:1"], ["complete"], "budoucí připomínka: odložit až po zaznění")
         self.assertEqual(acts["reminder:2"], ["complete", "snooze"])
         self.assertEqual(acts["reminder:3"], [], "opakovaná: hotovo by výskyt neposunulo")
         self.assertEqual(acts["reminder:4"], [])

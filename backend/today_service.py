@@ -91,10 +91,15 @@ def _exam_kind(exam_type: str | None) -> str:
 
 # ---------- akce (Roadmap 4H) ----------
 
-def _reminder_actions(r: Reminder) -> list[str]:
+def _reminder_actions(r: Reminder, rung: bool) -> list[str]:
     """Hotovo / odložit jen u aktivní JEDNORÁZOVÉ připomínky: u opakované „hotovo" výskyt neposune
-    (reminder_service.complete) a odložení mění jen jeden výskyt – to patří na stránku Připomínky."""
-    return ["complete", "snooze"] if r.status in ("scheduled", "fired") and r.recurrence == "none" else []
+    (reminder_service.complete) a odložení mění jen jeden výskyt – to patří na stránku Připomínky.
+
+    Odložit jen u připomínky, která už zazněla (`rung`): snooze_target počítá „+N min" od TEĎ, takže
+    u budoucí připomínky (21:00, klik v 10:39, +1 h → 11:39) by „odložení" termín naopak přiblížilo."""
+    if r.status not in ("scheduled", "fired") or r.recurrence != "none":
+        return []
+    return ["complete", "snooze"] if rung else ["complete"]
 
 
 def snooze_options(today: date) -> list[dict]:
@@ -127,7 +132,7 @@ def _reminder_items_today(c: _Ctx) -> list[TodayItem]:
                 id=f"reminder:{r.id}", type="reminder", title=r.title,
                 subtitle="Připomínka" + (f" · {rs.describe_recurrence(r)}" if r.recurrence != "none" else ""),
                 area="reminders", date=local.date().isoformat(), time=f"{local:%H:%M}", status=status,
-                href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r),
+                href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r, rung=status == "due"),
             ))
         elif r.recurrence != "none" and r.last_fired_at is not None and start <= r.last_fired_at < end:
             # opakovaná připomínka dnes už zazněla (due_at se posunul na další výskyt) – proběhlo
@@ -202,7 +207,7 @@ def _overdue_items(c: _Ctx) -> list[TodayItem]:
             id=f"reminder:{r.id}", type="reminder", title=r.title,
             subtitle=f"Nevyřízená připomínka · {format_date_cz(local.date())} {local:%H:%M}", area="reminders",
             date=local.date().isoformat(), time=f"{local:%H:%M}", status="overdue", severity="warning",
-            href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r),
+            href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r, rung=True),
         ))
     return items
 

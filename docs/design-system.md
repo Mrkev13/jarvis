@@ -499,7 +499,7 @@ already has clean semantics. The backend decides (`TodayItem.actions`); the UI n
 
 | Row | Actions | Path (reused, not new) |
 |---|---|---|
-| One-off reminder, active (today or overdue) | **Hotovo**, **Odložit** | `POST /reminders/{id}/done` · `/snooze` with `?source=today` (same as the Reminders page) |
+| One-off reminder, active (today or overdue) | **Hotovo**; **Odložit** only once it has rung (snooze counts from now, so on a future reminder it would pull it earlier) | `POST /reminders/{id}/done` · `/snooze` with `?source=today` (same as the Reminders page) |
 | Open assignment (today, overdue, or a planner row with `ref assignment:N`) | **Hotovo** | `POST /today/actions/prepare` → existing `modify_records` complete pending action → `POST /actions/confirm` |
 | Past exam still open | **Zapsat výsledek →** (link) | navigates to `/school?exam=N`; no exam editor in Today |
 | Recurring reminder, done/past rows, notifications, Potom | none | – |
