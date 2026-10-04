@@ -1,0 +1,287 @@
+{
+ "date": "2026-10-11",
+ "date_label": "neděle 11. 10. 2026",
+ "now_local": "14:30",
+ "summary": {
+  "remaining": 4,
+  "done": 2,
+  "attention": 4,
+  "next": {
+   "id": "reminder:1",
+   "type": "reminder",
+   "title": "Fyzioterapie",
+   "subtitle": "Připomínka",
+   "area": "reminders",
+   "date": "2026-10-11",
+   "time": "15:30",
+   "status": "upcoming",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=1",
+   "source_id": 1,
+   "actions": [
+    "complete",
+    "snooze"
+   ],
+   "minutes_until": 60
+  }
+ },
+ "timeline": [
+  {
+   "id": "reminder:4",
+   "type": "reminder",
+   "title": "Ranní protažení",
+   "subtitle": "Připomínka · denně v 07:00",
+   "area": "reminders",
+   "date": "2026-10-11",
+   "time": "07:00",
+   "status": "past",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=4",
+   "source_id": 4,
+   "actions": []
+  },
+  {
+   "id": "reminder:7",
+   "type": "reminder",
+   "title": "Vyndat prádlo",
+   "subtitle": "Připomínka",
+   "area": "reminders",
+   "date": "2026-10-11",
+   "time": "13:45",
+   "status": "due",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=7",
+   "source_id": 7,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
+  },
+  {
+   "id": "reminder:1",
+   "type": "reminder",
+   "title": "Fyzioterapie",
+   "subtitle": "Připomínka",
+   "area": "reminders",
+   "date": "2026-10-11",
+   "time": "15:30",
+   "status": "upcoming",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=1",
+   "source_id": 1,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
+  },
+  {
+   "id": "assignment:8",
+   "type": "assignment",
+   "title": "Esej o ústavě",
+   "subtitle": "Úkol · termín dnes · Dějepis",
+   "area": "school",
+   "date": "2026-10-11",
+   "time": null,
+   "status": "open",
+   "priority": 3,
+   "severity": null,
+   "href": "/school?assignment=8",
+   "source_id": 8,
+   "actions": [
+    "complete"
+   ]
+  },
+  {
+   "id": "exam:4",
+   "type": "exam",
+   "title": "Kvíz z dějepisu",
+   "subtitle": "Kvíz · Dějepis",
+   "area": "school",
+   "date": "2026-10-11",
+   "time": null,
+   "status": "open",
+   "priority": 2,
+   "severity": null,
+   "href": "/school?exam=4",
+   "source_id": 4,
+   "actions": []
+  },
+  {
+   "id": "reminder:6",
+   "type": "reminder",
+   "title": "Zavolat mámě",
+   "subtitle": "Připomínka",
+   "area": "reminders",
+   "date": "2026-10-11",
+   "time": "11:00",
+   "status": "done",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=6",
+   "source_id": 6,
+   "actions": []
+  }
+ ],
+ "attention": [
+  {
+   "id": "assignment:1",
+   "type": "assignment",
+   "title": "Sada",
+   "subtitle": "Úkol po termínu · Matematika · termín 2. 10. 2026",
+   "area": "school",
+   "date": "2026-10-02",
+   "time": null,
+   "status": "overdue",
+   "priority": 1,
+   "severity": "important",
+   "href": "/school?assignment=1",
+   "source_id": 1,
+   "actions": [
+    "complete"
+   ]
+  },
+  {
+   "id": "exam:3",
+   "type": "exam",
+   "title": "test",
+   "subtitle": "Test proběhla – zapiš výsledek · Fyzika · 3. 10. 2026",
+   "area": "school",
+   "date": "2026-10-03",
+   "time": null,
+   "status": "overdue",
+   "priority": 4,
+   "severity": "warning",
+   "href": "/school?exam=3",
+   "source_id": 3,
+   "actions": [
+    "record_result"
+   ]
+  },
+  {
+   "id": "reminder:5",
+   "type": "reminder",
+   "title": "Koupit lístky",
+   "subtitle": "Nevyřízená připomínka · 10. 10. 2026 09:00",
+   "area": "reminders",
+   "date": "2026-10-10",
+   "time": "09:00",
+   "status": "overdue",
+   "priority": null,
+   "severity": "warning",
+   "href": "/reminders?reminder=5",
+   "source_id": 5,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
+  },
+  {
+   "id": "goal:1",
+   "type": "notification",
+   "title": "Cíl spoření stagnuje",
+   "subtitle": "Bez posunu 21 dní.",
+   "area": "finance",
+   "date": null,
+   "time": null,
+   "status": "open",
+   "priority": null,
+   "severity": "warning",
+   "href": "/goals?goal=1",
+   "source_id": 2,
+   "actions": []
+  }
+ ],
+ "priorities": [
+  {
+   "id": "assignment:5",
+   "type": "planner",
+   "title": "Připravit/odevzdat úkol: Laboratoř",
+   "subtitle": "Termín 14. 10. 2026 (zbývají 3 dny).",
+   "area": "school",
+   "date": null,
+   "time": null,
+   "status": "open",
+   "priority": 5,
+   "severity": null,
+   "href": "/school?assignment=5",
+   "source_id": 5,
+   "actions": [
+    "complete"
+   ]
+  }
+ ],
+ "upcoming": [
+  {
+   "id": "reminder:2",
+   "type": "reminder",
+   "title": "Zalít květiny",
+   "subtitle": "Připomínka",
+   "area": "reminders",
+   "date": "2026-10-12",
+   "time": "08:00",
+   "status": "upcoming",
+   "priority": null,
+   "severity": null,
+   "href": "/reminders?reminder=2",
+   "source_id": 2,
+   "actions": []
+  },
+  {
+   "id": "assignment:3",
+   "type": "assignment",
+   "title": "Projekt",
+   "subtitle": "Úkol · Matematika",
+   "area": "school",
+   "date": "2026-10-13",
+   "time": null,
+   "status": "upcoming",
+   "priority": null,
+   "severity": null,
+   "href": "/school?assignment=3",
+   "source_id": 3,
+   "actions": []
+  },
+  {
+   "id": "exam:1",
+   "type": "exam",
+   "title": "Zkouška fyzika",
+   "subtitle": "Zkouška · Fyzika",
+   "area": "school",
+   "date": "2026-10-15",
+   "time": null,
+   "status": "upcoming",
+   "priority": null,
+   "severity": null,
+   "href": "/school?exam=1",
+   "source_id": 1,
+   "actions": []
+  }
+ ],
+ "snooze_options": [
+  {
+   "id": "15m",
+   "label": "+15 min",
+   "minutes": 15
+  },
+  {
+   "id": "1h",
+   "label": "+1 h",
+   "minutes": 60
+  },
+  {
+   "id": "3h",
+   "label": "+3 h",
+   "minutes": 180
+  },
+  {
+   "id": "tomorrow",
+   "label": "Zítra 8:00",
+   "until_local": "2026-10-12T08:00"
+  }
+ ],
+ "errors": {}
+}

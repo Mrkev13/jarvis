@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4G).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -1167,6 +1167,7 @@ async function openSeeded(value, opts = {}) {
 }
 
 // 19) Roadmap 4G – režim Dnes (/today), mock GET /today = odpovědi skutečného today_service.
+await fetch("http://127.0.0.1:8000/__mock/today/reset", { method: "POST" });
 const todayFixture = (name) => readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8");
 const serveToday = (body, status = 200) => async (p) =>
   p.route("http://127.0.0.1:8000/today", (route) => route.fulfill({ status, contentType: "application/json", body }));
@@ -1260,6 +1261,179 @@ for (const [scheme, motion] of [["light", "no-preference"], ["dark", "reduce"]])
     check("dnes reduced motion: bez animací", anims === 0, String(anims));
   }
   await ctx.close();
+}
+
+// 20) Roadmap 4H – akce z režimu Dnes (mock: stav dne po akci = fixture ze skutečného backendu).
+const MOCK = "http://127.0.0.1:8000";
+const todayMock = async (path) => (await fetch(MOCK + path, { method: "POST" })).json();
+const todayCalls = async () => (await fetch(`${MOCK}/__mock/today`)).json();
+const rowOf = (page, id) => page.locator(`[data-item="${id}"]`);
+const focusedLabel = (page) => page.evaluate(() => document.activeElement?.getAttribute("aria-label") || document.activeElement?.textContent?.trim() || "");
+async function countTodayGets(page) {
+  const counter = { n: 0 };
+  page.on("request", (r) => {
+    const u = new URL(r.url());
+    if (u.port === "8000" && u.pathname === "/today" && r.method() === "GET") counter.n++;
+  });
+  return counter;
+}
+{
+  await todayMock("/__mock/today/reset");
+  let gets;
+  const { ctx, page, errors } = await open("/today", { setup: async (p) => (gets = await countTodayGets(p)) });
+  const r7 = rowOf(page, "reminder:7");
+  check("dnes akce: připomínka má Hotovo + Odložit", (await r7.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).count()) === 1 && (await r7.getByRole("button", { name: "Odložit připomínku: Vyndat prádlo" }).count()) === 1);
+  check("dnes akce: opakovaná / hotová / Potom bez akcí", (await rowOf(page, "reminder:4").getByRole("button").count()) === 0 && (await page.locator('[data-section="upcoming"] button').count()) === 0);
+  check("dnes akce: úkol jen Hotovo", (await rowOf(page, "assignment:1").getByRole("button").count()) === 1);
+  check("dnes akce: zkouška = odkaz Zapsat výsledek", (await rowOf(page, "exam:3").getByRole("link", { name: "Zapsat výsledek zkoušky: test" }).getAttribute("href")) === "/school?exam=3");
+  await page.screenshot({ path: `${OUT}today-actions.png`, fullPage: true });
+
+  // Hotovo připomínky → jedno obnovení, řádek do Hotovo, fokus na další akční řádek
+  const before = gets.n;
+  await r7.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).click();
+  await page.getByText("Připomínka „Vyndat prádlo“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("dnes akce: hotovo ohlášeno (role=status)", (await page.locator('[data-today-notice][role="status"]').innerText()).includes("je hotová"));
+  check("dnes akce: jedno obnovení /today", gets.n - before === 1, String(gets.n - before));
+  check("dnes akce: připomínka v Hotovo", (await rowOf(page, "reminder:7").getAttribute("data-status")) === "done" && (await page.locator('[data-section="timeline"] summary').innerText()).includes("2 položky"));
+  check("dnes akce: fokus na další akční řádek", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", await focusedLabel(page));
+  check("dnes akce: volání se zdrojem Dnes", JSON.stringify(await todayCalls()) === JSON.stringify(["done:reminder:7"]));
+  await page.screenshot({ path: `${OUT}today-action-success.png` });
+
+  // Odložit: volby ze serveru, Esc zavře a vrátí fokus
+  await todayMock("/__mock/today/reset");
+  await page.getByRole("button", { name: "Obnovit", exact: true }).click();
+  await page.waitForTimeout(500);
+  const toggle = rowOf(page, "reminder:1").getByRole("button", { name: "Odložit připomínku: Fyzioterapie" });
+  await toggle.click();
+  const group = page.getByRole("group", { name: "Odložit „Fyzioterapie“ – na kdy?" });
+  check("dnes odložit: nabídka s pevnými volbami", JSON.stringify(await group.getByRole("button").allInnerTexts()) === JSON.stringify(["+15 min", "+1 h", "+3 h", "Zítra 8:00", "Zrušit"]) && (await toggle.getAttribute("aria-expanded")) === "true");
+  check("dnes odložit: fokus na první volbu", (await focusedLabel(page)) === "+15 min: Fyzioterapie");
+  await page.screenshot({ path: `${OUT}today-snooze.png` });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  check("dnes odložit: Esc zavře a vrátí fokus", (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Fyzioterapie");
+  check("dnes odložit: Esc nespustí globální zkratky", (await page.getByRole("dialog").count()) === 0);
+  await toggle.click();
+  await group.getByRole("button", { name: "Zítra 8:00: Fyzioterapie" }).click();
+  await page.getByText(/^Odloženo: Fyzioterapie/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes odložit: zítra 8:00 (pražské datum ze serveru)", (await todayCalls()).includes("snooze:reminder:1:2026-10-12T08:00"));
+  check("dnes odložit: obnoveno", (await page.locator('[data-today-notice]').innerText()).includes("Odloženo: Fyzioterapie (Zítra 8:00)"));
+
+  // úkol: prepare + confirm, zmizí z Pozornosti, Vrátit = existující undo
+  await todayMock("/__mock/today/reset");
+  await page.getByRole("button", { name: "Obnovit", exact: true }).click();
+  await page.waitForTimeout(500);
+  await rowOf(page, "assignment:1").getByRole("button", { name: "Dokončit úkol: Sada" }).click();
+  await page.getByText("Úkol „Sada“ je hotový.").waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("dnes úkol: prepare + confirm", JSON.stringify(await todayCalls()) === JSON.stringify(["prepare:assignment:1", "confirm:today-1"]));
+  check("dnes úkol: zmizí z Pozornosti", (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 0);
+  const undo = page.locator("[data-today-notice]").getByRole("button", { name: "Vrátit" });
+  check("dnes úkol: nabídne Vrátit (existující undo)", (await undo.count()) === 1);
+  await undo.click();
+  await page.getByText(/^Vráceno/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("dnes úkol: vrácení přes /actions/undo + confirm", JSON.stringify((await todayCalls()).slice(2)) === JSON.stringify(["undo:today-1", "confirm:today-undo-today-1"]) && (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 1);
+
+  // selhání: řádek zůstane, Zkusit znovu potvrdí TUTÉŽ pending akci
+  await todayMock("/__mock/today/reset");
+  await page.getByRole("button", { name: "Obnovit", exact: true }).click();
+  await page.waitForTimeout(500);
+  await todayMock("/__mock/today/fail?mode=confirm_error");
+  await rowOf(page, "assignment:1").getByRole("button", { name: "Dokončit úkol: Sada" }).click();
+  const alert = rowOf(page, "assignment:1").getByRole("alert");
+  await alert.waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes chyba: řádek zůstane s hláškou", (await alert.innerText()).includes("Akci se nepodařilo provést"));
+  check("dnes chyba: zbytek stránky běží", (await page.locator('[data-section="timeline"] [data-item]').count()) >= 5);
+  await page.screenshot({ path: `${OUT}today-action-error.png` });
+  await alert.getByRole("button", { name: "Zkusit znovu" }).click();
+  await page.getByText("Úkol „Sada“ je hotový.").waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes chyba: opakování bez druhé pending akce", JSON.stringify(await todayCalls()) === JSON.stringify(["prepare:assignment:1", "confirm:today-1", "confirm:today-1"]));
+
+  // zastaralé: už hotová jinde → hláška + obnovený stav, žádné opakování
+  await todayMock("/__mock/today/reset");
+  await page.getByRole("button", { name: "Obnovit", exact: true }).click();
+  await page.waitForTimeout(500);
+  await todayMock("/__mock/today/fail?mode=stale");
+  await rowOf(page, "reminder:7").getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).click();
+  await page.getByText(/už je hotová nebo zrušená/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("dnes zastaralé: hláška a obnovený stav", (await page.locator("[data-today-notice]").innerText()).includes("Stav jsem obnovil") && (await rowOf(page, "reminder:7").getAttribute("data-status")) === "done" && (await rowOf(page, "reminder:7").getByRole("alert").count()) === 0);
+
+  // obecná chyba připomínky → Zkusit znovu
+  await todayMock("/__mock/today/reset");
+  await page.getByRole("button", { name: "Obnovit", exact: true }).click();
+  await page.waitForTimeout(500);
+  await todayMock("/__mock/today/fail?mode=error");
+  await rowOf(page, "reminder:1").getByRole("button", { name: "Dokončit připomínku: Fyzioterapie" }).click();
+  await rowOf(page, "reminder:1").getByRole("alert").waitFor({ timeout: 5000 }).catch(() => undefined);
+  await rowOf(page, "reminder:1").getByRole("button", { name: "Zkusit znovu" }).click();
+  await page.getByText("Připomínka „Fyzioterapie“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes chyba připomínky: opakování projde", (await todayCalls()).filter((c) => c === "done:reminder:1").length === 2);
+
+  // regrese: odkaz řádku, vyhledávání, Rychlé přidání
+  await page.keyboard.press("Control+k");
+  check("dnes akce: Ctrl+K dál funguje", (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Přidat" }).click();
+  check("dnes akce: Rychlé přidání dál funguje", (await page.getByRole("dialog", { name: "Rychlé přidání" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await rowOf(page, "exam:3").getByRole("link", { name: "Zapsat výsledek zkoušky: test" }).click();
+  await page.waitForURL("**/school?exam=3", { timeout: 5000 }).catch(() => undefined);
+  check("dnes akce: Zapsat výsledek vede do Školy", /\/school\?exam=3$/.test(page.url()), page.url());
+  check("dnes akce: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// klávesnice: Hotovo a Odložit bez myši
+{
+  await todayMock("/__mock/today/reset");
+  const { ctx, page, errors } = await open("/today");
+  const tabTo = async (name, max = 80) => {
+    for (let i = 0; i < max; i++) {
+      if ((await focusedLabel(page)) === name) return true;
+      await page.keyboard.press("Tab");
+    }
+    return false;
+  };
+  check("klávesnice dnes: Tab na Hotovo připomínky", await tabTo("Dokončit připomínku: Vyndat prádlo"));
+  await page.keyboard.press("Enter");
+  await page.getByText("Připomínka „Vyndat prádlo“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("klávesnice dnes: Enter dokončí, fokus dál", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie");
+  await page.keyboard.press("Tab");
+  check("klávesnice dnes: Tab na Odložit", (await focusedLabel(page)) === "Odložit připomínku: Fyzioterapie");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(80);
+  await page.keyboard.press("Tab");
+  check("klávesnice dnes: Tab na volbu +1 h", (await focusedLabel(page)) === "+1 h: Fyzioterapie");
+  await page.keyboard.press("Enter");
+  await page.getByText(/^Odloženo: Fyzioterapie \(\+1 h\)/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("klávesnice dnes: odloženo o hodinu", (await todayCalls()).includes("snooze:reminder:1:+60"));
+  check("klávesnice dnes: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// mobil 390 px: akce ≥ 44 px, odložení se vejde, žádné přetečení
+{
+  await todayMock("/__mock/today/reset");
+  const { ctx, page, errors } = await open("/today", { width: 390, height: 844 });
+  const row = rowOf(page, "reminder:1");
+  const done = await row.getByRole("button", { name: "Dokončit připomínku: Fyzioterapie" }).boundingBox();
+  check("dnes mobil: Hotovo ≥ 44 px", Boolean(done && done.height >= 44), JSON.stringify(done));
+  await row.getByRole("button", { name: "Odložit připomínku: Fyzioterapie" }).tap();
+  const opts = await row.getByRole("group").getByRole("button").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), Math.round(r.height)]; }));
+  check("dnes mobil: volby odložení se vejdou a jsou ≥ 44 px", opts.every(([l, r, h]) => l >= 0 && r <= 390 && h >= 44), JSON.stringify(opts));
+  check("dnes mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const title = await row.getByText(/Fyzioterapie$/).first().boundingBox();
+  const rowBox = await row.boundingBox();
+  check("dnes mobil: název nahoře v řádku", Boolean(title && rowBox && title.y - rowBox.y < 80), JSON.stringify({ t: title?.y, r: rowBox?.y }));
+  await row.screenshot({ path: `${OUT}today-mobile-actions.png` });
+  await row.getByRole("button", { name: "+15 min: Fyzioterapie" }).tap();
+  await page.getByText(/^Odloženo: Fyzioterapie/).waitFor({ timeout: 5000 }).catch(() => undefined);
+  check("dnes mobil: odložení ťuknutím", (await todayCalls()).includes("snooze:reminder:1:+15"));
+  check("dnes mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await todayMock("/__mock/today/reset");
 }
 
 await browser.close();

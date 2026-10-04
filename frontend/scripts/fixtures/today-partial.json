@@ -19,6 +19,10 @@
    "severity": null,
    "href": "/reminders?reminder=1",
    "source_id": 1,
+   "actions": [
+    "complete",
+    "snooze"
+   ],
    "minutes_until": 240
   }
  },
@@ -35,7 +39,8 @@
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=4",
-   "source_id": 4
+   "source_id": 4,
+   "actions": []
   },
   {
    "id": "reminder:7",
@@ -49,7 +54,11 @@
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=7",
-   "source_id": 7
+   "source_id": 7,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
   },
   {
    "id": "reminder:1",
@@ -63,7 +72,11 @@
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=1",
-   "source_id": 1
+   "source_id": 1,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
   },
   {
    "id": "assignment:8",
@@ -77,7 +90,10 @@
    "priority": null,
    "severity": null,
    "href": "/school?assignment=8",
-   "source_id": 8
+   "source_id": 8,
+   "actions": [
+    "complete"
+   ]
   },
   {
    "id": "exam:4",
@@ -91,7 +107,8 @@
    "priority": null,
    "severity": null,
    "href": "/school?exam=4",
-   "source_id": 4
+   "source_id": 4,
+   "actions": []
   },
   {
    "id": "reminder:6",
@@ -105,7 +122,8 @@
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=6",
-   "source_id": 6
+   "source_id": 6,
+   "actions": []
   }
  ],
  "attention": [
@@ -121,7 +139,10 @@
    "priority": null,
    "severity": "important",
    "href": "/school?assignment=1",
-   "source_id": 1
+   "source_id": 1,
+   "actions": [
+    "complete"
+   ]
   },
   {
    "id": "exam:3",
@@ -135,7 +156,10 @@
    "priority": null,
    "severity": "warning",
    "href": "/school?exam=3",
-   "source_id": 3
+   "source_id": 3,
+   "actions": [
+    "record_result"
+   ]
   },
   {
    "id": "reminder:5",
@@ -149,7 +173,11 @@
    "priority": null,
    "severity": "warning",
    "href": "/reminders?reminder=5",
-   "source_id": 5
+   "source_id": 5,
+   "actions": [
+    "complete",
+    "snooze"
+   ]
   },
   {
    "id": "goal:1",
@@ -163,7 +191,8 @@
    "priority": null,
    "severity": "warning",
    "href": "/goals?goal=1",
-   "source_id": 2
+   "source_id": 2,
+   "actions": []
   }
  ],
  "priorities": [],
@@ -180,7 +209,8 @@
    "priority": null,
    "severity": null,
    "href": "/reminders?reminder=2",
-   "source_id": 2
+   "source_id": 2,
+   "actions": []
   },
   {
    "id": "assignment:3",
@@ -194,7 +224,8 @@
    "priority": null,
    "severity": null,
    "href": "/school?assignment=3",
-   "source_id": 3
+   "source_id": 3,
+   "actions": []
   },
   {
    "id": "assignment:5",
@@ -208,7 +239,30 @@
    "priority": null,
    "severity": null,
    "href": "/school?assignment=5",
-   "source_id": 5
+   "source_id": 5,
+   "actions": []
+  }
+ ],
+ "snooze_options": [
+  {
+   "id": "15m",
+   "label": "+15 min",
+   "minutes": 15
+  },
+  {
+   "id": "1h",
+   "label": "+1 h",
+   "minutes": 60
+  },
+  {
+   "id": "3h",
+   "label": "+3 h",
+   "minutes": 180
+  },
+  {
+   "id": "tomorrow",
+   "label": "Zítra 8:00",
+   "until_local": "2026-10-12T08:00"
   }
  ],
  "errors": {

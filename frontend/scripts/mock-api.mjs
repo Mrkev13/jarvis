@@ -36,7 +36,7 @@ const GET_ROUTES = {
   "/activity": () => fixture("activity"),
   // Roadmap 4G: GET /today ze skutečného today_service (ne 11. 10. 2026 14:30 Praha). Prázdný den a částečnou
   // chybu (fixtures/today-empty.json, today-partial.json) podstrkuje ui-check přes page.route.
-  "/today": () => fixture("today"),
+  "/today": () => fixture(todayState.fixture),
 };
 
 function send(res, req, status, body, extraHeaders = {}) {
@@ -61,6 +61,9 @@ const quickAddPrepared = [];
 const quickAddConfirmed = [];
 const quickAddFailOnce = new Set();
 let quickAddSeq = 0;
+// Roadmap 4H: akce z Dnes. Stav dne = fixture vygenerovaná skutečným backendem PO dané akci
+// (today-after-*.json); /__mock/today/fail?mode=error|stale|confirm_error nastaví jednorázové selhání.
+const todayState = { fixture: "today", fail: null, calls: [], seq: 0, undone: new Set() };
 const sessionOf = (req) => /(?:^|;\s*)standa_hub_session=([^;]+)/.exec(req.headers.cookie || "")?.[1] ?? null;
 
 function readBody(req) {
@@ -137,6 +140,57 @@ createServer(async (req, res) => {
   }
   if (url.pathname === "/__mock/quick-add") {
     return respond(200, { parse: quickAddCalls.splice(0), prepared: quickAddPrepared.splice(0), confirmed: quickAddConfirmed.splice(0) });
+  }
+  if (url.pathname === "/__mock/today/reset") {
+    Object.assign(todayState, { fixture: "today", fail: null, calls: [], seq: 0, undone: new Set() });
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/today/fail") {
+    todayState.fail = url.searchParams.get("mode");
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/today") return respond(200, todayState.calls);
+  const todayReminder = /^\/reminders\/(\d+)\/(done|snooze)$/.exec(url.pathname);
+  if (todayReminder && req.method === "POST" && url.searchParams.get("source") === "today") {
+    const [, id, op] = todayReminder;
+    todayState.calls.push(`${op}:reminder:${id}${body?.minutes ? `:+${body.minutes}` : body?.until_local ? `:${body.until_local}` : ""}`);
+    const fail = todayState.fail;
+    todayState.fail = null;
+    if (fail === "error") return respond(500, { detail: "Simulovaná chyba serveru." }, 300);
+    if (fail === "stale") {
+      todayState.fixture = "today-after-reminder-done"; // jiná záložka ji mezitím dokončila
+      return respond(400, { detail: "Připomínka už je hotová nebo zrušená." }, 300);
+    }
+    todayState.fixture = op === "done" ? "today-after-reminder-done" : "today-after-reminder-snooze";
+    return respond(200, { id: Number(id), status: op === "done" ? "done" : "scheduled", next_label: "ne 11. 10. 2026 15:30" }, 400);
+  }
+  if (url.pathname === "/today/actions/prepare" && req.method === "POST") {
+    todayState.calls.push(`prepare:${body?.ref}`);
+    if (todayState.fail === "stale") {
+      todayState.fail = null;
+      todayState.fixture = "today-after-assignment-done";
+      return respond(409, { detail: { error: "no_change", message: "Záznam už má požadované hodnoty – není co měnit." } }, 300);
+    }
+    const id = `today-${++todayState.seq}`;
+    return respond(200, { ok: true, pending_action: { id, tool: "modify_records", arguments: { _source: "today" }, expires_at: null } }, 250);
+  }
+  if (url.pathname === "/actions/confirm" && req.method === "POST" && String(body?.action_id || "").startsWith("today-")) {
+    const id = String(body.action_id);
+    todayState.calls.push(`confirm:${id}`);
+    if (todayState.fail === "confirm_error") {
+      todayState.fail = null;
+      return respond(200, { ok: false, error: "execution_failed", detail: "Simulovaná chyba při zápisu." }, 300);
+    }
+    if (id.includes("undo")) {
+      todayState.fixture = "today";
+      return respond(200, { ok: true, tool: "undo_change", arguments: {}, result: { undone: true } }, 300);
+    }
+    todayState.fixture = "today-after-assignment-done";
+    return respond(200, { ok: true, tool: "modify_records", arguments: {}, result: { undo_available: true } }, 400);
+  }
+  if (url.pathname === "/actions/undo" && req.method === "POST" && String(body?.action_id || "").startsWith("today-")) {
+    todayState.calls.push(`undo:${body.action_id}`);
+    return respond(200, { ok: true, pending_action: { id: `today-undo-${body.action_id}`, tool: "undo_change", arguments: { _source: "today" } } }, 250);
   }
   if (handleAi(req, url, body, respond)) return;
   if (req.method === "GET") {
