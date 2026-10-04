@@ -1749,14 +1749,19 @@ def reminders_update(reminder_id: int, request: ReminderUpdateRequest):
         db.close()
 
 
+def _ui_source(source: str | None) -> str:
+    """Odkud přišla ruční akce (Aktivita „zdroj"): jen známé povrchy, jinak „manual" (Roadmap 4H)."""
+    return "today" if source == "today" else "manual"
+
+
 @app.post("/reminders/{reminder_id}/snooze")
-def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest):
+def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest, source: str | None = None):
     db = SessionLocal()
     try:
         item = _reminder_or_404(db, reminder_id)
         until = _reminder_call(lambda: reminder_service.snooze_target(
             item, minutes=request.minutes, until_local=request.until_local))
-        _reminder_call(lambda: reminder_service.snooze(db, item, until))
+        _reminder_call(lambda: reminder_service.snooze(db, item, until, user_context=_ui_source(source)))
         db.commit()
         return reminder_service.serialize(item)
     finally:
@@ -1764,11 +1769,11 @@ def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest):
 
 
 @app.post("/reminders/{reminder_id}/done")
-def reminders_done(reminder_id: int):
+def reminders_done(reminder_id: int, source: str | None = None):
     db = SessionLocal()
     try:
         item = _reminder_or_404(db, reminder_id)
-        _reminder_call(lambda: reminder_service.complete(db, item))
+        _reminder_call(lambda: reminder_service.complete(db, item, user_context=_ui_source(source)))
         db.commit()
         return reminder_service.serialize(item)
     finally:
