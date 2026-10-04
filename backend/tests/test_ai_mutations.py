@@ -311,6 +311,7 @@ class AiMutationFlowTestCase(unittest.TestCase):
             db.close()
         item_log = next(lg for lg in logs if lg.area == "finance")
         self.assertEqual((item_log.action_type, item_log.user_context), ("update", "ai_confirm"))
+        self.assertTrue(item_log.summary.startswith("Upraveno (AI): "), item_log.summary)  # akce z Dnes = „(Dnes)"
         self.assertEqual(json.loads(item_log.delta_json)["amount"], {"old": 320.0, "new": 450.0})
         approve = next(lg for lg in logs if lg.area == "ai")
         self.assertEqual(approve.action_type, "approve")

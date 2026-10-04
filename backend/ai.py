@@ -258,6 +258,11 @@ def propose_undo_action(action_id: str) -> dict:
         except MutationRefused as refused:
             return {"ok": False, "error": refused.code, "detail": refused.detail}
         stored = {"plan": plan}
+        # Roadmap 4H: vrácení patří ke stejnému povrchu jako původní akce (Dnes → Dnes). Zdroj se čte z uložené
+        # původní akce na serveru – volající ho nemůže podstrčit.
+        origin = _stored_source(db, action_id)
+        if origin in MANUAL_SOURCES:
+            stored[PENDING_SOURCE_KEY] = origin
         pending_id = _store_pending_action(db, "undo_change", stored, ttl_minutes=30)
         info = _get_pending_action(db, pending_id)
         return {
@@ -272,6 +277,20 @@ def propose_undo_action(action_id: str) -> dict:
         }
     finally:
         db.close()
+
+
+def _stored_source(db, action_id) -> str | None:
+    try:
+        pa = db.get(PendingAction, int(action_id))
+    except (TypeError, ValueError):
+        return None
+    if pa is None:
+        return None
+    try:
+        args = json.loads(pa.arguments) if isinstance(pa.arguments, str) else (pa.arguments or {})
+    except (TypeError, ValueError):
+        return None
+    return args.get(PENDING_SOURCE_KEY) if isinstance(args, dict) else None
 
 
 def reject_pending(db, pending_id: str):
@@ -299,6 +318,10 @@ def _message_to_dict(m):
 PENDING_SOURCE_KEY = "_source"
 
 QUICK_ADD_SOURCE = "quick_add"
+# Roadmap 4H: akce z režimu Dnes (dokončení úkolu) jdou stejnou cestou pending → potvrzení.
+TODAY_SOURCE = "today"
+# Ruční (ne-AI) zdroje: user_context = zdroj, žádný záznam „akce AI schválena"; text chyby pro Aktivitu.
+MANUAL_SOURCES = {QUICK_ADD_SOURCE: "Rychlé přidání se nepodařilo", TODAY_SOURCE: "Akce z režimu Dnes se nepodařila"}
 
 
 def prepare_write_action(db, fn_name: str, arguments: dict, *, source: str | None = None) -> dict:
@@ -826,12 +849,14 @@ def execute_confirm_action(action_id: str):
             stored = _confirm_pending_action_atomically(db, action_id)
         except HTTPException as he:
             try:
+                origin = _stored_source(db, action_id)  # opakované potvrzení akce z Dnes / Rychlého přidání
                 log_activity(
                     db, "system", "error",
-                    f"Potvrzení akce AI #{action_id} selhalo: {he.detail}",
+                    (f"Potvrzení akce #{action_id} selhalo: {he.detail}" if origin in MANUAL_SOURCES
+                     else f"Potvrzení akce AI #{action_id} selhalo: {he.detail}"),
                     entity_type="PendingAction",
                     entity_id=_audit_entity_id(action_id),
-                    user_context="ai_confirm"
+                    user_context=origin if origin in MANUAL_SOURCES else "ai_confirm"
                 )
                 db.commit()
             except Exception:
@@ -857,10 +882,10 @@ def execute_confirm_action(action_id: str):
 
         tool_name = stored.get("tool")
         arguments = dict(stored.get("arguments") or {})
-        # Roadmap 4E: kdo akci navrhl (AI / Rychlé přidání) – klíč se toolu nepředává.
+        # Roadmap 4E/4H: kdo akci navrhl (AI / Rychlé přidání / Dnes) – klíč se toolu nepředává.
         source = arguments.pop(PENDING_SOURCE_KEY, None)
-        quick_add = source == QUICK_ADD_SOURCE
-        user_context = "quick_add" if quick_add else "ai_confirm"
+        manual = source in MANUAL_SOURCES
+        user_context = source if manual else "ai_confirm"
 
         if tool_name not in WRITE_TOOL_FUNCTIONS:
             _finalize_pending_status(db, action_id, "failed")
@@ -902,8 +927,8 @@ def execute_confirm_action(action_id: str):
             else:
                 _finalize_pending_status(db, action_id, "executed")
 
-            # Rychlé přidání: záznam do Aktivity zapsal sám tool (user_context=quick_add) – není to akce AI.
-            if not quick_add:
+            # Rychlé přidání / Dnes: záznam do Aktivity zapsal sám tool (user_context=zdroj) – není to akce AI.
+            if not manual:
                 try:
                     # Roadmap 4C: lidský text místo „Potvrzena akce add_work_session (date_value=…)".
                     summary = ai_action_summary(tool_name, arguments)[:480]
@@ -927,8 +952,8 @@ def execute_confirm_action(action_id: str):
             _finalize_pending_status(db, action_id, "failed")
             try:
                 log_activity(
-                    db, "system" if quick_add else "ai", "error" if quick_add else "reject",
-                    (f"Rychlé přidání se nepodařilo – {ai_action_label(tool_name)}: {str(exc)[:120]}" if quick_add
+                    db, "system" if manual else "ai", "error" if manual else "reject",
+                    (f"{MANUAL_SOURCES[source]} – {ai_action_label(tool_name)}: {str(exc)[:120]}" if manual
                      else f"Akci AI se nepodařilo provést – {ai_action_label(tool_name)}: {str(exc)[:120]}"),
                     entity_type=tool_name,
                     entity_id=_audit_entity_id(action_id),

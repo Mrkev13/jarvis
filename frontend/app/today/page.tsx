@@ -1,5 +1,6 @@
 "use client";
 
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useOpenQuickAdd } from "@/components/quick-add/QuickAddProvider";
 import {
@@ -18,7 +19,9 @@ import {
   TextLink,
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
+import { useTodayActions, type RowError, type TodayNotice } from "@/hooks/useTodayActions";
 import {
+  actionLabel,
   groupTimeline,
   isEmptyDay,
   itemsLabel,
@@ -28,10 +31,20 @@ import {
   STATUS_META,
   TYPE_LABELS,
   untilLabel,
+  type SnoozeOption,
+  type TodayActionId,
   type TodayItem,
   type TodayPayload,
 } from "@/lib/today";
 import { cx } from "@/lib/ui";
+
+type ActionsCtx = {
+  busyKey: string | null;
+  rowErrors: Record<string, RowError>;
+  snoozeOptions: SnoozeOption[];
+  run: (item: TodayItem, action: TodayActionId, option?: SnoozeOption) => Promise<void>;
+};
+const ActionsContext = createContext<ActionsCtx | null>(null);
 
 /**
  * Režim Dnes (Roadmap 4G): „Co dnes potřebuje moji pozornost?" Jeden sloupec, jeden dotaz (GET /today),
@@ -41,6 +54,8 @@ export default function TodayPage() {
   const resource = useApiResource<unknown>("/today");
   const openQuickAdd = useOpenQuickAdd();
   const data: TodayPayload | null = resource.data ? normalizeToday(resource.data) : null;
+  // Roadmap 4H: akce z řádků → po úspěchu jedno obnovení GET /today (žádné dotazování na pozadí)
+  const actions = useTodayActions(resource.reload);
 
   const addButton = (
     <Button variant="primary" onClick={openQuickAdd} aria-haspopup="dialog">
@@ -64,6 +79,8 @@ export default function TodayPage() {
         }
       />
 
+      <ActionNotice notice={actions.notice} busy={actions.busyKey === "undo"} onDismiss={actions.dismissNotice} />
+
       {resource.loading ? (
         <LoadingState lines={4} label="Načítám dnešek…" />
       ) : resource.status === "error" || !data ? (
@@ -71,7 +88,7 @@ export default function TodayPage() {
       ) : isEmptyDay(data) ? (
         <EmptyDay data={data} addButton={addButton} />
       ) : (
-        <>
+        <ActionsContext.Provider value={{ busyKey: actions.busyKey, rowErrors: actions.rowErrors, snoozeOptions: data.snooze_options, run: actions.run }}>
           {resource.error ? <ErrorState message={`Obnovení selhalo: ${resource.error}`} /> : null}
           <DaySummary data={data} />
           <Section id="attention" title="Vyžaduje pozornost" icon="⚠️" error={data.errors.attention}>
@@ -99,7 +116,7 @@ export default function TodayPage() {
             <Timeline data={data} />
           </Section>
           <Upcoming data={data} />
-        </>
+        </ActionsContext.Provider>
       )}
     </ContentContainer>
   );
@@ -201,6 +218,10 @@ function ItemList({ label, items, nextId }: { label: string; items: TodayItem[];
 function TodayRow({ item, isNext }: { item: TodayItem; isNext?: boolean }) {
   const status = STATUS_META[item.status];
   const quiet = item.status === "done" || item.status === "past";
+  const ctx = useContext(ActionsContext);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const rowError = ctx?.rowErrors[item.id];
+  const actions = ctx ? item.actions : [];
   const body = (
     <div className="flex min-h-11 items-start gap-3">
       {item.time && item.status !== "overdue" ? (
@@ -227,23 +248,171 @@ function TodayRow({ item, isNext }: { item: TodayItem; isNext?: boolean }) {
     </div>
   );
   const box = cx(
-    "block rounded-[var(--radius-control)] border px-3 py-2.5 md:px-4",
+    "rounded-[var(--radius-control)] border px-3 py-2.5 transition-colors md:px-4",
     isNext ? "border-accent/50 bg-accent/5" : item.status === "overdue" ? "border-danger/30 bg-danger/5" : "border-line-subtle bg-surface-2",
+    item.href && "hover:border-accent/40",
     quiet && "opacity-70",
   );
   return (
-    <li data-item={item.id} data-status={item.status} aria-current={isNext ? "true" : undefined}>
-      {item.href ? (
+    <li
+      data-item={item.id}
+      data-status={item.status}
+      data-actionable={actions.length ? "" : undefined}
+      aria-current={isNext ? "true" : undefined}
+    >
+      <div className={box}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          {item.href ? (
+            <Link
+              href={item.href}
+              className="block min-w-0 flex-1 rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            >
+              {body}
+            </Link>
+          ) : (
+            <div className="min-w-0 flex-1">{body}</div>
+          )}
+          {actions.length && ctx ? (
+            <RowActions item={item} ctx={ctx} snoozeOpen={snoozeOpen} onToggleSnooze={() => setSnoozeOpen((o) => !o)} />
+          ) : null}
+        </div>
+        {snoozeOpen && ctx && actions.includes("snooze") ? (
+          <SnoozeOptions item={item} ctx={ctx} onClose={() => setSnoozeOpen(false)} />
+        ) : null}
+        {rowError && ctx ? (
+          <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <span className="min-w-0 flex-1">{rowError.message}</span>
+            <Button size="sm" variant="secondary" disabled={ctx.busyKey !== null} onClick={() => void ctx.run(item, rowError.action, rowError.option)}>
+              Zkusit znovu
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/** Nejvýš jedna hlavní akce + „Odložit"; výsledek zkoušky = odkaz do Školy (žádný editor v Dnes). */
+function RowActions({ item, ctx, snoozeOpen, onToggleSnooze }: { item: TodayItem; ctx: ActionsCtx; snoozeOpen: boolean; onToggleSnooze: () => void }) {
+  const locked = ctx.busyKey !== null;
+  const snoozeId = `snooze-${item.id.replace(":", "-")}`;
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:pt-0.5">
+      {item.actions.includes("complete") ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          data-action-primary=""
+          aria-label={actionLabel(item, "complete")}
+          busy={ctx.busyKey === `${item.id}:complete`}
+          busyLabel="Ukládám…"
+          disabled={locked}
+          onClick={() => void ctx.run(item, "complete")}
+        >
+          <span aria-hidden="true">✓</span> Hotovo
+        </Button>
+      ) : null}
+      {item.actions.includes("snooze") && ctx.snoozeOptions.length ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={actionLabel(item, "snooze")}
+          aria-expanded={snoozeOpen}
+          aria-controls={snoozeId}
+          data-snooze-toggle={item.id}
+          busy={ctx.busyKey === `${item.id}:snooze`}
+          busyLabel="Odkládám…"
+          disabled={locked}
+          onClick={onToggleSnooze}
+        >
+          Odložit
+        </Button>
+      ) : null}
+      {item.actions.includes("record_result") && item.href ? (
         <Link
           href={item.href}
-          className={cx(box, "transition-colors hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70")}
+          data-action-primary=""
+          aria-label={actionLabel(item, "record_result")}
+          className="inline-flex min-h-9 items-center rounded-[var(--radius-control)] px-3 text-sm text-accent-strong hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 pointer-coarse:min-h-11"
         >
-          {body}
+          Zapsat výsledek →
         </Link>
-      ) : (
-        <div className={box}>{body}</div>
-      )}
-    </li>
+      ) : null}
+    </div>
+  );
+}
+
+/** Pevné volby odložení (spočítané serverem v pražském čase). Esc zavře a vrátí fokus na „Odložit". */
+function SnoozeOptions({ item, ctx, onClose }: { item: TodayItem; ctx: ActionsCtx; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, []);
+  const back = () => {
+    onClose();
+    window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-snooze-toggle="${CSS.escape(item.id)}"]`)?.focus());
+  };
+  return (
+    <div
+      ref={ref}
+      id={`snooze-${item.id.replace(":", "-")}`}
+      role="group"
+      aria-label={`Odložit „${item.title}“ – na kdy?`}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          back();
+        }
+      }}
+      className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line-subtle pt-2"
+    >
+      <span className="mr-1 text-xs text-ink-muted">Odložit na:</span>
+      {ctx.snoozeOptions.map((o) => (
+        <Button
+          key={o.id}
+          size="sm"
+          variant="secondary"
+          aria-label={`${o.label}: ${item.title}`}
+          disabled={ctx.busyKey !== null}
+          onClick={() => {
+            onClose();
+            void ctx.run(item, "snooze", o);
+          }}
+        >
+          {o.label}
+        </Button>
+      ))}
+      <Button size="sm" variant="ghost" onClick={back}>
+        Zrušit
+      </Button>
+    </div>
+  );
+}
+
+/** Výsledek poslední akce: oznámení čtečce, u dokončení úkolu „Vrátit" (existující undo). */
+function ActionNotice({ notice, busy, onDismiss }: { notice: TodayNotice | null; busy: boolean; onDismiss: () => void }) {
+  return (
+    <div role="status" aria-live="polite" data-today-notice="" tabIndex={-1} className="focus:outline-none">
+      {notice ? (
+        <div
+          className={cx(
+            "flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border px-4 py-2.5 text-sm",
+            notice.tone === "success" ? "border-success/35 bg-success/10 text-ink" : notice.tone === "warning" ? "border-warning/40 bg-warning/10 text-ink" : "border-danger/40 bg-danger/10 text-danger",
+          )}
+        >
+          <span aria-hidden="true">{notice.tone === "success" ? "✓" : "!"}</span>
+          <span className="min-w-0 flex-1">{notice.message}</span>
+          {notice.undo ? (
+            <Button size="sm" variant="secondary" onClick={notice.undo} busy={busy} busyLabel="Vracím…">
+              Vrátit
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={onDismiss} aria-label="Zavřít oznámení">
+            ×
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

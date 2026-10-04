@@ -456,6 +456,11 @@ class ReminderSnoozeRequest(BaseModel):
     until_local: str | None = None
 
 
+class TodayActionRequest(BaseModel):
+    action: str
+    ref: str
+
+
 class ExecutePendingRequest(BaseModel):
     pending_id: str
 
@@ -1749,14 +1754,19 @@ def reminders_update(reminder_id: int, request: ReminderUpdateRequest):
         db.close()
 
 
+def _ui_source(source: str | None) -> str:
+    """Odkud přišla ruční akce (Aktivita „zdroj"): jen známé povrchy, jinak „manual" (Roadmap 4H)."""
+    return "today" if source == "today" else "manual"
+
+
 @app.post("/reminders/{reminder_id}/snooze")
-def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest):
+def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest, source: str | None = None):
     db = SessionLocal()
     try:
         item = _reminder_or_404(db, reminder_id)
         until = _reminder_call(lambda: reminder_service.snooze_target(
             item, minutes=request.minutes, until_local=request.until_local))
-        _reminder_call(lambda: reminder_service.snooze(db, item, until))
+        _reminder_call(lambda: reminder_service.snooze(db, item, until, user_context=_ui_source(source)))
         db.commit()
         return reminder_service.serialize(item)
     finally:
@@ -1764,11 +1774,11 @@ def reminders_snooze(reminder_id: int, request: ReminderSnoozeRequest):
 
 
 @app.post("/reminders/{reminder_id}/done")
-def reminders_done(reminder_id: int):
+def reminders_done(reminder_id: int, source: str | None = None):
     db = SessionLocal()
     try:
         item = _reminder_or_404(db, reminder_id)
-        _reminder_call(lambda: reminder_service.complete(db, item))
+        _reminder_call(lambda: reminder_service.complete(db, item, user_context=_ui_source(source)))
         db.commit()
         return reminder_service.serialize(item)
     finally:
@@ -2330,6 +2340,34 @@ def today_get():
         payload = build_today(db)
         db.commit()  # historie doporučení plánovače (stejně jako /dashboard a /planner)
         return payload
+    finally:
+        db.close()
+
+
+@app.post("/today/actions/prepare")
+def today_action_prepare(request: TodayActionRequest):
+    """Roadmap 4H: akce z režimu Dnes, která jde přes bezpečný zápis (pending akce → POST /actions/confirm).
+
+    Deklarativní mapování, žádný nový executor: zatím jen „complete" úkolu = existující modify_records
+    (snímek pro kontrolu zastarání, audit, vrácení). Připomínky používají přímo /reminders/{id}/done|snooze.
+    """
+    from mutation_service import MutationRefused
+
+    kind, _, raw_id = (request.ref or "").partition(":")
+    if request.action != "complete" or kind != "assignment" or not raw_id.isdigit():
+        raise HTTPException(status_code=422, detail="Tuhle akci režim Dnes nepodporuje.")
+    db = SessionLocal()
+    try:
+        try:
+            pending = _ai_module.prepare_write_action(
+                db, "modify_records",
+                {"entity": "school_assignment", "action": "complete", "target": {"id": int(raw_id)}},
+                source=_ai_module.TODAY_SOURCE,
+            )
+        except MutationRefused as refused:
+            # už hotový / smazaný úkol = zastaralý stav na stránce → 409, stránka se obnoví
+            raise HTTPException(status_code=409, detail={"error": refused.code, "message": refused.detail})
+        return {"ok": True, "pending_action": pending}
     finally:
         db.close()
 

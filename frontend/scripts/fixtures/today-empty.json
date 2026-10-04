@@ -12,5 +12,27 @@
  "attention": [],
  "priorities": [],
  "upcoming": [],
+ "snooze_options": [
+  {
+   "id": "15m",
+   "label": "+15 min",
+   "minutes": 15
+  },
+  {
+   "id": "1h",
+   "label": "+1 h",
+   "minutes": 60
+  },
+  {
+   "id": "3h",
+   "label": "+3 h",
+   "minutes": 180
+  },
+  {
+   "id": "tomorrow",
+   "label": "Zítra 8:00",
+   "until_local": "2026-10-12T08:00"
+  }
+ ],
  "errors": {}
 }

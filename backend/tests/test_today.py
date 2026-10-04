@@ -208,6 +208,15 @@ class AttentionAndDedupTestCase(TodayBase):
         self.assertEqual(out["attention"][0].priority, 1)
         self.assertEqual(out["timeline"][0].severity, "warning")
 
+    def test_notification_for_finished_record_is_dropped(self):
+        self.add(
+            Assignment(id=1, title="Sada", subject_id=1, due_date=date(2026, 10, 2), status="done"),
+            Reminder(id=1, title="Lístky", due_at=utc(2026, 10, 9, 9), status="done"),
+            self.notification(1, "assignment", 1, "important", "Po termínu: Sada"),
+            self.notification(2, "reminder", 1, "warning", "Lístky", area="reminders"),
+        )
+        self.assertEqual(self.build()["attention"], [], "upozornění k vyřízenému záznamu se nezobrazí")
+
     def test_no_attention(self):
         out = self.build()
         self.assertEqual(out["attention"], [])
@@ -294,7 +303,7 @@ class TodayApiTestCase(unittest.TestCase):
         self.assertEqual(self.client.post("/auth/login", json={"pin": self.PIN}).status_code, 200)
         r = self.client.get("/today")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(r.json()), {"date", "date_label", "now_local", "summary", "timeline", "attention", "priorities", "upcoming", "errors"})
+        self.assertEqual(set(r.json()), {"date", "date_label", "now_local", "summary", "timeline", "attention", "priorities", "upcoming", "snooze_options", "errors"})
 
 
 if __name__ == "__main__":

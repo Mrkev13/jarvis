@@ -60,3 +60,46 @@ test("empty day vs. day with only errors", () => {
   assert.equal(isEmptyDay(normalizeToday({ errors: { timeline: "x" } })), false, "chyba není prázdný den");
   assert.equal(isEmptyDay(normalizeToday({ attention: [{ id: "x", title: "Po termínu" }] })), false);
 });
+
+// ---------- Roadmap 4H: akce z řádku ----------
+import { actionLabel, classifyActionError, entityKind, nextFocusId, parseRef, successMessage } from "./today.ts";
+
+test("actions and snooze options are whitelisted", () => {
+  const n = normalizeItem({ id: "reminder:5", title: "Fyzio", actions: ["complete", "snooze", "rm -rf", 3] });
+  assert.deepEqual(n.actions, ["complete", "snooze"]);
+  assert.deepEqual(normalizeItem({ id: "x:1", title: "y" }).actions, []);
+  const p = normalizeToday({ snooze_options: [
+    { id: "15m", label: "+15 min", minutes: 15 }, { id: "tomorrow", label: "Zítra 8:00", until_local: "2026-10-12T08:00" },
+    { id: "bad", label: "x", minutes: -5 }, { id: "bad2", label: "y", until_local: "zítra" }, { label: "no id", minutes: 5 },
+  ] });
+  assert.deepEqual(p.snooze_options.map((o) => o.id), ["15m", "tomorrow"]);
+});
+
+test("refs, labels and messages name the record", () => {
+  assert.deepEqual(parseRef("reminder:5"), { kind: "reminder", id: 5 });
+  assert.equal(parseRef("notification:x"), null);
+  assert.equal(parseRef("javascript:alert(1)"), null);
+  const r = normalizeItem({ id: "reminder:5", title: "Fyzio", type: "reminder" });
+  const a = normalizeItem({ id: "assignment:2", title: "Sada", type: "planner" });
+  assert.equal(entityKind(a), "assignment", "řádek plánu s ref úkolu");
+  assert.equal(actionLabel(r, "complete"), "Dokončit připomínku: Fyzio");
+  assert.equal(actionLabel(a, "complete"), "Dokončit úkol: Sada");
+  assert.equal(actionLabel(r, "snooze"), "Odložit připomínku: Fyzio");
+  assert.equal(successMessage(a, "complete"), "Úkol „Sada“ je hotový.");
+  assert.equal(successMessage(r, "snooze", "+1 h"), "Odloženo: Fyzio (+1 h).");
+});
+
+test("action errors: stale refreshes, others retry", () => {
+  assert.deepEqual(classifyActionError(400, "Připomínka už je hotová nebo zrušená."), { stale: true, message: "Připomínka už je hotová nebo zrušená. Stav jsem obnovil." });
+  assert.equal(classifyActionError(409, { error: "no_change", message: "Záznam už má požadované hodnoty – není co měnit." }).stale, true);
+  assert.equal(classifyActionError(404, null).stale, true);
+  assert.deepEqual(classifyActionError(500, "boom"), { stale: false, message: "Akci se nepodařilo provést. Zkus to znovu." });
+  assert.equal(classifyActionError(null, null).stale, false, "síť = zkusit znovu");
+});
+
+test("focus moves to the next actionable row", () => {
+  assert.equal(nextFocusId(["a", "b", "c"], "b"), "c");
+  assert.equal(nextFocusId(["a", "b", "c"], "c"), "b");
+  assert.equal(nextFocusId(["a"], "a"), null);
+  assert.equal(nextFocusId(["a"], "z"), null);
+});
