@@ -540,3 +540,12 @@ připomínku: …", "Zapsat výsledek zkoušky: …"); "Odložit" is a disclosur
 opening a labelled group, Esc closes it and returns focus; busy state is text ("Ukládám…"); errors are
 `role=alert`; nothing is conveyed by colour only. Mobile: actions sit under the title, all ≥ 44 px.
 
+## 19. Game images (Game Enrichment A)
+
+`components/games/GameImage` – tank thumbnail, MFF portrait or WoT currency icon in a fixed frame (`xs` 24 / `sm` 40 /
+`md` 56 / `lg` 88 px; tanks 1.6 : 1; optional smaller `mobileSize`). Charcoal frame with `border-line-subtle`, control
+radius, no glow, no splash art: the image is a small recognition anchor, text stays primary. Missing/failed → neutral
+monogram in the same frame. Assets are local (gitignored cache + runtime manifest), see `docs/game-assets.md`.
+Placement: WoT grind rows (`EntityRow leading`, `sm`), WoT currency labels (`xs`, decorative), MFF character cards
+(`md`, `sm` on mobile). Do not add images to small stat rows or turn modules into galleries.
+
