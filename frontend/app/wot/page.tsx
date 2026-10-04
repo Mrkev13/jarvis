@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GameImage } from "@/components/games/GameImage";
 import {
   AreaBadge,
   Button,
@@ -193,7 +194,16 @@ export default function WotPage() {
             />
             <StatGrid cols={4}>
               {RESOURCE_KEYS.map((key) => (
-                <MetricCard key={key} label={RESOURCE_LABELS[key]} value={formatNumber(resources[key])} />
+                <MetricCard
+                  key={key}
+                  label={
+                    <span className="inline-flex items-center gap-1.5">
+                      <GameImage kind="resource" name={key} size="xs" />
+                      {RESOURCE_LABELS[key]}
+                    </span>
+                  }
+                  value={formatNumber(resources[key])}
+                />
               ))}
             </StatGrid>
 
@@ -394,6 +404,7 @@ function GrindRow({
       style={staggerStyle(index)}
       className="motion-card"
       muted={done}
+      leading={<GameImage kind="tank" name={g.tank} size="sm" />}
       badges={
         <>
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
