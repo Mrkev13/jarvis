@@ -207,6 +207,14 @@ def _overdue_items(c: _Ctx) -> list[TodayItem]:
     return items
 
 
+def _closed_refs(c: _Ctx) -> set[str]:
+    """Ref záznamů, které už nic nepotřebují: hotové úkoly, uzavřené zkoušky, neaktivní připomínky."""
+    refs = {f"assignment:{a.id}" for a in c.db.query(Assignment.id, Assignment.status).all() if is_assignment_done(a.status)}
+    refs |= {f"exam:{e.id}" for e in c.db.query(Exam.id, Exam.status).all() if not is_exam_open(e.status)}
+    refs |= {f"reminder:{r.id}" for r in c.db.query(Reminder.id).filter(Reminder.status.in_(("done", "cancelled"))).all()}
+    return refs
+
+
 def _notification_ref(n: dict) -> str | None:
     st, sid = n.get("source_type"), n.get("source_id")
     return f"{st}:{sid}" if st in ("assignment", "exam", "reminder", "goal") and sid is not None else None
@@ -220,9 +228,14 @@ def build_attention(c: _Ctx) -> tuple[list[TodayItem], dict[str, str]]:
     """(položky, závažnost podle ref z upozornění) – upozornění k záznamu se spojí s jeho položkou."""
     items = {it.id: it for it in _overdue_items(c)}
     severity_by_ref: dict[str, str] = {}
+    closed = _closed_refs(c)
     for n in list_notifications(c.db, unread_only=True, include_resolved=False, now=c.now_utc):
         sev = norm(n.get("severity")) or "info"
         ref = _notification_ref(n)
+        if ref in closed:
+            # Roadmap 4H: záznam je už vyřízený (např. právě dokončený z Dnes) – upozornění by do dalšího běhu
+            # generate_notifications jen strašilo. Stejné pravidlo jako _resolve_if_no_longer_relevant, jen čtením.
+            continue
         if ref:
             prev = severity_by_ref.get(ref)
             if prev is None or SEVERITY_RANK.get(sev, 3) < SEVERITY_RANK.get(prev, 3):
