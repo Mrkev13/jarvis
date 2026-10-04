@@ -18,6 +18,19 @@ export interface TodayItem {
   priority: number | null;
   severity: "important" | "warning" | "info" | null;
   href: string | null;
+  /** Roadmap 4H: co jde udělat přímo z řádku (backend today_service – jen tam, kde to existující pravidla dovolí). */
+  actions: TodayActionId[];
+}
+
+export type TodayActionId = "complete" | "snooze" | "record_result";
+const ACTION_IDS: TodayActionId[] = ["complete", "snooze", "record_result"];
+
+/** Volba odložení spočítaná serverem v pražském čase (žádné datum z prohlížeče). */
+export interface SnoozeOption {
+  id: string;
+  label: string;
+  minutes?: number;
+  until_local?: string;
 }
 
 export interface TodayPayload {
@@ -29,6 +42,7 @@ export interface TodayPayload {
   attention: TodayItem[];
   priorities: TodayItem[];
   upcoming: TodayItem[];
+  snooze_options: SnoozeOption[];
   errors: Partial<Record<"timeline" | "attention" | "priorities" | "upcoming", string>>;
 }
 
@@ -65,7 +79,19 @@ export function normalizeItem(raw: unknown): TodayItem | null {
     priority: typeof raw.priority === "number" && raw.priority > 0 ? raw.priority : null,
     severity,
     href: safeHref(raw.href),
+    actions: Array.isArray(raw.actions) ? ACTION_IDS.filter((a) => (raw.actions as unknown[]).includes(a)) : [],
   };
+}
+
+function normalizeSnooze(raw: unknown): SnoozeOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isRecord).flatMap((o): SnoozeOption[] => {
+    const label = str(o.label);
+    if (!str(o.id) || !label) return [];
+    if (typeof o.minutes === "number" && o.minutes > 0) return [{ id: str(o.id), label, minutes: o.minutes }];
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(str(o.until_local))) return [{ id: str(o.id), label, until_local: str(o.until_local) }];
+    return [];
+  });
 }
 
 function items(raw: unknown): TodayItem[] {
@@ -91,6 +117,7 @@ export function normalizeToday(raw: unknown): TodayPayload {
     attention: items(r.attention),
     priorities: items(r.priorities),
     upcoming: items(r.upcoming),
+    snooze_options: normalizeSnooze(r.snooze_options),
     errors: Object.fromEntries(
       (["timeline", "attention", "priorities", "upcoming"] as const).filter((k) => typeof errors[k] === "string").map((k) => [k, errors[k] as string]),
     ),
@@ -156,4 +183,51 @@ export function shortDate(iso: string | null): string {
 
 export function isEmptyDay(p: TodayPayload): boolean {
   return !p.timeline.length && !p.attention.length && !p.priorities.length && Object.keys(p.errors).length === 0;
+}
+
+// ---------- akce z řádku (Roadmap 4H) ----------
+
+/** „reminder:5" → {kind: "reminder", id: 5}; jiné / poškozené → null. */
+export function parseRef(ref: string): { kind: string; id: number } | null {
+  const m = /^([a-z_]+):(\d+)$/.exec(ref);
+  return m ? { kind: m[1], id: Number(m[2]) } : null;
+}
+
+/** Druh záznamu pro akci (řádek plánu „assignment:5" je úkol). */
+export function entityKind(item: TodayItem): "reminder" | "assignment" | "exam" | null {
+  const kind = parseRef(item.id)?.kind;
+  return kind === "reminder" || kind === "assignment" || kind === "exam" ? kind : null;
+}
+
+/** Přístupný název ovládání vždy s názvem záznamu („Dokončit připomínku: Fyzioterapie"). */
+export function actionLabel(item: TodayItem, action: TodayActionId): string {
+  const kind = entityKind(item);
+  if (action === "complete") return kind === "assignment" ? `Dokončit úkol: ${item.title}` : `Dokončit připomínku: ${item.title}`;
+  if (action === "snooze") return `Odložit připomínku: ${item.title}`;
+  return `Zapsat výsledek zkoušky: ${item.title}`;
+}
+
+/** Hláška po úspěchu (oznamuje se čtečce, ukazuje se v liště nahoře). */
+export function successMessage(item: TodayItem, action: TodayActionId, snoozeLabel?: string): string {
+  if (action === "snooze") return `Odloženo: ${item.title}${snoozeLabel ? ` (${snoozeLabel})` : ""}.`;
+  return entityKind(item) === "assignment" ? `Úkol „${item.title}“ je hotový.` : `Připomínka „${item.title}“ je hotová.`;
+}
+
+/**
+ * Chyba akce → {zastaralé?, text}. Zastaralé (už hotové / změněné / smazané jinde) = obnovit stránku, žádné
+ * opakování; jinak (síť, 5xx) řádek zůstane a nabídne „Zkusit znovu".
+ */
+export function classifyActionError(status: number | null, detail: unknown): { stale: boolean; message: string } {
+  const text = typeof detail === "string" ? detail : isRecord(detail) && typeof detail.message === "string" ? detail.message : "";
+  if (status === 400 || status === 404 || status === 409) {
+    return { stale: true, message: `${text || "Záznam se mezitím změnil."} Stav jsem obnovil.` };
+  }
+  return { stale: false, message: "Akci se nepodařilo provést. Zkus to znovu." };
+}
+
+/** Pořadí akčních řádků pro posun fokusu po akci: další akční řádek ve stejném seznamu, jinak předchozí. */
+export function nextFocusId(ids: string[], current: string): string | null {
+  const i = ids.indexOf(current);
+  if (i < 0) return null;
+  return ids[i + 1] ?? ids[i - 1] ?? null;
 }
