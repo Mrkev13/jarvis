@@ -40,7 +40,7 @@ export const CHARACTERS: Record<string, RegistryEntry> = {
   mephisto: { name: "Mephisto" },
   carnage: { name: "Carnage" },
   valkyrie: { name: "Valkyrie" },
-  luna_snow: { name: "Luna Snow" },
+  luna_snow: { name: "Luna Snow", aliases: ["Luna"] },
   magneto: { name: "Magneto" },
   mysterio: { name: "Mysterio" },
   namor: { name: "Namor" },
