@@ -65,7 +65,10 @@ export function GameImage({
           unoptimized
           loading="lazy"
           onError={() => setFailed(src)}
-          className={cx("h-full w-full", kind === "tank" ? "object-contain p-0.5 brightness-[1.2] contrast-[1.05]" : "object-cover")}
+          className={cx(
+            "h-full w-full",
+            kind === "tank" ? "object-contain p-0.5 brightness-[1.2] contrast-[1.05]" : kind === "resource" ? "object-contain p-[3px]" : "object-cover",
+          )}
         />
       </span>
     );
