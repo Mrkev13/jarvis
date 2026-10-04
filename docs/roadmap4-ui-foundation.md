@@ -52,7 +52,7 @@ visual polish.
 | Item | Status |
 |---|---|
 | Shared `GameImage` (size tokens, fixed frame, lazy, monogram fallback) | ✅ design-system §19 |
-| Tank / character / currency registry with name normalization and aliases | ✅ `lib/gameAssets.ts`, tests |
+| Tanks resolved from the Tankopedia manifest (no registry), character/currency registry, normalization, minimal aliases | ✅ `lib/gameAssets.ts`, tests |
 | Real assets from official sources into a gitignored local cache + manifest | ✅ `scripts/fetch-game-assets.mjs`, `docs/game-assets.md` |
 | Tank thumbnails on grinds, currency icons, MFF portraits | ✅ |
 | Remote image hosts in Next config | ❌ not needed (same-origin files) |

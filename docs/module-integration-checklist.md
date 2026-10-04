@@ -111,13 +111,14 @@ Only for a low-risk action the module already supports cleanly; never new domain
 
 ## 11. Game visual asset integration (Game Enrichment A)
 Only for game modules whose entities are recognised by a picture.
-- [ ] Registry entry in `frontend/lib/gameAssets.ts` (stable snake_case slug = file name, official name, aliases the
-      user really types); unknown names must fall back, never map to a similar entity.
+- [ ] Matching from official data, not a hand-kept list: WoT tanks resolve at runtime from the Tankopedia manifest
+      (`resolveTank`); small fixed sets (MFF characters, currencies) get a registry entry in `frontend/lib/gameAssets.ts`
+      (stable snake_case slug). Aliases only for spellings no tier resolves; unknown/ambiguous names fall back.
 - [ ] Source: an official API/CDN or explicit official URL in `scripts/game-assets.sources.json`; never generated
       lookalikes, never committed files (gitignored cache, attribution in the manifest).
 - [ ] UI: `GameImage` with a size token, next to the text (never instead of it); decorative only when the label is visible.
-- [ ] Tests: alias/normalization cases in `lib/gameAssets.test.mjs`; ui-check with the stub manifest (image, missing,
-      failing) and a 390 px check.
+- [ ] Tests: resolution/alias cases in `lib/gameAssets.test.mjs` against `scripts/fixtures/game-assets-manifest.json`;
+      ui-check with the stub manifest (image, not in manifest, failing load) and a 390 px check.
 
 ## 12. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
