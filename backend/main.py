@@ -456,6 +456,11 @@ class ReminderSnoozeRequest(BaseModel):
     until_local: str | None = None
 
 
+class TodayActionRequest(BaseModel):
+    action: str
+    ref: str
+
+
 class ExecutePendingRequest(BaseModel):
     pending_id: str
 
@@ -2335,6 +2340,34 @@ def today_get():
         payload = build_today(db)
         db.commit()  # historie doporučení plánovače (stejně jako /dashboard a /planner)
         return payload
+    finally:
+        db.close()
+
+
+@app.post("/today/actions/prepare")
+def today_action_prepare(request: TodayActionRequest):
+    """Roadmap 4H: akce z režimu Dnes, která jde přes bezpečný zápis (pending akce → POST /actions/confirm).
+
+    Deklarativní mapování, žádný nový executor: zatím jen „complete" úkolu = existující modify_records
+    (snímek pro kontrolu zastarání, audit, vrácení). Připomínky používají přímo /reminders/{id}/done|snooze.
+    """
+    from mutation_service import MutationRefused
+
+    kind, _, raw_id = (request.ref or "").partition(":")
+    if request.action != "complete" or kind != "assignment" or not raw_id.isdigit():
+        raise HTTPException(status_code=422, detail="Tuhle akci režim Dnes nepodporuje.")
+    db = SessionLocal()
+    try:
+        try:
+            pending = _ai_module.prepare_write_action(
+                db, "modify_records",
+                {"entity": "school_assignment", "action": "complete", "target": {"id": int(raw_id)}},
+                source=_ai_module.TODAY_SOURCE,
+            )
+        except MutationRefused as refused:
+            # už hotový / smazaný úkol = zastaralý stav na stránce → 409, stránka se obnoví
+            raise HTTPException(status_code=409, detail={"error": refused.code, "message": refused.detail})
+        return {"ok": True, "pending_action": pending}
     finally:
         db.close()
 

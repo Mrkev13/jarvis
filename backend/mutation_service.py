@@ -733,6 +733,9 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
 # (nejvýš jednou) + obnovení všech položek v JEDNÉ transakci; aktuální stav musí přesně odpovídat
 # snímku PO, jinak se nic nezmění. Model nikdy nerekonstruuje staré hodnoty.
 
+# Roadmap 4H: vrácení akce z ručního povrchu (ne AI) – text v Aktivitě.
+_UNDO_ORIGIN = {"today": "Dnes"}
+
 UNDO_WINDOW_HOURS = 24
 UNDO_STATUS = "undone"
 UNDO_SUPPORTED = frozenset({
@@ -1001,17 +1004,18 @@ def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
             diff = _undo_item(db, ent, rec["action"], item, apply=True)
             ids.append(int(item["id"]))
             log_activity(
-                db, ent.area, "undo", _short(f"Vráceno (AI): {item.get('label') or ent.label}", 480),
+                db, ent.area, "undo", _short(f"Vráceno ({_UNDO_ORIGIN.get(user_context, 'AI')}): {item.get('label') or ent.label}", 480),
                 entity_type=ent.entity_type, entity_id=int(item["id"]),
                 delta={"undo_of_action": original_id, "restored": diff}, user_context=user_context,
                 dedupe_key=f"undo:{original_id}:{item['id']}",
             )
-        log_activity(
-            db, "ai", "undo", _short(f"Vrácena AI akce #{original_id}: {rec.get('title')}", 480),
-            entity_type="PendingAction", entity_id=original_id,
-            delta={"undo_of_action": original_id, "entity": ent.name, "action": rec["action"], "ids": ids},
-            user_context=user_context, dedupe_key=f"undo:{original_id}",
-        )
+        if user_context not in _UNDO_ORIGIN:  # vrácení ruční akce (Dnes) není akce AI → bez záznamu v oblasti AI
+            log_activity(
+                db, "ai", "undo", _short(f"Vrácena AI akce #{original_id}: {rec.get('title')}", 480),
+                entity_type="PendingAction", entity_id=original_id,
+                delta={"undo_of_action": original_id, "entity": ent.name, "action": rec["action"], "ids": ids},
+                user_context=user_context, dedupe_key=f"undo:{original_id}",
+            )
         args = _json.loads(pa.arguments) if pa.arguments else {}
         args["undo"] = {**rec, "undone_at": utc_now().isoformat()}
         pa.arguments = _json.dumps(args, ensure_ascii=False, default=str)
