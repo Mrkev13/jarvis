@@ -320,6 +320,16 @@ def _apply_recommendation_history(
     return adjusted, created
 
 
+def action_ref(recommendation_key: str | None) -> str | None:
+    """Záznam, ke kterému se akce plánovače vztahuje („assignment:12", „exam:3", „goal:7") – Roadmap 4G
+    (deduplikace v režimu Dnes a odkazy). „work:behind:{goal_id}" patří k cíli."""
+    parts = (recommendation_key or "").split(":")
+    if len(parts) < 2 or not parts[-1].isdigit():
+        return None
+    kind = {"assignment": "assignment", "exam": "exam", "goal": "goal", "work": "goal"}.get(parts[0])
+    return f"{kind}:{parts[-1]}" if kind else None
+
+
 def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
     d = today or today_local()
     now = _now()
@@ -423,6 +433,7 @@ def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
                 "area": a.area,
                 "title": a.title,
                 "reason": a.reason,
+                "ref": action_ref(a.recommendation_key),
             }
             for idx, a in enumerate(chosen)
         ],

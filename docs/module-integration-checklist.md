@@ -82,8 +82,17 @@ Only when the module has a compact, glanceable summary; otherwise skip.
 - [ ] Tests: registry uniqueness test still passes, default order assertion updated, a ui-check screenshot.
 - [ ] No runtime plugin loading; no pixel positions.
 
-## 9. Future surfaces (design for, do not build early)
-- [ ] Today Mode: what "today" means for the module (Prague date semantics).
+## 9. Today Mode integration (Roadmap 4G – Dnes)
+Only for records that are dated or need action today; otherwise skip.
+- [ ] Source mapping in `backend/today_service.py`: an explicit function that returns `TodayItem`s – into the
+      timeline (dated today, `local_day_bounds_utc`), attention (overdue / needs action) or upcoming (next 7 days).
+      Reuse the module's own status rules (`statuses.py`), never new ones; no runtime plugin registry.
+- [ ] Stable `id` = ref `"<type>:<id>"` (the same ref the planner and notifications use) so deduplication works;
+      `href` = the module deep link (`/<module>?<param>=<id>`, see Search integration).
+- [ ] Czech subtitle (kind · subject · date, no raw enums/ISO), `time` only when the record really has one.
+- [ ] Tests in `backend/tests/test_today.py`: today vs. tomorrow vs. overdue, midnight/DST if timed, dedup with
+      planner/notifications; regenerate `frontend/scripts/fixtures/today*.json` from the real service.
+- [ ] Keep it bounded – Today shows what matters today, not the module's list.
 
 ## 10. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.

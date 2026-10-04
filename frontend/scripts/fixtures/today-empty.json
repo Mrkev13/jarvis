@@ -1,0 +1,16 @@
+{
+ "date": "2026-10-11",
+ "date_label": "neděle 11. 10. 2026",
+ "now_local": "14:30",
+ "summary": {
+  "remaining": 0,
+  "done": 0,
+  "attention": 0,
+  "next": null
+ },
+ "timeline": [],
+ "attention": [],
+ "priorities": [],
+ "upcoming": [],
+ "errors": {}
+}

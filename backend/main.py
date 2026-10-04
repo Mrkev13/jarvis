@@ -2319,6 +2319,21 @@ def _get_mff_quick_status(db):
     }
 
 
+@app.get("/today")
+def today_get():
+    """Roadmap 4G: režim Dnes – dnešní časová osa, pozornost, plán a nejbližší termíny (Europe/Prague).
+    Deterministické, bez LLM; chyba jednoho zdroje = `errors[sekce]`, zbytek se vrátí."""
+    from today_service import build_today
+
+    db = SessionLocal()
+    try:
+        payload = build_today(db)
+        db.commit()  # historie doporučení plánovače (stejně jako /dashboard a /planner)
+        return payload
+    finally:
+        db.close()
+
+
 @app.get("/dashboard")
 def dashboard_get():
     db = SessionLocal()

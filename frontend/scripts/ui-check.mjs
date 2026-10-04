@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4F).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4G).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -6,7 +6,7 @@
 // Spuštění: node scripts/ui-check.mjs   (Playwright: PLAYWRIGHT_MODULE=/cesta/k/playwright/index.mjs,
 //           jinak `import("playwright")`; prohlížeč: PLAYWRIGHT_CHROMIUM=/cesta/k/chromium volitelně)
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
@@ -56,6 +56,8 @@ const PAGES = [
   ["/mff", "mff"],
   // Roadmap 4C
   ["/ai", "ai"],
+  // Roadmap 4G
+  ["/today", "today"],
 ];
 const ONLY = process.env.UI_CHECK_PAGES ? process.env.UI_CHECK_PAGES.split(",") : null;
 const WIDTHS = [
@@ -621,7 +623,7 @@ async function searchCalls() {
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   await page.waitForTimeout(80);
   check("hledání: fokus v poli (combobox s popiskem)", await input.evaluate((el) => el === document.activeElement));
-  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 13);
+  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 14);
   await page.screenshot({ path: `${OUT}search-empty.png` });
 
   const first = async () => (await dialog.getByRole("option").first().innerText()).split("\n")[0];
@@ -1161,6 +1163,102 @@ async function openSeeded(value, opts = {}) {
   check("dashboard mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   await page.screenshot({ path: `${OUT}dashboard-mobile.png` });
   check("dashboard mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
+// 19) Roadmap 4G – režim Dnes (/today), mock GET /today = odpovědi skutečného today_service.
+const todayFixture = (name) => readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8");
+const serveToday = (body, status = 200) => async (p) =>
+  p.route("http://127.0.0.1:8000/today", (route) => route.fulfill({ status, contentType: "application/json", body }));
+{
+  let todayCalls = 0;
+  const { ctx, page, errors } = await open("/today", { setup: async (p) => p.on("request", (r) => { const u = new URL(r.url()); if (u.port === "8000" && u.pathname === "/today") todayCalls++; }) });
+  check("dnes: jeden dotaz /today", todayCalls === 1, String(todayCalls));
+  check("dnes: h1 Dnes + český datum", (await page.getByRole("heading", { level: 1, name: "Dnes" }).count()) === 1 && (await page.getByText("Neděle 11. 10. 2026").count()) >= 1);
+  check("dnes: souhrn s další položkou", (await page.getByRole("heading", { name: "Další: Fyzioterapie v 18:30" }).count()) === 1 && (await page.getByText(/za 4 h/).count()) >= 1);
+  const section = (id) => page.locator(`[data-section="${id}"]`);
+  const ids = (loc) => loc.locator("[data-item]").evaluateAll((els) => els.map((e) => e.getAttribute("data-item")));
+  const att = await ids(section("attention"));
+  check("dnes: Vyžaduje pozornost (po termínu nejdřív)", att[0] === "assignment:1" && att.length === 4 && (await section("attention").getByText("Důležité").count()) >= 1, att.join(","));
+  check("dnes: dnešní plán z plánovače", (await ids(section("plan"))).length >= 1 && (await section("plan").getByText(/^Plán #\d/).count()) >= 1);
+  const tl = await ids(section("timeline"));
+  check("dnes: časová osa chronologicky, bez času „Během dne“", JSON.stringify(tl.slice(0, 3)) === JSON.stringify(["reminder:4", "reminder:7", "reminder:1"]) && (await section("timeline").getByRole("heading", { name: "Během dne" }).count()) === 1, tl.join(","));
+  const next = section("timeline").locator('[aria-current="true"]');
+  check("dnes: další položka označená textem (ne jen barvou)", (await next.getAttribute("data-item")) === "reminder:1" && (await next.getByText("Další", { exact: true }).count()) === 1);
+  check("dnes: stavy slovem", (await section("timeline").getByText("proběhlo").count()) >= 1 && (await section("timeline").getByText("k vyřízení").count()) >= 1);
+  const doneSummary = section("timeline").locator("summary");
+  check("dnes: hotové sbalené", (await doneSummary.innerText()).includes("Hotovo (1 položka)") && !(await section("timeline").locator('[data-item="reminder:6"]').isVisible()));
+  await doneSummary.click();
+  check("dnes: hotové se rozbalí", await section("timeline").locator('[data-item="reminder:6"]').isVisible());
+  const all = await page.locator("[data-item]").evaluateAll((els) => els.map((e) => e.getAttribute("data-item")));
+  check("dnes: žádný záznam dvakrát", all.length === new Set(all).size, all.join(","));
+  check("dnes: Potom max. 3", (await ids(section("upcoming"))).length <= 3 && (await ids(section("upcoming"))).length >= 1);
+  await page.screenshot({ path: `${OUT}today.png`, fullPage: true });
+
+  await page.getByRole("button", { name: "Přidat" }).click();
+  check("dnes: + Přidat otevře Rychlé přidání", (await page.getByRole("dialog", { name: "Rychlé přidání" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  await search.getByRole("combobox").fill("dnes");
+  await page.waitForTimeout(400);
+  check("dnes: Ctrl+K funguje a najde stránku Dnes", (await search.getByRole("option").first().innerText()).startsWith("Dnes"));
+  await page.keyboard.press("Escape");
+  check("dnes: položka v navigaci aktivní", (await page.locator('nav a[href="/today"][aria-current="page"]').count()) >= 1);
+
+  await section("attention").getByRole("link", { name: /Sada/ }).click();
+  await page.waitForURL("**/school?assignment=1", { timeout: 5000 }).catch(() => undefined);
+  check("dnes: položka vede na záznam (deep link)", /\/school\?assignment=1$/.test(page.url()), page.url());
+  await page.waitForTimeout(1000);
+  check("dnes: záznam zvýrazněn", await page.evaluate(() => document.activeElement?.getAttribute("data-search-target") === "assignment-1"));
+  check("dnes: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/today", { setup: serveToday(todayFixture("today-empty")) });
+  check("dnes prázdný: záměrný prázdný stav", (await page.getByTestId("today-empty").innerText()) === "Dnes nemáš nic naplánovaného." && (await page.locator("[data-section]").count()) === 0);
+  check("dnes prázdný: Přidat + Plánovač", (await page.getByRole("button", { name: "Přidat" }).count()) >= 1 && (await page.getByRole("link", { name: "Plánovač →" }).count()) === 1);
+  await page.screenshot({ path: `${OUT}today-empty.png` });
+  check("dnes prázdný: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/today", { setup: serveToday(todayFixture("today-partial")) });
+  const plan = page.locator('[data-section="plan"]');
+  check("dnes částečná chyba: jen sekce plánu hlásí chybu", (await plan.getByText("Dnešní plán se nepodařilo sestavit.").count()) === 1 && (await page.getByText("se nepodařilo").count()) === 1);
+  check("dnes částečná chyba: ostatní sekce běží", (await page.locator('[data-section="timeline"] [data-item]').count()) >= 3 && (await page.locator('[data-section="attention"] [data-item]').count()) >= 1);
+  await page.screenshot({ path: `${OUT}today-partial.png`, fullPage: true });
+  check("dnes částečná chyba: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/today", { setup: serveToday(JSON.stringify({ detail: "boom" }), 500) });
+  check("dnes výpadek: chyba s opakováním", (await page.getByRole("button", { name: /Zkusit znovu/ }).count()) === 1);
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/today", { width: 390, height: 844 });
+  const head = await page.getByRole("heading", { name: /^Další:/ }).boundingBox();
+  check("dnes mobil: další položka v prvním výřezu", Boolean(head && head.y + head.height < 844), JSON.stringify(head));
+  const add = await page.getByRole("button", { name: "Přidat" }).boundingBox();
+  check("dnes mobil: Přidat nahoře a ≥ 44 px", Boolean(add && add.y < 400 && add.height >= 44), JSON.stringify(add));
+  check("dnes mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const small = await page.locator("[data-item] > a").evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height < 44).length);
+  check("dnes mobil: položky ≥ 44 px", small === 0, String(small));
+  await page.screenshot({ path: `${OUT}today-mobile.png`, fullPage: true });
+  await page.getByRole("button", { name: "Rychlé přidání", exact: true }).tap();
+  check("dnes mobil: Rychlé přidání z hlavičky", (await page.getByRole("dialog", { name: "Rychlé přidání" }).count()) === 1);
+  check("dnes mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+for (const [scheme, motion] of [["light", "no-preference"], ["dark", "reduce"]]) {
+  const { ctx, page } = await open("/today", { scheme, reducedMotion: motion });
+  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  if (scheme === "light") check("dnes (světlý motiv OS): zůstává tmavý", !/255, 255, 255/.test(bg), bg);
+  else {
+    const anims = await page.evaluate(() => [...document.querySelectorAll("main *")].filter((el) => getComputedStyle(el).animationName !== "none").length);
+    check("dnes reduced motion: bez animací", anims === 0, String(anims));
+  }
   await ctx.close();
 }
 
