@@ -25,6 +25,7 @@ export function EntityRow({
   style,
   busy,
   searchTarget,
+  leading,
 }: {
   title: React.ReactNode;
   badges?: React.ReactNode;
@@ -38,6 +39,8 @@ export function EntityRow({
   busy?: boolean;
   /** Cíl odkazu z globálního vyhledávání (např. „exam-12", viz components/search/SearchHighlighter). */
   searchTarget?: string;
+  /** Obrázek / ikona vlevo (např. GameImage tanku) – text zůstává hlavní. */
+  leading?: React.ReactNode;
 }) {
   return (
     <li
@@ -52,11 +55,14 @@ export function EntityRow({
       )}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 flex-1">
+        <div className={cx("min-w-0 flex-1", leading ? "flex items-start gap-3" : null)}>
+          {leading ? <div className="shrink-0">{leading}</div> : null}
+          <div className="min-w-0 flex-1">
           {badges ? <div className="mb-1.5 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
           <div className={cx("break-words font-medium text-ink", muted && "line-through decoration-ink-faint")}>{title}</div>
           {meta ? <div className="mt-0.5 text-sm text-ink-muted">{meta}</div> : null}
           {children}
+          </div>
         </div>
         {actions ? <div className="flex flex-wrap gap-2 md:justify-end md:shrink-0">{actions}</div> : null}
       </div>
