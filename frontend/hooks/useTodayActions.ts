@@ -113,6 +113,7 @@ export function useTodayActions(reload: () => Promise<void>) {
       const focusId = nextFocusId(siblings, item.id);
       busyRef.current = true;
       setBusyKey(`${item.id}:${action}`);
+      setNotice(null); // stará hláška nepatří k nové akci
       setRowErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== item.id)));
       try {
         let undo: (() => void) | undefined;
