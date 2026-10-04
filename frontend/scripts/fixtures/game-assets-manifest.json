@@ -1,0 +1,176 @@
+{
+ "$comment": "Testovací manifest (tvar výstupu scripts/fetch-game-assets.mjs, verze 2) se skutečnými metadaty z Tankopedie – bez obrázků. Sdílí ho lib/gameAssets.test.mjs a scripts/ui-check.mjs.",
+ "version": 2,
+ "generated_at": "2026-10-04T12:00:00.000Z",
+ "assets": {
+  "resource/credits": {
+   "file": "wot/resources/credits.svg",
+   "source": "https://eu-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css .currency__silver::after",
+   "attribution": "© Wargaming.net"
+  },
+  "resource/gold": {
+   "file": "wot/resources/gold.svg",
+   "source": "https://eu-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css .currency__gold::after",
+   "attribution": "© Wargaming.net"
+  },
+  "resource/bonds": {
+   "file": "wot/resources/bonds.svg",
+   "source": "https://eu-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css .modules_info-box-text__bonds-farmer::after",
+   "attribution": "© Wargaming.net"
+  },
+  "resource/free_xp": {
+   "file": "wot/resources/free_xp.svg",
+   "source": "https://eu-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css .experience__free::after",
+   "attribution": "© Wargaming.net"
+  },
+  "character/luna_snow": {
+   "file": "mff/characters/luna_snow.png"
+  }
+ },
+ "wot_tanks": {
+  "1": {
+   "name": "T-34",
+   "short_name": "T-34",
+   "nation": "ussr",
+   "tier": 5,
+   "path": "wot/tanks/1.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/ussr-R04_T-34.png",
+   "attribution": "© Wargaming.net"
+  },
+  "1649": {
+   "name": "Konštrukta T-34/100",
+   "short_name": "T-34/100",
+   "nation": "czech",
+   "tier": 7,
+   "path": "wot/tanks/1649.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/czech-Cz05_T34_100.png",
+   "attribution": "© Wargaming.net"
+  },
+  "2417": {
+   "name": "TVP T 50/51",
+   "short_name": "TVP T 50/51",
+   "nation": "czech",
+   "tier": 10,
+   "path": "wot/tanks/2417.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/czech-Cz04_T50_51.png",
+   "attribution": "© Wargaming.net"
+  },
+  "2433": {
+   "name": "Kranvagn",
+   "short_name": "Kranvagn",
+   "nation": "sweden",
+   "tier": 10,
+   "path": "wot/tanks/2433.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/sweden-S16_Kranvagn.png",
+   "attribution": "© Wargaming.net"
+  },
+  "2849": {
+   "name": "T34",
+   "short_name": "T34",
+   "nation": "usa",
+   "tier": 8,
+   "path": "wot/tanks/2849.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/usa-A13_T34_hvy.png",
+   "attribution": "© Wargaming.net"
+  },
+  "2929": {
+   "name": "Vz. 55",
+   "short_name": "Vz. 55",
+   "nation": "czech",
+   "tier": 10,
+   "path": "wot/tanks/2929.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/czech-Cz17_Vz_55.png",
+   "attribution": "© Wargaming.net"
+  },
+  "3633": {
+   "name": "IS-2",
+   "short_name": "IS-2",
+   "nation": "china",
+   "tier": 7,
+   "path": "wot/tanks/3633.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/china-Ch10_IS2.png",
+   "attribution": "© Wargaming.net"
+  },
+  "6817": {
+   "name": "CAV mod. 71",
+   "short_name": "CAV 71",
+   "nation": "italy",
+   "tier": 11,
+   "path": "wot/tanks/6817.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/italy-It43_CAV_mod_71.png",
+   "attribution": "© Wargaming.net"
+  },
+  "9297": {
+   "name": "FV215b (183)",
+   "short_name": "FV215b 183",
+   "nation": "uk",
+   "tier": 10,
+   "path": "wot/tanks/9297.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/uk-GB48_FV215b_183.png",
+   "attribution": "© Wargaming.net"
+  },
+  "14609": {
+   "name": "Leopard 1",
+   "short_name": "Leopard 1",
+   "nation": "germany",
+   "tier": 10,
+   "path": "wot/tanks/14609.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/germany-G89_Leopard1.png",
+   "attribution": "© Wargaming.net"
+  },
+  "14881": {
+   "name": "T57 Heavy",
+   "short_name": "T57 Heavy",
+   "nation": "usa",
+   "tier": 10,
+   "path": "wot/tanks/14881.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/usa-A67_T57_58.png",
+   "attribution": "© Wargaming.net"
+  },
+  "19201": {
+   "name": "T-100 LT",
+   "short_name": "T-100 LT",
+   "nation": "ussr",
+   "tier": 10,
+   "path": "wot/tanks/19201.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/ussr-R132_VNII_100LT.png",
+   "attribution": "© Wargaming.net"
+  },
+  "20225": {
+   "name": "Object 268 Version 4",
+   "short_name": "Obj. 268/4",
+   "nation": "ussr",
+   "tier": 10,
+   "path": "wot/tanks/20225.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/ussr-R149_Object_268_4.png",
+   "attribution": "© Wargaming.net"
+  },
+  "40977": {
+   "name": "Hirschkäfer",
+   "short_name": "Hirschkäfer",
+   "nation": "germany",
+   "tier": 11,
+   "path": "wot/tanks/40977.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/germany-G189_Hirschkafer.png",
+   "attribution": "© Wargaming.net"
+  },
+  "46849": {
+   "name": "Object 279 early",
+   "short_name": "Obj. 279 (e)",
+   "nation": "ussr",
+   "tier": 10,
+   "path": "wot/tanks/46849.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/ussr-R157_Object_279R.png",
+   "attribution": "© Wargaming.net"
+  },
+  "59137": {
+   "name": "IS-2",
+   "short_name": "IS-2",
+   "nation": "ussr",
+   "tier": 7,
+   "path": "wot/tanks/59137.png",
+   "source": "https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/ussr-R71_IS_2B.png",
+   "attribution": "© Wargaming.net"
+  }
+ }
+}
