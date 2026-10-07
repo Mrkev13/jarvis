@@ -1,0 +1,123 @@
+[
+ {
+  "id": 2,
+  "milestone_type": "mastery",
+  "mastery": "ace",
+  "tank": "ELC EVEN 90",
+  "map_name": "Karelia",
+  "played_on": "2026-09-20",
+  "damage": 1594,
+  "assist": 5975,
+  "kills": 2,
+  "base_xp": 1412,
+  "notes": null,
+  "favorite": true,
+  "created_at": "2026-10-07T12:00:00Z",
+  "updated_at": "2026-10-07T12:00:00Z",
+  "screenshots": [
+   {
+    "id": 4,
+    "url": "/wot/screenshots/4/file",
+    "caption": "Spotování celou bitvu",
+    "original_name": "karelia.png",
+    "content_type": "image/png",
+    "size_bytes": 180000,
+    "position": 0,
+    "created_at": "2026-10-01T20:00:00Z"
+   }
+  ]
+ },
+ {
+  "id": 1,
+  "milestone_type": "mastery",
+  "mastery": "ace",
+  "tank": "Progetto 65",
+  "map_name": "Útesy",
+  "played_on": "2026-09-14",
+  "damage": 5205,
+  "assist": 1754,
+  "kills": 5,
+  "base_xp": 1208,
+  "notes": "Poslední tank týmu, 1 vs 3 na konci.",
+  "favorite": false,
+  "created_at": "2026-10-07T12:00:00Z",
+  "updated_at": "2026-10-07T12:00:00Z",
+  "screenshots": [
+   {
+    "id": 1,
+    "url": "/wot/screenshots/1/file",
+    "caption": "Výsledková tabulka",
+    "original_name": "utesy-vysledky.png",
+    "content_type": "image/png",
+    "size_bytes": 180000,
+    "position": 0,
+    "created_at": "2026-10-01T20:00:00Z"
+   },
+   {
+    "id": 2,
+    "url": "/wot/screenshots/2/file",
+    "caption": "Mistr!",
+    "original_name": "utesy-mko.png",
+    "content_type": "image/png",
+    "size_bytes": 180000,
+    "position": 1,
+    "created_at": "2026-10-01T20:01:00Z"
+   },
+   {
+    "id": 3,
+    "url": "/wot/screenshots/3/file",
+    "caption": null,
+    "original_name": "utesy-mapa.png",
+    "content_type": "image/png",
+    "size_bytes": 180000,
+    "position": 2,
+    "created_at": "2026-10-01T20:02:00Z"
+   }
+  ]
+ },
+ {
+  "id": 3,
+  "milestone_type": "mastery",
+  "mastery": "first",
+  "tank": "Object 140",
+  "map_name": "Prochorovka",
+  "played_on": "2026-08-30",
+  "damage": null,
+  "assist": null,
+  "kills": null,
+  "base_xp": null,
+  "notes": null,
+  "favorite": false,
+  "created_at": "2026-10-07T12:00:00Z",
+  "updated_at": "2026-10-07T12:00:00Z",
+  "screenshots": []
+ },
+ {
+  "id": 4,
+  "milestone_type": "mastery",
+  "mastery": "ace",
+  "tank": "Kranvagn",
+  "map_name": "Himmelsdorf",
+  "played_on": "2026-07-11",
+  "damage": 6120,
+  "assist": null,
+  "kills": 3,
+  "base_xp": null,
+  "notes": null,
+  "favorite": false,
+  "created_at": "2026-10-07T12:00:00Z",
+  "updated_at": "2026-10-07T12:00:00Z",
+  "screenshots": [
+   {
+    "id": 5,
+    "url": "/wot/screenshots/5/file",
+    "caption": "Soubor smazaný z disku",
+    "original_name": "chybejici.png",
+    "content_type": "image/png",
+    "size_bytes": 180000,
+    "position": 0,
+    "created_at": "2026-10-01T20:00:00Z"
+   }
+  ]
+ }
+]
