@@ -5,9 +5,10 @@ import { apiFetch } from "@/lib/api";
 import { areaMeta } from "@/lib/areas";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { GOAL_SOURCES, GOAL_STATUSES, goalSourceMeta, goalStatusMeta, goalTrackingLabel } from "@/lib/goals";
-import { MAX_STAGGER, staggerStyle, useCompletionSignal } from "@/lib/motion";
+import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
 import { cx, priorityTone } from "@/lib/ui";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
+import { CompletionState } from "@/components/motion/CompletionState";
 import {
   AreaBadge,
   Button,
@@ -91,7 +92,7 @@ const formatPct = (value: number) => formatPercent(value);
 
 /**
  * Průběh cíle: pruh (Progress) + procento, které se při změně plynule „dopočítá"
- * a při dosažení 100 % krátce „pukne" (motion-complete) – jen při přechodu na 100, ne při načtení.
+ * a při dosažení 100 % krátce zazáří (CompletionState) – jen při přechodu na 100, ne při načtení.
  */
 function GoalProgress({
   pct,
@@ -107,7 +108,6 @@ function GoalProgress({
   /** Hodnota pruhu, pokud se liší od zobrazeného procenta (splněné cíle mají plný pruh). */
   barValue?: number;
 }) {
-  const completion = useCompletionSignal(pct);
   const completed = status.trim().toLowerCase() === "completed";
   return (
     <div className="flex items-center gap-3">
@@ -118,16 +118,17 @@ function GoalProgress({
         size={size}
         className="flex-1"
       />
-      <span
-        key={completion}
+      <CompletionState
+        as="span"
+        complete={pct >= 100}
+        announce={`Cíl ${title} je splněn na 100 %`}
         className={cx(
           "shrink-0 rounded-md text-right text-sm tabular-nums",
           size === "md" ? "w-14 font-semibold text-ink" : "w-12 text-ink-muted",
-          completion > 0 && "motion-complete",
         )}
       >
         <AnimatedNumber value={pct} format={formatPct} />
-      </span>
+      </CompletionState>
     </div>
   );
 }

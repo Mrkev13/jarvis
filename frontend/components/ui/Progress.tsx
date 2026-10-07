@@ -1,6 +1,11 @@
+import { progressFillOffset } from "@/lib/motionState";
 import { BAR_TONE, clampPercent, cx, progressTone, type Tone } from "@/lib/ui";
 
-/** Ukazatel průběhu (role=progressbar). Barva: akcent, 100 % zeleně, jinou sémantiku dává volající. */
+/**
+ * Ukazatel průběhu (role=progressbar). Barva: akcent, 100 % zeleně, jinou sémantiku dává volající.
+ * Pohyb (Roadmap 6A, kategorie „progress"): výplň se posouvá transformací (bez layout shiftu), při omezeném
+ * pohybu se změní okamžitě. Číslo/text vedle pruhu a aria-valuenow zůstávají hlavní informací.
+ */
 export function Progress({
   value,
   label,
@@ -26,8 +31,8 @@ export function Progress({
       className={cx("w-full overflow-hidden rounded-full bg-surface-2 ring-1 ring-inset ring-line-subtle", size === "sm" ? "h-1.5" : "h-2", className)}
     >
       <div
-        className={cx("motion-progress h-full rounded-full", BAR_TONE[progressTone(pct, tone)])}
-        style={{ width: `${pct}%` }}
+        className={cx("motion-progress-fill h-full w-full rounded-full", BAR_TONE[progressTone(pct, tone)])}
+        style={{ ["--motion-progress-offset" as string]: progressFillOffset(pct) } as React.CSSProperties}
       />
     </div>
   );

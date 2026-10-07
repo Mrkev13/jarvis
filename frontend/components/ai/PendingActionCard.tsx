@@ -1,5 +1,6 @@
 import { AreaBadge, Button, StatusBadge } from "@/components/ui";
 import { describeAction } from "@/lib/aiActions";
+import { motionClass } from "@/lib/motionTokens";
 import type { PendingAction } from "@/lib/pendingActions";
 import { cx } from "@/lib/ui";
 
@@ -29,7 +30,7 @@ export function PendingActionCard({
       aria-busy={state === "executing" || undefined}
       className={cx(
         "motion-card relative overflow-hidden rounded-card border bg-surface shadow-card",
-        state === "failed" ? "motion-shake border-danger/50" : state === "executing" ? "motion-executing border-accent/40" : "border-accent/30",
+        state === "failed" ? cx(motionClass("error"), "border-danger/50") : state === "executing" ? "motion-executing border-accent/40" : "border-accent/30",
       )}
     >
       <div aria-hidden="true" className="h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent" />

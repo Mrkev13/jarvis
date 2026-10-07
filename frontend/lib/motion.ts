@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { becameTrue, increased, stepSignal, type SignalState, type SignalTrigger } from "./motionState.ts";
+import { increased, stepSignal, type SignalState, type SignalTrigger } from "./motionState.ts";
 import { MOTION_DURATION } from "./motionTokens.ts";
 
 /**
@@ -87,13 +87,6 @@ export function useTransitionSignal<T>(value: T, ready: boolean, trigger: Signal
 /** Čítač nárůstů `value` (např. počet upozornění) – viz useTransitionSignal. */
 export function useIncreaseSignal(value: number, ready: boolean): number {
   return useTransitionSignal(value, ready, increased);
-}
-
-/**
- * Čítač, který se zvýší, když progress přejde z < 100 na >= 100 (ne při načtení už dokončeného).
- */
-export function useCompletionSignal(progress: number): number {
-  return useTransitionSignal(progress >= 100, true, becameTrue);
 }
 
 const NO_IDS: ReadonlySet<string> = new Set();
