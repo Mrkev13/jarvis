@@ -9,6 +9,7 @@ import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
   AreaBadge,
   Button,
+  ButtonLink,
   Card,
   CardHeader,
   ConfirmDialog,
@@ -527,6 +528,18 @@ export default function WotPage() {
               </ul>
             )}
           </PageSection>
+          {/* ===== KNIHOVNA REPLAYŮ (Game Enrichment C) – na /wot jen odkaz ===== */}
+          <Card as="section" aria-labelledby="wot-replays-link" data-section="wot-replays">
+            <CardHeader
+              title={<span id="wot-replays-link">Knihovna replayů</span>}
+              description="Originální .wotreplay soubory se štítky, filtry a propojením na Mka."
+              actions={
+                <ButtonLink href="/wot/replays" variant="secondary" size="sm">
+                  Otevřít knihovnu
+                </ButtonLink>
+              }
+            />
+          </Card>
         </div>
       )}
 

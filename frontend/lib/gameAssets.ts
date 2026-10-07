@@ -147,6 +147,8 @@ export interface TankIndex {
   byName: Map<string, string[]>;
   byShort: Map<string, string[]>;
   byCompact: Map<string, string[]>;
+  /** Game Enrichment C: technický název vozidla z replaye („sweden:S16_Kranvagn") → id; z názvu souboru Tankopedie. */
+  byTag: Map<string, string[]>;
 }
 
 function addTo(map: Map<string, string[]>, key: string, id: string) {
@@ -157,15 +159,32 @@ function addTo(map: Map<string, string[]>, key: string, id: string) {
 }
 
 export function buildTankIndex(tanks: TankEntry[]): TankIndex {
-  const index: TankIndex = { entries: new Map(), byName: new Map(), byShort: new Map(), byCompact: new Map() };
+  const index: TankIndex = { entries: new Map(), byName: new Map(), byShort: new Map(), byCompact: new Map(), byTag: new Map() };
   for (const t of tanks) {
     index.entries.set(t.vehicle_id, t);
     addTo(index.byName, normalizeGameName(t.name), t.vehicle_id);
     addTo(index.byShort, normalizeGameName(t.short_name), t.vehicle_id);
     addTo(index.byCompact, compact(t.name), t.vehicle_id);
     addTo(index.byCompact, compact(t.short_name), t.vehicle_id);
+    const tag = tankTagFromSource(t.source);
+    if (tag) addTo(index.byTag, tag, t.vehicle_id);
   }
   return index;
+}
+
+/**
+ * Obrázky Tankopedie se jmenují `<národ>-<tag>.png` („…/vehicle/sweden-S16_Kranvagn.png") – stejný tag, jaký
+ * nese replay (`playerVehicle`). Z URL v manifestu tak jde tag spárovat s názvem vozidla bez dalšího registru.
+ */
+export function tankTagFromSource(source: string | null | undefined): string | null {
+  const m = /\/([a-z]+)-([A-Za-z0-9_-]{1,80})\.png$/.exec(source ?? "");
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
+/** Tag vozidla z replaye („sweden:S16_Kranvagn") → vozidlo z manifestu; neznámý / nejednoznačný → null. */
+export function resolveTankTag(index: TankIndex, tag: string | null | undefined): TankEntry | null {
+  const ids = index.byTag.get(String(tag ?? "").trim());
+  return ids?.length === 1 ? index.entries.get(ids[0]) ?? null : null;
 }
 
 /** Výsledek stupně: jednoznačné vozidlo, nejednoznačné (stop – raději monogram než špatný tank), nebo nic. */
