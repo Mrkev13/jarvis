@@ -258,11 +258,18 @@ používá `created_at` (a ukázka v 4.2 s `executed_at` je cílový stav). Dopl
   pg_dump --no-owner --no-privileges -U user dbname | gzip > BACKUP_DIR/standa-hub-{ts}.sql.gz
   ```
 - **SQLite** (`sqlite+pysqlite://…`): kopie `fileobj` přes `shutil.copyfileobj` → gzip → `BACKUP_DIR/standa-hub-{ts}.db.gz`.
+- `pg_dump`: `PG_DUMP_PATH` → `PATH` → na Windows standardní `%ProgramFiles%/PostgreSQL/<verze>/bin`.
+- Po DB dumpu stejný běh inkrementálně archivuje `MEDIA_DIR`; stejný SHA-256 přeskočí, změněnou
+  relativní cestu uloží jako neměnnou verzi a existující obsah nepřepíše.
 
 ### 7.2 Verifikace + retention
 
-- `_verify_backup(path, checksum)`: `SHA256` souboru == uložené checksum v BackupLog.
-- `_apply_retention(db, cutoff=now - BACKUP_RETENTION_DAYS=30d)`: smaže `backup_logs` řádek + unlinkne soubor pro řádky `started_at < cutoff`.
+- `_verify_backup(path, size, checksum)`: velikost i `SHA256` souboru souhlasí.
+- `media/manifests/*.json`: relativní cesta, velikost, SHA-256, cesta v archivu, čas archivace a copied/unchanged.
+- `runs/*.json`: timestamp, DB dump + checksum a konkrétní media manifest + checksum. Chyba médií znamená
+  `BackupLog.status="failed"`.
+- `_apply_retention`: po `BACKUP_RETENTION_DAYS` smaže DB dump, run metadata, manifest a `backup_logs` řádek.
+  Neměnný archiv médií nemaže automaticky, takže smazaný živý soubor zůstane obnovitelný.
 
 ### 7.3 BackupLog status FSM
 

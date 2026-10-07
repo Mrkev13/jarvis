@@ -84,7 +84,8 @@ Table `wot_milestone_screenshots`: `id`, `milestone_id` (FK, cascade), `stored_n
 
 - **Location**: `MEDIA_DIR/wot-screenshots/` – `MEDIA_DIR` defaults to `./media` relative to the backend working
   directory (`backend/media/…` when started from `backend/`). Gitignored. Change via `MEDIA_DIR` in `backend/.env`.
-- Metadata in the DB, files on disk; **files are not part of the DB backup** – back up `MEDIA_DIR` separately.
+- Metadata are in the DB and files are on disk; the normal backup run archives `MEDIA_DIR` incrementally with SHA-256
+  verification (see `docs/backups.md`).
 - Module: `backend/media_storage.py` (smallest safe local store; no S3/cloud).
 
 ### Upload limits / security
@@ -127,4 +128,4 @@ real database. Fixture screenshots are neutral one-colour PNGs, not game art.
 
 Replay library and parsing → done in Game Enrichment C (`docs/wot-replays.md`). Still deferred: best-moments page across games, MFF progression/T4 events, gamification (XP,
 badges, streaks) on top of `wot_grind_completed`, screenshot reordering by drag & drop (API supports `position`),
-image thumbnails/resizing on the server, including `MEDIA_DIR` in the backup script.
+image thumbnails/resizing on the server.

@@ -59,9 +59,9 @@ Errors use the B shape: `{"detail": {"error": "<code>", "message": "…"}}` (`in
 
 ### Backup implications
 
-**Replay files (and B's screenshots) under `MEDIA_DIR` are not part of the database backup** (`backup_service.py`
-dumps the DB only). Until the backup script includes `MEDIA_DIR`, back the folder up separately. Restoring only the
-DB leaves rows whose download returns 404 (the UI keeps working; the files are simply missing).
+**Replay files (and B's screenshots) under `MEDIA_DIR` are archived incrementally by the normal backup run**
+(`backup_service.py`; see `docs/backups.md`). Restoring only the DB leaves rows whose download returns 404
+(the UI keeps working; the files are simply missing).
 
 ## Duplicate detection
 
@@ -219,13 +219,11 @@ are real user replays.
 6. Edit metadata, add tags, link to an Mko, toggle favorite, then try the filters and Ctrl+K search.
 7. Download → the bytes equal the original (`sha256sum`).
 8. Delete → the file disappears from `MEDIA_DIR/wot-replays/` and the linked Mko stays.
-9. Add `MEDIA_DIR` to your backup routine.
+9. Run a backup and verify that its media manifest contains the uploaded replay.
 
 ## Deferred
 
-- Including `MEDIA_DIR` in the backup script.
 - Bulk upload / folder import.
-- "Create Mko from replay" pre-fill.
 - Replay stream decoding (positions, timeline).
 - Per-tank stats aggregation.
 - A best-moments page across games.

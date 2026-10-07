@@ -81,7 +81,8 @@ visual polish.
 | Manual metadata, tags (presets + custom), favorite, milestone link | ✅ `/wot/replays`, `components/wot/replays/` |
 | Filters, sorting, Global Search results | ✅ |
 | Replay tag → tank name via A's manifest | ✅ `resolveTankTag` |
-| `MEDIA_DIR` in backups, bulk import, replay stream decoding | ⏳ deferred |
+| `MEDIA_DIR` in backups | ✅ incremental archive + SHA-256 manifests (`docs/backups.md`) |
+| Bulk import, replay stream decoding | ⏳ deferred |
 
 ## Status after Roadmap 4H (Act from Today)
 
