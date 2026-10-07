@@ -72,6 +72,17 @@ visual polish.
 | Screenshot upload (PNG/JPEG/WebP, 10 MB, local `MEDIA_DIR`), gallery + lightbox | ✅ `backend/media_storage.py`, `MilestoneGallery.tsx` |
 | Replays, best-moments page, gamification, MFF progression | ⏳ later phases |
 
+## Status after Game Enrichment C (WoT Replay Library)
+
+| Item | Status |
+|---|---|
+| `.wotreplay` upload, originals in `MEDIA_DIR/wot-replays`, SHA-256 duplicates → 409 | ✅ `docs/wot-replays.md`, migration `0014_wot_replays` |
+| Deterministic header parser (parsed / partial / unsupported / invalid) | ✅ `backend/replay_parser.py` – needs local check with real replays |
+| Manual metadata, tags (presets + custom), favorite, milestone link | ✅ `/wot/replays`, `components/wot/replays/` |
+| Filters, sorting, Global Search results | ✅ |
+| Replay tag → tank name via A's manifest | ✅ `resolveTankTag` |
+| `MEDIA_DIR` in backups, bulk import, replay stream decoding | ⏳ deferred |
+
 ## Status after Roadmap 4H (Act from Today)
 
 | Item | Status |

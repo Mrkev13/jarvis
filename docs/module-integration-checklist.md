@@ -130,6 +130,9 @@ Only when a module truly needs user files (e.g. WoT milestone screenshots, `docs
       row with `delta.event` and a dedupe key – no event bus.
 - [ ] Tests: valid types, invalid type, oversize, traversal/unsafe name, delete cleanup; ui-check with a stateful mock
       and neutral stub images (no game art), reduced-motion path and 390 px.
+- [ ] Non-image files (e.g. `.wotreplay`, Game Enrichment C): `media_storage.save_bytes` after your own validation
+      (extension + structure), SHA-256 duplicate check, attachment download by id only, parser that never guesses
+      (status + warnings) and manual editing for everything it could not read.
 
 ## 13. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
