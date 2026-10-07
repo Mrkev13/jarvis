@@ -187,6 +187,66 @@ class WotGrind(Base):
     xp_remaining = Column(Float, default=0)
     priority = Column(String(20), default="medium")
     status = Column(String(20), default="active")
+    # Game Enrichment B: výchozí zbývající XP (základ pro průběh v %) a začátek grindu (pro délku).
+    # NULL u grindů založených před 0013 → průběh se ukáže od momentu migrace / neznámá délka.
+    xp_start = Column(Float, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+
+
+class WotGrindCompletion(Base):
+    """Splněný grind (Game Enrichment B) – trvalá historie, nezávislá na řádku grindu (ten se dá smazat / znovu
+    založit). Zdroj pravdy pro budoucí událost `wot_grind_completed` (gamifikace ji jen čte)."""
+    __tablename__ = "wot_grind_completions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    grind_id = Column(Integer, ForeignKey("wot_grinds.id", ondelete="SET NULL"), nullable=True, index=True)
+    tank = Column(String(100), nullable=False)
+    xp_start = Column(Float, nullable=True)
+    xp_remaining_before = Column(Float, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=False, index=True)
+    source = Column(String(30), nullable=False, default="manual")
+
+
+class WotMilestone(Base):
+    """Herní milník WoT (Game Enrichment B) – zatím hlavně „Mko" (Ace Tanker). `milestone_type` nechává místo pro
+    další druhy později; žádná obecná abstrakce."""
+    __tablename__ = "wot_milestones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    milestone_type = Column(String(30), nullable=False, default="mastery")
+    mastery = Column(String(20), nullable=True)
+    tank = Column(String(100), nullable=False)
+    map_name = Column(String(100), nullable=True)
+    played_on = Column(Date, nullable=True)
+    damage = Column(Integer, nullable=True)
+    assist = Column(Integer, nullable=True)
+    kills = Column(Integer, nullable=True)
+    base_xp = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    favorite = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    screenshots = relationship("WotMilestoneScreenshot", back_populates="milestone", cascade="all, delete-orphan",
+                               order_by="WotMilestoneScreenshot.position")
+
+
+class WotMilestoneScreenshot(Base):
+    """Screenshot k milníku: metadata v DB, soubor v MEDIA_DIR pod serverovým názvem (nikdy původní název)."""
+    __tablename__ = "wot_milestone_screenshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    milestone_id = Column(Integer, ForeignKey("wot_milestones.id", ondelete="CASCADE"), nullable=False, index=True)
+    stored_name = Column(String(80), nullable=False, unique=True)
+    original_name = Column(String(255), nullable=True)
+    content_type = Column(String(40), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    caption = Column(String(300), nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    milestone = relationship("WotMilestone", back_populates="screenshots")
 
 
 class Subject(Base):
