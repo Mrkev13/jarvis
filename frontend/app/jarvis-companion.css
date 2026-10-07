@@ -1,0 +1,335 @@
+/*
+ * Jarvis companion (MRK-16) – animace postavičky, izolované pod `jarvis-*`.
+ * Sémantický pohyb UI (MRK-6, motion.css / motion-semantic.css) se tu nepoužívá ani nepřepisuje.
+ * Stav řídí `data-companion-state` na kořeni (lib/jarvisCompanion.ts); chůzi dělá CSS transition
+ * `transform` s délkou z JS (lineární – odpovídá `walkPosition`).
+ * prefers-reduced-motion: žádná chůze, dýchání ani poskakování; výraz (oči, barva, póza) zůstává.
+ */
+
+/* vyhrazený pruh dole: obsah stránky na konci nikdy nezajede pod Jarvise (desktop ≥ 1024 px) */
+@media (min-width: 1024px) {
+  html[data-jarvis-companion="on"] [data-jarvis-lane="dock"] {
+    padding-bottom: 104px;
+  }
+  html[data-jarvis-companion="on"] [data-jarvis-ai-dock] {
+    padding-bottom: 112px;
+  }
+}
+
+.jarvis-companion {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 30; /* pod dialogy a šuplíky (z-50) – modální okna ho vždy překryjí */
+  width: 64px;
+  height: 84px;
+  pointer-events: none;
+  transition-property: transform;
+  transition-timing-function: linear;
+  will-change: transform;
+}
+
+.jarvis-companion-hit {
+  position: relative;
+  display: block;
+  width: 64px;
+  height: 84px;
+  pointer-events: auto;
+  border-radius: 18px;
+  cursor: pointer;
+  transition: transform 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.jarvis-companion-hit:hover {
+  transform: translateY(-2px);
+}
+.jarvis-companion-hit:focus-visible {
+  outline: 2px solid rgb(34 211 238 / 0.7);
+  outline-offset: 3px;
+}
+
+.jarvis-facing {
+  transition: transform 180ms ease-out;
+}
+[data-companion-facing="left"] .jarvis-facing {
+  transform: scaleX(-1);
+}
+
+/* ---------- bublina ---------- */
+.jarvis-bubble-slot {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.jarvis-bubble {
+  display: inline-block;
+  border: 1px solid rgb(46 220 255 / 0.35);
+  border-radius: 12px;
+  background: rgb(5 9 16 / 0.92);
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: rgb(226 244 255);
+  box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.8), 0 0 14px -6px rgb(46 220 255 / 0.6);
+  animation: jarvis-bubble-in 180ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+[data-companion-state="success"] .jarvis-bubble {
+  border-color: rgb(52 211 153 / 0.45);
+}
+[data-companion-state="warning"] .jarvis-bubble {
+  border-color: rgb(251 191 36 / 0.5);
+}
+[data-companion-state="error"] .jarvis-bubble {
+  border-color: rgb(251 113 133 / 0.5);
+}
+
+/* ---------- části postavičky ---------- */
+.jarvis-body,
+.jarvis-head,
+.jarvis-eyes,
+.jarvis-arm,
+.jarvis-leg {
+  transform-box: fill-box;
+}
+.jarvis-body {
+  transform-origin: 50% 100%;
+}
+.jarvis-head {
+  transform-origin: 50% 90%;
+  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+.jarvis-eyes {
+  transform-origin: 50% 47%;
+}
+.jarvis-arm {
+  transform-origin: 50% 0%;
+  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+.jarvis-leg {
+  transform-origin: 50% 0%;
+}
+.jarvis-ring {
+  position: absolute;
+  left: 50%;
+  top: 30px;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+
+/* idle: dýchání, mrkání, rozhlížení (jen klid, žádné poskakování) */
+[data-companion-state="idle"] .jarvis-body {
+  animation: jarvis-breathe 4.2s ease-in-out infinite;
+}
+[data-companion-state="idle"] .jarvis-eyes {
+  animation: jarvis-blink 5.8s linear infinite, jarvis-look 11s ease-in-out infinite;
+}
+
+/* chůze: střídání nohou a rukou, lehké pohupování */
+[data-companion-state="walking"] .jarvis-body {
+  animation: jarvis-bob 0.52s ease-in-out infinite;
+}
+[data-companion-state="walking"] .jarvis-leg-l,
+[data-companion-state="walking"] .jarvis-arm-r {
+  animation: jarvis-swing 0.52s ease-in-out infinite;
+}
+[data-companion-state="walking"] .jarvis-leg-r,
+[data-companion-state="walking"] .jarvis-arm-l {
+  animation: jarvis-swing 0.52s ease-in-out infinite reverse;
+}
+
+/* poslouchá: pozorný, pulzující kruh */
+[data-companion-state="listening"] .jarvis-head {
+  transform: translateY(-1px);
+}
+[data-companion-state="listening"] .jarvis-ring {
+  border-color: rgb(101 231 255 / 0.55);
+  animation: jarvis-listen 1.6s ease-out infinite;
+}
+
+/* přemýšlí: zastaví se, nakloní hlavu, ruka k bradě */
+[data-companion-state="thinking"] .jarvis-head {
+  transform: rotate(-6deg);
+}
+[data-companion-state="thinking"] .jarvis-arm-r {
+  transform: rotate(-125deg);
+}
+[data-companion-state="thinking"] .jarvis-eyes {
+  animation: jarvis-think 1.4s ease-in-out infinite;
+}
+
+/* úspěch: krátká oslava (2 poskoky, ruce nahoru), pak idle */
+[data-companion-state="success"] .jarvis-body {
+  animation: jarvis-cheer 0.9s cubic-bezier(0.2, 0, 0, 1) 2;
+}
+[data-companion-state="success"] .jarvis-arm-l {
+  transform: rotate(135deg);
+}
+[data-companion-state="success"] .jarvis-arm-r {
+  transform: rotate(-135deg);
+}
+
+/* varování: jedno trhnutí, ostražitý postoj */
+[data-companion-state="warning"] .jarvis-body {
+  animation: jarvis-shake 0.42s ease-in-out 1;
+}
+[data-companion-state="warning"] .jarvis-head {
+  transform: translateY(-2px);
+}
+[data-companion-state="warning"] .jarvis-ring {
+  border-color: rgb(251 191 36 / 0.45);
+}
+
+/* chyba: zamračené otřesení, pak svěšený postoj */
+[data-companion-state="error"] .jarvis-body {
+  animation: jarvis-shake 0.42s ease-in-out 1, jarvis-slump 0.5s ease-out 0.42s both;
+}
+[data-companion-state="error"] .jarvis-head {
+  transform: rotate(5deg) translateY(1px);
+}
+
+@keyframes jarvis-breathe {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.025);
+  }
+}
+@keyframes jarvis-blink {
+  0%,
+  95%,
+  100% {
+    transform: scaleY(1);
+  }
+  97% {
+    transform: scaleY(0.12);
+  }
+}
+@keyframes jarvis-look {
+  0%,
+  35%,
+  100% {
+    translate: 0 0;
+  }
+  45%,
+  60% {
+    translate: 2px 0;
+  }
+  70%,
+  85% {
+    translate: -2px 0;
+  }
+}
+@keyframes jarvis-bob {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25%,
+  75% {
+    transform: translateY(-2px);
+  }
+}
+@keyframes jarvis-swing {
+  0%,
+  100% {
+    transform: rotate(20deg);
+  }
+  50% {
+    transform: rotate(-20deg);
+  }
+}
+@keyframes jarvis-listen {
+  0% {
+    transform: scale(0.82);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+@keyframes jarvis-think {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 1.5px -1px;
+  }
+}
+@keyframes jarvis-cheer {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-9px);
+  }
+  60% {
+    transform: translateY(0);
+  }
+  75% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes jarvis-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-3px);
+  }
+  40% {
+    transform: translateX(3px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+@keyframes jarvis-slump {
+  from {
+    transform: none;
+  }
+  to {
+    transform: translateY(2px) scaleY(0.97);
+  }
+}
+@keyframes jarvis-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-companion,
+  .jarvis-companion-hit,
+  .jarvis-facing,
+  .jarvis-head,
+  .jarvis-arm {
+    transition: none !important;
+  }
+  .jarvis-companion-hit:hover {
+    transform: none;
+  }
+  .jarvis-companion *,
+  .jarvis-companion *::before,
+  .jarvis-companion *::after {
+    animation: none !important;
+  }
+}
