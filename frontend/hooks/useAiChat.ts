@@ -111,10 +111,14 @@ export function useAiChat({
 
   /** Nová / přepnutá konverzace: prázdná historie, žádné pending akce ani chyby. */
   const reset = useCallback(() => {
+    timers.current.forEach((timer) => window.clearTimeout(timer));
+    timers.current.clear();
     setHistory([]);
     setPendingActions([]);
     setFailure(null);
     setSending(false);
+    setFailedAction(null);
+    setOutcomes([]);
   }, []);
 
   const send = useCallback(
@@ -128,6 +132,7 @@ export function useAiChat({
         /* ignore */
       }
       setHistory((h) => [...h, { id: localId("u"), role: "user", content: prompt, createdAt: Date.now() }]);
+      setFailedAction(null);
       setSending(true);
       setFailure(null);
       setPendingActions([]);
@@ -216,6 +221,7 @@ export function useAiChat({
     async (action: PendingAction) => {
       const view = describeAction(action);
       setPendingActions((prev) => prev.filter((a) => a.id !== action.id));
+      setFailedAction((current) => current?.id === action.id ? null : current);
       showOutcome(view.title, "rejected");
       appendLocal(rejectedMessage(view));
       // Zamítnout i na serveru – jinak by akce zůstala potvrditelná do vypršení. 409 = už zpracovaná.

@@ -642,6 +642,22 @@ async function aiSend(page, text) {
   await ctx.close();
 }
 
+// Jarvis AI transientní stavy se nesmí přenést do jiné konverzace.
+{
+  const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900 });
+  const avatar = page.locator('header [data-testid="jarvis-avatar"]');
+  await aiSend(page, "Zapiš práci 3 h");
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Potvrdit" }).first().click();
+  await page.waitForTimeout(1200);
+  check("jarvis ai lifecycle: úspěch v aktivním chatu", (await avatar.getAttribute("data-jarvis-state")) === "success");
+  await page.getByRole("complementary", { name: "Konverzace" }).getByRole("button", { name: /^Finance – září/ }).click();
+  await page.waitForTimeout(700);
+  check("jarvis ai lifecycle: přepnutí chatu resetuje transientní stav", (await avatar.getAttribute("data-jarvis-state")) === "idle");
+  check("jarvis ai lifecycle: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 // přejmenování na místě a smazání přes ConfirmDialog
 {
   const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
@@ -721,6 +737,35 @@ async function aiSend(page, text) {
   });
   check("ai reduced motion: odpočet Vrátit bez animace", timer === "none", timer);
   await page.screenshot({ path: `${OUT}jarvis-ai-reduced-motion.png` });
+  await ctx.close();
+}
+
+// Skutečný stav diktování z browserového SpeechRecognition adapteru → listening.
+{
+  const { ctx, page, errors } = await open("/ai", {
+    setup: (p) => p.addInitScript(() => {
+      class FakeSpeechRecognition {
+        onstart = null;
+        onresult = null;
+        onerror = null;
+        onend = null;
+        onspeechend = null;
+        onsoundend = null;
+        onaudioend = null;
+        start() { setTimeout(() => this.onstart?.(), 25); }
+        stop() { setTimeout(() => this.onend?.(), 25); }
+        abort() { setTimeout(() => this.onend?.(), 25); }
+      }
+      Object.defineProperty(window, "SpeechRecognition", { value: FakeSpeechRecognition, configurable: true });
+      Object.defineProperty(window, "webkitSpeechRecognition", { value: FakeSpeechRecognition, configurable: true });
+    }),
+  });
+  const avatar = page.locator('header [data-testid="jarvis-avatar"]');
+  await page.getByRole("button", { name: "Diktovat zprávu (Ctrl+Shift+M)" }).click();
+  await page.getByText("Poslouchám…").waitFor();
+  check("jarvis ai: skutečné diktování = listening", (await avatar.getAttribute("data-jarvis-state")) === "listening");
+  await page.getByRole("button", { name: "Zastavit diktování" }).click();
+  check("jarvis ai listening: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 

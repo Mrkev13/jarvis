@@ -36,6 +36,7 @@ export function aiJarvisState({
   failedAction,
   sending,
   confirming,
+  listening,
   pending,
   success,
 }: {
@@ -43,12 +44,14 @@ export function aiJarvisState({
   failedAction: boolean;
   sending: boolean;
   confirming: boolean;
+  listening: boolean;
   pending: number;
   success: boolean;
 }): JarvisState {
   if (failure || failedAction) return "error";
   if (sending || confirming) return "thinking";
   if (pending > 0) return "warning";
+  if (listening) return "listening";
   if (success) return "success";
   return "idle";
 }

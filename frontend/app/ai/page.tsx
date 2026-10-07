@@ -111,6 +111,7 @@ export default function AiPage() {
     failedAction: Boolean(chat.failedAction),
     sending: chat.sending,
     confirming: Boolean(chat.confirmingId),
+    listening: voice.stt.listening,
     pending: chat.pendingActions.length,
     success: chat.outcomes.some((outcome) => outcome.kind === "success"),
   });
