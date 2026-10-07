@@ -59,6 +59,19 @@ visual polish.
 | Assets committed to Git | ❌ by design (third-party copyright) |
 | Grind completion, Mko gallery, replays, MFF T4 events | ⏳ Game Enrichment B/C |
 
+## Status after Game Enrichment B (WoT progress, completion & milestones)
+
+| Item | Status |
+|---|---|
+| Explicit "Splněno" with confirm, `POST /wot/grind/{id}/complete`, 409 on double completion | ✅ `docs/wot-milestones.md` |
+| Progress baseline (`xp_start`), progress bar only when known | ✅ migration `0013_wot_milestones` |
+| Completed history (`wot_grind_completions`, survives grind delete) | ✅ `components/wot/CompletedGrinds.tsx` |
+| GRIND COMPLETE cyan pulse (CSS, 1.3 s), static under reduced motion | ✅ `motion.css` |
+| `wot_grind_completed` as an activity row (no event bus) | ✅ |
+| Mastery milestones CRUD + favorite marker | ✅ `components/wot/MilestoneCard.tsx`, `MilestoneForm.tsx` |
+| Screenshot upload (PNG/JPEG/WebP, 10 MB, local `MEDIA_DIR`), gallery + lightbox | ✅ `backend/media_storage.py`, `MilestoneGallery.tsx` |
+| Replays, best-moments page, gamification, MFF progression | ⏳ later phases |
+
 ## Status after Roadmap 4H (Act from Today)
 
 | Item | Status |

@@ -549,5 +549,19 @@ are dark and transparent, so the tank frame adds a soft centered `ink-2` backdro
 (presentation only – source art is never modified). Missing/failed → neutral
 monogram in the same frame. Assets are local (gitignored cache + runtime manifest), see `docs/game-assets.md`.
 Placement: WoT grind rows (`EntityRow leading`, `sm`), WoT currency labels (`xs`, decorative), MFF character cards
-(`md`, `sm` on mobile). Do not add images to small stat rows or turn modules into galleries.
+(`md`, `sm` on mobile), completed-grind history (`xs`), milestone cards and the milestone form (`sm`). Do not add
+images to small stat rows or turn modules into galleries.
+
+## 20. Completion celebration and milestone gallery (Game Enrichment B)
+
+- **Completion** – an explicit, confirmed action (`ConfirmDialog danger={false}`, confirm label = the action). The
+  row then shows "GRIND COMPLETE" (mono, uppercase, `accent-strong`) with `motion-grind-complete`: one cyan
+  box-shadow pulse, 1.3 s, CSS only. No confetti, no overlay, never blocks navigation; the server write happens first.
+  Reduced motion → no animation, the row moves straight to history; the `role=status` text notice is always there.
+- **Favorite** – "★ Legendární" `StatusBadge` (warning tone) + warning border on the card; a toggle button with
+  `aria-pressed`. Not a ranking.
+- **Gallery** – `MilestoneGallery`: 16:9 thumbnail buttons (`aspect-video`, `object-cover`, lazy) named
+  "Zvětšit: Screenshot i z n – caption"; lightbox = portal dialog via `useModal` (focus on Zavřít, Esc, ←/→,
+  `object-contain` so the aspect ratio is kept). Missing file → text placeholder in the same frame, never a broken
+  image. No screenshots → nothing rendered (no empty placeholder tiles).
 

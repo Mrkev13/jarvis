@@ -120,7 +120,18 @@ Only for game modules whose entities are recognised by a picture.
 - [ ] Tests: resolution/alias cases in `lib/gameAssets.test.mjs` against `scripts/fixtures/game-assets-manifest.json`;
       ui-check with the stub manifest (image, not in manifest, failing load) and a 390 px check.
 
-## 12. Operations and quality
+## 12. User uploads and milestones (Game Enrichment B)
+Only when a module truly needs user files (e.g. WoT milestone screenshots, `docs/wot-milestones.md`).
+- [ ] Store through `backend/media_storage.py` (own purpose folder under `MEDIA_DIR`): type from file signature,
+      size limit from env, server-generated names, serve only by DB id; never `public/`, never committed.
+- [ ] Metadata row per file (original name only as display text); deleting the parent deletes rows **and** files
+      after the commit. Document that `MEDIA_DIR` is outside the DB backup.
+- [ ] Completion-like events: explicit user action + confirm, a history table that survives deletes, an activity
+      row with `delta.event` and a dedupe key – no event bus.
+- [ ] Tests: valid types, invalid type, oversize, traversal/unsafe name, delete cleanup; ui-check with a stateful mock
+      and neutral stub images (no game art), reduced-motion path and 390 px.
+
+## 13. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
 - [ ] Scheduler work (if any) as an isolated, idempotent, bounded job.
 - [ ] Logs without secrets or private content.
