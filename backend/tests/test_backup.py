@@ -340,6 +340,28 @@ class BackupTestCase(unittest.TestCase):
             self.assertEqual(log.status, "failed")
             self.assertIn("media backup failed", log.error_message)
 
+    def test_14_archive_commit_never_overwrites_racing_destination(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.wotreplay"
+            target = root / "archive" / "battle.wotreplay"
+            source.write_bytes(b"source-content")
+            expected_hash = hashlib.sha256(b"source-content").hexdigest()
+            original_copyfileobj = backup_service.shutil.copyfileobj
+
+            def copy_then_occupy(source_handle, target_handle, length=0):
+                original_copyfileobj(source_handle, target_handle, length=length)
+                target.write_bytes(b"racing-writer-content")
+
+            with patch.object(backup_service.shutil, "copyfileobj", side_effect=copy_then_occupy):
+                with self.assertRaisesRegex(backup_service.MediaBackupError, "obsazen"):
+                    backup_service._copy_verified(source, target, expected_hash)
+
+            self.assertEqual(target.read_bytes(), b"racing-writer-content")
+            self.assertFalse(target.with_name(f".{target.name}.tmp").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

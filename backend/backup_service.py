@@ -155,7 +155,16 @@ def _copy_verified(source: Path, target: Path, expected_hash: str) -> None:
             shutil.copyfileobj(source_handle, target_handle, length=1024 * 1024)
         if _sha256_of_file(temporary) != expected_hash:
             raise MediaBackupError(f"SHA-256 ověření kopie selhalo: {source.name}")
-        temporary.replace(target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError as exc:
+            if target.is_file() and _sha256_of_file(target) == expected_hash:
+                return
+            raise MediaBackupError(f"Cíl archivu byl souběžně obsazen jiným obsahem: {target.name}") from exc
+        except OSError as exc:
+            raise MediaBackupError(
+                f"Filesystem nepodporuje bezpečný atomický commit archivu: {target.name}"
+            ) from exc
     except FileExistsError as exc:
         raise MediaBackupError(f"Dočasný soubor archivu už existuje: {target.name}") from exc
     finally:
