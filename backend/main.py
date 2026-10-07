@@ -1357,6 +1357,20 @@ def wot_replay_update(replay_id: int, request: WotReplayUpdateRequest):
         db.close()
 
 
+@app.post("/wot/replays/{replay_id}/milestone")
+def wot_replay_create_milestone(replay_id: int):
+    """Založí Mko z údajů replaye a propojí ho (Game Enrichment C – lokální ověření)."""
+    db = SessionLocal()
+    try:
+        r, m = _wot_call(lambda: wot_replay_service.create_milestone_from_replay(db, replay_id))
+        db.commit()
+        db.refresh(r)
+        db.refresh(m)
+        return {"replay": wot_replay_service.serialize_replay(r), "milestone": wot_service.serialize_milestone(m)}
+    finally:
+        db.close()
+
+
 @app.delete("/wot/replays/{replay_id}")
 def wot_replay_delete(replay_id: int):
     db = SessionLocal()

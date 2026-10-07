@@ -93,6 +93,8 @@ function FormBody({
   const [tagError, setTagError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
   const status = parserStatusMeta(replay.parser_status);
 
   const set = <K extends keyof ReplayDraft>(k: K, v: ReplayDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -112,29 +114,51 @@ function FormBody({
     if (!draft.tags.includes(tag)) set("tags", [...draft.tags, tag]);
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  /** Uloží rozepsané údaje (bez zavření). `false` = chyba (ukázaná ve formuláři), jinak hotovo. */
+  async function persistDraft(): Promise<boolean> {
     const parsed = replayPatch({ ...draft, tank_name: tankValue }, replay, today);
     if (!parsed.ok) {
       setErrors(parsed.errors);
-      return;
+      return false;
     }
     setErrors({});
-    if (!Object.keys(parsed.body).length) {
-      onClose();
-      return;
-    }
+    if (!Object.keys(parsed.body).length) return true;
+    const res = await apiFetch(`/wot/replays/${replay.id}`, jsonBody("PATCH", parsed.body));
+    if (!res.ok) throw new Error(await errorText(res));
+    await onSaved((await res.json()) as WotReplay);
+    return true;
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setFailure(null);
     try {
-      const res = await apiFetch(`/wot/replays/${replay.id}`, jsonBody("PATCH", parsed.body));
-      if (!res.ok) throw new Error(await errorText(res));
-      await onSaved((await res.json()) as WotReplay);
-      onClose();
+      if (await persistDraft()) onClose();
     } catch (err) {
       setFailure(err instanceof Error && err.message ? err.message : "Uložení se nepodařilo.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** „Vytvořit Mko z tohoto replaye": nejdřív uloží rozepsané údaje, pak server založí Mko z replaye a propojí ho. */
+  async function createMilestone() {
+    setCreating(true);
+    setFailure(null);
+    setCreated(null);
+    try {
+      if (!(await persistDraft())) return;
+      const res = await apiFetch(`/wot/replays/${replay.id}/milestone`, { method: "POST" });
+      if (!res.ok) throw new Error(await errorText(res));
+      const body = (await res.json()) as { replay: WotReplay; milestone: WotMilestone };
+      await onSaved(body.replay);
+      set("linked_milestone_id", String(body.milestone.id));
+      setCreated(`Mko „${body.milestone.tank}" je vytvořené a propojené.`);
+    } catch (err) {
+      setFailure(err instanceof Error && err.message ? err.message : "Mko se nepodařilo vytvořit.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -291,6 +315,25 @@ function FormBody({
           </select>
         )}
       </FormField>
+      {created ? (
+        <p role="status" data-testid="replay-milestone-created" className="-mt-2 text-sm text-success">
+          {created}
+        </p>
+      ) : !draft.linked_milestone_id ? (
+        <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="replay-create-milestone">
+          {milestones.length === 0 ? <p className="text-sm text-ink-muted">Zatím nemáš žádné Mko.</p> : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void createMilestone()}
+            busy={creating}
+            busyLabel="Vytvářím…"
+            disabled={busy || creating || !(tankValue || replay.tank_tag)}
+          >
+            Vytvořit Mko z tohoto replaye
+          </Button>
+        </div>
+      ) : null}
       <FormField label="Poznámka" error={errors.notes}>
         {(p) => <textarea {...p} rows={3} value={draft.notes} onChange={(e) => set("notes", e.target.value)} className={fieldClass} placeholder="Co se v bitvě stalo…" />}
       </FormField>

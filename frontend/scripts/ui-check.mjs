@@ -1986,6 +1986,31 @@ const settle = (page, ms = 500) => page.waitForTimeout(ms);
   await ctx.close();
   await wotReset();
 }
+// Lokální ověření: bez jediného Mka nešel replay propojit a formulář neřekl proč → nápověda + „Vytvořit Mko z tohoto replaye"
+{
+  await wotReset();
+  await fetch(`${MOCK}/__mock/wot/milestones-empty`, { method: "POST" });
+  const { ctx, page, errors } = await open("/wot/replays?replay=1", { setup: (p) => withGameAssets(p) });
+  await page.getByTestId("replay-detail").waitFor({ timeout: 4000 }).catch(() => undefined);
+  await page.getByTestId("replay-detail").getByRole("button", { name: "Upravit údaje" }).click();
+  const form = page.getByTestId("replay-form");
+  await form.waitFor({ timeout: 3000 }).catch(() => undefined);
+  const box = form.getByTestId("replay-create-milestone");
+  check("replay → Mko: prázdný seznam Mk vysvětlený", (await box.innerText()).includes("Zatím nemáš žádné Mko"), await box.innerText().catch(() => ""));
+  await box.getByRole("button", { name: "Vytvořit Mko z tohoto replaye" }).click();
+  const done = form.getByTestId("replay-milestone-created");
+  await done.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("replay → Mko: vytvořené z replaye a propojené", (await done.count()) === 1 && (await done.getAttribute("role")) === "status" && (await done.innerText()).includes("je vytvořené a propojené"), await done.innerText().catch(() => ""));
+  const selected = await form.getByLabel("Propojit s Mkem / milníkem").evaluate((sel) => sel.options[sel.selectedIndex]?.text ?? "");
+  check("replay → Mko: nové Mko vybrané ve formuláři", selected.includes("Progetto 65"), selected);
+  await page.keyboard.press("Escape");
+  await settle(page, 500);
+  const detailLink = await page.getByTestId("replay-detail").innerText().catch(() => "");
+  check("replay → Mko: detail ukazuje propojení", detailLink.includes("Progetto 65") && !detailLink.includes("Bez propojení"), detailLink.replace(/\s+/g, " ").slice(0, 200));
+  check("replay → Mko: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await wotReset();
+}
 for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   await wotReset();
   const { ctx, page, errors } = await open("/wot/replays", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });

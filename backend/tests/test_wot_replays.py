@@ -20,7 +20,7 @@ import replay_fixtures as fx  # noqa: E402
 import replay_parser as rp  # noqa: E402
 import search_service  # noqa: E402
 import wot_replay_service as wrs  # noqa: E402
-from models import ActivityLog, WotReplay  # noqa: E402
+from models import ActivityLog, WotMilestone, WotReplay  # noqa: E402
 from test_wot_milestones import ELC as ELC_MILESTONE, PNG, PROGETTO as PROGETTO_MILESTONE, WotBase  # noqa: E402
 
 
@@ -421,6 +421,54 @@ class FriendlyTankNameTestCase(ReplayApiBase):
         self.assertEqual([x["title"] for x in hits], ["It13_Progetto_M35_mod_46"])
         act = self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="WotReplay").one())
         self.assertIn("italy:It13_Progetto_M35_mod_46", act.summary)
+
+
+class MilestoneFromReplayTestCase(ReplayApiBase):
+    """Lokální ověření: při prázdném seznamu Mk nešel replay propojit a Mko se muselo opsat ručně.
+    „Vytvořit Mko z tohoto replaye" ho založí z uložených údajů replaye a rovnou propojí (jedna transakce)."""
+
+    def upload_named(self, data, tank_name, name="real.wotreplay"):
+        r = self.client.post("/wot/replays", params={"filename": name, "tank_name": tank_name}, content=data,
+                             headers={"Content-Type": "application/octet-stream"})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_creates_prefilled_milestone_and_links_it(self):
+        self.login()
+        rid = self.upload_named(fx.REAL_ELC, "ELC EVEN 90")["id"]
+        r = self.client.post(f"/wot/replays/{rid}/milestone")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        m, rep = body["milestone"], body["replay"]
+        self.assertEqual((m["tank"], m["mastery"], m["map_name"], m["played_on"], m["damage"], m["assist"], m["kills"], m["base_xp"]),
+                         ("ELC EVEN 90", "ace", "Karélie", "2026-09-29", 1594, 5975, 2, 1412))
+        self.assertEqual(rep["linked_milestone_id"], m["id"])
+        self.assertEqual(self.q(lambda db: db.get(WotReplay, rid).linked_milestone_id), m["id"])
+        acts = self.q(lambda db: [a.summary for a in db.query(ActivityLog).order_by(ActivityLog.id)])
+        self.assertIn("Nový milník: ELC EVEN 90 · Karélie", acts)
+        self.assertIn("Replay propojen s milníkem: ELC EVEN 90 · Karélie", acts)
+
+    def test_played_on_is_prague_date(self):
+        self.login()
+        # Vz. 55 jen s hlavičkou: 07.10.2026 16:55:31 Praha → datum milníku 2026-10-07, bez statistik
+        rid = self.upload_named(fx.REAL_HEADER_ONLY, "Vz. 55")["id"]
+        m = self.client.post(f"/wot/replays/{rid}/milestone").json()["milestone"]
+        self.assertEqual((m["tank"], m["played_on"], m["damage"], m["mastery"]), ("Vz. 55", "2026-10-07", None, None))
+
+    def test_refuses_already_linked_missing_tank_and_unknown(self):
+        self.login()
+        rid = self.upload_named(fx.REAL_T57_LOSS, "T57 Heavy")["id"]
+        self.assertEqual(self.client.post(f"/wot/replays/{rid}/milestone").status_code, 200)
+        again = self.client.post(f"/wot/replays/{rid}/milestone")
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(again.json()["detail"]["error"], "already_linked")
+        self.assertEqual(self.q(lambda db: db.query(WotMilestone).count()), 1, "druhé Mko nevzniklo")
+        no_tank = self.upload_named(fx.UNSUPPORTED, "", name="x.wotreplay")["id"]
+        r = self.client.post(f"/wot/replays/{no_tank}/milestone")
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.json()["detail"]["error"], "missing_tank")
+        self.assertEqual(self.client.post("/wot/replays/999/milestone").status_code, 404)
+        self.assertEqual(self.q(lambda db: db.query(WotMilestone).count()), 1)
 
 if __name__ == "__main__":
     unittest.main()

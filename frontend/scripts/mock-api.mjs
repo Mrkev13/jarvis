@@ -331,6 +331,25 @@ createServer(async (req, res) => {
     }
   }
   // ----- Game Enrichment C: knihovna replayů -----
+  if (url.pathname === "/__mock/wot/milestones-empty") {
+    wotState.milestones = [];
+    return respond(200, { ok: true });
+  }
+  // „Vytvořit Mko z tohoto replaye" – jako backend: z údajů replaye, rovnou propojí; propojený → 409, bez tanku → 422
+  const fromReplay = /^\/wot\/replays\/(\d+)\/milestone$/.exec(url.pathname);
+  if (fromReplay && req.method === "POST") {
+    const r = wotState.replays.find((x) => x.id === Number(fromReplay[1]));
+    if (!r) return respond(404, { detail: { error: "not_found", message: "Replay neexistuje." } });
+    if (r.linked_milestone_id && wotMilestone(r.linked_milestone_id)) return respond(409, { detail: { error: "already_linked", message: "Replay už je propojený s Mkem." } });
+    const tank = r.tank_name || (r.tank_tag ? r.tank_tag.split(":").slice(1).join(":") : "");
+    if (!tank) return respond(422, { detail: { error: "missing_tank", message: "Replay nemá tank – doplň ho v údajích replaye." } });
+    const m = { id: ++wotState.seq, milestone_type: "mastery", mastery: r.mastery ?? null, tank, map_name: r.map_name ?? null,
+      played_on: r.played_at ? String(r.played_at).slice(0, 10) : null, damage: r.damage ?? null, assist: r.assist ?? null, kills: r.kills ?? null,
+      base_xp: r.base_xp ?? null, notes: null, favorite: false, created_at: wotNow(), updated_at: wotNow(), screenshots: [] };
+    wotState.milestones.unshift(m);
+    r.linked_milestone_id = m.id;
+    return respond(200, { replay: replayView(r), milestone: m }, 300);
+  }
   if (url.pathname === "/__mock/wot/replays-empty") {
     wotState.replays = [];
     return respond(200, { ok: true });

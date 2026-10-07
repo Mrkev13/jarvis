@@ -19,8 +19,8 @@ from activity_service import log_activity
 from env_config import env_int
 from models import WotMilestone, WotReplay
 from replay_parser import STATUSES, parse_replay
-from time_utils import APP_TZ, utc_now
-from wot_service import FIELD_LIMITS, MASTERY_VALUES, WotError, _clean_text, _iso, serialize_screenshot
+from time_utils import APP_TZ, to_local, utc_now
+from wot_service import FIELD_LIMITS, MASTERY_VALUES, WotError, _clean_text, _iso, create_milestone, serialize_screenshot
 
 REPLAY_FOLDER = "wot-replays"
 REPLAY_EXT = ".wotreplay"
@@ -239,6 +239,23 @@ def get_replay(db: Session, replay_id: int) -> WotReplay:
     if r is None:
         raise WotError("Replay neexistuje.", status=404, code="not_found")
     return r
+
+
+def create_milestone_from_replay(db: Session, replay_id: int) -> tuple[WotReplay, WotMilestone]:
+    """„Vytvořit Mko z tohoto replaye": milník z uložených údajů replaye (tank, odznak, mapa, pražské datum,
+    statistiky) a rovnou propojení – v jedné transakci. Už propojený replay / replay bez tanku se odmítne."""
+    r = get_replay(db, replay_id)
+    if r.linked_milestone_id is not None:
+        raise WotError("Replay už je propojený s Mkem.", status=409, code="already_linked")
+    tank = r.tank_name or (r.tank_tag.split(":", 1)[-1] if r.tank_tag else None)
+    if not tank:
+        raise WotError("Replay nemá tank – doplň ho v údajích replaye.", status=422, code="missing_tank")
+    m = create_milestone(db, {
+        "tank": tank, "mastery": r.mastery, "map_name": r.map_name,
+        "played_on": to_local(r.played_at).date().isoformat() if r.played_at else None,
+        "damage": r.damage, "assist": r.assist, "kills": r.kills, "base_xp": r.base_xp,
+    })
+    return update_replay(db, r.id, {"linked_milestone_id": m.id}), m
 
 
 def update_replay(db: Session, replay_id: int, data: dict) -> WotReplay:
