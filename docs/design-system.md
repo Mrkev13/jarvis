@@ -61,7 +61,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 | `StatusBadge` | short state/category with `tone`; `dot` for live-ish states | long sentences (use text) |
 | `Progress` | role=progressbar with a label; cyan by default, green at 100 % | fake meters |
 | `EntityList` / `EntityRow` | lists of records with badges, title, meta, actions; `tone` for attention rows, `muted` for closed | tables of numbers |
-| `Button` / `ButtonLink` / `TextLink` | `primary` (one per area), `secondary`, `ghost`, `danger`, `success`; `busy` + `busyLabel` | raw class strings |
+| `Button` / `ButtonLink` / `TextLink` | `primary` (one per area), `secondary`, `ghost`, `danger` and `success` (outline, never louder than primary); `busy` + `busyLabel` | raw class strings |
 | `FormField` + `fieldClass` | label + input + hint/error with ids wired automatically | placeholder-only labels |
 | `Tabs` | switching views of the same list (role=tablist, arrow keys) | navigation between pages |
 | `EmptyState` / `ErrorState` / `LoadingState` / `Skeleton` | mandatory states for every data view | flash an empty state while loading |

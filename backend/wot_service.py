@@ -82,6 +82,13 @@ def serialize_completion(c: WotGrindCompletion) -> dict:
     }
 
 
+def ensure_new_grind_status(status: str | None) -> None:
+    """Nový grind nesmí vzniknout rovnou splněný – zmizel by bez historie i události. Splnění jde jen přes
+    complete_grind nebo úpravu existujícího grindu (record_completion). Platí pro formulář, API i AI nástroj."""
+    if (status or "").strip().lower() == "completed":
+        raise WotError("Nový grind nejde vytvořit jako splněný – splň ho tlačítkem Splněno.", status=422, code="invalid_status")
+
+
 def record_completion(db: Session, g: WotGrind, *, source: str, xp_before: float | None, now: datetime) -> WotGrindCompletion:
     """Zapíše historii + Aktivitu pro grind, který se právě stal splněným (volající zajistil přechod stavu)."""
     completion = WotGrindCompletion(

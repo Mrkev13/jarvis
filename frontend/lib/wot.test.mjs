@@ -53,7 +53,7 @@ test("activeXpRemaining sčítá jen aktivní grindy", () => {
 import {
   activeGrinds, celebrationDuration, CELEBRATION_MS, durationLabel, emptyMilestoneDraft, galleryStep, grindProgress,
   masteryLabel, milestoneBody, milestoneDraftFrom, milestoneStats, screenshotFileError, screenshotUploadPath,
-  sortCompletions, sortMilestones,
+  sortCompletions, sortMilestones, grindStatusOptions, grindSummary,
 } from "./wot.ts";
 
 test("aktivní → splněný: splněné odcházejí z aktivních, průběh 100 %", () => {
@@ -120,4 +120,22 @@ test("screenshoty: typ a velikost před nahráním, cesta s metadaty, galerie do
   assert.equal(galleryStep(2, 3, 1), 0);
   assert.equal(galleryStep(0, 3, -1), 2);
   assert.equal(galleryStep(0, 0, 1), 0);
+});
+
+// Regrese B (lokální ověření): nový grind „Dokončeno" zmizel bez historie; hlavička během oslavy ukazovala starý stav.
+test("formulář nového grindu nenabízí Dokončeno, úprava ano", () => {
+  assert.deepEqual(grindStatusOptions("create").map((o) => o.value), ["active", "paused"]);
+  assert.deepEqual(grindStatusOptions("edit").map((o) => o.value), ["active", "paused", "completed"]);
+});
+
+test("souhrn hlavičky nepočítá grind, který server právě splnil", () => {
+  const grinds = [
+    { id: 1, tank: "VZ.55", xp_remaining: 205988, priority: "high", status: "active" },
+    { id: 8, tank: "Kranvagn", xp_remaining: 1000, priority: "low", status: "active" },
+    { id: 9, tank: "Pauza", xp_remaining: 500, priority: "low", status: "paused" },
+  ];
+  assert.deepEqual(grindSummary(grinds), { activeCount: 2, remaining: 206988 });
+  assert.deepEqual(grindSummary(grinds, 8), { activeCount: 1, remaining: 205988 });
+  assert.deepEqual(grindSummary(grinds, null), { activeCount: 2, remaining: 206988 });
+  assert.deepEqual(grindSummary([grinds[1]], 8), { activeCount: 0, remaining: 0 });
 });

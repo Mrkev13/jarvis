@@ -50,6 +50,14 @@ export const GRIND_STATUSES = [
   { value: "completed", label: "Dokončeno" },
 ] as const;
 
+/**
+ * Stavy ve formuláři grindu. Nový grind začíná jen jako aktivní / pozastavený – splnění jde vždy přes kanonický
+ * tok (Splněno nebo úprava existujícího grindu), který zapíše historii a událost wot_grind_completed.
+ */
+export function grindStatusOptions(mode: "create" | "edit"): readonly (typeof GRIND_STATUSES)[number][] {
+  return mode === "create" ? GRIND_STATUSES.filter((o) => o.value !== "completed") : GRIND_STATUSES;
+}
+
 export function emptyGrindDraft(): GrindDraft {
   return { tank: "", xp_remaining: "", priority: "medium", status: "active" };
 }
@@ -97,6 +105,18 @@ export function activeXpRemaining(grinds: WotGrind[]): number {
   return grinds
     .filter((g) => String(g.status).toLowerCase() === "active")
     .reduce((sum, g) => sum + (Number.isFinite(g.xp_remaining) ? g.xp_remaining : 0), 0);
+}
+
+/**
+ * Souhrn v hlavičce grindů. `justCompletedId` = grind, který server právě splnil, ale seznam se obnoví až po
+ * oslavě (~1,3 s) – v souhrnu už se nepočítá, ať hlavička neukazuje stav před splněním.
+ */
+export function grindSummary(grinds: WotGrind[], justCompletedId?: WotGrind["id"] | null): { activeCount: number; remaining: number } {
+  const counted = justCompletedId == null ? grinds : grinds.filter((g) => g.id !== justCompletedId);
+  return {
+    activeCount: counted.filter((g) => String(g.status).toLowerCase() === "active").length,
+    remaining: activeXpRemaining(counted),
+  };
 }
 
 // ===================== Game Enrichment B: splnění, historie, milníky =====================
