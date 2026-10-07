@@ -14,9 +14,10 @@ from dataclasses import asdict, dataclass
 from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value
-from models import Assignment, Exam, FinanceTransaction, Goal, Memory, MffCharacter, Reminder, Subject, WorkSession, WotGrind
+from models import Assignment, Exam, FinanceTransaction, Goal, Memory, MffCharacter, Reminder, Subject, WorkSession, WotGrind, WotReplay
 from reminder_service import describe_recurrence, format_local
 from statuses import REMINDER_ACTIVE_STATUSES, is_assignment_done
+from time_utils import to_local
 from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_hours_cz, format_num_cz
 
 MIN_QUERY = 2
@@ -125,6 +126,12 @@ def _candidates(db: Session, q: str):
     for g in db.query(WotGrind).limit(ROW_LIMIT).all():
         sub = _join("Grind", f"zbývá {format_num_cz(g.xp_remaining, 0)} XP", _GRIND_STATUS.get((g.status or "").lower(), ""), _PRIORITY.get((g.priority or "").lower(), ""))
         yield "wot_grind", g.id, g.tank, sub, "wot tank grind", "wot", f"/wot?grind={g.id}"
+    for r in db.query(WotReplay).order_by(WotReplay.uploaded_at.desc()).limit(ROW_LIMIT).all():
+        # Game Enrichment C: replay – tank (nebo technický název vozidla / souboru), mapa, štítky, poznámka
+        title = r.tank_name or (r.tank_tag.split(":", 1)[-1] if r.tank_tag else None) or r.original_filename or f"Replay #{r.id}"
+        tags = " ".join(r.tags or [])
+        sub = _join("Replay", r.map_name, format_date_cz(to_local(r.played_at)) if r.played_at else "", "★" if r.favorite else "")
+        yield "wot_replay", r.id, title, sub, f"{tags} {r.notes or ''} {r.original_filename or ''} wot replay zaznam", "wot", f"/wot/replays?replay={r.id}"
     for c in db.query(MffCharacter).limit(ROW_LIMIT).all():
         sub = _join(f"{c.tier} · Lv. {c.level}" if c.level else c.tier, _MFF_STATUS.get((c.status or "").lower(), ""), c.uniform)
         yield "mff_character", c.id, c.name, sub, f"{c.uniform} {c.team} {c.role} mff postava", "mff", f"/mff?character={c.id}"
