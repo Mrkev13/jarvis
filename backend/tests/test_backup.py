@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import hashlib
 import unittest
 import tempfile
 import sqlite3
@@ -49,12 +51,15 @@ class BackupTestCase(unittest.TestCase):
             conn.execute("INSERT INTO x (value) VALUES (?)", ("test",))
             conn.commit()
             conn.close()
+            media_dir = tmpdir_path / "live-media"
+            media_dir.mkdir()
 
             self.assertTrue(tmpdb.exists(), "Test SQLite DB file should exist")
 
             with patch.object(backup_service, "_DATABASE_URL", f"sqlite+pysqlite:///{tmpdb}"), \
                  patch.object(backup_service, "BACKUP_ENABLED", True), \
                  patch.object(backup_service, "BACKUP_DIR", str(tmpdir_path)), \
+                 patch.object(backup_service, "MEDIA_DIR", str(media_dir)), \
                  patch.object(backup_service, "BACKUP_RETENTION_DAYS", 30), \
                  patch.object(backup_service, "SessionLocal", self.TestSession):
 
@@ -72,6 +77,12 @@ class BackupTestCase(unittest.TestCase):
                 backup_path = Path(log.filename)
                 self.assertTrue(backup_path.exists(), f"Backup file should exist: {log.filename}")
                 self.assertTrue(str(backup_path).endswith(".sqlite.gz"), f"Backup file should be .sqlite.gz, got: {backup_path}")
+                run_files = list((tmpdir_path / "runs").glob("backup_*.json"))
+                self.assertEqual(len(run_files), 1)
+                run = json.loads(run_files[0].read_text(encoding="utf-8"))
+                self.assertEqual(run["status"], "success")
+                self.assertEqual(run["database"]["sha256"], log.checksum)
+                self.assertEqual(run["media"]["file_count"], 0)
 
     def test_02_retention_deletes_old_logs_and_files(self):
         import backup_service
@@ -198,6 +209,158 @@ class BackupTestCase(unittest.TestCase):
             self.assertFalse(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 2, 1, 30)))
             # 3. 10. 03:30 Praha → nový den → spustit
             self.assertTrue(backup_service.should_run_backup_daily(3, now_utc=datetime(2026, 10, 3, 1, 30)))
+
+    def test_06_pg_dump_explicit_path_wins(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            executable = Path(tmpdir) / "pg_dump.exe"
+            executable.write_bytes(b"stub")
+            with patch.dict(os.environ, {"PG_DUMP_PATH": str(executable)}), \
+                 patch.object(backup_service.shutil, "which") as which:
+                self.assertEqual(backup_service.find_pg_dump(), str(executable))
+                which.assert_not_called()
+
+    def test_07_pg_dump_uses_path_fallback(self):
+        import backup_service
+
+        with patch.dict(os.environ, {"PG_DUMP_PATH": ""}), \
+             patch.object(backup_service.shutil, "which", return_value="C:/tools/pg_dump.exe"):
+            self.assertEqual(backup_service.find_pg_dump(), "C:/tools/pg_dump.exe")
+
+    def test_08_pg_dump_not_found_is_actionable(self):
+        import backup_service
+
+        with patch.dict(os.environ, {"PG_DUMP_PATH": ""}), \
+             patch.object(backup_service.shutil, "which", return_value=None), \
+             patch.object(backup_service.os, "name", "posix"):
+            with self.assertRaisesRegex(backup_service.PgDumpNotFound, "PG_DUMP_PATH"):
+                backup_service.find_pg_dump()
+
+    def test_09_media_new_unchanged_nested_and_manifest(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "media-source"
+            backup = root / "backup"
+            nested = media / "wot-replays" / "nested" / "battle.wotreplay"
+            nested.parent.mkdir(parents=True)
+            nested.write_bytes(b"replay-content")
+            expected_hash = hashlib.sha256(b"replay-content").hexdigest()
+
+            with patch.object(backup_service, "MEDIA_DIR", str(media)):
+                first = backup_service.sync_media_archive(backup, "first")
+                second = backup_service.sync_media_archive(backup, "second")
+
+            self.assertEqual(first["copied"], 1)
+            self.assertEqual(second["copied"], 0)
+            self.assertEqual(second["skipped"], 1)
+            manifest = json.loads(second["manifest_path"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["files"][0]["relative_path"], "wot-replays/nested/battle.wotreplay")
+            self.assertEqual(manifest["files"][0]["sha256"], expected_hash)
+            archived = backup / manifest["files"][0]["archive_path"]
+            self.assertEqual(hashlib.sha256(archived.read_bytes()).hexdigest(), expected_hash)
+
+    def test_10_changed_media_is_versioned_without_overwrite(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "source"
+            backup = root / "backup"
+            source = media / "photos" / "same.jpg"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"old")
+            with patch.object(backup_service, "MEDIA_DIR", str(media)):
+                first = backup_service.sync_media_archive(backup, "first")
+                source.write_bytes(b"new")
+                second = backup_service.sync_media_archive(backup, "second")
+
+            first_manifest = json.loads(first["manifest_path"].read_text(encoding="utf-8"))
+            second_manifest = json.loads(second["manifest_path"].read_text(encoding="utf-8"))
+            first_archive = backup / first_manifest["files"][0]["archive_path"]
+            second_archive = backup / second_manifest["files"][0]["archive_path"]
+            self.assertEqual(first_archive.read_bytes(), b"old")
+            self.assertEqual(second_archive.read_bytes(), b"new")
+            self.assertNotEqual(first_archive, second_archive)
+            self.assertIn(".versions", second_archive.parts)
+
+    def test_11_deleted_source_is_retained(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "source"
+            backup = root / "backup"
+            source = media / "wot-replays" / "keep.wotreplay"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"keep-me")
+            with patch.object(backup_service, "MEDIA_DIR", str(media)):
+                first = backup_service.sync_media_archive(backup, "first")
+                source.unlink()
+                second = backup_service.sync_media_archive(backup, "second")
+            first_manifest = json.loads(first["manifest_path"].read_text(encoding="utf-8"))
+            archived = backup / first_manifest["files"][0]["archive_path"]
+            self.assertTrue(archived.exists())
+            self.assertEqual(second["file_count"], 0)
+
+    def test_12_path_traversal_and_outside_symlink_are_rejected(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            safe_root = root / "safe"
+            safe_root.mkdir()
+            outside = root / "outside.bin"
+            outside.write_bytes(b"outside")
+            with self.assertRaises(backup_service.MediaBackupError):
+                backup_service._safe_relative_file(outside, safe_root)
+            with self.assertRaises(backup_service.MediaBackupError):
+                backup_service._safe_archive_path(safe_root, Path("../escape.bin"))
+
+    def test_13_media_failure_marks_whole_backup_failed(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            tmpdb = root / "test.db"
+            sqlite3.connect(str(tmpdb)).close()
+            media = root / "media"
+            media.mkdir()
+            with patch.object(backup_service, "_DATABASE_URL", f"sqlite+pysqlite:///{tmpdb}"), \
+                 patch.object(backup_service, "BACKUP_ENABLED", True), \
+                 patch.object(backup_service, "BACKUP_DIR", str(root / "backups")), \
+                 patch.object(backup_service, "MEDIA_DIR", str(media)), \
+                 patch.object(backup_service, "SessionLocal", self.TestSession), \
+                 patch.object(backup_service, "sync_media_archive", side_effect=backup_service.MediaBackupError("boom")):
+                backup_id = backup_service.run_backup(db_session=self.db)
+            log = self.db.get(_all_models.BackupLog, backup_id)
+            self.assertEqual(log.status, "failed")
+            self.assertIn("media backup failed", log.error_message)
+
+    def test_14_archive_commit_never_overwrites_racing_destination(self):
+        import backup_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.wotreplay"
+            target = root / "archive" / "battle.wotreplay"
+            source.write_bytes(b"source-content")
+            expected_hash = hashlib.sha256(b"source-content").hexdigest()
+            original_copyfileobj = backup_service.shutil.copyfileobj
+
+            def copy_then_occupy(source_handle, target_handle, length=0):
+                original_copyfileobj(source_handle, target_handle, length=length)
+                target.write_bytes(b"racing-writer-content")
+
+            with patch.object(backup_service.shutil, "copyfileobj", side_effect=copy_then_occupy):
+                with self.assertRaisesRegex(backup_service.MediaBackupError, "obsazen"):
+                    backup_service._copy_verified(source, target, expected_hash)
+
+            self.assertEqual(target.read_bytes(), b"racing-writer-content")
+            self.assertFalse(target.with_name(f".{target.name}.tmp").exists())
 
 
 if __name__ == "__main__":
