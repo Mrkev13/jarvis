@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { JarvisAvatar } from "@/components/jarvis/JarvisAvatar";
 import { useOpenQuickAdd } from "@/components/quick-add/QuickAddProvider";
 import {
   AccentLine,
@@ -66,7 +67,12 @@ export default function TodayPage() {
   return (
     <ContentContainer width="narrow">
       <PageHeader
-        eyebrow={<HudLabel>Standa Hub · režim dnes</HudLabel>}
+        eyebrow={
+          <span className="inline-flex items-center gap-2">
+            <JarvisAvatar state="idle" size="sm" />
+            <HudLabel>Standa Hub · režim dnes</HudLabel>
+          </span>
+        }
         title="Dnes"
         subtitle={data ? capitalize(data.date_label) : "Co dnes potřebuje tvou pozornost."}
         actions={

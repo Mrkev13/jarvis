@@ -9,6 +9,7 @@ import { Drawer } from "@/components/ui";
 import { useAiChat } from "@/hooks/useAiChat";
 import { useAiVoice } from "@/hooks/useAiVoice";
 import { useConversations } from "@/hooks/useConversations";
+import { aiJarvisState } from "@/lib/jarvisAvatar";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 
 /**
@@ -105,6 +106,14 @@ export default function AiPage() {
   }
 
   const active = convs.conversations.find((c) => c.id === convs.activeId) ?? null;
+  const jarvisState = aiJarvisState({
+    failure: Boolean(chat.failure),
+    failedAction: Boolean(chat.failedAction),
+    sending: chat.sending,
+    confirming: Boolean(chat.confirmingId),
+    pending: chat.pendingActions.length,
+    success: chat.outcomes.some((outcome) => outcome.kind === "success"),
+  });
 
   const panel = (showHeading: boolean) => (
     <ConversationPanel
@@ -140,6 +149,7 @@ export default function AiPage() {
           conversationsOpen={drawerOpen}
           onNew={() => void newChat()}
           creating={creating}
+          jarvisState={jarvisState}
         />
         <MessageList
           conversationId={convs.activeId}

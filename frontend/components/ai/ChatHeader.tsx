@@ -1,4 +1,6 @@
+import { JarvisAvatar } from "@/components/jarvis/JarvisAvatar";
 import { Button, HudLabel, StatusPulse } from "@/components/ui";
+import type { JarvisState } from "@/lib/jarvisAvatar";
 
 /**
  * Hlavička chatu: jediné h1 stránky, název aktivní konverzace. Pod lg otevírá konverzace v Draweru
@@ -10,16 +12,19 @@ export function ChatHeader({
   conversationsOpen,
   onNew,
   creating,
+  jarvisState,
 }: {
   title: string | null;
   onOpenConversations: () => void;
   conversationsOpen: boolean;
   onNew: () => void;
   creating: boolean;
+  jarvisState: JarvisState;
 }) {
   return (
     <header className="border-b border-line">
       <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3 md:px-6">
+        <JarvisAvatar state={jarvisState} size="sm" className="shadow-[0_0_24px_-12px_rgba(46,220,255,.75)]" />
         <div className="min-w-0 flex-1">
           <HudLabel className="hidden items-center gap-1.5 sm:flex">
             <StatusPulse tone="ai" className="h-1.5 w-1.5" /> Standa AI · asistent

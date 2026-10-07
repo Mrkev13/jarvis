@@ -103,6 +103,19 @@ for (const [path, name] of PAGES.filter(([, n]) => !ONLY || ONLY.includes(n))) {
   }
 }
 
+// MRK-10 – Jarvis v denním briefingu: lokální asset, deterministický stav a dekorativní a11y režim.
+{
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
+  const avatar = page.locator('[aria-labelledby="briefing-title"] [data-testid="jarvis-avatar"]');
+  check("jarvis briefing: avatar je viditelný", (await avatar.count()) === 1 && await avatar.isVisible());
+  check("jarvis briefing: výchozí stav idle", (await avatar.getAttribute("data-jarvis-state")) === "idle");
+  check("jarvis briefing: lokální asset a velikost sm", (await avatar.getAttribute("data-jarvis-asset")) === "asset" && (await avatar.getAttribute("data-jarvis-size")) === "sm");
+  check("jarvis briefing: dekorativní instance je skrytá čtečkám", (await avatar.getAttribute("aria-hidden")) === "true");
+  check("jarvis briefing: bez chyb JS", errors.length === 0, errors.join("; "));
+  await page.screenshot({ path: `${OUT}jarvis-briefing.png` });
+  await ctx.close();
+}
+
 // 2) Motiv systému: aplikace zůstává tmavá i při světlém motivu OS.
 for (const scheme of ["light", "dark"]) {
   const { ctx, page } = await open("/", { scheme });
@@ -511,6 +524,10 @@ async function aiSend(page, text) {
 {
   const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900 });
   const box = page.getByLabel("Zpráva pro Standa AI");
+  const avatar = page.locator('header [data-testid="jarvis-avatar"]');
+  check("jarvis ai: avatar je viditelný", (await avatar.count()) === 1 && await avatar.isVisible());
+  check("jarvis ai: výchozí stav idle", (await avatar.getAttribute("data-jarvis-state")) === "idle");
+  check("jarvis ai: lokální asset, sm a dekorativní", (await avatar.getAttribute("data-jarvis-asset")) === "asset" && (await avatar.getAttribute("data-jarvis-size")) === "sm" && (await avatar.getAttribute("aria-hidden")) === "true");
   check("ai: pole pro zprávu má popisek", (await box.count()) === 1);
   const unlabeled = await page.evaluate(() =>
     [...document.querySelectorAll("main textarea, main select, main input:not([type=hidden])")].filter((el) => {
@@ -548,6 +565,7 @@ async function aiSend(page, text) {
   await page.waitForTimeout(200);
   check("ai: během odesílání busy tlačítko", (await page.locator('button[aria-busy="true"]', { hasText: "Odesílám" }).count()) === 1);
   check("ai: indikátor přemýšlení (role=status)", (await page.getByText("Standa AI přemýšlí…").count()) === 1);
+  check("jarvis ai: odesílání = thinking", (await avatar.getAttribute("data-jarvis-state")) === "thinking");
   check("ai: pole se po odeslání vyprázdní", (await box.inputValue()) === "");
   await page.waitForTimeout(1200);
   check("ai: odpověď vykreslená (Markdown nadpis)", (await page.getByRole("heading", { name: "Odpověď" }).count()) === 1);
@@ -562,6 +580,7 @@ async function aiSend(page, text) {
   await aiSend(page, "Zapiš práci 6,5 h pro Klient XYZ");
   await page.waitForTimeout(1500);
   const card = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
+  check("jarvis ai: čekající potvrzení = warning", (await avatar.getAttribute("data-jarvis-state")) === "warning");
   check("ai: karta akce s českým titulkem", (await card.getByRole("heading", { name: "Přidat pracovní záznam" }).count()) === 1);
   const cardText = await card.innerText();
   check("ai: karta ukazuje hodnoty a výdělek", /10\. 10\. 2026/.test(cardText) && /6,5 h/.test(cardText) && /2\s437,50 Kč/.test(cardText), cardText.replace(/\n/g, " | ").slice(0, 160));
@@ -573,6 +592,8 @@ async function aiSend(page, text) {
   const outcome = page.getByRole("list", { name: "Výsledky akcí" });
   check("ai: výsledek „Hotovo“ s nabídkou Vrátit", (await outcome.getByRole("button", { name: /^Vrátit změnu/ }).count()) === 1);
   check("ai: zpráva o provedení v historii", (await page.getByText("Přidán pracovní záznam.").count()) >= 1);
+  check("jarvis ai: dokončená akce = success", (await avatar.getAttribute("data-jarvis-state")) === "success");
+  await page.screenshot({ path: `${OUT}jarvis-ai-success.png` });
   await outcome.getByRole("button", { name: /^Vrátit změnu/ }).click();
   await page.waitForTimeout(700);
   const undoCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
@@ -591,6 +612,8 @@ async function aiSend(page, text) {
   await page.waitForTimeout(1200);
   const failedCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator(":scope > li").first();
   check("ai: selhání potvrzení – Zkusit znovu", (await failedCard.getByRole("button", { name: "Zkusit znovu" }).count()) === 1);
+  check("jarvis ai: selhání akce = error", (await avatar.getAttribute("data-jarvis-state")) === "error");
+  await page.screenshot({ path: `${OUT}jarvis-ai-error.png` });
   // Roadmap 6A: selhání = krátký obrys (motion-error), karta se nehýbe (žádné třesení).
   const failedMotion = await failedCard.evaluate((el) => ({ cls: el.className, transform: getComputedStyle(el).transform }));
   check("ai: selhání – motion-error bez posunu", failedMotion.cls.includes("motion-error") && !failedMotion.cls.includes("motion-shake") && failedMotion.transform === "none", failedMotion.transform);
@@ -602,6 +625,7 @@ async function aiSend(page, text) {
   await aiSend(page, "test limit");
   await page.waitForTimeout(1300);
   check("ai: rate limit – upozornění se Zkusit znovu", (await page.getByRole("alert").filter({ hasText: "vytížená" }).getByRole("button", { name: "Zkusit znovu" }).count()) === 1);
+  check("jarvis ai: chyba požadavku = error", (await avatar.getAttribute("data-jarvis-state")) === "error");
   await page.screenshot({ path: `${OUT}ai-ratelimit.png` });
   await aiSend(page, "denní limit");
   await page.waitForTimeout(1300);
@@ -643,6 +667,8 @@ async function aiSend(page, text) {
 // mobil: konverzace v Draweru (fokus, Escape, návrat fokusu, výběr zavře)
 {
   const { ctx, page, errors } = await open("/ai", { width: 390, height: 844 });
+  const avatar = page.locator('header [data-testid="jarvis-avatar"]');
+  check("jarvis ai mobil: avatar sm je viditelný", await avatar.isVisible() && (await avatar.getAttribute("data-jarvis-size")) === "sm");
   check("ai mobil: bez postranního panelu konverzací", !(await page.getByRole("complementary", { name: "Konverzace" }).isVisible()));
   const opener = page.getByRole("button", { name: "Konverzace" });
   await opener.click();
@@ -675,6 +701,12 @@ async function aiSend(page, text) {
   const { ctx, page } = await open("/ai", { reducedMotion: "reduce" });
   await aiSend(page, "Zapiš práci 1 h");
   await page.waitForTimeout(150);
+  const avatarMotion = await page.locator('header [data-testid="jarvis-avatar"]').evaluate((el) => ({
+    state: el.getAttribute("data-jarvis-state"),
+    self: getComputedStyle(el).animationName,
+    after: getComputedStyle(el, "::after").animationName,
+  }));
+  check("jarvis reduced motion: thinking bez animace", avatarMotion.state === "thinking" && avatarMotion.self === "none" && avatarMotion.after === "none", JSON.stringify(avatarMotion));
   const dots = await page.evaluate(() => {
     const d = document.querySelector(".animate-bounce");
     return d ? getComputedStyle(d).animationName : "missing";
@@ -688,6 +720,20 @@ async function aiSend(page, text) {
     return t ? getComputedStyle(t).animationName : "missing";
   });
   check("ai reduced motion: odpočet Vrátit bez animace", timer === "none", timer);
+  await page.screenshot({ path: `${OUT}jarvis-ai-reduced-motion.png` });
+  await ctx.close();
+}
+
+// Chybějící asset nesmí rozbít AI hlavičku: komponenta přepne na lokální vektorový fallback.
+{
+  const { ctx, page, errors } = await open("/ai", {
+    setup: (p) => p.route("**/jarvis/jarvis-shell.svg", (route) => route.abort()),
+  });
+  const avatar = page.locator('header [data-testid="jarvis-avatar"]');
+  await avatar.locator('[data-testid="jarvis-fallback"]').waitFor();
+  check("jarvis fallback: chyba assetu přepne bezpečný fallback", (await avatar.getAttribute("data-jarvis-asset")) === "fallback");
+  check("jarvis fallback: avatar zůstává viditelný", await avatar.isVisible());
+  check("jarvis fallback: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
@@ -1291,6 +1337,8 @@ const serveToday = (body, status = 200) => async (p) =>
 {
   let todayCalls = 0;
   const { ctx, page, errors } = await open("/today", { setup: async (p) => p.on("request", (r) => { const u = new URL(r.url()); if (u.port === "8000" && u.pathname === "/today") todayCalls++; }) });
+  const todayAvatar = page.locator('main [data-testid="jarvis-avatar"]').first();
+  check("jarvis dnes: idle avatar sm je viditelný", await todayAvatar.isVisible() && (await todayAvatar.getAttribute("data-jarvis-state")) === "idle" && (await todayAvatar.getAttribute("data-jarvis-size")) === "sm");
   check("dnes: jeden dotaz /today", todayCalls === 1, String(todayCalls));
   check("dnes: h1 Dnes + český datum", (await page.getByRole("heading", { level: 1, name: "Dnes" }).count()) === 1 && (await page.getByText("Neděle 11. 10. 2026").count()) >= 1);
   check("dnes: souhrn s další položkou", (await page.getByRole("heading", { name: "Další: Fyzioterapie v 18:30" }).count()) === 1 && (await page.getByText(/za 4 h/).count()) >= 1);
