@@ -1623,6 +1623,24 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
   const histText = await page.locator('[data-section="wot-completed"]').innerText();
   check("wot B: historie – datum, doba a XP", /58 dn/.test(histText) && /165\s?000/.test(histText) && /datum neznámé/.test(histText), histText.replace(/\s+/g, " ").slice(0, 160));
 
+  // Regrese B (lokální ověření): nový grind nejde založit jako „Dokončeno"; Splněno je obrys, ne plná zelená
+  await page.getByRole("button", { name: "Přidat grind" }).click();
+  const statusOptions = await page.getByLabel("Stav").locator("option").evaluateAll((els) => els.map((o) => o.value));
+  check("wot B: nový grind nenabízí stav Dokončeno", JSON.stringify(statusOptions) === JSON.stringify(["active", "paused"]), JSON.stringify(statusOptions));
+  await page.getByRole("button", { name: "Zrušit" }).first().click();
+  const fills = await page.evaluate(() => {
+    const bg = (el) => (el ? getComputedStyle(el).backgroundColor : "");
+    const done = document.querySelector('[aria-label^="Splněno: "]');
+    const add = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Přidat grind");
+    return { done: bg(done), add: bg(add) };
+  });
+  const alpha = (c) => (/rgba?\(([^)]+)\)/.exec(c)?.[1].split(",")[3] ?? "1").trim();
+  check("wot B: Splněno tišší než Přidat grind (bez plné výplně)", Number(alpha(fills.done)) < 0.2 && Number(alpha(fills.add)) > 0.9, JSON.stringify(fills));
+  const headerText = () => page.locator("p, div").filter({ hasText: /^\d+ aktivn\S* · zbývá / }).last().innerText();
+  const parseHeader = (t) => { const m = /^(\d+) aktivn\S* · zbývá ([\d\s ]+) XP/.exec(t.trim()); return m ? { n: Number(m[1]), xp: Number(m[2].replace(/\D/g, "")) } : null; };
+  const headerBefore = parseHeader(await headerText());
+  const kranvagnXp = Number(((await activeRow(page, "Kranvagn").innerText()).match(/Zbývá ([\d\s ]+) XP/)?.[1] ?? "").replace(/\D/g, ""));
+
   // Splněno → potvrzení → GRIND COMPLETE → historie
   await activeRow(page, "Kranvagn").getByRole("button", { name: "Splněno: Kranvagn" }).click();
   const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "Označit Kranvagn jako splněný?" });
@@ -1640,11 +1658,14 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
   check("wot B: oslava = azurový puls (CSS animace, žádná knihovna)", anim.includes("motion-grind-complete"), anim);
   check("wot B: při oslavě 100 % a bez akcí", (await celebrating.innerText()).includes("100 %") && (await celebrating.getByRole("button").count()) === 0);
   check("wot B: oznámení pro čtečky (role=status)", (await page.getByTestId("grind-complete-notice").getAttribute("role")) === "status");
+  const headerDuring = parseHeader(await headerText());
+  check("wot B: hlavička během oslavy už bez splněného grindu", Boolean(headerBefore && headerDuring && headerDuring.n === headerBefore.n - 1 && headerDuring.xp === headerBefore.xp - kranvagnXp), JSON.stringify({ headerBefore, headerDuring, kranvagnXp }));
   await page.screenshot({ path: `${OUT}wot-grind-complete.png` });
   // navigace není blokovaná: odkaz v menu je dál klikatelný (jen ověříme, že nic nepřekrývá stránku)
   check("wot B: oslava nic nepřekrývá", (await page.locator('[role="dialog"], [role="alertdialog"]').count()) === 0);
   await page.waitForTimeout(1700);
   check("wot B: po oslavě grind opustí aktivní seznam", (await activeRow(page, "Kranvagn").count()) === 0 && (await badge.count()) === 0);
+  check("wot B: hlavička po obnovení sedí se stavem během oslavy", JSON.stringify(parseHeader(await headerText())) === JSON.stringify(headerDuring), await headerText());
   const hist = await historyIds(page);
   check("wot B: splnění je nahoře v historii (stabilní id)", hist.length === 3 && /^completion:\d+$/.test(hist[0]) && hist[0] !== "completion:1", hist.join(","));
   check("wot B: nové splnění zvýrazněné v historii", (await page.locator(`[data-completion="${hist[0]}"]`).innerText()).includes("Kranvagn"));

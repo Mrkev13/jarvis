@@ -1073,6 +1073,7 @@ def add_wot_grind(request: WotGrindRequest):
                 db.flush()
                 wot_service.record_completion(db, existing, source="manual", xp_before=xp_before, now=utc_now())
         else:
+            _wot_call(lambda: wot_service.ensure_new_grind_status(request.status))
             item = WotGrind(
                 tank=request.tank,
                 xp_remaining=request.xp_remaining,

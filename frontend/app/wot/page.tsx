@@ -32,11 +32,11 @@ import { formatNumber, plural, pragueDayKey } from "@/lib/format";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
-  activeXpRemaining,
+  grindSummary,
   celebrationDuration,
   emptyGrindDraft,
   GRIND_PRIORITIES,
-  GRIND_STATUSES,
+  grindStatusOptions,
   grindBody,
   sortMilestones,
   RESOURCE_KEYS,
@@ -252,8 +252,8 @@ export default function WotPage() {
     a.localeCompare(b, "cs"),
   );
 
-  const activeCount = grinds.filter((g) => String(g.status).toLowerCase() === "active").length;
-  const remainingTotal = activeXpRemaining(grinds);
+  // během oslavy už server grind splnil → hlavička ho nepočítá (seznam se obnoví až po ~1,3 s)
+  const { activeCount, remaining: remainingTotal } = grindSummary(grinds, celebrating?.id);
 
   return (
     <ContentContainer>
@@ -416,7 +416,7 @@ export default function WotPage() {
                             onChange={(e) => setGrindDraft((d) => ({ ...d, status: e.target.value }))}
                             className={fieldClass}
                           >
-                            {GRIND_STATUSES.map((o) => (
+                            {grindStatusOptions(grindMode).map((o) => (
                               <option key={o.value} value={o.value}>
                                 {o.label}
                               </option>

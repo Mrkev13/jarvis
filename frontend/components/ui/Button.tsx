@@ -10,7 +10,8 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary: "border border-line bg-surface-2 text-ink hover:bg-hover hover:border-ink-faint",
   ghost: "text-ink-2 hover:bg-hover hover:text-ink",
   danger: "border border-danger/40 text-danger hover:bg-danger/10",
-  success: "bg-success/90 text-app font-semibold hover:bg-success",
+  // Obrys jako danger: jasně akční, ale nepřebije primární tlačítko (plná zelená na každém řádku byla nejhlasitější).
+  success: "border border-success/45 text-success hover:bg-success/10 hover:border-success/70",
 };
 
 const SIZE: Record<ButtonSize, string> = {

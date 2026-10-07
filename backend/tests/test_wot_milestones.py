@@ -165,6 +165,35 @@ class GrindCompletionTestCase(WotBase):
         self.assertEqual((g["status"], g["xp_start"], g["progress"]), ("active", 30000, 0))
         self.assertEqual(len(self.client.get("/wot/grinds/completed").json()), 1)
 
+    def test_new_grind_cannot_be_created_completed(self):
+        """Regrese B: nový grind rovnou „Dokončeno" zmizel bez historie i události – splnění jen kanonickým tokem."""
+        self.login()
+        r = self.client.post("/wot/grind", json={"tank": "Kranvagn", "xp_remaining": 52000, "priority": "high", "status": "completed"})
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(r.json()["detail"]["error"], "invalid_status")
+        self.assertEqual(self.q(lambda db: db.query(WotGrind).count()), 0, "nic se nezapsalo")
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).count()), 0)
+        # obejití přes AI nástroj (potvrzená akce) – stejné pravidlo
+        with self.assertRaises(ws.WotError):
+            tools.upsert_wot_grind("Kranvagn", 52000, status="completed", user_context="ai_confirm")
+        self.assertEqual(self.q(lambda db: db.query(WotGrind).count()), 0)
+
+    def test_existing_grind_completed_via_ai_tool_records_history(self):
+        self.login()
+        self.add_grind("Kranvagn", 52000)
+        tools.upsert_wot_grind("Kranvagn", 52000, status="completed", user_context="ai_confirm")
+        g = self.q(lambda db: db.query(WotGrind).one())
+        self.assertEqual((g.status, g.xp_remaining), ("completed", 0))
+        hist = self.client.get("/wot/grinds/completed").json()
+        self.assertEqual([(h["tank"], h["xp_remaining_before"]) for h in hist], [("Kranvagn", 52000)])
+        events = self.q(lambda db: [(lg.user_context, lg.delta_json) for lg in db.query(ActivityLog).filter_by(action_type="complete")])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0][0], "ai_confirm")
+        self.assertIn("wot_grind_completed", events[0][1])
+        # opakované „completed" už nic nepřidá
+        tools.upsert_wot_grind("Kranvagn", 0, status="completed", user_context="ai_confirm")
+        self.assertEqual(len(self.client.get("/wot/grinds/completed").json()), 1)
+
     def test_legacy_completed_grind_in_history_without_date(self):
         self.q(lambda db: (db.add(WotGrind(tank="T-100 LT", xp_remaining=0, priority="low", status="completed")), db.commit()))
         self.login()
