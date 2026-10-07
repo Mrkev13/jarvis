@@ -152,6 +152,13 @@ class UploadTestCase(ReplayApiBase):
             self.assertEqual(self.upload(fx.PROGETTO, "big.wotreplay", status=413)["detail"]["error"], "invalid_file")
         self.assertEqual(self.replay_files(), [])
 
+    def test_failed_db_write_leaves_no_file(self):
+        self.login()
+        with patch.object(wrs, "log_activity", side_effect=RuntimeError("db down")):
+            with self.assertRaises(RuntimeError):
+                self.upload(fx.PROGETTO, "x.wotreplay", status=500)
+        self.assertEqual(self.replay_files(), [])
+
     def test_traversal_filename_is_metadata_only(self):
         self.login()
         body = self.upload(fx.PROGETTO, "../../etc/evil\x00name.wotreplay")

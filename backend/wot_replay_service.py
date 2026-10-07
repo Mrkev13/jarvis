@@ -202,11 +202,15 @@ def upload_replay(db: Session, data: bytes, filename: str | None, *, now: dateti
         **{k: v for k, v in result.metadata.items() if k in {"tank_tag", "map_name", "played_at", "game_version", "damage",
                                                               "assist", "kills", "base_xp", "mastery", "battle_result"}},
     )
-    db.add(r)
-    db.flush()
-    log_activity(db, "wot", "create", f"Replay nahrán: {_label(r)}", entity_type="WotReplay", entity_id=r.id,
-                 delta={"event": EVENTS["uploaded"], "parser_status": r.parser_status}, user_context="manual",
-                 dedupe_key=f"{EVENTS['uploaded']}:{r.id}")
+    try:
+        db.add(r)
+        db.flush()
+        log_activity(db, "wot", "create", f"Replay nahrán: {_label(r)}", entity_type="WotReplay", entity_id=r.id,
+                     delta={"event": EVENTS["uploaded"], "parser_status": r.parser_status}, user_context="manual",
+                     dedupe_key=f"{EVENTS['uploaded']}:{r.id}")
+    except Exception:
+        media_storage.delete_file(REPLAY_FOLDER, stored)  # žádný osiřelý soubor
+        raise
     return r
 
 
