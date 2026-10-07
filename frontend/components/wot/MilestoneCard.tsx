@@ -1,7 +1,7 @@
 "use client";
 
 import { GameImage } from "@/components/games/GameImage";
-import { Button, Card, StatusBadge } from "@/components/ui";
+import { Button, Card, StatusBadge, TextLink } from "@/components/ui";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cx } from "@/lib/ui";
 import { masteryLabel, milestoneStats, type WotMilestone } from "@/lib/wot";
@@ -68,6 +68,14 @@ export function MilestoneCard({
       {m.notes ? <p className="whitespace-pre-line break-words text-sm text-ink-2">{m.notes}</p> : null}
 
       <MilestoneGallery shots={m.screenshots} tank={m.tank} />
+
+      {m.replay_ids?.length ? (
+        <p className="text-sm" data-testid="milestone-replay-link">
+          <TextLink href={`/wot/replays?replay=${m.replay_ids[0]}`}>
+            <span aria-hidden="true">▶&nbsp;</span>Replay bitvy{m.replay_ids.length > 1 ? ` (${m.replay_ids.length})` : ""}
+          </TextLink>
+        </p>
+      ) : null}
 
       <div className="mt-auto flex flex-wrap gap-2 border-t border-line-subtle pt-3">
         <Button size="sm" variant="secondary" onClick={onEdit} disabled={busy}>
