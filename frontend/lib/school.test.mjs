@@ -74,3 +74,33 @@ test("creditsLabel uses Czech plural", () => {
   assert.equal(creditsLabel(3), "3 kredity");
   assert.equal(creditsLabel(5), "5 kreditů");
 });
+
+// MRK-14: uzavření zkoušky, volitelný výsledek, stav „Uzavřeno"
+import { emptyCloseDraft, examCloseBody, examResultLabel, isExamClosed as closedExam, examStatusMeta as examMeta } from "./school.ts";
+
+test("closed exam status (no grade) counts as closed", () => {
+  assert.equal(closedExam("closed"), true);
+  assert.equal(closedExam("upcoming"), false);
+  assert.deepEqual(examMeta("closed"), { label: "Uzavřeno", tone: "neutral" });
+});
+
+test("examCloseBody: result is optional, validated like the backend", () => {
+  assert.deepEqual(examCloseBody(emptyCloseDraft()), { ok: true, body: { outcome: "passed", result_type: null, result_value: null } });
+  assert.deepEqual(examCloseBody({ outcome: "passed", result_type: "percent", result_value: " 87,5 " }).body, { outcome: "passed", result_type: "percent", result_value: "87,5" });
+  assert.equal(examCloseBody({ outcome: "passed", result_type: "points", result_value: "42 / 50" }).ok, true);
+  assert.equal(examCloseBody({ outcome: "failed", result_type: "grade", result_value: "F" }).ok, true);
+  assert.deepEqual(examCloseBody({ outcome: "failed", result_type: "pass_fail", result_value: "x" }).body, { outcome: "failed", result_type: "pass_fail", result_value: null });
+  assert.equal(examCloseBody({ outcome: "closed", result_type: "pass_fail", result_value: "" }).ok, false);
+  assert.match(examCloseBody({ outcome: "passed", result_type: "percent", result_value: "120" }).error, /0–100/);
+  assert.match(examCloseBody({ outcome: "passed", result_type: "points", result_value: "hodně" }).error, /Body/);
+  assert.match(examCloseBody({ outcome: "passed", result_type: "grade", result_value: "7" }).error, /Známka/);
+  assert.match(examCloseBody({ outcome: "passed", result_type: "grade", result_value: "" }).error, /Vyplň/);
+});
+
+test("examResultLabel", () => {
+  assert.equal(examResultLabel("percent", "87,5"), "87,5 %");
+  assert.equal(examResultLabel("points", "42/50"), "42/50 b");
+  assert.equal(examResultLabel("grade", "2-"), "známka 2-");
+  assert.equal(examResultLabel("pass_fail", "passed"), null);
+  assert.equal(examResultLabel(null, null), null);
+});

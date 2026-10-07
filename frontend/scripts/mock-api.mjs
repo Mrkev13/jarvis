@@ -29,8 +29,8 @@ const GET_ROUTES = {
   "/mff/characters": () => fixture("mff-characters"),
   "/mff/summary": () => fixture("mff-summary"),
   "/school/subjects": () => fixture("school-subjects"),
-  "/school/assignments": () => fixture("school-assignments"),
-  "/school/exams": () => fixture("school-exams"),
+  "/school/assignments": () => schoolState.assignments,
+  "/school/exams": () => schoolState.exams,
   "/work/sessions": () => fixture("work-sessions"),
   "/work/summary": () => fixture("work-summary"),
   "/wot/grinds": () => wotState.grinds,
@@ -56,6 +56,15 @@ function send(res, req, status, body, extraHeaders = {}) {
 // Game Enrichment B: stavový WoT (splnění grindu, historie, milníky, screenshoty). Výchozí data = fixtures ze
 // skutečného wot_service; /__mock/wot/reset vrátí výchozí stav. Screenshoty = neutrální testovací PNG (ne herní
 // grafika); id 5 představuje soubor smazaný z disku (404 → náhradní stav v galerii).
+// MRK-14: stavová Škola (splnění / uzavření / znovuotevření); /__mock/school/reset vrátí fixtures.
+const schoolState = {};
+function resetSchool() {
+  Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams") });
+}
+resetSchool();
+const SCHOOL_ASSIGNMENT_DONE = ["done", "completed", "hotovo", "closed", "finished"];
+const SCHOOL_EXAM_OPEN = ["upcoming", "scheduled", ""];
+
 const wotState = {};
 function resetWot() {
   Object.assign(wotState, {
@@ -256,6 +265,29 @@ createServer(async (req, res) => {
   if (url.pathname === "/actions/undo" && req.method === "POST" && String(body?.action_id || "").startsWith("today-")) {
     todayState.calls.push(`undo:${body.action_id}`);
     return respond(200, { ok: true, pending_action: { id: `today-undo-${body.action_id}`, tool: "undo_change", arguments: { _source: "today" } } }, 250);
+  }
+  if (url.pathname === "/__mock/school/reset") {
+    resetSchool();
+    return respond(200, { ok: true });
+  }
+  const schoolMatch = /^\/school\/(assignment|exam)\/(\d+)\/(complete|reopen|close)$/.exec(url.pathname);
+  if (schoolMatch && req.method === "POST") {
+    const [, kind, rawId, action] = schoolMatch;
+    const list = kind === "assignment" ? schoolState.assignments : schoolState.exams;
+    const item = list.find((x) => x.id === Number(rawId));
+    if (!item) return respond(404, { detail: { error: "not_found", message: "Položka neexistuje." } });
+    const open = kind === "assignment" ? !SCHOOL_ASSIGNMENT_DONE.includes(item.status) : SCHOOL_EXAM_OPEN.includes(item.status);
+    if ((action === "reopen") === open) return respond(409, { detail: { error: open ? "not_completed" : "already_completed", message: "Zastaralý stav." } }, 300);
+    if (action === "complete") Object.assign(item, { status: "done", completed_at: new Date().toISOString().slice(0, 19) + "Z" });
+    else if (action === "close") {
+      const b = body ?? {};
+      if (b.result_type === "percent" && !(Number(String(b.result_value).replace(",", ".")) <= 100)) {
+        return respond(400, { detail: { error: "invalid_result_value", message: "Procenta: číslo 0–100." } }, 300);
+      }
+      Object.assign(item, { status: b.outcome || "passed", completed_at: new Date().toISOString().slice(0, 19) + "Z", result_type: b.result_type ?? null,
+        result_value: b.result_type === "pass_fail" ? b.outcome : b.result_value ?? null });
+    } else Object.assign(item, { status: kind === "assignment" ? "todo" : "upcoming", completed_at: null, result_type: null, result_value: null });
+    return respond(200, { ok: true, item }, 450);
   }
   if (url.pathname === "/__mock/wot/reset") {
     resetWot();

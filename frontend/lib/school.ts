@@ -12,10 +12,10 @@ export function isDoneStatus(status: string | null | undefined): boolean {
   return DONE_STATUSES.includes(String(status ?? "").toLowerCase());
 }
 
-/** Zkouška je uzavřená, když už má výsledek (splněno/nesplněno). */
+/** Zkouška je uzavřená: má výsledek (splněno/nesplněno) nebo je uzavřená bez hodnocení (MRK-14). */
 export function isExamClosed(status: string | null | undefined): boolean {
   const s = String(status ?? "").toLowerCase();
-  return s === "failed" || isDoneStatus(s);
+  return s === "failed" || s === "closed" || isDoneStatus(s);
 }
 
 type Meta = { label: string; tone: Tone };
@@ -30,6 +30,7 @@ const EXAM_STATUS: Record<string, Meta> = {
   upcoming: { label: "Nadcházející", tone: "neutral" },
   passed: { label: "Splněno", tone: "success" },
   failed: { label: "Nesplněno", tone: "danger" },
+  closed: { label: "Uzavřeno", tone: "neutral" },
 };
 
 const EXAM_TYPE: Record<string, string> = {
@@ -114,4 +115,53 @@ export function creditsLabel(n: number): string {
   const a = Math.abs(n);
   const word = a === 1 ? "kredit" : a >= 2 && a <= 4 ? "kredity" : "kreditů";
   return `${n} ${word}`;
+}
+
+// ---------- MRK-14: uzavření zkoušky s volitelným výsledkem ----------
+
+export const EXAM_OUTCOMES = [
+  { value: "passed", label: "Složeno" },
+  { value: "failed", label: "Nesloženo" },
+  { value: "closed", label: "Bez hodnocení" },
+] as const;
+
+export const RESULT_TYPES = [
+  { value: "", label: "Bez výsledku", placeholder: "" },
+  { value: "percent", label: "Procenta", placeholder: "např. 87,5" },
+  { value: "points", label: "Body", placeholder: "např. 42/50" },
+  { value: "grade", label: "Známka", placeholder: "např. 1, 2- nebo A" },
+  { value: "pass_fail", label: "Splněno / nesplněno", placeholder: "" },
+] as const;
+
+export type ExamCloseDraft = { outcome: string; result_type: string; result_value: string };
+export const emptyCloseDraft = (): ExamCloseDraft => ({ outcome: "passed", result_type: "", result_value: "" });
+
+const POINTS_RE = /^\d{1,4}([.,]\d{1,2})?(\s*\/\s*\d{1,4}([.,]\d{1,2})?)?$/;
+const GRADE_RE = /^([1-5]([+-]|,5)?|[A-Fa-f][+-]?)$/;
+
+/** Stejná pravidla jako backend (school_service.normalize_result); výsledek je nepovinný. */
+export function examCloseBody(d: ExamCloseDraft): { ok: true; body: Record<string, string | null> } | { ok: false; error: string } {
+  const value = d.result_value.trim();
+  const body = { outcome: d.outcome, result_type: d.result_type || null, result_value: value || null };
+  if (!d.result_type) return { ok: true, body: { ...body, result_value: null } };
+  if (d.result_type === "pass_fail") {
+    return d.outcome === "closed" ? { ok: false, error: "Splněno / nesplněno potřebuje výsledek Složeno nebo Nesloženo." } : { ok: true, body: { ...body, result_value: null } };
+  }
+  if (!value) return { ok: false, error: "Vyplň hodnotu výsledku, nebo zvol „Bez výsledku“." };
+  if (d.result_type === "percent") {
+    const n = Number(value.replace(",", ".").replace(/%$/, "").trim());
+    if (!Number.isFinite(n) || n < 0 || n > 100) return { ok: false, error: "Procenta: číslo 0–100." };
+  }
+  if (d.result_type === "points" && !POINTS_RE.test(value)) return { ok: false, error: "Body: číslo, případně „42/50“." };
+  if (d.result_type === "grade" && !GRADE_RE.test(value)) return { ok: false, error: "Známka: 1–5 (třeba 2-) nebo A–F." };
+  return { ok: true, body };
+}
+
+/** Výsledek k zobrazení („87,5 %", „42/50 b", „známka 2-"); splněno/nesplněno říká už stav. */
+export function examResultLabel(type: string | null | undefined, value: string | null | undefined): string | null {
+  if (!type || !value || type === "pass_fail") return null;
+  if (type === "percent") return `${value} %`;
+  if (type === "points") return `${value} b`;
+  if (type === "grade") return `známka ${value}`;
+  return value;
 }
