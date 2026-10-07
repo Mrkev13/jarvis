@@ -8,11 +8,14 @@ import {
   COMPANION_STATES,
   COMPANION_TIMING,
   RELOCATION_ORDER,
+  anchorSamplePoints,
+  chooseCompanionAnchor,
   companionAnchors,
   companionBubbleSide,
   companionLayout,
   companionVisible,
   createCompanion,
+  measureOccupied,
   nextCompanionDeadline,
   parseCompanionPref,
   pickSafeAnchor,
@@ -24,9 +27,12 @@ import {
 const VIEWPORT = { width: 1366, height: 768, sidebar: 240 };
 const anchorsFor = (vp = VIEWPORT, route = "default") => companionAnchors(vp, route);
 
-function fresh({ now = 0, roaming = true, enabled = true, route = "default", vp = VIEWPORT } = {}) {
-  return createCompanion({ now, anchors: anchorsFor(vp, route), enabled, roaming });
+/** Nový companion po prvním měření (nic pod kotvami). */
+function fresh({ now = 0, roaming = true, enabled = true, route = "default", vp = VIEWPORT, occupied = [] } = {}) {
+  const m = createCompanion({ now, anchors: anchorsFor(vp, route), enabled, roaming });
+  return stepCompanion(m, { type: "occupancy", occupied, now });
 }
+const regularAnchors = (vp, route) => anchorsFor(vp, route).filter((a) => !a.peek);
 
 /**
  * Tiká stroj po jeho vlastních termínech (tak to dělá komponenta – jeden časovač),
@@ -54,8 +60,10 @@ test("states and priorities follow the brief: error/warning > success > listenin
 
 test("anchors stay inside the viewport and right of the sidebar", () => {
   for (const vp of [VIEWPORT, { width: 1024, height: 700, sidebar: 240 }, { width: 2560, height: 1440, sidebar: 240 }]) {
-    const anchors = anchorsFor(vp);
-    assert.deepEqual(anchors.map((a) => a.id), ["left", "center", "right"]);
+    const anchors = regularAnchors(vp);
+    assert.deepEqual(anchorsFor(vp).map((a) => a.id), ["left", "center", "right", "edge"]);
+    const edge = anchorsFor(vp).find((a) => a.peek);
+    assert.equal(edge.x + edge.width, vp.width, "edge peek stays flush with the right edge");
     for (const a of anchors) {
       assert.ok(a.x >= vp.sidebar, `${a.id} must not cover the sidebar`);
       assert.ok(a.x + COMPANION_BOX.width <= vp.width, `${a.id} must fit horizontally`);
@@ -105,7 +113,7 @@ test("starts idle at the right anchor; disabled companion is hidden", () => {
 test("idle relocation is rare, deterministic and walks only between anchors", () => {
   let m = fresh();
   assert.equal(nextCompanionDeadline(m), COMPANION_TIMING.relocateEveryMs);
-  const anchorIds = new Set(anchorsFor().map((a) => a.id));
+  const anchorIds = new Set(regularAnchors().map((a) => a.id));
   const visited = [];
   for (let i = 0; i < RELOCATION_ORDER.length; i += 1) {
     m = advance(m); // čas na přesun
@@ -244,6 +252,9 @@ test("layout change re-clamps to the new anchors (viewport bounds)", () => {
 
   let ai = stepCompanion(fresh(), { type: "layout", anchors: anchorsFor(VIEWPORT, "ai"), now: 5 });
   assert.equal(ai.anchor, "ai");
+  assert.equal(nextCompanionDeadline(ai), 5 + COMPANION_TIMING.recheckAfterLayoutMs, "only the one-off recheck");
+  ai = stepCompanion(ai, { type: "occupancy", occupied: [], now: 6 });
+  ai = stepCompanion(ai, { type: "tick", now: 5 + COMPANION_TIMING.recheckAfterLayoutMs });
   assert.equal(nextCompanionDeadline(ai), Infinity, "single anchor → no relocation");
 
   const gone = stepCompanion(fresh(), { type: "layout", anchors: [], now: 5 });
@@ -277,7 +288,7 @@ test("bubble opens toward the inside of the screen", () => {
 });
 
 test("pickSafeAnchor moves away from a focused control that overlaps the companion", () => {
-  const anchors = anchorsFor();
+  const anchors = regularAnchors();
   const right = anchors.find((a) => a.id === "right");
   const control = { left: right.x - 10, right: right.x + 40, top: right.y + 5, bottom: right.y + 30 };
   assert.equal(pickSafeAnchor(anchors, "right", control), "center");
@@ -285,6 +296,107 @@ test("pickSafeAnchor moves away from a focused control that overlaps the compani
   assert.equal(pickSafeAnchor(anchors, "right", far), null, "no overlap → stay");
   const everywhere = { left: 0, right: 5000, top: 0, bottom: 5000 };
   assert.equal(pickSafeAnchor(anchors, "right", everywhere), null, "nowhere safe → stay put");
+});
+
+// ---------- obsazené kotvy (MRK-16 UX) ----------
+
+test("occupied bottom-right anchor → walks to the nearest free anchor", () => {
+  let m = fresh();
+  assert.equal(m.anchor, "right");
+  m = stepCompanion(m, { type: "occupancy", occupied: ["right"], now: 10 });
+  assert.equal(m.state, "walking", "visible and calm → walks away, no teleport");
+  assert.equal(m.walk.target, "center");
+  assert.equal(m.parked, false);
+});
+
+test("occupied anchor while not yet visible (first measure) → placed directly on a free one", () => {
+  const created = createCompanion({ now: 0, anchors: anchorsFor(), enabled: true, roaming: true });
+  assert.equal(created.measured, false, "starts unmeasured (rendered transparent)");
+  const m = stepCompanion(created, { type: "occupancy", occupied: ["right", "center"], now: 1 });
+  assert.equal(m.state, "idle");
+  assert.equal(m.anchor, "left");
+  assert.equal(m.measured, true);
+});
+
+test("all regular anchors occupied → peeks from the right edge; everything occupied → hides", () => {
+  let m = stepCompanion(fresh(), { type: "scroll", now: 5 });
+  m = stepCompanion(m, { type: "tick", now: 5 + COMPANION_TIMING.scrollSettleMs });
+  m = stepCompanion(m, { type: "occupancy", occupied: ["left", "center", "right"], now: 300 });
+  assert.equal(m.anchor, "edge");
+  assert.equal(m.state, "idle");
+  assert.equal(m.x, anchorsFor().find((a) => a.id === "edge").x);
+  assert.equal(nextCompanionDeadline(m), m.checkAt ?? Infinity, "never relocates out of the peek on its own");
+
+  m = stepCompanion(m, { type: "occupancy", occupied: ["left", "center", "right", "edge"], now: 400 });
+  assert.equal(m.state, "hidden");
+  assert.equal(m.parked, true);
+  m = stepCompanion(m, { type: "pulse", kind: "success", now: 410 });
+  assert.equal(m.state, "hidden", "parked companion does not pop out over content");
+
+  m = stepCompanion(m, { type: "occupancy", occupied: ["left"], now: 500 });
+  assert.equal(m.parked, false);
+  assert.ok(["center", "right"].includes(m.anchor) || m.walk, "comes back to a free anchor");
+});
+
+test("scrolling hides him (transparent), stops the walk, then re-measures once settled", () => {
+  let m = advance(fresh()); // walking right → center
+  const t = m.walk.start + 1000;
+  const before = m.measureRequest;
+  m = stepCompanion(m, { type: "scroll", now: t });
+  assert.equal(m.measured, false);
+  assert.equal(m.walk, null);
+  assert.equal(m.scrollUntil, t + COMPANION_TIMING.scrollSettleMs);
+  m = stepCompanion(m, { type: "scroll", now: t + 100 });
+  assert.equal(m.measureRequest, before, "no measuring while still scrolling");
+  assert.equal(nextCompanionDeadline(m), t + 100 + COMPANION_TIMING.scrollSettleMs);
+  m = stepCompanion(m, { type: "tick", now: t + 100 + COMPANION_TIMING.scrollSettleMs });
+  assert.equal(m.measureRequest, before + 1, "settled → one measurement");
+  m = stepCompanion(m, { type: "occupancy", occupied: ["center"], now: t + 400 });
+  assert.equal(m.measured, true);
+  assert.equal(m.walk, null, "repositioned while invisible – no walk across content");
+  assert.notEqual(m.anchor, "center");
+});
+
+test("relocation never targets an occupied anchor", () => {
+  let m = fresh({ occupied: ["center"] });
+  m = advance(m);
+  assert.equal(m.state, "walking");
+  assert.equal(m.walk.target, "left", "skips the occupied center");
+});
+
+test("reduced motion: occupied fixed anchor → nearest free one, never walking", () => {
+  let m = fresh({ roaming: false, occupied: ["right"] });
+  assert.equal(m.state, "idle");
+  assert.equal(m.walk, null);
+  assert.equal(m.anchor, "center");
+  m = stepCompanion(m, { type: "occupancy", occupied: ["center", "right"], now: 50 });
+  assert.equal(m.walk, null);
+  assert.equal(m.anchor, "left");
+  m = stepCompanion(m, { type: "mood", mood: "thinking", now: 60 });
+  assert.equal(m.state, "thinking", "expressions still change");
+});
+
+test("/ai dock is reserved: it is never measured as occupied", () => {
+  const ai = anchorsFor(VIEWPORT, "ai");
+  assert.deepEqual(measureOccupied(ai, () => true), []);
+  const all = measureOccupied(anchorsFor(), (x) => x > 1200);
+  assert.deepEqual(all, ["right", "edge"]);
+});
+
+test("sample points stay inside the visible part of the anchor", () => {
+  for (const a of anchorsFor()) {
+    for (const p of anchorSamplePoints(a)) {
+      assert.ok(p.x > a.x && p.x < a.x + a.width && p.y > a.y && p.y < a.y + COMPANION_BOX.height);
+    }
+  }
+});
+
+test("chooseCompanionAnchor keeps a free current anchor and prefers regular anchors over the edge", () => {
+  const anchors = anchorsFor();
+  assert.equal(chooseCompanionAnchor(anchors, [], "right", 1278), "right");
+  assert.equal(chooseCompanionAnchor(anchors, ["right"], "right", 1278), "center");
+  assert.equal(chooseCompanionAnchor(anchors, ["right", "center", "left"], "right", 1278), "edge");
+  assert.equal(chooseCompanionAnchor(anchors, ["right", "center", "left", "edge"], "right", 1278), null);
 });
 
 test("companionLayout derives the dock mode from the route", () => {

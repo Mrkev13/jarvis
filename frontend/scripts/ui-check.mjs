@@ -522,10 +522,10 @@ async function aiSend(page, text) {
   await box.press("Enter");
 }
 {
-  const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900 });
+  const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900, setup: (p) => p.addInitScript(() => localStorage.setItem("standa-hub:jarvis-companion:v1", "off")) });
   const box = page.getByLabel("Zpráva pro Standa AI");
   const avatar = page.locator('header [data-testid="jarvis-avatar"]');
-  check("jarvis ai: avatar je viditelný", (await avatar.count()) === 1 && await avatar.isVisible());
+  check("jarvis ai: avatar je viditelný (companion vypnutý)", (await avatar.count()) === 1 && await avatar.isVisible());
   check("jarvis ai: výchozí stav idle", (await avatar.getAttribute("data-jarvis-state")) === "idle");
   check("jarvis ai: lokální asset, sm a dekorativní", (await avatar.getAttribute("data-jarvis-asset")) === "asset" && (await avatar.getAttribute("data-jarvis-size")) === "sm" && (await avatar.getAttribute("aria-hidden")) === "true");
   check("ai: pole pro zprávu má popisek", (await box.count()) === 1);
@@ -773,7 +773,10 @@ async function aiSend(page, text) {
 // Chybějící asset nesmí rozbít AI hlavičku: komponenta přepne na lokální vektorový fallback.
 {
   const { ctx, page, errors } = await open("/ai", {
-    setup: (p) => p.route("**/jarvis/jarvis-shell.svg", (route) => route.abort()),
+    setup: async (p) => {
+      await p.addInitScript(() => localStorage.setItem("standa-hub:jarvis-companion:v1", "off"));
+      await p.route("**/jarvis/jarvis-shell.svg", (route) => route.abort());
+    },
   });
   const avatar = page.locator('header [data-testid="jarvis-avatar"]');
   await avatar.locator('[data-testid="jarvis-fallback"]').waitFor();
@@ -2264,30 +2267,74 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
 }
 await wotReset();
 
-// 30) MRK-16 – Jarvis companion: kotvy, stavy, chůze, klik, bubliny, reduced motion, vypnutí, mobil, záloha obrázku.
+// 30) MRK-16 – Jarvis companion: volné kotvy (nezakrývá obsah), scroll, stavy, chůze, klik, bubliny,
+//     reduced motion, vypnutí, mobil, záloha obrázku, jediný Jarvis na /ai.
 {
   const companion = (page) => page.getByTestId("jarvis-companion");
   const cState = (page) => companion(page).getAttribute("data-companion-state");
   const cAnchor = (page) => companion(page).getAttribute("data-companion-anchor");
+  const cShown = (page) => companion(page).getAttribute("data-companion-visible");
   const cBox = (page) => page.getByTestId("jarvis-companion-link").boundingBox();
-  const inViewport = (box, vw, vh) => Boolean(box) && box.x >= 0 && box.y >= 0 && box.x + box.width <= vw && box.y + box.height <= vh;
   const overlap = (a, b) => Boolean(a && b) && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
   const lanePadding = (page) => page.locator('[data-jarvis-lane="dock"]').evaluate((el) => getComputedStyle(el).paddingBottom);
+  const toBottom = async (page) => {
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await settle(page, 600);
+  };
+  // Nezávislá kontrola: viditelná část companiona se nekříží s kartou, ovládacím prvkem ani textem stránky.
+  const coveredContent = (page) =>
+    page.evaluate(() => {
+      const root = document.querySelector('[data-testid="jarvis-companion"]');
+      if (!root || root.getAttribute("data-companion-visible") !== "true") return [];
+      const r = root.querySelector('[data-testid="jarvis-companion-link"]').getBoundingClientRect();
+      const vis = { left: Math.max(r.left, 0), right: Math.min(r.right, document.documentElement.clientWidth), top: r.top, bottom: r.bottom };
+      const sel = ".rounded-card, a[href], button, input, textarea, select, [role='button'], [role='switch'], p, h1, h2, h3, li, img, table";
+      return [...document.querySelectorAll(sel)]
+        .filter((el) => !root.contains(el) && !el.closest("[data-desktop-sidebar]"))
+        .map((el) => ({ el, b: el.getBoundingClientRect() }))
+        .filter(({ b }) => b.width > 0 && b.height > 0 && b.left < vis.right && vis.left < b.right && b.top < vis.bottom && vis.top < b.bottom)
+        // jen opravdu viditelné: prvek oříznutý scrollem (např. dlouhý seznam konverzací) pod Jarvisem není
+        .filter(({ el, b }) => {
+          const x = (Math.max(b.left, vis.left) + Math.min(b.right, vis.right)) / 2;
+          const y = (Math.max(b.top, vis.top) + Math.min(b.bottom, vis.bottom)) / 2;
+          return document.elementsFromPoint(x, y).includes(el);
+        })
+        .map(({ el }) => `${el.tagName.toLowerCase()}.${String(el.className).split(" ")[0]}`)
+        .slice(0, 5);
+    });
 
   for (const [label, width, height] of [["1366", 1366, 768], ["wide", 1920, 1080]]) {
     const { ctx, page, errors } = await open("/", { width, height });
     await companion(page).waitFor({ timeout: 4000 }).catch(() => undefined);
-    const box = await cBox(page);
-    check(`companion @${label}: viditelný, idle, pravá kotva`, (await cState(page)) === "idle" && (await cAnchor(page)) === "right");
-    check(`companion @${label}: uvnitř viewportu`, inViewport(box, width, height), JSON.stringify(box));
+    await settle(page, 1500); // první měření + pozdější kontrola po načtení dat
+    const top = { state: await cState(page), anchor: await cAnchor(page), shown: await cShown(page) };
+    const coveredTop = await coveredContent(page);
+    check(`companion @${label} nahoře: nezakrývá karty ani ovládání`, coveredTop.length === 0, `${JSON.stringify(top)} ${coveredTop.join(", ")}`);
+    check(`companion @${label} nahoře: je vidět (volná kotva nebo vykouknutí od okraje)`, top.shown === "true" && ["left", "center", "right", "edge"].includes(top.anchor ?? ""), JSON.stringify(top));
     const sidebar = await page.locator("[data-desktop-sidebar]").boundingBox();
-    const quickAdd = await page.getByRole("button", { name: /^Rychlé přidání/ }).first().boundingBox();
-    check(`companion @${label}: nepřekrývá navigaci ani Rychlé přidání`, !overlap(box, sidebar) && !overlap(box, quickAdd));
+    check(`companion @${label}: nepřekrývá navigaci`, !overlap(await cBox(page), sidebar));
+    await page.screenshot({ path: `${OUT}companion-top-${label}.png` });
+
+    // během scrollu průhledný, po dosednutí znovu na volném místě
+    await page.mouse.wheel(0, 500);
+    await settle(page, 60);
+    const mid = await cShown(page);
+    check(`companion @${label}: během scrollu průhledný`, mid === "false", String(mid));
+    await settle(page, 500);
+    const coveredMid = await coveredContent(page);
+    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, (await cShown(page)) === "true" && coveredMid.length === 0, coveredMid.join(", "));
+    await page.screenshot({ path: `${OUT}companion-scrolled-${label}.png` });
+
+    await toBottom(page);
+    const bottom = { anchor: await cAnchor(page), shown: await cShown(page) };
+    check(`companion @${label} dole: v pruhu na běžné kotvě`, ["left", "center", "right"].includes(bottom.anchor ?? "") && bottom.shown === "true", JSON.stringify(bottom));
+    check(`companion @${label} dole: nic nezakrývá`, (await coveredContent(page)).length === 0);
     const lane = await lanePadding(page);
-    check(`companion @${label}: vyhrazený pruh dole (obsah pod něj na konci nezajede)`, lane === "104px", lane);
+    check(`companion @${label}: pruh dole jen 104 px (žádná velká mrtvá plocha)`, lane === "104px", lane);
     const fig = await page.getByTestId("jarvis-figure").getAttribute("data-jarvis-asset");
     check(`companion @${label}: postavička z jarvis-shell.svg`, fig === "asset", fig);
-    await page.screenshot({ path: `${OUT}companion-idle-${label}.png` });
+    await page.screenshot({ path: `${OUT}companion-bottom-${label}.png` });
+
     if (label === "1366") {
       // Rychlé přidání: dialog (z-50) companiona překryje
       await page.keyboard.press("Control+Shift+K");
@@ -2301,30 +2348,74 @@ await wotReset();
       await page.keyboard.press("Escape");
       await settle(page, 300);
       // fokus ovládacího prvku pod Jarvisem → ustoupí na jinou kotvu
-      await page.evaluate(() => {
+      const before = await cAnchor(page);
+      const at = await cBox(page);
+      await page.evaluate((r) => {
         const input = document.createElement("input");
         input.id = "companion-probe";
-        input.style.cssText = "position:fixed;right:30px;bottom:30px;width:120px;height:32px;z-index:1";
+        input.style.cssText = `position:fixed;left:${r.x - 10}px;top:${r.y + 20}px;width:90px;height:32px;z-index:1`;
         document.body.appendChild(input);
-      });
+      }, at);
       await page.focus("#companion-probe");
       await settle(page, 100);
-      check("companion: fokusované pole pod ním → odejde ke středu", (await cAnchor(page)) === "→center", await cAnchor(page));
-      // klik → AI asistent
+      const after = await cAnchor(page);
+      check("companion: fokusované pole pod ním → ustoupí na jinou kotvu", after !== before && after !== `→${before}`, `${before} → ${after}`);
       await page.evaluate(() => document.getElementById("companion-probe")?.remove());
+      await settle(page, 6500);
+      // klik → AI asistent
       await page.getByTestId("jarvis-companion-link").click();
       await page.waitForURL("**/ai", { timeout: 5000 }).catch(() => undefined);
       check("companion: klik otevře AI asistenta", new URL(page.url()).pathname === "/ai", page.url());
-      await settle(page, 600);
+      await settle(page, 800);
       const aiBox = await cBox(page);
       const composer = await page.getByPlaceholder("Napiš, co potřebuješ…").boundingBox();
       const aside = await page.locator("[data-jarvis-ai-dock]").boundingBox();
       const docked = (await cAnchor(page)) === "ai" && aiBox && aside && aiBox.x >= aside.x && aiBox.x + aiBox.width <= aside.x + aside.width;
       check("companion /ai: zaparkovaný ve sloupci konverzací", Boolean(docked), JSON.stringify({ aiBox, aside }));
-      check("companion /ai: nepřekrývá pole zprávy", !overlap(aiBox, composer), JSON.stringify({ aiBox, composer }));
-      await page.screenshot({ path: `${OUT}companion-ai-${label}.png` });
+      check("companion /ai: nepřekrývá pole zprávy ani konverzace", !overlap(aiBox, composer) && (await coveredContent(page)).length === 0);
     }
     check(`companion @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+
+  // /ai: jen jeden Jarvis – companion zapnutý → avatar v hlavičce skrytý; vypnutý / mobil → avatar zůstává
+  const headerAvatar = (page) => page.locator('header [data-testid="jarvis-avatar"]');
+  for (const [label, opts, expectCompanion] of [
+    ["desktop", { width: 1366, height: 768 }, true],
+    ["desktop reduced", { width: 1366, height: 768, reducedMotion: "reduce" }, true],
+    ["vypnutý", { width: 1366, height: 768, setup: (p) => p.addInitScript(() => localStorage.setItem("standa-hub:jarvis-companion:v1", "off")) }, false],
+    ["mobil 390", { width: 390, height: 844 }, false],
+  ]) {
+    const { ctx, page, errors } = await open("/ai", opts);
+    await settle(page, 400);
+    const avatarShown = await headerAvatar(page).isVisible();
+    const companionShown = (await companion(page).count()) === 1 && (await cShown(page)) === "true";
+    check(
+      `companion /ai ${label}: právě jeden Jarvis (${expectCompanion ? "companion" : "avatar v hlavičce"})`,
+      expectCompanion ? companionShown && !avatarShown : !companionShown && avatarShown,
+      JSON.stringify({ avatarShown, companionShown }),
+    );
+    if (label === "desktop") await page.screenshot({ path: `${OUT}companion-ai-1366.png` });
+    if (label === "vypnutý") await page.screenshot({ path: `${OUT}companion-ai-off.png` });
+    check(`companion /ai ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    // hlavička /ai se po hydrataci neposune: avatar je skrytý už v prvním vykreslení (skript v <head>)
+    const { ctx, page } = await open("/ai", {
+      width: 1366,
+      height: 768,
+      setup: (p) =>
+        p.addInitScript(() => {
+          document.addEventListener("DOMContentLoaded", () => {
+            const el = document.querySelector("[data-jarvis-header-avatar]");
+            window.__firstDisplay = el ? getComputedStyle(el).display : "missing";
+          });
+        }),
+    });
+    const first = await page.evaluate(() => window.__firstDisplay);
+    const now = await page.locator("[data-jarvis-header-avatar]").evaluate((el) => getComputedStyle(el).display);
+    check("companion /ai: avatar skrytý už při prvním vykreslení (bez skoku hlavičky)", first === "none" && now === "none", `${first} → ${now}`);
     await ctx.close();
   }
 
@@ -2332,7 +2423,11 @@ await wotReset();
   {
     const { ctx, page, errors } = await open("/", { width: 1366, height: 768, setup: (p) => p.clock.install() });
     await companion(page).waitFor({ timeout: 4000 }).catch(() => undefined);
-    check("companion: hned po načtení se nehýbe", (await cState(page)) === "idle");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await settle(page, 150); // scroll událost přijde až s dalším snímkem
+    await page.clock.fastForward(2_000);
+    await settle(page, 100);
+    check("companion: dole stojí na pravé kotvě", (await cState(page)) === "idle" && (await cAnchor(page)) === "right", `${await cState(page)} ${await cAnchor(page)}`);
     await page.clock.fastForward(30_000);
     check("companion: po 30 s pořád stojí (žádný neustálý pohyb)", (await cState(page)) === "idle");
     await page.clock.fastForward(61_000);
@@ -2350,6 +2445,38 @@ await wotReset();
     await ctx.close();
   }
 
+  // obsazené kotvy: karta přes pravou kotvu → jiná volná; všechno obsazené → vykoukne od okraje
+  {
+    const { ctx, page, errors } = await open("/", { width: 1366, height: 768 });
+    await toBottom(page);
+    const block = async (css) => {
+      await page.evaluate((style) => {
+        const el = document.createElement("div");
+        el.className = "companion-blocker rounded-card";
+        el.style.cssText = `position:fixed;z-index:20;bottom:0;height:120px;${style}`;
+        document.body.appendChild(el);
+      }, css);
+      await page.mouse.wheel(0, -1);
+      await settle(page, 600);
+    };
+    await block("right:30px;width:170px");
+    check("companion: obsazená pravá kotva → přesun na volnou", ["center", "→center"].includes(await cAnchor(page) ?? ""), await cAnchor(page));
+    await settle(page, 6500);
+    check("companion: po přesunu nic nezakrývá", (await coveredContent(page)).filter((c) => !c.includes("companion-blocker")).length === 0);
+    await block("left:240px;width:1080px");
+    const peek = { anchor: await cAnchor(page), state: await cState(page) };
+    check("companion: všechny kotvy obsazené → vykoukne od pravého okraje", peek.anchor === "edge", JSON.stringify(peek));
+    await page.screenshot({ path: `${OUT}companion-edge.png` });
+    await block("right:0;width:60px");
+    check("companion: ani okraj volný → dočasně schovaný", (await companion(page).count()) === 0);
+    await page.evaluate(() => document.querySelectorAll(".companion-blocker").forEach((el) => el.remove()));
+    await page.mouse.wheel(0, 1);
+    await settle(page, 700);
+    check("companion: po uvolnění se vrátí", (await companion(page).count()) === 1 && (await cShown(page)) === "true");
+    check("companion obsazené kotvy: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+
   // všechny stavy a priority přes vývojovou ukázku
   const jarvisProbe = await fetch(`${BASE}/dev/jarvis`, { redirect: "manual" }).catch(() => null);
   if (!jarvisProbe || jarvisProbe.status === 404) {
@@ -2358,6 +2485,7 @@ await wotReset();
     for (const motion of ["no-preference", "reduce"]) {
       const tag = motion === "reduce" ? "companion stavy (reduced)" : "companion stavy";
       const { ctx, page, errors } = await open("/dev/jarvis", { width: 1366, height: 768, reducedMotion: motion });
+      await settle(page, 400);
       const btn = (name) => page.getByRole("button", { name, exact: true });
       const bubble = async () => (await page.getByTestId("jarvis-bubble").innerText()).trim();
       const moods = [
@@ -2378,7 +2506,7 @@ await wotReset();
       await btn("Klid").click();
       await settle(page, 100);
       check(`${tag}: po vyřešení potvrzení se ukáže odložená oslava`, (await cState(page)) === "success");
-      await settle(page, 2600); // případná zbylá bublina odezní
+      await settle(page, 2600);
       await btn("Úspěch").click();
       await settle(page, 250);
       check(`${tag}: success`, (await cState(page)) === "success");
@@ -2408,13 +2536,22 @@ await wotReset();
     }
   }
 
-  // reduced motion: žádné potulování
+  // reduced motion: žádné potulování; obsazená kotva → přestaví se (nechodí) a nic nezakrývá
   {
     const { ctx, page } = await open("/", { width: 1366, height: 768, reducedMotion: "reduce", setup: (p) => p.clock.install() });
     await companion(page).waitFor({ timeout: 4000 }).catch(() => undefined);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await settle(page, 150); // scroll událost přijde až s dalším snímkem
+    await page.clock.fastForward(2_000);
     await page.clock.fastForward(200_000);
     await settle(page, 100);
     check("companion reduced: ani po 200 s nechodí, stojí vpravo", (await cState(page)) === "idle" && (await cAnchor(page)) === "right");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await settle(page, 150);
+    await page.clock.fastForward(2_000);
+    await settle(page, 100);
+    const st = { state: await cState(page), anchor: await cAnchor(page), covered: await coveredContent(page) };
+    check("companion reduced nahoře: nechodí a nic nezakrývá", st.state !== "walking" && !String(st.anchor).startsWith("→") && st.covered.length === 0, JSON.stringify(st));
     await ctx.close();
   }
 
@@ -2455,7 +2592,7 @@ await wotReset();
       height: 768,
       setup: (p) => p.route(/jarvis-shell\.svg/, (route) => route.fulfill({ status: 404, body: "" })),
     });
-    await settle(page, 400);
+    await toBottom(page);
     const figure = page.getByTestId("jarvis-figure");
     const mode = await figure.getAttribute("data-jarvis-asset");
     check("companion: když obrázek selže, ukáže zálohu", mode === "fallback" && (await figure.getByTestId("jarvis-fallback").count()) === 1, mode);
