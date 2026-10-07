@@ -168,6 +168,117 @@ for (const scheme of ["light", "dark"]) {
   await ctx.close();
 }
 
+// 5b) Roadmap 6A – sémantický pohyb: progress přes transform (bez layoutu), reduced motion = okamžitá změna.
+for (const motion of ["no-preference", "reduce"]) {
+  const { ctx, page, errors } = await open("/goals", { reducedMotion: motion });
+  await page.waitForTimeout(900);
+  const bars = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="progressbar"]')].map((bar) => {
+      const fill = bar.querySelector(".motion-progress-fill");
+      if (!fill) return { ok: false };
+      const cs = getComputedStyle(fill);
+      const m = new DOMMatrix(cs.transform);
+      const track = bar.getBoundingClientRect().width;
+      const shown = track ? (100 * (track + m.m41)) / track : 0;
+      return {
+        ok: true,
+        fullWidth: Math.abs(fill.getBoundingClientRect().width - track) <= 1 || Math.abs(fill.offsetWidth - bar.clientWidth) <= 1,
+        delta: Math.abs(shown - Number(bar.getAttribute("aria-valuenow"))),
+        transition: `${cs.transitionProperty} ${cs.transitionDuration}`,
+      };
+    }),
+  );
+  const label = motion === "reduce" ? "goals reduced motion" : "goals";
+  check(`${label}: progress bary používají motion-progress-fill`, bars.length > 0 && bars.every((b) => b.ok), String(bars.length));
+  check(`${label}: výplň odpovídá aria-valuenow (±1 %)`, bars.every((b) => b.delta <= 1), bars.map((b) => b.delta?.toFixed(1)).join(","));
+  check(
+    `${label}: ${motion === "reduce" ? "bez přechodu" : "přechod jen transformací"}`,
+    bars.every((b) => (motion === "reduce" ? /\b0s\b/.test(b.transition) : /^transform \d/.test(b.transition))),
+    bars[0]?.transition,
+  );
+  check(`${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
+// 5c) Roadmap 6A – motion primitiva na vývojové ukázce /dev/motion (jen s MOTION_PREVIEW=1 na serveru).
+{
+  const probe = await fetch(`${BASE}/dev/motion`, { redirect: "manual" }).catch(() => null);
+  if (!probe || probe.status === 404) {
+    console.log("· /dev/motion není zapnutá (MOTION_PREVIEW=1) – kontroly primitiv přeskočeny");
+  } else {
+    for (const motion of ["no-preference", "reduce"]) {
+      const tag = motion === "reduce" ? "motion primitiva (reduced)" : "motion primitiva";
+      const { ctx, page, errors } = await open("/dev/motion", { reducedMotion: motion });
+      const btn = (name) => page.getByRole("button", { name, exact: true });
+      const pseudoAnim = (sel, pseudo) =>
+        page.evaluate(([s, p]) => {
+          const el = document.querySelector(s);
+          return el ? getComputedStyle(el, p).animationName : "missing";
+        }, [sel, pseudo]);
+
+      // Completion: 40 → 100 %
+      await btn("+30 %").click();
+      await btn("+30 %").click();
+      await page.waitForTimeout(80);
+      const done = page.locator('[data-complete="true"]').first();
+      check(`${tag}: dokončení – štítek viditelný`, await done.getByText("Splněno").isVisible());
+      check(`${tag}: dokončení – role=status zpráva`, (await done.locator('[role="status"]').innerText()).includes("Ukázkový cíl splněn"));
+      const glow = await pseudoAnim('[data-complete="true"]', "::after");
+      check(`${tag}: dokončení – záře ${motion === "reduce" ? "vypnutá" : "běží"}`, motion === "reduce" ? glow === "none" : glow === "motion-glow-once", glow);
+      await page.waitForTimeout(1400);
+      const running = await page.evaluate(() => document.querySelector('[data-complete="true"]').getAnimations({ subtree: true }).filter((a) => a.playState === "running").length);
+      check(`${tag}: oslava doběhne do 1,5 s`, running === 0, String(running));
+
+      // Streak: +1 den → krátké rozhoření; popisek nese počet
+      await btn("+1 den").click();
+      await page.waitForTimeout(60);
+      const flame = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="preview-streak"] [role="img"]:last-child');
+        const icon = el?.querySelector(".motion-flame");
+        return { label: el?.getAttribute("aria-label"), anim: icon ? getComputedStyle(icon).animationName : "missing", hidden: icon?.getAttribute("aria-hidden") };
+      });
+      check(`${tag}: streak – popisek „Streak 6 dní"`, flame.label === "Streak 6 dní", flame.label);
+      check(`${tag}: streak – ikona aria-hidden`, flame.hidden === "true");
+      check(
+        `${tag}: streak – ${motion === "reduce" ? "statický plamen" : "rozhoření při nárůstu"}`,
+        motion === "reduce" ? flame.anim === "none" : flame.anim.startsWith("motion-flame-burst"),
+        flame.anim,
+      );
+
+      // Milník: trvalý obrys i bez pohybu, záře jen s pohybem
+      await btn("Přepnout milník").click();
+      await page.waitForTimeout(60);
+      const ring = await page.evaluate(() => {
+        const el = document.querySelector('[data-milestone="true"]');
+        return el ? getComputedStyle(el, "::before").boxShadow : "missing";
+      });
+      check(`${tag}: milník – trvalý obrys`, ring !== "none" && ring !== "missing", ring);
+      const mGlow = await pseudoAnim('[data-milestone="true"]', "::after");
+      check(`${tag}: milník – záře ${motion === "reduce" ? "vypnutá" : "jednou"}`, motion === "reduce" ? mGlow === "none" : mGlow === "motion-glow-once", mGlow);
+
+      // Chyba: krátký obrys, žádné třesení (transform zůstává none)
+      await btn("Chyba").click();
+      const err = await page.evaluate(async () => {
+        const el = document.querySelector('[role="alert"].motion-error');
+        const samples = [];
+        for (let i = 0; i < 5; i += 1) {
+          samples.push(el ? getComputedStyle(el).transform : "missing");
+          await new Promise((r) => setTimeout(r, 60));
+        }
+        return { samples, anim: el ? getComputedStyle(el).animationName : "missing" };
+      });
+      check(`${tag}: chyba – bez posunu textu`, err.samples.every((t) => t === "none"), err.samples.join(","));
+      check(`${tag}: chyba – ${motion === "reduce" ? "bez animace" : "krátký obrys"}`, motion === "reduce" ? err.anim === "none" : err.anim === "motion-ring-error", err.anim);
+
+      // Animace neblokují: tlačítka jsou klikací hned, fokus se nikam nepřesouvá
+      check(`${tag}: fokus zůstává na ovládání`, await page.evaluate(() => document.activeElement?.tagName === "BUTTON"));
+      check(`${tag}: bez chyb JS`, errors.length === 0, errors.join("; "));
+      await page.screenshot({ path: `${OUT}motion-preview-${motion}.png`, fullPage: true });
+      await ctx.close();
+    }
+  }
+}
+
 // 6) Klávesnice: viditelný fokus na první položce navigace.
 {
   const { ctx, page } = await open("/review");
@@ -478,6 +589,9 @@ async function aiSend(page, text) {
   await page.waitForTimeout(1200);
   const failedCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator(":scope > li").first();
   check("ai: selhání potvrzení – Zkusit znovu", (await failedCard.getByRole("button", { name: "Zkusit znovu" }).count()) === 1);
+  // Roadmap 6A: selhání = krátký obrys (motion-error), karta se nehýbe (žádné třesení).
+  const failedMotion = await failedCard.evaluate((el) => ({ cls: el.className, transform: getComputedStyle(el).transform }));
+  check("ai: selhání – motion-error bez posunu", failedMotion.cls.includes("motion-error") && !failedMotion.cls.includes("motion-shake") && failedMotion.transform === "none", failedMotion.transform);
   await failedCard.getByRole("button", { name: "Zkusit znovu" }).click();
   await page.waitForTimeout(1200);
   check("ai: druhý pokus projde", (await page.getByRole("list", { name: "Akce čekající na potvrzení" }).count()) === 0);
