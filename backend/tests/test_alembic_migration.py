@@ -347,6 +347,24 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertIn("wot_replays", _sqlite_tables(self.conn))
 
+    def test_0015_adds_school_completion_columns_and_keeps_data(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0014_wot_replays")
+        self.conn.execute(text("INSERT INTO subjects (name, code, semester, credits, active) VALUES ('Fyzika', 'F1', 'ZS', 5, 1)"))
+        self.conn.execute(text("INSERT INTO assignments (title, description, priority, status, subject_id) VALUES ('Sada', '', 'high', 'done', 1)"))
+        self.conn.execute(text("INSERT INTO exams (title, exam_type, status, notes, subject_id) VALUES ('Zápočet', 'test', 'passed', '', 1)"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0015_school_completion")
+        self.assertTrue({"completed_at"} <= {c["name"] for c in inspect(self.conn).get_columns("assignments")})
+        self.assertTrue({"completed_at", "result_type", "result_value"} <= {c["name"] for c in inspect(self.conn).get_columns("exams")})
+        self.assertEqual(self.conn.execute(text("SELECT status, completed_at FROM assignments")).fetchone(), ("done", None),
+                         "starší hotové položky zůstanou hotové, jen bez času")
+        alembic_cmd.downgrade(self.cfg, "0014_wot_replays")
+        self.assertNotIn("result_type", {c["name"] for c in inspect(self.conn).get_columns("exams")})
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM exams")).scalar(), 1)
+        alembic_cmd.upgrade(self.cfg, "head")
+
     def test_0012_adds_weekly_reviews_and_downgrades_cleanly(self):
         from sqlalchemy import inspect
 
