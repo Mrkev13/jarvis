@@ -1,7 +1,9 @@
 # Module Framework, Feature Flags & Domain Events (Platform 2.0)
 
-Status: **proposal** – to be split into Linear issues. Principles: [architecture-principles.md](architecture-principles.md)
-(P1–P18). Today's per-module checklist: [module-integration-checklist.md](module-integration-checklist.md).
+Status: **accepted** (decisions in §10). Tracked in Linear under MRK-8 (phases A–D). Principles:
+[architecture-principles.md](architecture-principles.md) (P1–P18). Today's per-module checklist:
+[module-integration-checklist.md](module-integration-checklist.md). Builds on the existing feature-flag branch
+`claude/standa-module-feature-flags-5wzspc` (MRK-7, `docs/module-feature-flags.md` there).
 
 Roadmap context:
 `current bugs → production readiness → **Platform 2.0 (this doc)** → Habits pilot → Global Visual Refresh → Calendar
@@ -43,7 +45,7 @@ What stays the same (non-negotiable):
 | Concept | One sentence |
 |---|---|
 | **Module** | A bounded life area (school, finance, habits…) with its own models, service, router and integrations. |
-| **ModuleSpec** (backend manifest) | A frozen dataclass that declares the module's identity, flag and the providers it contributes. |
+| **ModuleDef** (backend manifest) | A frozen dataclass that declares the module's identity, flag and the providers it contributes. |
 | **Module manifest** (frontend) | The TS counterpart: nav entry, icon, area style, widgets, Quick Add field defs, search params, labels. |
 | **Provider** | A small pure-ish function the aggregator calls: `search_source`, `today_source`, `briefing_source`… |
 | **Feature flag** | `enabled` state of a module, resolved once per request; disabled modules contribute nothing anywhere. |
@@ -58,12 +60,11 @@ What stays the same (non-negotiable):
 
 ```
 backend/
-  module_registry.py          # the ONLY list of modules (explicit imports, fixed order)
-  module_spec.py              # ModuleSpec + provider type definitions
+  module_registry.py          # the ONLY list of modules: ModuleDef, ModuleAccess, flags (exists on the MRK-7 branch)
   events.py                   # DomainEvent, emit(), consumer registry
   modules/
     habits/
-      __init__.py             # MODULE = ModuleSpec(...)
+      __init__.py             # MODULE = ModuleDef(...)
       models.py               # SQLAlchemy models (imported by alembic/env.py via the registry)
       service.py              # create/update/delete/query – the only write path (REST + AI + Quick Add)
       router.py               # APIRouter, mounted under /habits
@@ -72,18 +73,28 @@ backend/
   tests/modules/habits/...
 ```
 
-Existing modules (school, finance, work, wot, mff, goals, reminders, memory) **are not moved up front**. They get a
-thin `ModuleSpec` in phase A (identity + flag only) and are migrated provider by provider when touched (P16).
+Existing modules (school, finance, work, wot, mff, goals) **stay where they are** (decision 4). They already have a
+`ModuleDef` on the MRK-7 branch (identity, flag, capabilities, entity types) and get providers one aggregator at a
+time in phase C. Moving their files into `modules/` is a separate, purely cosmetic refactor, done only if a clear
+need appears.
 
-### 3.2 ModuleSpec
+### 3.2 ModuleDef
 
 ```python
 @dataclass(frozen=True)
-class ModuleSpec:
+class ModuleDef:
+    # --- exists on the MRK-7 branch ---
     id: str                         # stable snake_case, == activity area, == frontend manifest id; never renamed
     label: str                      # Czech, e.g. "Návyky"
-    core: bool = False              # core modules cannot be disabled (ai, reminders, system)
-    default_enabled: bool = True    # used when no override exists (see §5)
+    default_enabled: bool           # used when neither env nor DB says otherwise (§5.2)
+    implemented: bool               # planned modules stay unavailable even with the flag on
+    capabilities: frozenset[str]    # nav, search, quick_add, today, dashboard, ai_context
+    entity_types: frozenset[str]    # ref prefixes "<type>:<id>" – gating is by entity type, not by area label
+    context_areas: frozenset[str]
+    api_prefixes: tuple[str, ...]
+    quick_add_kinds: tuple[str, ...]
+
+    # --- added by this proposal ---
     depends_on: tuple[str, ...] = ()  # hard deps: cannot enable without them (e.g. food → calendar, if ever needed)
 
     router: APIRouter | None = None
@@ -105,6 +116,9 @@ class ModuleSpec:
     scheduler_jobs: tuple[JobSpec, ...] = ()             # isolated, idempotent, bounded (P10, P11, P13)
 ```
 
+Core (system, AI, reminders, event infrastructure, notifications, planner, Today, Activity, Memory) is not a
+`ModuleDef`: it is always available and cannot be switched off.
+
 Provider signatures are the existing per-aggregator shapes, lifted out of the aggregators unchanged, e.g.:
 
 ```python
@@ -118,12 +132,11 @@ BriefingSource = Callable[[Session, date], list[BriefingItem]]          # determ
 ```python
 # module_registry.py
 from modules.habits import MODULE as HABITS
-from legacy_modules import SCHOOL, FINANCE, WORK, WOT, MFF, GOALS, REMINDERS, MEMORY
 
-MODULES: tuple[ModuleSpec, ...] = (SCHOOL, REMINDERS, GOALS, WORK, FINANCE, HABITS, WOT, MFF, MEMORY)
+MODULES: tuple[ModuleDef, ...] = (SCHOOL, WORK, FINANCE, GOALS, HABITS, WOT, MFF, _planned("food", "Jídlo"), ...)
 
-def enabled_modules(db) -> tuple[ModuleSpec, ...]: ...   # resolves flags (§5), cached per request
-def module(id: str) -> ModuleSpec: ...
+def current_access(db) -> ModuleAccess: ...   # resolves flags (§5.2) once per request / scheduler run
+# access.allows("habits", "today"), access.allows_ref("habit:3", "today"), access.available_modules()
 ```
 
 Order in `MODULES` is the default order for sections everywhere (CURRENT STATE, briefing, search groups). It replaces
@@ -153,10 +166,13 @@ Rules that keep this honest:
 ### 3.5 `GET /modules`
 
 ```json
-[{ "id": "habits", "label": "Návyky", "enabled": true, "core": false, "depends_on": [] }, ...]
+[{ "id": "habits", "label": "Návyky", "available": true, "capabilities": ["nav", "today", ...],
+   "implemented": true, "enabled": true, "source": "db", "locked": false, "depends_on": [] }, ...]
 ```
 
-Single source of truth for the frontend's flag state. `PUT /modules/{id}` toggles a non-core module (§5).
+`available`/`capabilities` exist on the MRK-7 branch. `enabled`, `source` (`env` | `db` | `default`) and `locked`
+(true when an env override decides) are added so the Settings UI can explain itself. This becomes the **runtime
+source of truth for the frontend** (§5.3). `PUT /modules/{id}` `{ "enabled": bool }` writes the DB setting.
 
 ---
 
@@ -168,7 +184,7 @@ Single source of truth for the frontend's flag state. `PUT /modules/{id}` toggle
 @dataclass(frozen=True)
 class DomainEvent:
     type: str            # "<module>.<entity>.<verb>", e.g. "school.assignment.completed", "reminder.due"
-    module: str          # == ModuleSpec.id
+    module: str          # == ModuleDef.id
     ref: str | None      # "<entity_type>:<id>" – the same ref Today/planner/notifications already use
     payload: dict        # small, display-ready (title, due date…), JSON; never secrets or raw private blobs
     source: str          # user_context: "manual" | "ai_confirm" | "quick_add" | "today" | "scheduler" | "system"
@@ -178,7 +194,7 @@ class DomainEvent:
 
 Naming: past tense for facts (`created`, `updated`, `completed`, `reopened`, `deleted`), plain noun for time
 events (`due`, `upcoming`, `overdue`, `streak_broken`). The type list lives in the module's `events.py` and is
-declared in `ModuleSpec.event_types`; an undeclared type fails in tests, not in production.
+declared in `ModuleDef.event_types`; an undeclared type fails in tests, not in production.
 
 ### 4.2 Two kinds of events
 
@@ -206,8 +222,15 @@ service.py ── db.add(change) ── events.emit(db, e) ── db.commit()
   the write transaction. The activity row keeps its current shape; the module supplies `summary` and `delta`.
 - `domain_events` table (Alembic, additive): `id` (monotonic PK), `occurred_at` (naive UTC), `type`, `module`, `ref`,
   `payload_json`, `source`, `dedupe_key` (UNIQUE, nullable), `version`.
-- Retention: **keep them** (single user, tiny volume). They are the raw material for *What changed?*,
-  retrospectives and Year in Review. Revisit only if the table exceeds ~1M rows.
+- Retention (decision 3): `domain_events` is a **distribution log, not the archive**. Rows older than
+  `DOMAIN_EVENTS_RETENTION_DAYS` (default **180**, allowed 90–365) are deleted by a bounded daily scheduler job.
+  Long-term history lives where it already does or in dedicated tables written by in-transaction consumers:
+  - **audit:** `activity_logs` (kept long term, unchanged);
+  - **business history:** goal progress, grind completions, habit logs, completed assignments (never destructively
+    overwritten, so completed things stay visible);
+  - **Year in Review / retrospectives:** a small `period_stats` aggregate (module, metric, period, value) filled by
+    a consumer, so yearly numbers never depend on the outbox still holding a year of events.
+  - *What changed?* reads the outbox since the last visit, which is always well inside the retention window.
 - Existing `log_activity` call sites keep working. They are migrated to `emit` when their module is touched; no
   big-bang rewrite.
 
@@ -252,16 +275,40 @@ A module is **enabled** or **disabled**. Disabled means *invisible and inert, ne
 | Activity log & history | **still readable**; area label still resolves from the registry |
 | Data | untouched; re-enabling restores everything |
 
-`core` modules (`ai`, `reminders`, `system`) cannot be disabled. Enabling a module whose `depends_on` is disabled
-is refused with a clear message.
+Core (decision 2) stays deliberately small: `system`, `ai`, `reminders` and the event infrastructure (plus the
+non-module pages from MRK-7: Řídicí centrum, Dnes, Plánovač, Aktivita, Paměť, notifications). **Goals is a normal
+module.** Consequences:
+- Other modules must work with Goals disabled (they never import goal services for their own behaviour).
+- With Goals enabled and a source module disabled, an automatic goal whose source is unavailable shows
+  "Zdroj není dostupný" and keeps its last value. It does not error and is not recomputed to 0.
 
-### 5.2 Storage and resolution
+Enabling a module whose `depends_on` is disabled is refused with a clear message.
 
-1. `module_settings` table (`module_id` PK, `enabled`, `updated_at`), toggled from a Settings page via
-   `PUT /modules/{id}` and logged as `system.module.enabled/disabled`.
-2. If there is no row: env override `MODULE_<ID>_ENABLED` via `env_config.env_bool` (useful for dev and cloud
-   sessions), else `ModuleSpec.default_enabled`.
-3. Resolved once per request (`enabled_modules(db)`) and once per scheduler job run – never mid-request.
+### 5.2 Storage and resolution (decision 1)
+
+Priority: **env override > DB setting > manifest default.**
+
+1. `MODULE_<ID>_ENABLED` in `backend/.env` (MRK-7 parsing: `parse_flag`; blank/invalid = "not set", warning once).
+   Use it for an emergency switch-off or deployment-specific behaviour (e.g. a Mirror instance without WoT).
+2. `module_settings` table (`module_id` PK, `enabled`, `updated_at`; additive Alembic revision), written by
+   `PUT /modules/{id}` from the Settings page and logged as `system.module.enabled` / `system.module.disabled`.
+   When an env override exists, the toggle is shown **locked** ("Vynuceno konfigurací serveru") and `PUT` returns
+   409. The DB value is kept and applies again once the override is removed.
+3. Else `ModuleDef.default_enabled`.
+
+`implemented=False` still wins over everything. Flags are resolved once per request (`current_access(db)`) and once
+per scheduler job run, never mid-request.
+
+### 5.3 Frontend: from build-time to runtime flags
+
+MRK-7 inlines `NEXT_PUBLIC_MODULE_*` at `next build`. With a DB toggle the browser must learn flags at runtime:
+- `AppShell` loads `GET /modules` once (with the session) and builds `createModuleAccess(flags)`. That function
+  already accepts any mapping, so only the source of the mapping changes.
+- Until the response arrives, the last known value from `localStorage` is used (no flash of hidden modules). With
+  no cache, module navigation shows a skeleton. `ModuleRouteGuard` waits instead of showing "Modul není dostupný".
+- After `PUT /modules/{id}` the shell refetches. No rebuild, no restart.
+- `NEXT_PUBLIC_MODULE_*` and `moduleConfig.ts` are removed (one source of truth: the backend). The FE↔BE parity test
+  stays for ids, labels, capabilities and routes.
 
 No percentage rollouts, no per-user targeting, no remote config: single user (P1).
 
@@ -274,7 +321,7 @@ Next.js App Router needs physical route folders, so pages are not generated. Eac
 ```
 frontend/modules/habits/
   manifest.ts        # nav, icon, area style, widgets, quick-add fields, search params, today action labels
-  HabitsPage.tsx     # the page; app/habits/page.tsx is a 3-line wrapper with <ModuleGate id="habits">
+  HabitsPage.tsx     # the page; app/habits/page.tsx is a thin wrapper (ModuleRouteGuard in AppShell gates it)
   lib.ts + lib.test.mjs
 frontend/lib/modules.ts   # explicit import list, mirrors backend MODULES order
 ```
@@ -325,14 +372,16 @@ unique and prefixed.
 
 Each phase is shippable on its own and keeps all existing tests green.
 
-**Phase A – registry + flags without refactoring (small, immediate value)**
-- `module_spec.py`, `module_registry.py`, thin `ModuleSpec` for the existing modules (id, label, core, default).
-- `module_settings` migration, `GET/PUT /modules`, Settings toggle UI, `ModuleGate`.
-- Enforce flags at the *existing* aggregation points by filtering on `area` (search results, Today items, dashboard
-  keys, tool router areas, context areas, quick-add kinds, nav). Everything is already tagged with an area, so
-  this works before any provider extraction.
-- Tests: disabling `wot` removes it from nav, search, Today, dashboard, AI tools and context; data still there;
-  re-enable restores it.
+**Phase A – registry + flags (mostly built on the MRK-7 branch)**
+- A1 = MRK-7: bring `claude/standa-module-feature-flags-5wzspc` (based on `fdf8bc6`) onto current `main`. Since then
+  `main` gained WoT milestones, the replay library, motion, avatar and companion. At minimum, `wot_replay` (and
+  milestone types if searchable) must join `wot.entity_types`, `/wot/replays` the WoT routes, and new dashboard
+  widgets need `modules`. Re-run the parity tests and `module-flags-check.mjs`.
+- A2: DB settings + runtime flags: `module_settings` migration, priority env > DB > default, extended
+  `GET /modules`, `PUT /modules/{id}`, Settings page with locked state, `AppShell` loads flags at runtime (§5.3),
+  `NEXT_PUBLIC_MODULE_*` removed, Goals degradation (§5.1).
+- Tests: disabling `wot` via DB removes it from nav, search, Today, dashboard, AI tools and context without a
+  rebuild; env override beats DB and locks the toggle; data untouched; re-enable restores layout and records.
 
 **Phase B – domain events + SSE**
 - `events.py`, `domain_events` outbox migration, in-transaction activity consumer, after-commit dispatcher,
@@ -347,6 +396,17 @@ Each phase is shippable on its own and keeps all existing tests green.
   aggregator to iterate, and regenerate fixtures. No behaviour changes in the same PR.
 
 **Phase D – Habits pilot (acceptance test of the framework)**
+
+Scope (decision 5): five habits, deliberately not a full tracker: rehab / knee exercises, water, skincare,
+reading, morning or evening routine.
+- `Habit`: name, schedule (daily / chosen weekdays), kind `check` | `count` | `duration`, optional target + unit
+  (e.g. water 2 l, reading 20 min), active.
+- `HabitLog`: habit, local date, status `done` | `skipped` | `missed`, optional value. Unique `(habit, date)`.
+  `missed` is written by a scheduler job after the day ends, for scheduled habits with no log. That job is the pilot's
+  time event.
+- No streak gamification, reminders per habit, charts or AI coaching in the pilot. Those can come later if the
+  habits are actually used.
+
 - Built entirely in `backend/modules/habits/`, `frontend/modules/habits/`, one Alembic revision and one
   `app/habits/page.tsx` wrapper.
 - **Acceptance criterion:** outside those folders, the PR touches only the two registry files (+ migration,
@@ -356,7 +416,7 @@ Each phase is shippable on its own and keeps all existing tests green.
   (`habits.habit.checked`, `habits.streak.broken` as a time event), dashboard widget, AI read tool, flag.
 
 **Afterwards**
-- Update `module-integration-checklist.md` into a "how to fill a ModuleSpec" guide.
+- Update `module-integration-checklist.md` into a "how to fill a ModuleDef" guide.
 - Migrate legacy modules opportunistically when they are touched (School during MRK-14 follow-ups, WoT during
   MRK-12…). No dedicated big-bang migration.
 - Calendar is the first large consumer. Its `Event` entity and a Quick Add kind with a higher priority than
@@ -375,13 +435,13 @@ Each phase is shippable on its own and keeps all existing tests green.
 
 ---
 
-## 10. Open decisions
+## 10. Decisions (2026-10-07)
 
-1. **Flag storage:** DB + Settings UI with an env override (proposed), or env only?
-2. **Core set:** `ai`, `reminders`, `system`. Should `goals` also be core, given that automatic goals read other
-   modules?
-3. **Event retention:** keep forever (proposed) vs. a time window plus aggregates for Year in Review.
-4. **Folder move:** keep legacy modules where they are and wrap them (proposed), or move them into `modules/` when
-   they are first migrated?
-5. **Habits scope for the pilot:** which 3–5 habits are real enough to use daily (rehab, water, skincare, reading,
-   morning/evening routine)?
+1. **Flag storage:** DB + Settings UI, priority **env override > DB > manifest default** (§5.2–5.3).
+2. **Core:** `system`, `ai`, `reminders`, event infrastructure. **Goals is a normal module** and degrades gracefully
+   (§5.1).
+3. **Event retention:** outbox 90–365 days (default 180). Audit and business history are kept long term in their
+   own tables, and Year in Review uses `period_stats` aggregates (§4.3).
+4. **Legacy modules are not moved.** They are wrapped by their `ModuleDef` where they are (§3.1).
+5. **Habits pilot:** rehab, water, skincare, reading, morning/evening routine, with done / missed / skipped plus
+   an optional count or duration (§8 phase D).
