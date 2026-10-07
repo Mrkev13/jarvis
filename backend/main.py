@@ -29,6 +29,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 import media_storage
 import wot_service
+import school_service
 import wot_replay_service
 
 
@@ -3090,6 +3091,61 @@ def delete_work_session(item_id: int):
         db.delete(item)
         db.commit()
         return {"status": "ok", "deleted": True, "id": item_id}
+    finally:
+        db.close()
+
+
+# ----- MRK-14: splnění / uzavření / znovuotevření (záznam zůstává, historie v Aktivitě) -----
+class ExamCloseRequest(BaseModel):
+    outcome: str = "passed"
+    result_type: str | None = None
+    result_value: str | None = None
+
+
+def _school_call(db, fn, serialize):
+    try:
+        item = fn()
+    except school_service.SchoolError as exc:
+        raise HTTPException(status_code=exc.status, detail={"error": exc.code, "message": str(exc)}) from None
+    db.commit()
+    db.refresh(item)
+    return {"ok": True, "item": serialize(item)}
+
+
+@app.post("/school/assignment/{item_id}/complete")
+def complete_school_assignment(item_id: int):
+    """„Splnit" – i po termínu. Už splněný → 409 already_completed."""
+    db = SessionLocal()
+    try:
+        return _school_call(db, lambda: school_service.complete_assignment(db, item_id), school_service.serialize_assignment_state)
+    finally:
+        db.close()
+
+
+@app.post("/school/assignment/{item_id}/reopen")
+def reopen_school_assignment(item_id: int):
+    db = SessionLocal()
+    try:
+        return _school_call(db, lambda: school_service.reopen_assignment(db, item_id), school_service.serialize_assignment_state)
+    finally:
+        db.close()
+
+
+@app.post("/school/exam/{item_id}/close")
+def close_school_exam(item_id: int, request: ExamCloseRequest):
+    """„Uzavřít" – složeno / nesloženo / bez hodnocení + volitelný výsledek (procenta, body, známka)."""
+    db = SessionLocal()
+    try:
+        return _school_call(db, lambda: school_service.close_exam(db, item_id, request.model_dump()), school_service.serialize_exam_state)
+    finally:
+        db.close()
+
+
+@app.post("/school/exam/{item_id}/reopen")
+def reopen_school_exam(item_id: int):
+    db = SessionLocal()
+    try:
+        return _school_call(db, lambda: school_service.reopen_exam(db, item_id), school_service.serialize_exam_state)
     finally:
         db.close()
 
