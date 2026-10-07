@@ -45,3 +45,6 @@ Thumbs.db
 
 # lokální výstup vizuální kontroly UI (frontend/scripts/ui-check.mjs)
 frontend/scripts/.ui-check/
+
+# Game Enrichment B: nahrané screenshoty (MEDIA_DIR, výchozí backend/media)
+media/
