@@ -1,6 +1,7 @@
 // Vývojový mock backendu pro vizuální kontrolu UI (Roadmap 4A) – NE produkce, žádný Groq.
 // Data v scripts/fixtures/*.json vznikla ze skutečných backendových služeb (seed + fake LLM).
 // Spuštění: node scripts/mock-api.mjs  (port 8000, nebo MOCK_API_PORT)
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { handleAi } from "./mock-ai.mjs";
@@ -63,7 +64,48 @@ function resetWot() {
     milestones: fixture("wot-milestones"),
     files: new Map(),
     seq: 100,
+    // Game Enrichment C: knihovna replayů (fixtures ze skutečného wot_replay_service)
+    replays: fixture("wot-replays").items,
   });
+}
+// ui-check nahrává scripts/fixtures/replay-upload.wotreplay (syntetický) → odpověď skutečného serveru pro tentýž soubor
+const REPLAY_UPLOAD = fixture("wot-replay-upload");
+const REPLAY_MAGIC = Buffer.from([0x12, 0x32, 0x34, 0x11]);
+const PRESET_TAGS = ["mko", "carry", "spotting", "record", "mistake", "fun", "close-game"];
+const normText = (t) => String(t ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+function replayView(r) {
+  const m = r.linked_milestone_id ? wotMilestone(r.linked_milestone_id) : null;
+  const milestone = m ? { id: m.id, tank: m.tank, mastery: m.mastery, map_name: m.map_name, played_on: m.played_on, screenshots: m.screenshots } : null;
+  return { ...r, linked_milestone_id: m ? m.id : null, milestone };
+}
+function replayList(qs) {
+  const rows = wotState.replays;
+  const facets = {
+    tanks: [...new Set(rows.map((r) => r.tank_name || r.tank_tag).filter(Boolean))].sort((a, b) => normText(a).localeCompare(normText(b))),
+    maps: [...new Set(rows.map((r) => r.map_name).filter(Boolean))].sort((a, b) => normText(a).localeCompare(normText(b))),
+    tags: [...new Set(rows.flatMap((r) => r.tags))].sort((a, b) => ((PRESET_TAGS.indexOf(a) + 1 || 99) - (PRESET_TAGS.indexOf(b) + 1 || 99)) || a.localeCompare(b)),
+  };
+  const q = normText(qs.get("q"));
+  const g = (k) => qs.get(k) || "";
+  let out = rows.filter((r) => {
+    const hay = normText([r.tank_name, r.tank_tag, r.map_name, r.notes, r.original_filename, r.tags.join(" ")].filter(Boolean).join(" "));
+    if (q && !q.split(" ").every((w) => hay.includes(w))) return false;
+    if (g("tank") && ![r.tank_name, r.tank_tag].includes(g("tank"))) return false;
+    if (g("map") && r.map_name !== g("map")) return false;
+    if (g("tag") && !r.tags.includes(g("tag").toLowerCase())) return false;
+    if (g("favorite") && String(r.favorite) !== g("favorite")) return false;
+    if (g("mastery") && (r.mastery || "none") !== g("mastery")) return false;
+    if (g("result") && r.battle_result !== g("result")) return false;
+    return true;
+  });
+  const sort = g("sort") || "played_desc";
+  if (sort === "uploaded_desc") out = [...out].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at) || b.id - a.id);
+  else {
+    const dated = out.filter((r) => r.played_at).sort((a, b) => a.played_at.localeCompare(b.played_at) || a.id - b.id);
+    if (sort === "played_desc") dated.reverse();
+    out = [...dated, ...out.filter((r) => !r.played_at).sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))];
+  }
+  return { items: out.map(replayView), total: rows.length, facets, preset_tags: PRESET_TAGS, statuses: ["parsed", "partial", "unsupported", "invalid"] };
 }
 resetWot();
 const SHOT_COLORS = [[58, 70, 84], [64, 80, 72], [84, 70, 58], [70, 64, 90]];
@@ -89,9 +131,11 @@ const sessionOf = (req) => /(?:^|;\s*)standa_hub_session=([^;]+)/.exec(req.heade
 
 function readBody(req) {
   return new Promise((resolve) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
+      req.rawBody = Buffer.concat(chunks); // upload replaye (Game Enrichment C) potřebuje bajty
+      const raw = req.rawBody.toString("utf8");
       try {
         resolve(raw ? JSON.parse(raw) : null);
       } catch {
@@ -231,7 +275,9 @@ createServer(async (req, res) => {
     return respond(200, { ok: true, grind: g, completion }, 350);
   }
   if (url.pathname === "/wot/grinds/completed" && req.method === "GET") return respond(200, wotState.completed);
-  if (url.pathname === "/wot/milestones" && req.method === "GET") return respond(200, wotState.milestones);
+  if (url.pathname === "/wot/milestones" && req.method === "GET") {
+    return respond(200, wotState.milestones.map((m) => ({ ...m, replay_ids: wotState.replays.filter((r) => r.linked_milestone_id === m.id).map((r) => r.id) })));
+  }
   if (url.pathname === "/wot/milestones" && req.method === "POST") {
     if (!String(body?.tank ?? "").trim()) return respond(400, { detail: { error: "invalid_tank", message: "Vyplň pole tank." } });
     const m = { id: ++wotState.seq, milestone_type: "mastery", mastery: null, map_name: null, played_on: null, damage: null, assist: null, kills: null,
@@ -282,6 +328,78 @@ createServer(async (req, res) => {
       const s = owner.screenshots.find((x) => x.id === sid);
       if (body && "caption" in body) s.caption = body.caption;
       return respond(200, s);
+    }
+  }
+  // ----- Game Enrichment C: knihovna replayů -----
+  if (url.pathname === "/__mock/wot/milestones-empty") {
+    wotState.milestones = [];
+    return respond(200, { ok: true });
+  }
+  // „Vytvořit Mko z tohoto replaye" – jako backend: z údajů replaye, rovnou propojí; propojený → 409, bez tanku → 422
+  const fromReplay = /^\/wot\/replays\/(\d+)\/milestone$/.exec(url.pathname);
+  if (fromReplay && req.method === "POST") {
+    const r = wotState.replays.find((x) => x.id === Number(fromReplay[1]));
+    if (!r) return respond(404, { detail: { error: "not_found", message: "Replay neexistuje." } });
+    if (r.linked_milestone_id && wotMilestone(r.linked_milestone_id)) return respond(409, { detail: { error: "already_linked", message: "Replay už je propojený s Mkem." } });
+    const tank = r.tank_name || (r.tank_tag ? r.tank_tag.split(":").slice(1).join(":") : "");
+    if (!tank) return respond(422, { detail: { error: "missing_tank", message: "Replay nemá tank – doplň ho v údajích replaye." } });
+    const m = { id: ++wotState.seq, milestone_type: "mastery", mastery: r.mastery ?? null, tank, map_name: r.map_name ?? null,
+      played_on: r.played_at ? String(r.played_at).slice(0, 10) : null, damage: r.damage ?? null, assist: r.assist ?? null, kills: r.kills ?? null,
+      base_xp: r.base_xp ?? null, notes: null, favorite: false, created_at: wotNow(), updated_at: wotNow(), screenshots: [] };
+    wotState.milestones.unshift(m);
+    r.linked_milestone_id = m.id;
+    return respond(200, { replay: replayView(r), milestone: m }, 300);
+  }
+  if (url.pathname === "/__mock/wot/replays-empty") {
+    wotState.replays = [];
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/wot/replays" && req.method === "GET") return respond(200, replayList(url.searchParams), 150);
+  if (url.pathname === "/wot/replays" && req.method === "POST") {
+    const name = url.searchParams.get("filename") || "";
+    const data = req.rawBody ?? Buffer.alloc(0);
+    if (!name.toLowerCase().endsWith(".wotreplay") || !data.length) {
+      return respond(400, { detail: { error: "invalid_file", message: !data.length ? "Soubor je prázdný." : "Nahrát jde jen soubor .wotreplay." } }, 300);
+    }
+    const sha = createHash("sha256").update(data).digest("hex");
+    const dup = wotState.replays.find((r) => r.sha256 === sha);
+    if (dup) return respond(409, { detail: { error: "duplicate", message: "Tenhle replay už v knihovně je.", replay_id: dup.id } }, 400);
+    let r;
+    if (sha === REPLAY_UPLOAD.sha256) r = { ...REPLAY_UPLOAD, original_filename: name };
+    else if (data.subarray(0, 4).equals(REPLAY_MAGIC)) {
+      r = { ...REPLAY_UPLOAD, sha256: sha, original_filename: name, parser_status: "unsupported", parser_warnings: ["Hlavičku replaye se nepodařilo přečíst (neznámá verze formátu)."],
+        tank_tag: null, map_name: null, played_at: null, damage: null, assist: null, kills: null, base_xp: null, mastery: null, battle_result: null, game_version: null };
+    } else return respond(400, { detail: { error: "invalid_file", message: "Soubor nevypadá jako replay World of Tanks." } }, 300);
+    const id = ++wotState.seq;
+    // jako backend: lidský název z manifestu (frontend) se uloží jen k rozpoznanému vozidlu
+    const hint = (url.searchParams.get("tank_name") || "").split(/\s+/).filter(Boolean).join(" ");
+    if (r.tank_tag && hint && hint.length <= 100) r = { ...r, tank_name: hint };
+    r = { ...r, id, file_size: data.length, download_url: `/wot/replays/${id}/file`, uploaded_at: wotNow(), created_at: wotNow(), updated_at: wotNow(), tags: [], favorite: false, linked_milestone_id: null };
+    wotState.replays.push(r);
+    return respond(200, replayView(r), 600);
+  }
+  const wotReplay = /^\/wot\/replays\/(\d+)(\/file)?$/.exec(url.pathname);
+  if (wotReplay) {
+    const r = wotState.replays.find((x) => x.id === Number(wotReplay[1]));
+    if (!r) return respond(404, { detail: { error: "not_found", message: "Replay neexistuje." } });
+    if (wotReplay[2] && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="${r.original_filename || `replay-${r.id}.wotreplay`}"`,
+        "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Credentials": "true" });
+      return res.end(Buffer.concat([REPLAY_MAGIC, Buffer.from(r.sha256)]));
+    }
+    if (req.method === "GET") return respond(200, replayView(r));
+    if (req.method === "PATCH") {
+      const b = { ...(body ?? {}) };
+      if ("linked_milestone_id" in b && b.linked_milestone_id != null && !wotMilestone(b.linked_milestone_id)) {
+        return respond(404, { detail: { error: "milestone_not_found", message: "Milník neexistuje." } });
+      }
+      if ("played_at" in b && b.played_at && b.played_at.length === 10) b.played_at = `${b.played_at}T10:00:00Z`;
+      Object.assign(r, b, { updated_at: wotNow() });
+      return respond(200, replayView(r), 300);
+    }
+    if (req.method === "DELETE") {
+      wotState.replays = wotState.replays.filter((x) => x.id !== r.id);
+      return respond(200, { ok: true, id: r.id, file_removed: true }, 300);
     }
   }
   if (handleAi(req, url, body, respond)) return;

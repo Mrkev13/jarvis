@@ -230,6 +230,8 @@ class WotMilestone(Base):
 
     screenshots = relationship("WotMilestoneScreenshot", back_populates="milestone", cascade="all, delete-orphan",
                                order_by="WotMilestoneScreenshot.position")
+    # Game Enrichment C: replaye odkazující na milník (bez kaskády – smazání milníku replay jen odpojí)
+    replays = relationship("WotReplay", back_populates="milestone", passive_deletes=True)
 
 
 class WotMilestoneScreenshot(Base):
@@ -247,6 +249,42 @@ class WotMilestoneScreenshot(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     milestone = relationship("WotMilestone", back_populates="screenshots")
+
+
+class WotReplay(Base):
+    """Replay WoT v knihovně (Game Enrichment C): originální .wotreplay v MEDIA_DIR/wot-replays pod serverovým názvem,
+    metadata v DB (z deterministického parseru hlavičky a/nebo ručně). Duplicitu hlídá SHA-256 obsahu.
+    Volitelně propojený s jedním milníkem (Mko) – smazání jedné strany druhou nerozbije."""
+    __tablename__ = "wot_replays"
+
+    id = Column(Integer, primary_key=True, index=True)
+    original_filename = Column(String(255), nullable=True)
+    stored_filename = Column(String(80), nullable=False, unique=True)
+    file_size = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False, unique=True)
+    uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    played_at = Column(DateTime, nullable=True, index=True)
+    tank_name = Column(String(100), nullable=True)
+    tank_tag = Column(String(100), nullable=True)
+    map_name = Column(String(100), nullable=True)
+    damage = Column(Integer, nullable=True)
+    assist = Column(Integer, nullable=True)
+    kills = Column(Integer, nullable=True)
+    base_xp = Column(Integer, nullable=True)
+    mastery = Column(String(20), nullable=True)
+    battle_result = Column(String(10), nullable=True)
+    game_version = Column(String(40), nullable=True)
+    notes = Column(Text, nullable=True)
+    tags = Column(JsonAsText, nullable=True)
+    favorite = Column(Boolean, nullable=False, default=False)
+    parser_status = Column(String(20), nullable=False, default="unsupported")
+    parser_version = Column(String(20), nullable=True)
+    parser_warnings = Column(JsonAsText, nullable=True)
+    linked_milestone_id = Column(Integer, ForeignKey("wot_milestones.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    milestone = relationship("WotMilestone", back_populates="replays")
 
 
 class Subject(Base):

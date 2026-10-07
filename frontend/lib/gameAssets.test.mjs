@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import {
   assetAlt, assetKey, assetSrc, CHARACTERS, EMPTY_MANIFEST, GAME_IMAGE_SIZES, imageBox, monogram, normalizeGameName,
-  parseManifest, resolveTank, RESOURCES, safeAssetFile, TANK_ALIASES, tankopediaImageUrl,
+  parseManifest, resolveTank, resolveTankTag, RESOURCES, tankTagFromSource, safeAssetFile, TANK_ALIASES, tankopediaImageUrl,
 } from "./gameAssets.ts";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../scripts/fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -145,4 +145,18 @@ test("tankopedia image URL: http upgraded to https only on official Wargaming ho
   assert.equal(tankopediaImageUrl("ftp://api.worldoftanks.eu/x.png"), null);
   assert.equal(tankopediaImageUrl(undefined), null);
   assert.equal(tankopediaImageUrl("nesmysl"), null);
+});
+
+test("Game Enrichment C: replay vehicle tag resolves through the Tankopedia image name", () => {
+  const m = parseManifest(fixture("game-assets-manifest"));
+  assert.equal(tankTagFromSource("https://api.worldoftanks.eu/static/2.77.0/wot/encyclopedia/vehicle/sweden-S16_Kranvagn.png"), "sweden:S16_Kranvagn");
+  assert.equal(tankTagFromSource("https://x/vehicle/ussr-R04_T-34.png"), "ussr:R04_T-34");
+  assert.equal(tankTagFromSource("wot/tanks/1.png"), null);
+  assert.equal(tankTagFromSource(undefined), null);
+  assert.equal(resolveTankTag(m.tanks, "sweden:S16_Kranvagn")?.name, "Kranvagn");
+  assert.equal(resolveTankTag(m.tanks, "germany:G89_Leopard1")?.name, "Leopard 1");
+  assert.equal(resolveTankTag(m.tanks, "ussr:R157_Object_279R")?.name, "Object 279 early");
+  assert.equal(resolveTankTag(m.tanks, "italy:It13_Progetto_M35_mod_46"), null, "není v manifestu → žádný odhad");
+  assert.equal(resolveTankTag(m.tanks, ""), null);
+  assert.equal(resolveTankTag(EMPTY_MANIFEST.tanks, "sweden:S16_Kranvagn"), null);
 });

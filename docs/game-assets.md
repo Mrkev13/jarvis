@@ -120,4 +120,5 @@ the same label). Currency icons sit next to the visible label and are decorative
 Grind completion, completed history, `wot_grind_completed`, Mastery ("Mko") milestones and the screenshot gallery are
 documented in `docs/wot-milestones.md`. User uploads use their own validated store (`backend/media_storage.py`,
 `MEDIA_DIR`, gitignored), never `public/`; tank pictures on those surfaces still come from `GameImage`. Replay library
-and MFF T4 events remain later phases.
+is Game Enrichment C (`docs/wot-replays.md`): replay vehicle tags resolve to names through the Tankopedia image name
+in the manifest (`resolveTankTag`). MFF T4 events remain a later phase.

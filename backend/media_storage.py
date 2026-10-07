@@ -25,7 +25,8 @@ IMAGE_TYPES = {
     "image/jpeg": ("jpg", {"jpg", "jpeg"}),
     "image/webp": ("webp", {"webp"}),
 }
-STORED_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpg|webp)$")
+# Game Enrichment C: replaye WoT (.wotreplay) – stejné úložiště, jiná složka a vlastní limit (WOT_REPLAY_MAX_MB)
+STORED_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpg|webp|wotreplay)$")
 
 
 class MediaError(ValueError):
@@ -98,13 +99,19 @@ def validate_image(data: bytes, original_name: str | None) -> str:
     return ctype
 
 
-def save_image(purpose: str, data: bytes, original_name: str | None) -> StoredImage:
-    ctype = validate_image(data, original_name)
-    stored = f"{uuid.uuid4().hex}.{IMAGE_TYPES[ctype][0]}"
+def save_bytes(purpose: str, data: bytes, ext: str) -> str:
+    """Zapíše už ověřený obsah pod nový serverový název (uuid4 hex + přípona); vrací uložený název."""
+    stored = f"{uuid.uuid4().hex}.{ext}"
     target = path_for(purpose, stored)
     # exkluzivní vytvoření: nikdy nepřepíše existující soubor
     with open(target, "xb") as fh:
         fh.write(data)
+    return stored
+
+
+def save_image(purpose: str, data: bytes, original_name: str | None) -> StoredImage:
+    ctype = validate_image(data, original_name)
+    stored = save_bytes(purpose, data, IMAGE_TYPES[ctype][0])
     return StoredImage(stored_name=stored, content_type=ctype, size_bytes=len(data))
 
 

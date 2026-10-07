@@ -565,3 +565,13 @@ images to small stat rows or turn modules into galleries.
   `object-contain` so the aspect ratio is kept). Missing file → text placeholder in the same frame, never a broken
   image. No screenshots → nothing rendered (no empty placeholder tiles).
 
+## 21. Replay library (Game Enrichment C)
+
+- Library = `EntityRow` list (tank `GameImage sm`, title button opens the detail) with `FilterBar` (search, selects,
+  "★ Jen oblíbené" chip). Badges: favorite, mastery, result, parser status only when not fully parsed, "Mko: <tank>".
+  Tags are small neutral chips with text.
+- Detail and edit are `Drawer`s; the detail is addressable (`?replay=ID`). The download is a real link styled as a
+  primary button (`buttonClass`). Delete uses `ConfirmDialog` and says what stays (the linked Mko).
+- Upload → review drawer immediately; it states that the replay is already saved ("Doplnit později"). Parser status
+  is a badge + one plain sentence; raw warnings only for partial/unsupported replays.
+

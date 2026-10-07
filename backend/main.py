@@ -29,6 +29,7 @@ from tools import get_goals, get_goals_summary
 from fastapi.middleware.cors import CORSMiddleware
 import media_storage
 import wot_service
+import wot_replay_service
 
 
 from ai import DailyLimitError, LLMRateLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
@@ -1267,6 +1268,139 @@ def wot_screenshot_delete(screenshot_id: int):
         db.commit()
         removed = media_storage.delete_file(wot_service.SCREENSHOT_FOLDER, name)
         return {"ok": True, "id": screenshot_id, "file_removed": removed}
+    finally:
+        db.close()
+
+
+# ---------- Game Enrichment C: knihovna replayů ----------
+class WotReplayUpdateRequest(BaseModel):
+    tank_name: str | None = None
+    map_name: str | None = None
+    played_at: str | None = None
+    damage: int | None = None
+    assist: int | None = None
+    kills: int | None = None
+    base_xp: int | None = None
+    mastery: str | None = None
+    battle_result: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
+    favorite: bool | None = None
+    linked_milestone_id: int | None = None
+
+
+def _replay_call(fn):
+    try:
+        return fn()
+    except wot_replay_service.DuplicateReplay as exc:
+        raise HTTPException(status_code=409, detail={"error": exc.code, "message": str(exc), "replay_id": exc.replay_id}) from None
+
+
+@app.get("/wot/replays")
+def wot_replays(q: str | None = None, tank: str | None = None, map: str | None = None, tag: str | None = None,
+                favorite: bool | None = None, mastery: str | None = None, result: str | None = None,
+                parser_status: str | None = None, sort: str = "played_desc"):
+    db = SessionLocal()
+    try:
+        return _wot_call(lambda: wot_replay_service.list_replays(
+            db, q=q, tank=tank, map_name=map, tag=tag, favorite=favorite, mastery=mastery, result=result,
+            parser_status=parser_status, sort=sort))
+    finally:
+        db.close()
+
+
+@app.post("/wot/replays")
+async def wot_replay_upload(request: Request, filename: str | None = None, tank_name: str | None = None):
+    """Upload jednoho .wotreplay jako surové tělo požadavku (`filename` = jen metadata, musí končit .wotreplay).
+    Stejný obsah (SHA-256) → 409 duplicate s id existujícího replaye. Parser jen předvyplní metadata.
+    `tank_name` = lidský název vozidla z manifestu ve frontendu (uloží se vedle technického tagu)."""
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > wot_replay_service.MAX_BYTES:
+        raise HTTPException(status_code=413, detail={"error": "invalid_file", "message": "Replay je moc velký."})
+    body = await request.body()
+    db = SessionLocal()
+    try:
+        replay = _wot_call(lambda: _replay_call(lambda: wot_replay_service.upload_replay(db, body, filename, tank_name=tank_name)))
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            media_storage.delete_file(wot_replay_service.REPLAY_FOLDER, replay.stored_filename)
+            existing = db.query(wot_replay_service.WotReplay).filter_by(sha256=replay.sha256).first()
+            if existing is not None:  # souběžný upload stejného souboru
+                raise HTTPException(status_code=409, detail={"error": "duplicate", "message": "Tenhle replay už v knihovně je.", "replay_id": existing.id}) from None
+            raise
+        db.refresh(replay)
+        return wot_replay_service.serialize_replay(replay)
+    finally:
+        db.close()
+
+
+@app.get("/wot/replays/{replay_id}")
+def wot_replay_detail(replay_id: int):
+    db = SessionLocal()
+    try:
+        return wot_replay_service.serialize_replay(_wot_call(lambda: wot_replay_service.get_replay(db, replay_id)))
+    finally:
+        db.close()
+
+
+@app.patch("/wot/replays/{replay_id}")
+def wot_replay_update(replay_id: int, request: WotReplayUpdateRequest):
+    db = SessionLocal()
+    try:
+        r = _wot_call(lambda: wot_replay_service.update_replay(db, replay_id, request.model_dump(exclude_unset=True)))
+        db.commit()
+        db.refresh(r)
+        return wot_replay_service.serialize_replay(r)
+    finally:
+        db.close()
+
+
+@app.post("/wot/replays/{replay_id}/milestone")
+def wot_replay_create_milestone(replay_id: int):
+    """Založí Mko z údajů replaye a propojí ho (Game Enrichment C – lokální ověření)."""
+    db = SessionLocal()
+    try:
+        r, m = _wot_call(lambda: wot_replay_service.create_milestone_from_replay(db, replay_id))
+        db.commit()
+        db.refresh(r)
+        db.refresh(m)
+        return {"replay": wot_replay_service.serialize_replay(r), "milestone": wot_service.serialize_milestone(m)}
+    finally:
+        db.close()
+
+
+@app.delete("/wot/replays/{replay_id}")
+def wot_replay_delete(replay_id: int):
+    db = SessionLocal()
+    try:
+        name = _wot_call(lambda: wot_replay_service.delete_replay(db, replay_id))
+        db.commit()
+        removed = media_storage.delete_file(wot_replay_service.REPLAY_FOLDER, name)
+        return {"ok": True, "id": replay_id, "file_removed": removed}
+    finally:
+        db.close()
+
+
+@app.get("/wot/replays/{replay_id}/file")
+def wot_replay_file(replay_id: int):
+    """Stažení originálu – jen soubor existujícího záznamu (žádné cesty od klienta), vždy jako příloha."""
+    db = SessionLocal()
+    try:
+        r = _wot_call(lambda: wot_replay_service.get_replay(db, replay_id))
+        try:
+            path = media_storage.path_for(wot_replay_service.REPLAY_FOLDER, r.stored_filename)
+        except media_storage.MediaError:
+            raise HTTPException(status_code=404, detail="Soubor neexistuje.") from None
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Soubor neexistuje.")
+        name = wot_replay_service.download_name(r)
+        return FileResponse(path, media_type="application/octet-stream", filename=name, headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        })
     finally:
         db.close()
 

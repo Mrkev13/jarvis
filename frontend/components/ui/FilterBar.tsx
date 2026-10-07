@@ -48,7 +48,7 @@ export function FilterBar({
             value={search.value}
             onChange={(e) => search.onChange(e.target.value)}
             placeholder={search.placeholder ?? "Hledat…"}
-            className={fieldClass}
+            className={cx(fieldClass, "pointer-coarse:min-h-11")}
           />
         </div>
       ) : null}
@@ -87,7 +87,7 @@ export function FilterSelect({
       <label htmlFor={id} className="block text-xs font-medium text-ink-2">
         {label}
       </label>
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cx(fieldClass, "pointer-coarse:min-h-11")}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

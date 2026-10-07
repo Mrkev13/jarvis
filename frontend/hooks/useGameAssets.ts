@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { EMPTY_MANIFEST, MANIFEST_URL, parseManifest, type GameAssetManifest } from "@/lib/gameAssets";
+import { EMPTY_MANIFEST, MANIFEST_URL, parseManifest, resolveTankTag, type GameAssetManifest } from "@/lib/gameAssets";
 
 /**
  * Manifest lokálních herních assetů (public/game-assets/manifest.json, vytváří ho scripts/fetch-game-assets.mjs).
@@ -33,4 +33,10 @@ function subscribe(onChange: () => void) {
 
 export function useGameAssetManifest(): GameAssetManifest | null {
   return useSyncExternalStore(subscribe, () => manifest, () => null);
+}
+
+/** Game Enrichment C: tag vozidla z replaye („sweden:S16_Kranvagn") → název z Tankopedie; neznámý / bez manifestu → null. */
+export function useTankNameForTag(tag: string | null | undefined): string | null {
+  const m = useGameAssetManifest();
+  return m && tag ? resolveTankTag(m.tanks, tag)?.name ?? null : null;
 }

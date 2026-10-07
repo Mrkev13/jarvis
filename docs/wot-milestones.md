@@ -125,6 +125,6 @@ real database. Fixture screenshots are neutral one-colour PNGs, not game art.
 
 ## Deferred
 
-Replay library and replay parsing, best-moments page across games, MFF progression/T4 events, gamification (XP,
+Replay library and parsing → done in Game Enrichment C (`docs/wot-replays.md`). Still deferred: best-moments page across games, MFF progression/T4 events, gamification (XP,
 badges, streaks) on top of `wot_grind_completed`, screenshot reordering by drag & drop (API supports `position`),
 image thumbnails/resizing on the server, including `MEDIA_DIR` in the backup script.

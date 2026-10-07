@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 import media_storage
 from activity_service import log_activity
-from models import WotGrind, WotGrindCompletion, WotMilestone, WotMilestoneScreenshot
+from models import WotGrind, WotGrindCompletion, WotMilestone, WotMilestoneScreenshot, WotReplay
 from time_utils import utc_now
 
 COMPLETION_EVENT = "wot_grind_completed"
@@ -248,6 +248,8 @@ def serialize_milestone(m: WotMilestone) -> dict:
         "created_at": _iso(m.created_at),
         "updated_at": _iso(m.updated_at),
         "screenshots": [serialize_screenshot(s) for s in sorted(m.screenshots, key=lambda s: (s.position, s.id))],
+        # Game Enrichment C: propojené replaye (jen id – detail je v knihovně replayů)
+        "replay_ids": sorted(r.id for r in m.replays),
     }
 
 
@@ -295,6 +297,9 @@ def delete_milestone(db: Session, milestone_id: int, *, user_context: str = "man
     """Smaže milník i metadata screenshotů; vrací uložené názvy souborů – smažou se AŽ po commitu."""
     m = get_milestone(db, milestone_id)
     files = [s.stored_name for s in m.screenshots]
+    # propojené replaye zůstávají, jen bez odkazu (SQLite ON DELETE SET NULL nevynucuje)
+    db.query(WotReplay).filter(WotReplay.linked_milestone_id == m.id).update(
+        {WotReplay.linked_milestone_id: None}, synchronize_session=False)
     log_activity(db, "wot", "delete", f"Milník smazán: {_label(m)}", entity_type="WotMilestone", entity_id=m.id,
                  user_context=user_context)
     db.delete(m)

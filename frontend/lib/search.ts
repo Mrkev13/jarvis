@@ -143,7 +143,7 @@ export function isSearchShortcut(e: { key: string; ctrlKey: boolean; metaKey: bo
 }
 
 /** Parametry odkazů z vyhledávání (backend search_service: href) → cíl `data-search-target` na stránce. */
-export const SEARCH_TARGET_PARAMS = ["subject", "assignment", "exam", "reminder", "session", "transaction", "goal", "memory", "grind", "character"] as const;
+export const SEARCH_TARGET_PARAMS = ["subject", "assignment", "exam", "reminder", "session", "transaction", "goal", "memory", "grind", "character", "replay"] as const;
 
 export function searchTargetFromParams(params: { get(name: string): string | null }): string | null {
   for (const key of SEARCH_TARGET_PARAMS) {

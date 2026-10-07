@@ -216,6 +216,8 @@ export type WotMilestone = {
   created_at: string | null;
   updated_at: string | null;
   screenshots: MilestoneScreenshot[];
+  /** Game Enrichment C: propojené replaye (id v knihovně replayů). */
+  replay_ids?: number[];
 };
 
 export type MilestoneDraft = {
@@ -253,8 +255,8 @@ export function milestoneDraftFrom(m: WotMilestone): MilestoneDraft {
 
 /** Stejné limity jako backend (wot_service.FIELD_LIMITS). */
 export const MILESTONE_LIMITS = { damage: 100_000, assist: 100_000, kills: 15, base_xp: 10_000 } as const;
-type NumberField = keyof typeof MILESTONE_LIMITS;
-const NUMBER_LABELS: Record<NumberField, string> = { damage: "Poškození", assist: "Asistence", kills: "Zničení", base_xp: "Základní XP" };
+export type NumberField = keyof typeof MILESTONE_LIMITS;
+export const NUMBER_LABELS: Record<NumberField, string> = { damage: "Poškození", assist: "Asistence", kills: "Zničení", base_xp: "Základní XP" };
 
 export type MilestoneErrors = Partial<Record<keyof MilestoneDraft, string>>;
 
