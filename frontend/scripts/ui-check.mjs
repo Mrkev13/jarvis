@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A + B).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A–C).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -55,6 +55,8 @@ const PAGES = [
   ["/memory", "memory"],
   ["/wot", "wot"],
   ["/mff", "mff"],
+  // Game Enrichment C
+  ["/wot/replays", "wot-replays"],
   // Roadmap 4C
   ["/ai", "ai"],
   // Roadmap 4G
@@ -1773,6 +1775,217 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   }
   await page.screenshot({ path: `${OUT}wot-b-${label}.png`, fullPage: true });
   check(`wot B @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+await wotReset();
+
+// 23) Game Enrichment C – knihovna replayů (stavový mock, fixtures ze skutečného wot_replay_service; syntetické replaye).
+const REPLAY_FILE = readFileSync(new URL("./fixtures/replay-upload.wotreplay", import.meta.url));
+const replayIds = (page) => page.locator('[aria-label="Replaye"] > li').evaluateAll((els) => els.map((e) => e.getAttribute("data-search-target")));
+const replayRow = (page, id) => page.locator(`[aria-label="Replaye"] > li[data-search-target="replay-${id}"]`);
+const pickFilter = (page, label, value) => page.getByRole("search", { name: "Filtry replayů" }).getByLabel(label, { exact: true }).selectOption(value);
+const settle = (page, ms = 500) => page.waitForTimeout(ms);
+{
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  await page.locator('[data-section="wot-replays"]').getByRole("link", { name: "Otevřít knihovnu" }).click();
+  await page.waitForURL("**/wot/replays", { timeout: 5000 }).catch(() => undefined);
+  await settle(page, 800);
+  check("replaye: /wot → knihovna", page.url().endsWith("/wot/replays") && (await page.getByRole("heading", { level: 1 }).innerText()) === "Knihovna replayů", page.url());
+  check("replaye: nejnovější bitva první, bez data na konci", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-3", "replay-2", "replay-1", "replay-4", "replay-5"]), (await replayIds(page)).join(","));
+  const tanks = await imageState(page, '[aria-label="Replaye"] [data-game-image="tank"]');
+  check("replaye: tag z replaye → název a obrázek z manifestu (Leopard 1)", byAlt(tanks, "Tank Leopard 1")?.state === "image" && (await replayRow(page, 3).innerText()).includes("Leopard 1"), JSON.stringify(tanks.map((x) => [x.alt, x.state])));
+  check("replaye: tank mimo manifest → monogram", byAlt(tanks, "Tank Progetto 65")?.state === "fallback" && byAlt(tanks, "Tank 20260930_novy_format.wotreplay")?.state === "fallback");
+  check("replaye: stav parseru u částečného a nenačteného", (await replayRow(page, 4).locator('[data-parser-status="partial"]').count()) === 1 && (await replayRow(page, 5).locator('[data-parser-status="unsupported"]').innerText()).includes("Metadata nenačtena") && (await replayRow(page, 1).locator("[data-parser-status]").count()) === 0);
+  check("replaye: oblíbený = značka ★ Oblíbený", (await replayRow(page, 1).getByTestId("replay-favorite").count()) === 1 && (await page.getByTestId("replay-favorite").count()) === 1);
+  check("replaye: propojené Mko vidět v seznamu", (await replayRow(page, 1).getByTestId("replay-milestone-link").innerText()).includes("Progetto 65") && (await page.getByTestId("replay-milestone-link").count()) === 2);
+  check("replaye: štítky jako čipy", JSON.stringify(await replayRow(page, 1).locator("[data-tag]").allInnerTexts()) === JSON.stringify(["Mko", "Carry", "Těsná bitva"]));
+
+  // filtry
+  await pickFilter(page, "Štítek", "mko");
+  await settle(page);
+  check("replaye filtr: štítek Mko", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-2", "replay-1"]));
+  await page.getByRole("group", { name: "Oblíbené" }).getByRole("button", { name: "★ Jen oblíbené" }).click();
+  await settle(page);
+  check("replaye filtr: + jen oblíbené", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-1"]));
+  check("replaye filtr: počet aktivních filtrů", (await page.getByRole("button", { name: "Zrušit filtry (2)" }).count()) === 1);
+  await page.getByRole("button", { name: "Zrušit filtry (2)" }).click();
+  await page.getByRole("searchbox", { name: "Hledat v replayích" }).fill("utesy");
+  await settle(page, 700);
+  check("replaye hledání: mapa bez diakritiky", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-1"]));
+  await page.getByRole("searchbox", { name: "Hledat v replayích" }).fill("xyz-nic");
+  await settle(page, 700);
+  check("replaye hledání: nic nenalezeno = vlastní prázdný stav", (await page.getByTestId("replay-no-match").count()) === 1);
+  await page.getByRole("searchbox", { name: "Hledat v replayích" }).fill("");
+  const tankOptions = await page.getByRole("search", { name: "Filtry replayů" }).getByLabel("Tank", { exact: true }).locator("option").allInnerTexts();
+  check("replaye filtr: tank – názvy z manifestu místo tagů", tankOptions.includes("Leopard 1") && tankOptions.includes("Kranvagn") && !tankOptions.some((t) => t.includes(":")), tankOptions.join("|"));
+  await pickFilter(page, "Tank", "germany:G89_Leopard1");
+  await settle(page, 700);
+  check("replaye filtr: tank", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-3"]));
+  await pickFilter(page, "Tank", "");
+  await pickFilter(page, "Odznak", "none");
+  await settle(page);
+  check("replaye filtr: bez odznaku", JSON.stringify(await replayIds(page)) === JSON.stringify(["replay-3", "replay-4", "replay-5"]));
+  await pickFilter(page, "Odznak", "");
+  await pickFilter(page, "Řazení", "played_asc");
+  await settle(page);
+  check("replaye řazení: nejstarší bitva první", (await replayIds(page))[0] === "replay-4");
+  await pickFilter(page, "Řazení", "played_desc");
+  await settle(page);
+
+  // detail (URL ?replay=ID)
+  await replayRow(page, 1).getByRole("button", { name: "Detail replaye: Progetto 65" }).click();
+  const detail = page.getByTestId("replay-detail");
+  await detail.waitFor({ timeout: 3000 }).catch(() => undefined);
+  const dText = await detail.innerText().catch(() => "");
+  check("replaye detail: otevře se a má odkaz v URL", page.url().endsWith("/wot/replays?replay=1") && (await detail.count()) === 1);
+  check("replaye detail: statistiky, mapa, datum, štítky, poznámka", /5\s?205/.test(dText) && /1\s?754/.test(dText) && /1\s?208/.test(dText) && /Útesy · 14\. 9\. 2026/.test(dText) && dText.includes("Těsná bitva") && dText.includes("1 vs 3"), dText.replace(/\s+/g, " ").slice(0, 200));
+  check("replaye detail: soubor, velikost, stav parseru", dText.includes("20260914_2015_italy-It13_Progetto_M35_mod_46_18_cliff.wotreplay") && /kB/.test(dText) && (await detail.locator('[data-parser-status="parsed"]').innerText()).includes("Načteno z replaye"));
+  check("replaye detail: Mko + jeho screenshoty (galerie B)", (await detail.getByTestId("replay-detail-milestone").innerText()).includes("Progetto 65") && (await detail.locator("[data-shot]").count()) === 3);
+  const dl = detail.getByTestId("replay-download");
+  check("replaye detail: stažení originálu", (await dl.getAttribute("href"))?.endsWith("/wot/replays/1/file") && (await dl.getAttribute("download")) !== null);
+  await page.screenshot({ path: `${OUT}wot-replay-detail.png` });
+  await page.keyboard.press("Escape");
+  await settle(page, 400);
+  check("replaye detail: Esc zavře a vyčistí URL", page.url().endsWith("/wot/replays") && (await detail.count()) === 0, page.url());
+
+  // oblíbení
+  await replayRow(page, 3).getByRole("button", { name: "Oblíbit replay: Leopard 1" }).click();
+  await settle(page, 600);
+  check("replaye: oblíbení přepne značku (aria-pressed)", (await replayRow(page, 3).getByTestId("replay-favorite").count()) === 1 && (await replayRow(page, 3).getByRole("button", { name: "Zrušit oblíbení: Leopard 1" }).getAttribute("aria-pressed")) === "true");
+
+  // upload: neplatný soubor, pak replay → kontrola údajů → uložení
+  const input = page.getByTestId("replay-file-input");
+  await input.setInputFiles({ name: "bitva.zip", mimeType: "application/zip", buffer: Buffer.from("PK") });
+  check("replaye upload: jiná přípona odmítnuta v prohlížeči", (await page.getByTestId("replay-notice").innerText()).includes(".wotreplay") && (await page.getByTestId("replay-notice").getAttribute("role")) === "alert");
+  await input.setInputFiles({ name: "20261005_2105_usa-A67_T57_58_08_ruinberg.wotreplay", mimeType: "application/octet-stream", buffer: REPLAY_FILE });
+  const form = page.getByTestId("replay-form");
+  await form.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("replaye upload: hned kontrola údajů v panelu", (await page.getByRole("dialog", { name: "Zkontroluj údaje replaye" }).count()) === 1 && (await form.locator('[data-parser-status="parsed"]').innerText()).includes("Načteno z replaye"));
+  await settle(page, 300);
+  check("replaye upload: tank předvyplněný z manifestu, statistiky z replaye", (await form.getByLabel("Tank").inputValue()) === "T57 Heavy" && (await form.getByLabel("Poškození").inputValue()) === "7410" && (await form.getByLabel("Odznak zvládnutí").inputValue()) === "ace" && (await form.getByLabel("Výsledek").inputValue()) === "win");
+  const formTank = await imageState(page, '[data-testid="replay-form"] [data-game-image="tank"]');
+  check("replaye upload: obrázek tanku ve formuláři (Game Enrichment A)", formTank[0]?.state === "image" && formTank[0]?.src === "wot/tanks/14881.png", JSON.stringify(formTank));
+  await form.getByRole("group", { name: "Předvolené štítky" }).getByRole("button", { name: "Rekord" }).click();
+  await form.getByLabel("Vlastní štítek").fill("<b>");
+  await form.getByRole("button", { name: "Přidat", exact: true }).click();
+  check("replaye upload: neplatný vlastní štítek", (await form.getByRole("alert").innerText()).includes("1–24 znaků"));
+  await form.getByLabel("Vlastní štítek").fill("Ruinberg  Rush");
+  await form.getByLabel("Vlastní štítek").press("Enter");
+  check("replaye upload: vlastní štítek normalizovaný", (await form.getByRole("list", { name: "Vlastní štítky" }).innerText()).includes("ruinberg rush"));
+  await form.getByLabel("Propojit s Mkem / milníkem").selectOption("3");
+  await form.getByLabel("Poznámka").fill("Rush přes střed.");
+  await page.screenshot({ path: `${OUT}wot-replay-review.png` });
+  await form.getByRole("button", { name: "Uložit údaje" }).click();
+  await form.waitFor({ state: "detached", timeout: 4000 }).catch(() => undefined);
+  await settle(page, 600);
+  const ids = await replayIds(page);
+  const created = ids.find((x) => !["replay-1", "replay-2", "replay-3", "replay-4", "replay-5"].includes(x));
+  const newRow = page.locator(`[aria-label="Replaye"] > li[data-search-target="${created}"]`);
+  check("replaye upload: nový replay v knihovně (nejnovější bitva nahoře)", ids.length === 6 && ids[0] === created, ids.join(","));
+  check("replaye upload: uložené štítky a propojené Mko", JSON.stringify(await newRow.locator("[data-tag]").allInnerTexts()) === JSON.stringify(["Rekord", "ruinberg rush"]) && (await newRow.getByTestId("replay-milestone-link").innerText()).includes("Object 140"));
+
+  // duplicita: stejný obsah (jiný název) → nic nového, odkaz na existující
+  await input.setInputFiles({ name: "kopie.wotreplay", mimeType: "application/octet-stream", buffer: REPLAY_FILE });
+  await page.getByTestId("replay-notice").waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("replaye duplicita: oznámení, žádná druhá kopie", (await page.getByTestId("replay-notice").innerText()).includes("už v knihovně") && (await replayIds(page)).length === 6);
+  await page.getByRole("button", { name: "Otevřít existující" }).click();
+  await detail.waitFor({ timeout: 3000 }).catch(() => undefined);
+  check("replaye duplicita: Otevřít existující → detail", page.url().endsWith(`?replay=${created.split("-")[1]}`) && (await detail.innerText()).includes("T57 Heavy"));
+
+  // smazání s potvrzením
+  await detail.getByRole("button", { name: /^Smazat replay/ }).click();
+  const confirmDel = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "Smazat replay?" });
+  check("replaye smazání: výslovné potvrzení", (await confirmDel.count()) === 1 && (await confirmDel.innerText()).includes("Propojené Mko zůstane"));
+  await confirmDel.getByRole("button", { name: "Smazat replay" }).click();
+  await settle(page, 700);
+  check("replaye smazání: replay zmizí, detail zavřený", (await replayIds(page)).length === 5 && !page.url().includes("replay=") && (await detail.count()) === 0);
+
+  // ruční doplnění částečného replaye
+  await replayRow(page, 4).getByRole("button", { name: "Detail replaye: Kranvagn" }).click();
+  await detail.waitFor({ timeout: 3000 }).catch(() => undefined);
+  check("replaye částečný: detail vysvětlí, co chybí", (await detail.innerText()).includes("doplň je ručně") && (await detail.innerText()).includes("Statistiky zatím nejsou vyplněné"));
+  await detail.getByRole("button", { name: "Upravit údaje" }).click();
+  await form.waitFor({ timeout: 3000 }).catch(() => undefined);
+  check("replaye ruční úprava: tank z manifestu, stav Načteno částečně", (await form.getByLabel("Tank").inputValue()) === "Kranvagn" && (await form.locator('[data-parser-status="partial"]').count()) === 1);
+  await form.getByLabel("Zničení").fill("30");
+  await form.getByRole("button", { name: "Uložit údaje" }).click();
+  check("replaye ruční úprava: validace mezí", (await form.getByText("Zničení: celé číslo 0–15.").count()) === 1);
+  await form.getByLabel("Zničení").fill("3");
+  await form.getByLabel("Poškození").fill("6120");
+  await form.getByLabel("Odznak zvládnutí").selectOption("ace");
+  await form.getByRole("button", { name: "Uložit údaje" }).click();
+  await form.waitFor({ state: "detached", timeout: 4000 }).catch(() => undefined);
+  await settle(page, 600);
+  const kr = await detail.innerText().catch(() => "");
+  check("replaye ruční úprava: uloženo, detail zpět s novými údaji", /6\s?120/.test(kr) && kr.includes("Mistr (Mko)"), kr.replace(/\s+/g, " ").slice(0, 160));
+  await page.keyboard.press("Escape");
+  await settle(page, 300);
+  const krRow = await replayRow(page, 4).innerText();
+  check("replaye ruční úprava: řádek v seznamu", /6\s?120 dmg/.test(krRow) && krRow.includes("Mistr (Mko)"), krRow.replace(/\s+/g, " ").slice(0, 160));
+  check("replaye: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // Mko → replay (odkaz na kartě milníku) a globální vyhledávání → detail replaye
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  const link = page.locator('[aria-label="Milníky"] > li[data-milestone="1"]').getByTestId("milestone-replay-link");
+  check("replaye: karta Mka ukazuje propojený replay", (await link.count()) === 1 && (await page.getByTestId("milestone-replay-link").count()) === 2);
+  await link.getByRole("link").click();
+  await page.waitForURL("**/wot/replays?replay=1", { timeout: 5000 }).catch(() => undefined);
+  await page.getByTestId("replay-detail").waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("replaye: Mko → detail replaye", page.url().endsWith("/wot/replays?replay=1") && (await page.getByTestId("replay-detail").count()) === 1);
+  await page.keyboard.press("Escape");
+  await settle(page, 300);
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  await palette.getByRole("combobox", { name: "Hledat stránku nebo záznam" }).fill("progetto");
+  await settle(page, 800);
+  const opt = palette.getByRole("option", { name: /Progetto 65/ }).first();
+  check("hledání: replay ve výsledcích", (await opt.count()) === 1 && (await opt.innerText()).includes("Replay"));
+  await opt.click();
+  await page.waitForURL("**/wot/replays?replay=1", { timeout: 5000 }).catch(() => undefined);
+  await page.getByTestId("replay-detail").waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("hledání: replay → detail v knihovně", (await page.getByTestId("replay-detail").count()) === 1);
+  check("replaye odkazy: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // prázdná knihovna
+  await fetch(`${MOCK}/__mock/wot/replays-empty`, { method: "POST" });
+  const { ctx, page, errors } = await open("/wot/replays", { setup: (p) => withGameAssets(p) });
+  check("replaye prázdné: záměrný prázdný stav s nahráním", (await page.getByTestId("replay-empty").count()) === 1 && (await page.getByRole("button", { name: "Nahrát replay" }).count()) === 2 && (await page.getByRole("search").count()) === 0);
+  await page.screenshot({ path: `${OUT}wot-replays-empty.png` });
+  check("replaye prázdné: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await wotReset();
+}
+for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot/replays", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+  await settle(page, 600);
+  check(`replaye @${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  // celostránkový screenshot až na konci: v Chromiu po něm emulace přestane hlásit pointer: coarse
+  if (width < 500) {
+    await replayRow(page, 1).getByRole("button", { name: "Detail replaye: Progetto 65" }).tap();
+    const d = page.getByTestId("replay-detail");
+    await d.waitFor({ timeout: 3000 }).catch(() => undefined);
+    await settle(page, 900); // po vjezdu panelu
+    const dl = await d.getByTestId("replay-download").boundingBox();
+    check("replaye mobil: detail přes celou šířku, stažení ≥ 40 px", Boolean(dl && dl.height >= 40) && (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, JSON.stringify(dl));
+    await page.screenshot({ path: `${OUT}wot-replay-detail-mobile.png` });
+    await d.getByRole("button", { name: "Upravit údaje" }).tap();
+    await page.getByTestId("replay-form").waitFor({ timeout: 3000 }).catch(() => undefined);
+    await settle(page, 400);
+    check("replaye mobil: formulář bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wot-replay-form-mobile.png` });
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await settle(page, 400);
+  }
+  await page.screenshot({ path: `${OUT}wot-replays-${label}.png`, fullPage: true });
+  check(`replaye @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 await wotReset();

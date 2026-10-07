@@ -1054,5 +1054,20 @@
    }
   ],
   "total": 7
+ },
+ "progetto": {
+  "query": "progetto",
+  "results": [
+   {
+    "id": "wot_replay:1",
+    "type": "wot_replay",
+    "title": "Progetto 65",
+    "subtitle": "Replay · Útesy · 14. 9. 2026 · ★",
+    "area": "wot",
+    "href": "/wot/replays?replay=1",
+    "score": 85
+   }
+  ],
+  "total": 1
  }
 }
