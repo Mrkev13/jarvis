@@ -1,0 +1,154 @@
+/*
+ * Standa Hub – sémantická motion primitiva (Roadmap 6A, docs/design-system.md § 6).
+ *
+ * Třídy pojmenované podle toho, CO se stalo (completion, milestone, error…), ne jak se to animuje.
+ * Časování jen ze sémantických tokenů v app/motion.css (`--motion-duration-*`, `--motion-ease-*`).
+ * React obaly: components/motion/* (CompletionState, MilestoneGlow, SuccessPulse, StreakFlame, MotionReveal).
+ *
+ * Pravidla (stejná jako motion.css):
+ *  - jen opacity / transform (záře = předvykreslená vrstva ::after, animuje se jen její opacity),
+ *  - vše jednorázové (žádné smyčky), oslava ≤ 1,2 s, nic neblokuje kliknutí ani navigaci,
+ *  - dekorativní vrstvy jsou pseudo-elementy (čtečka je nevidí); informace nese text,
+ *  - prefers-reduced-motion: žádný pohyb, výsledný stav zůstává vidět.
+ */
+
+/* ===== Keyframes ===== */
+
+@keyframes motion-glow-once {
+  0%   { opacity: 0; }
+  30%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes motion-label-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes motion-exit {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes motion-ring-warning {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(251 191 36 / 0); }
+  35%      { box-shadow: 0 0 0 3px rgb(251 191 36 / 0.35); }
+}
+
+@keyframes motion-ring-error {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--motion-danger-rgb) / 0); }
+  35%      { box-shadow: 0 0 0 3px rgb(var(--motion-danger-rgb) / 0.4); }
+}
+
+/* ===== Exit ===== */
+
+/* Krátké zmizení (jen opacity); prvek odebírá volající po motionDurationMs("exit"). */
+.motion-exit {
+  pointer-events: none;
+  animation: motion-exit var(--motion-duration-fast) var(--motion-ease-exit) forwards;
+}
+
+/* ===== Progress ===== */
+
+/*
+ * Výplň progress baru: plná šířka stopy, posun přes transform (inline --motion-progress-offset) → žádný
+ * layout. První vykreslení „naroste" zleva (@starting-style), změny hodnoty plynule.
+ */
+.motion-progress-fill {
+  transform: translateX(var(--motion-progress-offset, 0%));
+  transition: transform var(--motion-duration-deliberate) var(--motion-ease-enter);
+}
+@starting-style {
+  .motion-progress-fill {
+    transform: translateX(-100%);
+  }
+}
+
+/* ===== Completion / Milestone – záře jako vrstva ::after ===== */
+
+.motion-completion,
+.motion-milestone {
+  position: relative;
+}
+
+.motion-completion::after,
+.motion-milestone::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Dokončení: jedna zelená záře (≤ 1,2 s), pak klid. Přehrává se při připojení třídy (CompletionState). */
+.motion-completion::after {
+  box-shadow: 0 0 0 2px rgb(var(--motion-success-rgb) / 0.6), 0 0 24px -4px rgb(var(--motion-success-rgb) / 0.55);
+  animation: motion-glow-once var(--motion-duration-celebration) var(--motion-ease-emphasized);
+}
+
+/* Štítek dokončení („Splněno") – krátký vstup; text je vidět i bez animace. */
+.motion-completion-label {
+  animation: motion-label-in var(--motion-duration-normal) var(--motion-ease-enter) backwards;
+}
+
+/* Milník: trvalý jemný azurový obrys (::before) + jednorázová záře při dosažení (::after). */
+.motion-milestone::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgb(34 211 238 / 0.35);
+}
+.motion-milestone::after {
+  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.5), 0 0 28px -6px rgb(34 211 238 / 0.6);
+}
+.motion-milestone-reached::after {
+  animation: motion-glow-once var(--motion-duration-celebration) var(--motion-ease-emphasized);
+}
+
+/* ===== Streak ===== */
+
+/* Nárůst streaku – jedno krátké rozhoření plamene (keyframe motion-flame-burst z motion.css). */
+.motion-streak-bump {
+  animation: motion-flame-burst var(--motion-duration-deliberate) var(--motion-ease-emphasized);
+}
+/* …a s volitelným plápoláním (`idle`): po rozhoření se vrátí k jemnému plápolání. */
+.motion-streak-bump-idle {
+  animation:
+    motion-flame-burst var(--motion-duration-deliberate) var(--motion-ease-emphasized),
+    motion-flame-flicker var(--motion-flame-duration) var(--motion-ease-standard) var(--motion-duration-deliberate) infinite;
+}
+
+/* ===== Warning / Error – krátký důraz, žádné třesení ani opakované blikání ===== */
+
+.motion-warning {
+  animation: motion-ring-warning var(--motion-duration-deliberate) var(--motion-ease-standard);
+}
+
+.motion-error {
+  animation: motion-ring-error var(--motion-duration-deliberate) var(--motion-ease-standard);
+}
+
+/* ===== Omezený pohyb ===== */
+@media (prefers-reduced-motion: reduce) {
+  .motion-exit,
+  .motion-completion::after,
+  .motion-completion-label,
+  .motion-milestone-reached::after,
+  .motion-streak-bump,
+  .motion-streak-bump-idle,
+  .motion-warning,
+  .motion-error {
+    animation: none !important;
+  }
+  /* Hodnota se změní okamžitě; trvalý obrys milníku (::before) zůstává. */
+  .motion-progress-fill {
+    transition: none !important;
+  }
+  /* Výstup bez prolínání: prvek rovnou zmizí (volající ho stejně odebere). */
+  .motion-exit {
+    opacity: 0;
+  }
+}

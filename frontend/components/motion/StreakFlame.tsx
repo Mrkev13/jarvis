@@ -1,43 +1,70 @@
 "use client";
 
-/** Hranice, při kterých se plamen krátce „rozhoří" (připraveno pro budoucí Habits/Fitness). */
-export const STREAK_MILESTONES = [7, 14, 30, 50, 100, 365] as const;
+import { useTransitionSignal } from "@/lib/motion";
+import { increased, STREAK_MILESTONES, streakVisual } from "@/lib/motionState";
+import { cx } from "@/lib/ui";
+
+export { STREAK_MILESTONES };
 
 interface StreakFlameProps {
   days: number;
   broken?: boolean;
   milestones?: readonly number[];
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md";
+  /**
+   * Jemné plápolání aktivního plamene. Výchozí vypnuto – zapínat jen na jednom „živém" místě
+   * (např. dnešní návyk), ne v seznamech. Omezený pohyb ho vždy vypne.
+   */
+  idle?: boolean;
+  /** Data jsou načtená (dokud ne, nárůst se nepočítá – načtení stránky plamen nerozhoří). Výchozí true. */
+  ready?: boolean;
+  /** Vlastní přístupný popis (výchozí česky „Streak 7 dní – milník"). */
+  label?: string;
 }
 
-const SIZE_CLASS = { sm: "text-base", md: "text-2xl", lg: "text-4xl" } as const;
+const SIZE_CLASS = { sm: "text-base", md: "text-2xl" } as const;
 
 /**
- * Plamen streaku:
- *  - aktivní streak → jemné plápolání,
- *  - milník (7, 14, 30 … dní) → krátké silnější rozhoření, pak plápolání,
+ * Prezentační základ streaku pro budoucí Habits (Roadmap 6A) – bez sledování a ukládání.
+ *  - aktivní streak → statický plamen (volitelně jemné plápolání `idle`),
+ *  - nárůst streaku (days vzroste) → jedno krátké rozhoření (≈ 700 ms), ne při načtení,
+ *  - milník (7, 14, 30 … dní) → trvale teplejší čip (barva, ne pohyb) + „milník" v popisu,
  *  - přerušený / nulový streak → šedý plamen bez animace.
- * Animace respektují prefers-reduced-motion (viz app/motion.css).
+ * Informace je v aria-label/title a v čísle; plamen je dekorace (aria-hidden).
  */
-export function StreakFlame({ days, broken = false, milestones = STREAK_MILESTONES, size = "md" }: StreakFlameProps) {
-  const active = !broken && days > 0;
-  const milestone = active && milestones.includes(days);
-  const motionClass = milestone ? "motion-flame-milestone" : active ? "motion-flame-active" : "";
-  const label = active
-    ? `Streak ${days} ${days === 1 ? "den" : days < 5 ? "dny" : "dní"}${milestone ? " – milník!" : ""}`
-    : "Streak přerušen";
+export function StreakFlame({ days, broken = false, milestones = STREAK_MILESTONES, size = "md", idle = false, ready = true, label }: StreakFlameProps) {
+  const visual = streakVisual(days, { broken, milestones });
+  const active = visual.state !== "inactive";
+  const bump = useTransitionSignal(active ? days : 0, ready, increased);
+  const text = label ?? visual.label;
 
   return (
-    <span className="inline-flex items-center gap-1.5" role="img" aria-label={label} title={label}>
+    <span
+      className={cx(
+        "inline-flex items-center gap-1.5 rounded-full",
+        visual.state === "milestone" && "bg-orange-500/10 px-2 ring-1 ring-inset ring-orange-400/40",
+      )}
+      role="img"
+      aria-label={text}
+      title={text}
+      data-streak={visual.state}
+    >
       <span
-        // key = days → při dosažení milníku se rozhoření přehraje znovu
-        key={milestone ? `m-${days}` : "flame"}
+        // key = počet nárůstů → rozhoření se přehraje při každém dalším nárůstu (přemontuje se jen ikona)
+        key={bump}
         aria-hidden="true"
-        className={`motion-flame ${SIZE_CLASS[size]} ${motionClass} ${active ? "" : "grayscale opacity-40"}`}
+        className={cx(
+          "motion-flame",
+          SIZE_CLASS[size],
+          active && bump > 0 ? (idle ? "motion-streak-bump-idle" : "motion-streak-bump") : active && idle ? "motion-flame-active" : null,
+          !active && "grayscale opacity-40",
+        )}
       >
         🔥
       </span>
-      <span className={`font-semibold tabular-nums ${active ? "text-orange-200" : "text-zinc-500"}`}>{days}</span>
+      <span aria-hidden="true" className={cx("font-semibold tabular-nums", active ? "text-orange-200" : "text-ink-muted")}>
+        {Math.max(0, Math.floor(Number.isFinite(days) ? days : 0))}
+      </span>
     </span>
   );
 }

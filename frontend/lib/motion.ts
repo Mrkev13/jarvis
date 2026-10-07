@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { becameTrue, increased, stepSignal, type SignalState, type SignalTrigger } from "./motionState.ts";
+import { MOTION_DURATION } from "./motionTokens.ts";
 
 /**
  * JS zrcadlo motion tokenů z app/motion.css (časovače a tween čísel).
- * Při změně hodnot upravit i CSS proměnné `--motion-*`.
+ * Sémantické tokeny žijí v lib/motionTokens.ts; tady zůstávají původní názvy.
  */
 export const MOTION = {
-  fastMs: 140,
-  normalMs: 240,
-  slowMs: 700,
+  fastMs: MOTION_DURATION.fast,
+  normalMs: MOTION_DURATION.normal,
+  slowMs: MOTION_DURATION.deliberate,
   highlightMs: 1600,
 } as const;
 
@@ -71,33 +73,27 @@ export function useAnimatedNumber(target: number, durationMs: number = MOTION.sl
 }
 
 /**
- * Čítač, který se zvýší pokaždé, když `value` vzroste oproti předchozí hodnotě.
- * Dokud `ready` není true (data se teprve načítají), se nárůsty nepočítají – načtení stránky
- * tedy nepulzuje. Použití jako `key` elementu s `motion-pulse` → puls jen při skutečném nárůstu.
+ * Čítač, který se zvýší, když přechod `value` splní `trigger` (např. nárůst, dosažení stavu).
+ * Dokud `ready` není true (data se teprve načítají), se přechody nepočítají – načtení stránky
+ * tedy nic nespustí. Použití jako `key` elementu s jednorázovou animací → přehraje se jen při události.
  */
+export function useTransitionSignal<T>(value: T, ready: boolean, trigger: SignalTrigger<T>): number {
+  const [state, setState] = useState<SignalState<T>>({ prev: value, ready, signal: 0 });
+  const next = stepSignal(state, value, ready, trigger);
+  if (next !== state) setState(next);
+  return next.signal;
+}
+
+/** Čítač nárůstů `value` (např. počet upozornění) – viz useTransitionSignal. */
 export function useIncreaseSignal(value: number, ready: boolean): number {
-  const [prev, setPrev] = useState({ value, ready });
-  const [signal, setSignal] = useState(0);
-  if (value !== prev.value || ready !== prev.ready) {
-    // Počítá se jen nárůst mezi dvěma „ready" stavy – první načtení (i když přijde ve stejném
-    // renderu jako ready=true) je jen výchozí hodnota.
-    if (prev.ready && ready && value > prev.value) setSignal(signal + 1);
-    setPrev({ value, ready });
-  }
-  return signal;
+  return useTransitionSignal(value, ready, increased);
 }
 
 /**
  * Čítač, který se zvýší, když progress přejde z < 100 na >= 100 (ne při načtení už dokončeného).
  */
 export function useCompletionSignal(progress: number): number {
-  const [prev, setPrev] = useState(progress);
-  const [signal, setSignal] = useState(0);
-  if (progress !== prev) {
-    if (prev < 100 && progress >= 100) setSignal(signal + 1);
-    setPrev(progress);
-  }
-  return signal;
+  return useTransitionSignal(progress >= 100, true, becameTrue);
 }
 
 const NO_IDS: ReadonlySet<string> = new Set();
