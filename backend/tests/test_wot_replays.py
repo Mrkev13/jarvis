@@ -97,6 +97,38 @@ class ParserTestCase(unittest.TestCase):
         self.assertNotIn("map_name", r.metadata)
 
 
+class RealClientShapeTestCase(unittest.TestCase):
+    """Regrese z lokálního ověření na skutečných replayích klienta 2.x (hodnoty z reálných souborů, bez binárek)."""
+
+    def test_real_2x_full_battle(self):
+        r = rp.parse_replay(fx.REAL_ELC)
+        self.assertEqual(r.status, "parsed", r.warnings)
+        m = r.metadata
+        self.assertEqual(m["tank_tag"], "france:F97_ELC_EVEN_90")
+        self.assertEqual(m["map_name"], "Karélie", "lokalizovaný název mapy z klienta")
+        self.assertEqual((m["damage"], m["kills"], m["mastery"], m["battle_result"]), (1594, 2, "ace", "win"))
+        self.assertEqual(m["assist"], 5975, "spotování 5874 + pásy 101; stun/smoke/inspire se nepočítají")
+        self.assertEqual(m["base_xp"], 1412, "základní XP = originalXP, ne xp/factualXP po prémii (2330)")
+        self.assertEqual(m["played_at"], datetime(2026, 9, 29, 14, 30, 0), "arenaCreateTime UTC (16:30 Praha)")
+
+    def test_real_2x_version_comes_from_xml_not_stale_exe(self):
+        self.assertEqual(rp.parse_replay(fx.REAL_ELC).metadata["game_version"], "2.4.0.1", "exe říká 2.4.0.0")
+        self.assertEqual(rp.parse_replay(fx.REAL_T57_LOSS).metadata["game_version"], "2.2.1.2", "exe říká 2.2.1.0")
+
+    def test_real_2x_loss_with_achievement_xp(self):
+        m = rp.parse_replay(fx.REAL_T57_LOSS).metadata
+        self.assertEqual((m["battle_result"], m["base_xp"], m["assist"], m["mastery"]), ("loss", 1225, 0, "ace"))
+
+    def test_real_2x_left_early_header_only(self):
+        r = rp.parse_replay(fx.REAL_HEADER_ONLY)
+        self.assertEqual(r.status, "partial")
+        self.assertEqual((r.metadata["tank_tag"], r.metadata["map_name"], r.metadata["game_version"]),
+                         ("czech:Cz17_Vz_55", "Klidné pobřeží", "2.4.0.2"))
+        self.assertEqual(r.metadata["played_at"], datetime(2026, 10, 7, 14, 55, 31), "dateTime = Praha (CEST) → UTC")
+        for k in ("damage", "kills", "assist", "base_xp", "mastery", "battle_result"):
+            self.assertNotIn(k, r.metadata)
+
+
 class ReplayApiBase(WotBase):
     def upload(self, data=fx.PROGETTO, name="20260914_2015_italy-It13_Progetto_M35_mod_46_18_cliff.wotreplay", status=200):
         params = {} if name is None else {"filename": name}
