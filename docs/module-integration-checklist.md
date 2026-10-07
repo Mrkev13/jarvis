@@ -3,6 +3,12 @@
 A checklist, **not a framework**. A new module is "well integrated" when it ticks the boxes that make sense for
 it; skip what does not apply and say why in the PR. Principles: [architecture-principles.md](architecture-principles.md).
 
+## 0. Feature flag (Roadmap 6C)
+- [ ] Registry entry in `backend/module_registry.py` **and** `frontend/lib/modules.ts` (one line each, parity is
+      tested): capabilities, entity types, context areas, routes/API prefixes, Quick Add kinds. Default disabled
+      until the module is usable. See [module-feature-flags.md](module-feature-flags.md) – “How to register a new module”.
+- [ ] Pages/widgets tagged with `module` / `modules`; no ad-hoc `if (FLAG)` checks – ask `ModuleAccess.allows()`.
+
 ## 1. Data and domain
 - [ ] Model(s) in `backend/models.py` with an **additive** Alembic migration (upgrade/downgrade/re-upgrade test;
       PostgreSQL check for non-trivial changes).
