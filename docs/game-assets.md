@@ -115,9 +115,9 @@ portraits and icons square. `mobileSize` gives a smaller frame below `md`. Used:
 Tank and portrait images carry identity: `alt="Tank Kranvagn"`, `alt="Portrét: Luna Snow"` (fallback: `role="img"` with
 the same label). Currency icons sit next to the visible label and are decorative (`alt=""` / `aria-hidden`).
 
-## Future (Game Enrichment B/C – not built yet)
+## Game Enrichment B (built) and later phases
 
-User-uploaded screenshots (Mastery/"Mko" gallery), replay thumbnails and milestone galleries will need uploads with a
-server-side store. `GameImage` already takes any same-origin file through the manifest; uploads should get their own
-validated store (size/type checks, per-file records) instead of `public/`, and reuse the frame, size tokens and
-fallback. Grind completion, `wot_grind_completed`, replay library and MFF T4 events are separate phases.
+Grind completion, completed history, `wot_grind_completed`, Mastery ("Mko") milestones and the screenshot gallery are
+documented in `docs/wot-milestones.md`. User uploads use their own validated store (`backend/media_storage.py`,
+`MEDIA_DIR`, gitignored), never `public/`; tank pictures on those surfaces still come from `GameImage`. Replay library
+and MFF T4 events remain later phases.

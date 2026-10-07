@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { handleAi } from "./mock-ai.mjs";
+import { stubPng } from "./stub-png.mjs";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const PORT = Number(process.env.MOCK_API_PORT || 8000);
@@ -31,7 +32,7 @@ const GET_ROUTES = {
   "/school/exams": () => fixture("school-exams"),
   "/work/sessions": () => fixture("work-sessions"),
   "/work/summary": () => fixture("work-summary"),
-  "/wot/grinds": () => fixture("wot-grinds"),
+  "/wot/grinds": () => wotState.grinds,
   "/wot/resources": () => fixture("wot-resources"),
   "/activity": () => fixture("activity"),
   // Roadmap 4G: GET /today ze skutečného today_service (ne 11. 10. 2026 14:30 Praha). Prázdný den a částečnou
@@ -49,6 +50,26 @@ function send(res, req, status, body, extraHeaders = {}) {
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
   });
   res.end(body === undefined ? "" : JSON.stringify(body));
+}
+
+// Game Enrichment B: stavový WoT (splnění grindu, historie, milníky, screenshoty). Výchozí data = fixtures ze
+// skutečného wot_service; /__mock/wot/reset vrátí výchozí stav. Screenshoty = neutrální testovací PNG (ne herní
+// grafika); id 5 představuje soubor smazaný z disku (404 → náhradní stav v galerii).
+const wotState = {};
+function resetWot() {
+  Object.assign(wotState, {
+    grinds: fixture("wot-grinds"),
+    completed: fixture("wot-completed"),
+    milestones: fixture("wot-milestones"),
+    files: new Map(),
+    seq: 100,
+  });
+}
+resetWot();
+const SHOT_COLORS = [[58, 70, 84], [64, 80, 72], [84, 70, 58], [70, 64, 90]];
+const wotNow = () => new Date().toISOString().slice(0, 19) + "Z";
+function wotMilestone(id) {
+  return wotState.milestones.find((m) => m.id === id);
 }
 
 // Auth (Roadmap 4C – kontrola proxy a loginu): session cookie „expired" = neplatná session, jinak platná.
@@ -191,6 +212,77 @@ createServer(async (req, res) => {
   if (url.pathname === "/actions/undo" && req.method === "POST" && String(body?.action_id || "").startsWith("today-")) {
     todayState.calls.push(`undo:${body.action_id}`);
     return respond(200, { ok: true, pending_action: { id: `today-undo-${body.action_id}`, tool: "undo_change", arguments: { _source: "today" } } }, 250);
+  }
+  if (url.pathname === "/__mock/wot/reset") {
+    resetWot();
+    return respond(200, { ok: true });
+  }
+  const wotComplete = /^\/wot\/grind\/(\d+)\/complete$/.exec(url.pathname);
+  if (wotComplete && req.method === "POST") {
+    const g = wotState.grinds.find((x) => x.id === Number(wotComplete[1]));
+    if (!g) return respond(404, { detail: { error: "not_found", message: "Grind neexistuje." } });
+    if (g.status === "completed") return respond(409, { detail: { error: "already_completed", message: "Grind už je splněný." } }, 300);
+    const before = g.xp_remaining;
+    Object.assign(g, { status: "completed", xp_remaining: 0, progress: 100 });
+    const cid = ++wotState.seq;
+    const completion = { id: `completion:${cid}`, completion_id: cid, grind_id: g.id, tank: g.tank, completed_at: wotNow(), started_at: g.started_at,
+      xp_start: g.xp_start, xp_remaining_before: before, duration_days: g.started_at ? 30 : null, source: "manual", legacy: false };
+    wotState.completed.unshift(completion);
+    return respond(200, { ok: true, grind: g, completion }, 350);
+  }
+  if (url.pathname === "/wot/grinds/completed" && req.method === "GET") return respond(200, wotState.completed);
+  if (url.pathname === "/wot/milestones" && req.method === "GET") return respond(200, wotState.milestones);
+  if (url.pathname === "/wot/milestones" && req.method === "POST") {
+    if (!String(body?.tank ?? "").trim()) return respond(400, { detail: { error: "invalid_tank", message: "Vyplň pole tank." } });
+    const m = { id: ++wotState.seq, milestone_type: "mastery", mastery: null, map_name: null, played_on: null, damage: null, assist: null, kills: null,
+      base_xp: null, notes: null, favorite: false, ...body, tank: String(body.tank).trim(), created_at: wotNow(), updated_at: wotNow(), screenshots: [] };
+    wotState.milestones.unshift(m);
+    return respond(200, m, 250);
+  }
+  const wotMs = /^\/wot\/milestones\/(\d+)$/.exec(url.pathname);
+  if (wotMs) {
+    const m = wotMilestone(Number(wotMs[1]));
+    if (!m) return respond(404, { detail: { error: "not_found", message: "Milník neexistuje." } });
+    if (req.method === "PATCH") {
+      Object.assign(m, body ?? {}, { updated_at: wotNow() });
+      return respond(200, m, 200);
+    }
+    if (req.method === "DELETE") {
+      wotState.milestones = wotState.milestones.filter((x) => x.id !== m.id);
+      return respond(200, { ok: true, id: m.id, files_removed: m.screenshots.length }, 200);
+    }
+  }
+  const wotUpload = /^\/wot\/milestones\/(\d+)\/screenshots$/.exec(url.pathname);
+  if (wotUpload && req.method === "POST") {
+    const m = wotMilestone(Number(wotUpload[1]));
+    if (!m) return respond(404, { detail: { error: "not_found", message: "Milník neexistuje." } });
+    const sid = ++wotState.seq;
+    const shot = { id: sid, url: `/wot/screenshots/${sid}/file`, caption: url.searchParams.get("caption"), original_name: url.searchParams.get("filename"),
+      content_type: "image/png", size_bytes: 1000, position: m.screenshots.length, created_at: wotNow() };
+    m.screenshots.push(shot);
+    wotState.files.set(sid, true);
+    return respond(200, shot, 250);
+  }
+  const wotShot = /^\/wot\/screenshots\/(\d+)(\/file)?$/.exec(url.pathname);
+  if (wotShot) {
+    const sid = Number(wotShot[1]);
+    if (wotShot[2] && req.method === "GET") {
+      if (sid === 5) return respond(404, { detail: "Soubor neexistuje." });
+      const png = stubPng(sid % 2 ? 320 : 256, sid % 2 ? 180 : 192, SHOT_COLORS[sid % SHOT_COLORS.length]);
+      res.writeHead(200, { "Content-Type": "image/png", "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Credentials": "true", "Cache-Control": "private, max-age=60" });
+      return res.end(png);
+    }
+    const owner = wotState.milestones.find((m) => m.screenshots.some((s) => s.id === sid));
+    if (!owner) return respond(404, { detail: { error: "not_found", message: "Screenshot neexistuje." } });
+    if (req.method === "DELETE") {
+      owner.screenshots = owner.screenshots.filter((s) => s.id !== sid);
+      return respond(200, { ok: true, id: sid, file_removed: true });
+    }
+    if (req.method === "PATCH") {
+      const s = owner.screenshots.find((x) => x.id === sid);
+      if (body && "caption" in body) s.caption = body.caption;
+      return respond(200, s);
+    }
   }
   if (handleAi(req, url, body, respond)) return;
   if (req.method === "GET") {

@@ -1,4 +1,4 @@
-// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A).
+// Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A + B).
 //
 // Předpoklady: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
@@ -7,7 +7,7 @@
 //           jinak `import("playwright")`; prohlížeč: PLAYWRIGHT_CHROMIUM=/cesta/k/chromium volitelně)
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
 import { mkdirSync, readFileSync } from "node:fs";
-import { deflateSync } from "node:zlib";
+import { stubPng } from "./stub-png.mjs";
 import { fileURLToPath } from "node:url";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
@@ -1446,33 +1446,8 @@ async function countTodayGets(page) {
 
 // 21) Game Enrichment A – herní obrázky. Skutečné assety se necommitují (public/game-assets je gitignore), proto
 // test podstrčí manifest (fixtures/game-assets-manifest.json) a neutrální testovací PNG/SVG (NE herní grafika) přes page.route.
-function stubPng(w, h, [r, g, b]) {
-  const crcTable = Array.from({ length: 256 }, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-  });
-  const crc = (buf) => {
-    let c = 0xffffffff;
-    for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const c = Buffer.alloc(4);
-    c.writeUInt32BE(crc(td));
-    return Buffer.concat([len, td, c]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr.set([8, 2, 0, 0, 0], 8);
-  const raw = Buffer.alloc((w * 3 + 1) * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set([r, g, b], y * (w * 3 + 1) + 1 + x * 3);
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
-}
+const wotReset = () => fetch(`${MOCK}/__mock/wot/reset`, { method: "POST" });
+await wotReset();
 // Manifest ve tvaru výstupu skriptu (verze 2) se skutečnými metadaty z Tankopedie – sdílený s unit testy.
 // Žádný registr tanků: názvy grindů se k vozidlům přiřadí za běhu. Object 279 early (#46849) nemá soubor → chyba načtení.
 const TEST_MANIFEST = JSON.parse(readFileSync(new URL("./fixtures/game-assets-manifest.json", import.meta.url), "utf8"));
@@ -1526,9 +1501,14 @@ const byAlt = (list, alt) => list.find((x) => x.alt === alt);
   await page.waitForTimeout(300);
   const obj = byAlt(await imageState(page, '[data-game-image="tank"]'), "Tank Object 279 (e)");
   check("wot obrázky: chyba načtení → monogram, žádný rozbitý obrázek", obj?.state === "fallback" && obj.text === "O279", JSON.stringify(obj));
-  const sizes = await imageState(page, '[data-game-image="tank"]');
-  check("wot obrázky: pevný rámeček 64 × 40 (žádný posun)", sizes.every((x) => x.w === 64 && x.h === 40), JSON.stringify(sizes.map((x) => [x.w, x.h])));
-  check("wot obrázky: dokončený grind má tank taky", (await row("T-100 LT").count()) === 1);
+  const sizes = await imageState(page, '[data-search-target] [data-game-image="tank"]');
+  check("wot obrázky: pevný rámeček 64 × 40 (žádný posun)", sizes.length >= 3 && sizes.every((x) => x.w === 64 && x.h === 40), JSON.stringify(sizes.map((x) => [x.w, x.h])));
+  check("wot obrázky: aktivní grind má tank", (await row("Kranvagn").count()) === 1);
+  // Game Enrichment B: splněné grindy jsou v historii (malá miniatura), milníky mají tank taky
+  const done = await imageState(page, '[data-section="wot-completed"] [data-game-image="tank"]');
+  check("wot obrázky: splněný grind v historii má tank (mimo manifest = monogram)", byAlt(done, "Tank T-100 LT")?.state === "image" && byAlt(done, "Tank Progetto 65")?.state === "fallback" && done.length === 2, JSON.stringify(done.map((x) => [x.alt, x.state])));
+  const ms = await imageState(page, '[aria-label="Milníky"] [data-game-image="tank"]');
+  check("wot obrázky: milník (Mko) má tank z manifestu", ms.length === 4 && byAlt(ms, "Tank Kranvagn")?.state === "image" && ms.every((x) => x.state === "image" || x.state === "fallback"), JSON.stringify(ms.map((x) => [x.alt, x.state])));
   const res = await imageState(page, '#resources [data-game-image="resource"]');
   check("wot měny: oficiální ikona u všech čtyř měn", res.length === 4 && res.every((x) => x.state === "image" && x.loaded === true), JSON.stringify(res.map((x) => [x.state, x.src])));
   check("wot měny: Credits / Gold / Bonds / Free XP ze správného souboru", JSON.stringify(res.map((x) => x.src).sort()) === JSON.stringify(["wot/resources/bonds.svg", "wot/resources/credits.svg", "wot/resources/free_xp.svg", "wot/resources/gold.svg"]), JSON.stringify(res.map((x) => x.src)));
@@ -1563,9 +1543,11 @@ const byAlt = (list, alt) => list.find((x) => x.alt === alt);
   const unknown = byAlt(tanks, "Tank Neexistující tank");
   check("wot neznámý tank: monogram s popiskem", unknown?.state === "fallback" && unknown.text === "NT", JSON.stringify(unknown));
   check("wot obrázky: líné načítání", tanks.filter((x) => x.state === "image").every((x) => x.lazy === true));
-  const tankFiles = requests.filter((r) => r.startsWith("/game-assets/wot/tanks/"));
+  // grindy + historie + Mka: stahují se jen soubory tanků, které jsou na stránce vidět
+  const tankFiles = [...new Set(requests.filter((r) => r.startsWith("/game-assets/wot/tanks/")))];
+  const shown = new Set((await imageState(page, '[data-game-image="tank"] img')).length ? (await page.locator('[data-game-image="tank"] img').evaluateAll((els) => els.map((i) => new URL(i.src).pathname))) : []);
   const manifestLoads = requests.filter((r) => r.endsWith("manifest.json")).length;
-  check("wot obrázky: prohlížeč stáhne jen zobrazené tanky (ne celou cache)", tankFiles.length > 0 && tankFiles.length <= 5 && manifestLoads === 1, JSON.stringify({ tankFiles: tankFiles.length, manifestLoads }));
+  check("wot obrázky: prohlížeč stáhne jen zobrazené tanky (ne celou cache)", tankFiles.length > 0 && tankFiles.length <= 10 && tankFiles.every((f) => shown.has(f) || f === MISSING_TANK_FILE) && manifestLoads === 1, JSON.stringify({ tankFiles: tankFiles.length, manifestLoads }));
   await page.screenshot({ path: `${OUT}wot-assets-real-grinds.png`, fullPage: true });
   check("wot reálné grindy: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
@@ -1604,7 +1586,7 @@ for (const path of ["/wot", "/mff"]) {
   const { ctx, page, errors } = await open(path, { width: 390, height: 844, setup: (p) => withGameAssets(p) });
   await page.waitForTimeout(700);
   check(`${path} obrázky mobil: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
-  const imgs = await imageState(page, path === "/wot" ? '[data-game-image="tank"]' : '[data-game-image="character"]');
+  const imgs = await imageState(page, path === "/wot" ? '[data-search-target] [data-game-image="tank"]' : '[data-game-image="character"]');
   check(`${path} obrázky mobil: menší miniatury zůstávají`, imgs.length >= 3 && imgs.every((x) => x.h === 40), JSON.stringify(imgs.map((x) => [x.w, x.h])));
   const titleSel = path === "/wot" ? "[data-search-target] div.break-words.font-medium" : '[aria-label="Sledované postavy"] h3';
   const widths = await page.locator(titleSel).evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
@@ -1617,6 +1599,204 @@ for (const path of ["/wot", "/mff"]) {
   check(`${path} obrázky mobil: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
 }
+
+// 22) Game Enrichment B – splnění grindu, historie, Mka a galerie screenshotů (stavový mock, screenshoty = neutrální PNG).
+const activeRow = (page, tank) => page.locator('[aria-label="Aktivní grindy"] > *').filter({ hasText: tank });
+const historyIds = (page) => page.locator('[data-section="wot-completed"] [data-completion]').evaluateAll((els) => els.map((e) => e.getAttribute("data-completion")));
+const milestoneIds = (page) => page.locator('[aria-label="Milníky"] > li').evaluateAll((els) => els.map((e) => e.getAttribute("data-milestone")));
+const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[data-milestone="${id}"]`);
+{
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  await page.waitForTimeout(600);
+  // pořadí sekcí: zdroje → aktivní grindy → splněné → Mka
+  const order = await page.evaluate(() =>
+    ["#resources", '[aria-label="Aktivní grindy"]', '[data-section="wot-completed"]', '[aria-label="Milníky"]'].map((sel) => document.querySelector(sel)?.getBoundingClientRect().top ?? -1),
+  );
+  check("wot B: pořadí zdroje → aktivní → splněné → Mka", order.every((y, i) => y >= 0 && (i === 0 || y > order[i - 1])), JSON.stringify(order.map(Math.round)));
+  check("wot B: aktivní seznam bez splněných grindů", (await activeRow(page, "Kranvagn").count()) === 1 && (await activeRow(page, "T-100 LT").count()) === 0 && (await activeRow(page, "Progetto 65").count()) === 0);
+  check("wot B: průběh grindu z výchozího XP", (await activeRow(page, "Kranvagn").innerText()).includes("75 %") && (await page.getByRole("progressbar", { name: /Kranvagn: 75 %/ }).count()) === 1);
+  check("wot B: grind bez výchozího XP nemá vymyšlený průběh", (await activeRow(page, "TVP T 50/51").getByRole("progressbar").count()) === 0);
+  check("wot B: historie – Progetto 65 + starší T-100 LT", JSON.stringify(await historyIds(page)) === JSON.stringify(["completion:1", "grind:3"]));
+  const histText = await page.locator('[data-section="wot-completed"]').innerText();
+  check("wot B: historie – datum, doba a XP", /58 dn/.test(histText) && /165\s?000/.test(histText) && /datum neznámé/.test(histText), histText.replace(/\s+/g, " ").slice(0, 160));
+
+  // Regrese B (lokální ověření): nový grind nejde založit jako „Dokončeno"; Splněno je obrys, ne plná zelená
+  await page.getByRole("button", { name: "Přidat grind" }).click();
+  const statusOptions = await page.getByLabel("Stav").locator("option").evaluateAll((els) => els.map((o) => o.value));
+  check("wot B: nový grind nenabízí stav Dokončeno", JSON.stringify(statusOptions) === JSON.stringify(["active", "paused"]), JSON.stringify(statusOptions));
+  await page.getByRole("button", { name: "Zrušit" }).first().click();
+  const fills = await page.evaluate(() => {
+    const bg = (el) => (el ? getComputedStyle(el).backgroundColor : "");
+    const done = document.querySelector('[aria-label^="Splněno: "]');
+    const add = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Přidat grind");
+    return { done: bg(done), add: bg(add) };
+  });
+  const alpha = (c) => (/rgba?\(([^)]+)\)/.exec(c)?.[1].split(",")[3] ?? "1").trim();
+  check("wot B: Splněno tišší než Přidat grind (bez plné výplně)", Number(alpha(fills.done)) < 0.2 && Number(alpha(fills.add)) > 0.9, JSON.stringify(fills));
+  const headerText = () => page.locator("p, div").filter({ hasText: /^\d+ aktivn\S* · zbývá / }).last().innerText();
+  const parseHeader = (t) => { const m = /^(\d+) aktivn\S* · zbývá ([\d\s ]+) XP/.exec(t.trim()); return m ? { n: Number(m[1]), xp: Number(m[2].replace(/\D/g, "")) } : null; };
+  const headerBefore = parseHeader(await headerText());
+  const kranvagnXp = Number(((await activeRow(page, "Kranvagn").innerText()).match(/Zbývá ([\d\s ]+) XP/)?.[1] ?? "").replace(/\D/g, ""));
+
+  // Splněno → potvrzení → GRIND COMPLETE → historie
+  await activeRow(page, "Kranvagn").getByRole("button", { name: "Splněno: Kranvagn" }).click();
+  const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "Označit Kranvagn jako splněný?" });
+  check("wot B: Splněno chce lehké potvrzení", (await confirm.count()) === 1);
+  check("wot B: XP samo nic nesplní (bez potvrzení beze změny)", JSON.stringify(await historyIds(page)) === JSON.stringify(["completion:1", "grind:3"]));
+  await confirm.getByRole("button", { name: "Splněno", exact: true }).click();
+  const badge = page.getByTestId("grind-complete");
+  await badge.waitFor({ timeout: 3000 }).catch(() => undefined);
+  const celebrating = activeRow(page, "Kranvagn");
+  const anim = await celebrating.evaluate((el) => {
+    const row = el.matches(".motion-grind-complete") ? el : el.querySelector(".motion-grind-complete");
+    return row ? getComputedStyle(row).animationName : "none";
+  }).catch(() => "none");
+  check("wot B: GRIND COMPLETE se zobrazí na řádku", (await badge.count()) === 1 && /grind complete/i.test(await badge.innerText()), String(await badge.count()));
+  check("wot B: oslava = azurový puls (CSS animace, žádná knihovna)", anim.includes("motion-grind-complete"), anim);
+  check("wot B: při oslavě 100 % a bez akcí", (await celebrating.innerText()).includes("100 %") && (await celebrating.getByRole("button").count()) === 0);
+  check("wot B: oznámení pro čtečky (role=status)", (await page.getByTestId("grind-complete-notice").getAttribute("role")) === "status");
+  const headerDuring = parseHeader(await headerText());
+  check("wot B: hlavička během oslavy už bez splněného grindu", Boolean(headerBefore && headerDuring && headerDuring.n === headerBefore.n - 1 && headerDuring.xp === headerBefore.xp - kranvagnXp), JSON.stringify({ headerBefore, headerDuring, kranvagnXp }));
+  await page.screenshot({ path: `${OUT}wot-grind-complete.png` });
+  // navigace není blokovaná: odkaz v menu je dál klikatelný (jen ověříme, že nic nepřekrývá stránku)
+  check("wot B: oslava nic nepřekrývá", (await page.locator('[role="dialog"], [role="alertdialog"]').count()) === 0);
+  await page.waitForTimeout(1700);
+  check("wot B: po oslavě grind opustí aktivní seznam", (await activeRow(page, "Kranvagn").count()) === 0 && (await badge.count()) === 0);
+  check("wot B: hlavička po obnovení sedí se stavem během oslavy", JSON.stringify(parseHeader(await headerText())) === JSON.stringify(headerDuring), await headerText());
+  const hist = await historyIds(page);
+  check("wot B: splnění je nahoře v historii (stabilní id)", hist.length === 3 && /^completion:\d+$/.test(hist[0]) && hist[0] !== "completion:1", hist.join(","));
+  check("wot B: nové splnění zvýrazněné v historii", (await page.locator(`[data-completion="${hist[0]}"]`).innerText()).includes("Kranvagn"));
+
+  // Mka: oblíbené první, pak podle data; značka Legendární; bez screenshotů žádná galerie
+  check("wot B: Mka – oblíbené první, pak nejnovější", JSON.stringify(await milestoneIds(page)) === JSON.stringify(["2", "1", "3", "4"]), (await milestoneIds(page)).join(","));
+  check("wot B: oblíbené = viditelná značka", (await milestoneCard(page, "2").getByTestId("favorite-marker").count()) === 1 && (await page.getByTestId("favorite-marker").count()) === 1);
+  const p65 = await milestoneCard(page, "1").innerText();
+  check("wot B: Progetto 65 – statistiky Mka", /5\s?205/.test(p65) && /1\s?754/.test(p65) && /1\s?208/.test(p65) && /Útesy/.test(p65) && /Mistr/.test(p65), p65.replace(/\s+/g, " ").slice(0, 200));
+  check("wot B: milník bez screenshotů = bez galerie", (await milestoneCard(page, "3").locator("[data-shot]").count()) === 0);
+  const thumbs = milestoneCard(page, "1").locator("[data-shot]");
+  check("wot B: galerie – 3 náhledy", (await thumbs.count()) === 3);
+  await page.waitForTimeout(400);
+  const thumbImgs = await thumbs.locator("img").evaluateAll((els) => els.map((i) => ({ ok: i.complete && i.naturalWidth > 0, lazy: i.loading === "lazy", fit: getComputedStyle(i).objectFit })));
+  check("wot B: náhledy se načtou líně, ořez 16:9", thumbImgs.length === 3 && thumbImgs.every((x) => x.ok && x.lazy && x.fit === "cover"), JSON.stringify(thumbImgs));
+  const ratio = await thumbs.first().evaluate((el) => el.getBoundingClientRect().width / el.getBoundingClientRect().height);
+  check("wot B: náhled má poměr 16:9", Math.abs(ratio - 16 / 9) < 0.05, ratio.toFixed(3));
+  await page.waitForTimeout(300);
+  check("wot B: chybějící soubor → náhradní stav, ne rozbitý obrázek", (await milestoneCard(page, "4").locator('[data-shot-state="missing"]').count()) === 1 && (await milestoneCard(page, "4").locator("img").count()) === 1);
+
+  // zvětšení: dialog, fokus na Zavřít, šipky, Esc vrátí fokus
+  await thumbs.first().click();
+  const box = page.getByTestId("shot-lightbox");
+  await box.waitFor({ timeout: 2000 }).catch(() => undefined);
+  check("wot B: klik na náhled otevře zvětšení", (await box.count()) === 1 && (await box.getAttribute("role")) === "dialog");
+  check("wot B: zvětšení – fokus na Zavřít", (await focusedLabel(page)) === "Zavřít náhled", await focusedLabel(page));
+  const big = await box.locator("img").evaluate((i) => ({ fit: getComputedStyle(i).objectFit, ok: i.complete && i.naturalWidth > 0 })).catch(() => null);
+  check("wot B: zvětšení zachová poměr stran (object-contain)", big?.fit === "contain", JSON.stringify(big));
+  check("wot B: zvětšení – popisek a pozice", /Výsledková tabulka/.test(await box.innerText()) && /1 \/ 3/.test(await box.innerText()));
+  await page.keyboard.press("ArrowRight");
+  check("wot B: šipka → další screenshot", /2 \/ 3/.test(await box.innerText()) && /Mistr!/.test(await box.innerText()));
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  check("wot B: šipka ← dokola na poslední", /3 \/ 3/.test(await box.innerText()));
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: `${OUT}wot-lightbox.png` });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  check("wot B: Esc zavře a vrátí fokus na náhled", (await box.count()) === 0 && /^Zvětšit: Screenshot 1 z 3/.test(await focusedLabel(page)), await focusedLabel(page));
+
+  // oblíbení: přepínač s aria-pressed, změní pořadí
+  const fav = milestoneCard(page, "3").getByRole("button", { name: "Označit jako legendární: Object 140" });
+  check("wot B: oblíbení = přepínač (aria-pressed)", (await fav.getAttribute("aria-pressed")) === "false");
+  await fav.click();
+  await page.waitForTimeout(500);
+  check("wot B: oblíbení přepne značku a pořadí", (await milestoneCard(page, "3").getByTestId("favorite-marker").count()) === 1 && (await milestoneIds(page)).slice(0, 2).sort().join(",") === "2,3", (await milestoneIds(page)).join(","));
+  await milestoneCard(page, "3").getByRole("button", { name: "Zrušit legendární: Object 140", pressed: true }).click();
+  await page.waitForTimeout(500);
+
+  // nový milník: jen tank je povinný, obrázek tanku se doplní sám, screenshot nahraný po uložení
+  await page.getByRole("button", { name: "Přidat Mko" }).click();
+  const form = page.getByTestId("milestone-form");
+  await form.waitFor({ timeout: 2000 }).catch(() => undefined);
+  check("wot B: formulář milníku v panelu", (await form.count()) === 1 && (await page.getByRole("dialog", { name: "Nové Mko / milník" }).count()) === 1);
+  await form.getByRole("button", { name: "Uložit milník" }).click();
+  check("wot B: prázdný tank = chyba u pole", (await form.getByText(/tank/i).filter({ hasText: /Vyplň|Zadej|povinn/i }).count()) >= 1);
+  await form.getByLabel("Tank *").fill("Kranvagn");
+  await page.waitForTimeout(400);
+  const preview = await imageState(page, '[data-testid="milestone-form"] [data-game-image="tank"]');
+  check("wot B: tank ve formuláři hned s obrázkem (Game Enrichment A)", preview[0]?.state === "image" && preview[0]?.src === "wot/tanks/2433.png", JSON.stringify(preview));
+  await form.getByLabel("Mapa").fill("Prochorovka");
+  await form.getByLabel("Poškození").fill("6100");
+  await form.getByLabel("Zničení").fill("4");
+  const fileInput = form.locator('input[type="file"]');
+  await fileInput.setInputFiles({ name: "poznamky.txt", mimeType: "text/plain", buffer: Buffer.from("ne") });
+  check("wot B: nepodporovaný soubor odmítnut v prohlížeči", (await form.getByRole("alert").filter({ hasText: /PNG|JPEG|WebP/ }).count()) === 1);
+  await fileInput.setInputFiles({ name: "kranvagn-mko.png", mimeType: "image/png", buffer: stubPng(320, 180, [60, 80, 90]) });
+  check("wot B: obrázek čeká na nahrání s popiskem", (await form.getByLabel("Popisek: kranvagn-mko.png").count()) === 1);
+  await form.getByLabel("Popisek: kranvagn-mko.png").fill("Konec bitvy");
+  await form.getByRole("button", { name: "Uložit milník" }).click();
+  await form.waitFor({ state: "detached", timeout: 4000 }).catch(() => undefined);
+  await page.waitForTimeout(500);
+  const ids = await milestoneIds(page);
+  const created = ids.find((id) => !["1", "2", "3", "4"].includes(id));
+  check("wot B: nový milník v seznamu", ids.length === 5 && Boolean(created), ids.join(","));
+  const newCard = milestoneCard(page, created);
+  check("wot B: nový milník – screenshot nahraný", (await newCard.locator("[data-shot]").count()) === 1 && /Prochorovka/.test(await newCard.innerText()));
+  await page.screenshot({ path: `${OUT}wot-milestones.png`, fullPage: true });
+
+  // smazání: výslovné potvrzení
+  await newCard.getByRole("button", { name: /Smazat/ }).click();
+  const del = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "Smazat milník" });
+  check("wot B: smazání milníku chce potvrzení", (await del.count()) === 1 && /screenshoty/.test(await del.innerText()));
+  await del.getByRole("button", { name: "Smazat milník" }).click();
+  await page.waitForTimeout(600);
+  check("wot B: milník smazán", (await milestoneIds(page)).length === 4);
+  check("wot B: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // omezený pohyb: žádná animace, grind rovnou v historii
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { reducedMotion: "reduce", setup: (p) => withGameAssets(p) });
+  await activeRow(page, "Object 279 (e)").getByRole("button", { name: /^Splněno/ }).click();
+  await page.getByRole("button", { name: "Splněno", exact: true }).click();
+  await page.waitForTimeout(700);
+  check("wot B omezený pohyb: bez oslavné animace", (await page.getByTestId("grind-complete").count()) === 0);
+  check("wot B omezený pohyb: grind hned v historii", (await activeRow(page, "Object 279 (e)").count()) === 0 && (await historyIds(page)).length === 3);
+  check("wot B omezený pohyb: textové oznámení zůstává", (await page.getByTestId("grind-complete-notice").count()) === 1);
+  const animations = await page.evaluate(() => [...document.querySelectorAll(".motion-grind-complete, .motion-grind-complete-label")].map((e) => getComputedStyle(e).animationName));
+  check("wot B omezený pohyb: CSS animace vypnutá", animations.every((a) => a === "none"), animations.join(","));
+  check("wot B omezený pohyb: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+  await page.waitForTimeout(600);
+  check(`wot B @${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const cards = await page.locator('[aria-label="Milníky"] > li').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  check(`wot B @${label}: karty Mk se vejdou`, cards.length === 4 && cards.every((w) => w <= width - 24), JSON.stringify(cards));
+  if (width < 500) {
+    const t = milestoneCard(page, "1").locator("[data-shot]").first();
+    const tb = await t.boundingBox();
+    check("wot B mobil: náhled je dotykový cíl ≥ 44 px", Boolean(tb && tb.height >= 44), String(tb?.height));
+    await t.tap();
+    const box = page.getByTestId("shot-lightbox");
+    await box.waitFor({ timeout: 2000 }).catch(() => undefined);
+    const img = await box.locator("img").boundingBox();
+    check("wot B mobil: zvětšení na šířku displeje", Boolean(img && img.width >= 340 && img.width <= 390), JSON.stringify(img));
+    await page.waitForTimeout(350); // po náběhu dialogu
+    await page.screenshot({ path: `${OUT}wot-lightbox-mobile.png` });
+    await box.getByRole("button", { name: "Zavřít náhled" }).tap();
+    await page.getByRole("button", { name: "Přidat Mko" }).tap();
+    await page.waitForTimeout(400);
+    check("wot B mobil: formulář milníku bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wot-milestone-form-mobile.png` });
+  }
+  await page.screenshot({ path: `${OUT}wot-b-${label}.png`, fullPage: true });
+  check(`wot B @${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+await wotReset();
 
 await browser.close();
 const failed = results.filter((r) => !r.ok);

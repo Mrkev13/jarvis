@@ -3,7 +3,8 @@ from datetime import date
 from database import SessionLocal
 from models import WotResource, WotGrind
 from models import FinanceTransaction
-from time_utils import today_local
+from time_utils import today_local, utc_now
+import wot_service
 from models import Subject, Assignment, Exam
 from models import WorkSession
 from models import MffCharacter
@@ -39,18 +40,11 @@ def get_wot_grinds():
     db = SessionLocal()
 
     try:
+        from wot_service import serialize_grind  # Game Enrichment B: + xp_start, started_at, progress
+
         grinds = db.query(WotGrind).all()
 
-        return [
-            {
-                "id": item.id,
-                "tank": item.tank,
-                "xp_remaining": item.xp_remaining,
-                "priority": item.priority,
-                "status": item.status
-            }
-            for item in grinds
-        ]
+        return [serialize_grind(item) for item in grinds]
 
     finally:
         db.close()
@@ -655,6 +649,8 @@ def upsert_wot_grind(
             for f in tracked_fields:
                 setattr(old_obj, f, getattr(existing, f, None))
 
+            was_completed = (existing.status or "").lower() == "completed"
+            xp_before = existing.xp_remaining
             existing.xp_remaining = xp_remaining
             existing.priority = priority
             existing.status = status
@@ -668,7 +664,13 @@ def upsert_wot_grind(
                 delta=delta_dict(old_obj, existing, tracked_fields),
                 user_context=user_context
             )
+            if (status or "").lower() == "completed" and not was_completed:
+                # stejné splnění jako tlačítko Splněno: 100 %, historie, událost wot_grind_completed
+                existing.xp_remaining = 0
+                db.flush()
+                wot_service.record_completion(db, existing, source=user_context, xp_before=xp_before, now=utc_now())
         else:
+            wot_service.ensure_new_grind_status(status)
             item = WotGrind(
                 tank=tank,
                 xp_remaining=xp_remaining,

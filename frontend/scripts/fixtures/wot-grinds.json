@@ -4,27 +4,49 @@
   "tank": "Object 279 (e)",
   "xp_remaining": 128000.0,
   "priority": "high",
-  "status": "active"
+  "status": "active",
+  "xp_start": 180000.0,
+  "started_at": "2026-08-20T18:00:00Z",
+  "progress": 29
  },
  {
   "id": 2,
   "tank": "Kranvagn",
   "xp_remaining": 52000.0,
   "priority": "high",
-  "status": "active"
+  "status": "active",
+  "xp_start": 208000.0,
+  "started_at": "2026-07-02T18:00:00Z",
+  "progress": 75
  },
  {
   "id": 3,
   "tank": "T-100 LT",
   "xp_remaining": 0.0,
   "priority": "low",
-  "status": "completed"
+  "status": "completed",
+  "xp_start": null,
+  "started_at": null,
+  "progress": 100
  },
  {
   "id": 4,
   "tank": "TVP T 50/51",
   "xp_remaining": 96000.0,
   "priority": "high",
-  "status": "active"
+  "status": "active",
+  "xp_start": null,
+  "started_at": null,
+  "progress": null
+ },
+ {
+  "id": 5,
+  "tank": "Progetto 65",
+  "xp_remaining": 0.0,
+  "priority": "medium",
+  "status": "completed",
+  "xp_start": 165000.0,
+  "started_at": "2026-08-01T18:00:00Z",
+  "progress": 100
  }
 ]

@@ -55,6 +55,7 @@ STEP_0009_EXTRA = {"reminders"}
 STEP_0010_EXTRA = {"push_subscriptions", "deliveries"}
 STEP_0011_EXTRA = {"daily_briefings"}
 STEP_0012_EXTRA = {"weekly_reviews"}
+STEP_0013_EXTRA = {"wot_grind_completions", "wot_milestones", "wot_milestone_screenshots"}
 
 
 def _sqlite_tables(conn):
@@ -163,7 +164,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -308,6 +309,26 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertIn("daily_briefings", _sqlite_tables(self.conn))
 
+    def test_0013_adds_wot_milestones_and_keeps_grinds(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0012_weekly_reviews")
+        self.conn.execute(text("INSERT INTO wot_grinds (tank, xp_remaining, priority, status) VALUES ('Kranvagn', 52000, 'high', 'active')"))
+        self.conn.execute(text("INSERT INTO wot_grinds (tank, xp_remaining, priority, status) VALUES ('T-100 LT', 0, 'low', 'completed')"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0013_wot_milestones")
+        rows = dict(self.conn.execute(text("SELECT tank, xp_start FROM wot_grinds")).fetchall())
+        self.assertEqual(rows, {"Kranvagn": 52000.0, "T-100 LT": None}, "průběh aktivních od teď, splněné beze změny")
+        self.assertTrue(STEP_0013_EXTRA <= _sqlite_tables(self.conn))
+        cols = {c["name"] for c in inspect(self.conn).get_columns("wot_milestone_screenshots")}
+        self.assertTrue({"stored_name", "original_name", "content_type", "size_bytes", "caption", "position"} <= cols)
+        alembic_cmd.downgrade(self.cfg, "0012_weekly_reviews")
+        self.assertFalse(STEP_0013_EXTRA & _sqlite_tables(self.conn))
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM wot_grinds")).scalar(), 2, "grindy přežijí downgrade")
+        self.assertNotIn("xp_start", {c["name"] for c in inspect(self.conn).get_columns("wot_grinds")})
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertTrue(STEP_0013_EXTRA <= _sqlite_tables(self.conn))
+
     def test_0012_adds_weekly_reviews_and_downgrades_cleanly(self):
         from sqlalchemy import inspect
 
@@ -418,7 +439,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA)
 
             db = main.SessionLocal()
             try:

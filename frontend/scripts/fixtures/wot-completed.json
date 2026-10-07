@@ -1,0 +1,28 @@
+[
+ {
+  "id": "completion:1",
+  "completion_id": 1,
+  "grind_id": 5,
+  "tank": "Progetto 65",
+  "completed_at": "2026-09-28T19:30:00Z",
+  "started_at": "2026-08-01T18:00:00Z",
+  "xp_start": 165000.0,
+  "xp_remaining_before": 31000.0,
+  "duration_days": 58,
+  "source": "manual",
+  "legacy": false
+ },
+ {
+  "id": "grind:3",
+  "completion_id": null,
+  "grind_id": 3,
+  "tank": "T-100 LT",
+  "completed_at": null,
+  "started_at": null,
+  "xp_start": null,
+  "xp_remaining_before": null,
+  "duration_days": null,
+  "source": "legacy",
+  "legacy": true
+ }
+]

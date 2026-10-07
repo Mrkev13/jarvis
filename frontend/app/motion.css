@@ -284,6 +284,23 @@
     motion-flame-flicker var(--motion-flame-duration) var(--motion-ease-in-out) calc(var(--motion-slow) * 2) infinite;
 }
 
+/* Game Enrichment B: „GRIND COMPLETE" – krátký azurový záblesk karty (≈1,3 s), žádné konfety. */
+@keyframes motion-grind-complete {
+  0%   { box-shadow: 0 0 0 0 rgb(34 211 238 / 0); }
+  30%  { box-shadow: 0 0 0 2px rgb(34 211 238 / 0.55), 0 0 32px -6px rgb(34 211 238 / 0.65); }
+  100% { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.3), 0 0 0 0 rgb(34 211 238 / 0); }
+}
+@keyframes motion-grind-complete-label {
+  from { opacity: 0; letter-spacing: 0.4em; }
+  to   { opacity: 1; letter-spacing: 0.2em; }
+}
+.motion-grind-complete {
+  animation: motion-grind-complete 1300ms var(--motion-ease) forwards;
+}
+.motion-grind-complete-label {
+  animation: motion-grind-complete-label 500ms var(--motion-ease) both;
+}
+
 /* ===== Omezený pohyb ===== */
 @media (prefers-reduced-motion: reduce) {
   .motion-page,
@@ -301,6 +318,8 @@
   .motion-flame-milestone,
   .motion-undo-timer,
   .motion-palette,
+  .motion-grind-complete,
+  .motion-grind-complete-label,
   .search-target-active,
   .motion-executing::after {
     animation: none !important;

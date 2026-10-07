@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
+import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
+import { GrindRow } from "@/components/wot/GrindRow";
+import { MilestoneCard } from "@/components/wot/MilestoneCard";
+import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
   AreaBadge,
   Button,
@@ -11,7 +15,6 @@ import {
   ContentContainer,
   EmptyState,
   EntityList,
-  EntityRow,
   ErrorState,
   FormField,
   fieldClass,
@@ -21,25 +24,27 @@ import {
   PageHeader,
   PageSection,
   StatGrid,
-  StatusBadge,
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiFetch, jsonBody } from "@/lib/api";
-import { formatNumber, plural } from "@/lib/format";
-import { staggerStyle } from "@/lib/motion";
-import { priorityTone } from "@/lib/ui";
+import { formatNumber, plural, pragueDayKey } from "@/lib/format";
+import { prefersReducedMotion } from "@/lib/motion";
 import {
-  activeXpRemaining,
+  activeGrinds,
+  grindSummary,
+  celebrationDuration,
   emptyGrindDraft,
   GRIND_PRIORITIES,
-  GRIND_STATUSES,
+  grindStatusOptions,
   grindBody,
-  grindStatusMeta,
+  sortMilestones,
   RESOURCE_KEYS,
   RESOURCE_LABELS,
   resourceEntries,
+  type CompletedGrind,
   type GrindDraft,
   type WotGrind,
+  type WotMilestone,
   type WotResources,
 } from "@/lib/wot";
 
@@ -48,8 +53,30 @@ const LOAD_ERROR = "Nepodařilo se načíst data z backendu.";
 export default function WotPage() {
   const resourcesRes = useApiResource<WotResources>("/wot/resources");
   const grindsRes = useApiResource<WotGrind[]>("/wot/grinds");
+  // Game Enrichment B: historie splnění a milníky – vlastní zdroje, chyba jednoho nesmí shodit stránku
+  const completedRes = useApiResource<CompletedGrind[]>("/wot/grinds/completed");
+  const milestonesRes = useApiResource<WotMilestone[]>("/wot/milestones");
   const resources = resourcesRes.data ?? {};
   const grinds = grindsRes.data ?? [];
+  const completions = completedRes.data ?? [];
+  const milestones = sortMilestones(milestonesRes.data ?? []);
+
+  // splnění grindu: potvrzení → server → krátká oslava (při omezeném pohybu hned) → obnovení seznamů
+  const [completing, setCompleting] = useState<WotGrind | null>(null);
+  const [celebrating, setCelebrating] = useState<WotGrind | null>(null);
+  const [completedNotice, setCompletedNotice] = useState<{ tank: string; id: string } | null>(null);
+  const celebrationTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (celebrationTimer.current) window.clearTimeout(celebrationTimer.current);
+    },
+    [],
+  );
+
+  const [milestoneForm, setMilestoneForm] = useState<{ open: boolean; milestone: WotMilestone | null }>({ open: false, milestone: null });
+  const [deletingMilestone, setDeletingMilestone] = useState<WotMilestone | null>(null);
+  const [busyMilestone, setBusyMilestone] = useState<number | null>(null);
+  const [todayIso] = useState(() => pragueDayKey(new Date())); // pražské datum pro „ne v budoucnu"
 
   const [showResourceForm, setShowResourceForm] = useState(false);
   const [resourceDraft, setResourceDraft] = useState<WotResources>({});
@@ -156,8 +183,76 @@ export default function WotPage() {
     }
   }
 
-  const activeCount = grinds.filter((g) => String(g.status).toLowerCase() === "active").length;
-  const remainingTotal = activeXpRemaining(grinds);
+  async function confirmCompleteGrind() {
+    const g = completing;
+    if (!g || g.id == null) return;
+    setError(null);
+    try {
+      const res = await apiFetch(`/wot/grind/${g.id}/complete`, { method: "POST" });
+      if (!res.ok && res.status !== 409) throw new Error("complete failed");
+      const body = res.ok ? ((await res.json()) as { completion?: { id?: string } }) : null;
+      setCompleting(null);
+      setCompletedNotice({ tank: g.tank, id: body?.completion?.id ?? "" });
+      if (res.status === 409) {
+        await Promise.all([grindsRes.reload(), completedRes.reload()]); // jiná záložka už grind splnila
+        return;
+      }
+      const ms = celebrationDuration(prefersReducedMotion());
+      if (ms === 0) {
+        await Promise.all([grindsRes.reload(), completedRes.reload()]);
+        return;
+      }
+      // oslava neblokuje nic: server už zapsal, seznamy se obnoví po ~1,3 s (nebo hned při odchodu ze stránky)
+      setCelebrating(g);
+      if (celebrationTimer.current) window.clearTimeout(celebrationTimer.current);
+      celebrationTimer.current = window.setTimeout(() => {
+        setCelebrating(null);
+        void Promise.all([grindsRes.reload(), completedRes.reload()]);
+      }, ms);
+    } catch (err) {
+      console.error(err);
+      setCompleting(null);
+      setError("Grind se nepodařilo označit jako splněný.");
+    }
+  }
+
+  async function toggleFavorite(m: WotMilestone) {
+    setBusyMilestone(m.id);
+    setError(null);
+    try {
+      const res = await apiFetch(`/wot/milestones/${m.id}`, jsonBody("PATCH", { favorite: !m.favorite }));
+      if (!res.ok) throw new Error("favorite failed");
+      await milestonesRes.reload();
+    } catch (err) {
+      console.error(err);
+      setError("Nepodařilo se změnit oblíbení.");
+    } finally {
+      setBusyMilestone(null);
+    }
+  }
+
+  async function confirmDeleteMilestone() {
+    const m = deletingMilestone;
+    if (!m) return;
+    try {
+      const res = await apiFetch(`/wot/milestones/${m.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      await milestonesRes.reload();
+    } catch (err) {
+      console.error(err);
+      setError("Milník se nepodařilo smazat.");
+    } finally {
+      setDeletingMilestone(null);
+    }
+  }
+
+  const visibleGrinds = activeGrinds(grinds).concat(celebrating && !activeGrinds(grinds).some((g) => g.id === celebrating.id) ? [celebrating] : []);
+  const knownTanks = [...new Set([...grinds.map((g) => g.tank), ...completions.map((c) => c.tank), ...milestones.map((m) => m.tank)])].sort((a, b) =>
+    a.localeCompare(b, "cs"),
+  );
+
+  // během oslavy už server grind splnil → hlavička ho nepočítá (seznam se obnoví až po ~1,3 s)
+  const { activeCount, remaining: remainingTotal } = grindSummary(grinds, celebrating?.id);
 
   return (
     <ContentContainer>
@@ -320,7 +415,7 @@ export default function WotPage() {
                             onChange={(e) => setGrindDraft((d) => ({ ...d, status: e.target.value }))}
                             className={fieldClass}
                           >
-                            {GRIND_STATUSES.map((o) => (
+                            {grindStatusOptions(grindMode).map((o) => (
                               <option key={o.value} value={o.value}>
                                 {o.label}
                               </option>
@@ -341,7 +436,20 @@ export default function WotPage() {
                 </Card>
               )}
 
-              {grinds.length === 0 ? (
+              {completedNotice ? (
+                <p
+                  role="status"
+                  data-testid="grind-complete-notice"
+                  className="flex items-center gap-2 rounded-[var(--radius-control)] border border-accent/40 bg-accent/5 px-3 py-2 text-sm text-ink"
+                >
+                  <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-accent-strong">Grind complete</span>
+                  <span className="min-w-0 flex-1">{completedNotice.tank} je splněný – najdeš ho ve Splněných grindech.</span>
+                  <Button size="sm" variant="ghost" onClick={() => setCompletedNotice(null)} aria-label="Zavřít oznámení">
+                    ×
+                  </Button>
+                </p>
+              ) : null}
+              {visibleGrinds.length === 0 ? (
                 <EmptyState
                   action={
                     showGrindForm ? undefined : (
@@ -351,26 +459,104 @@ export default function WotPage() {
                     )
                   }
                 >
-                  Zatím žádné grindy.
+                  {completions.length ? "Žádný aktivní grind – všechno splněno." : "Zatím žádné grindy."}
                 </EmptyState>
               ) : (
-                <EntityList label="Grindy tanků">
-                  {grinds.map((g, idx) => (
+                <EntityList label="Aktivní grindy">
+                  {visibleGrinds.map((g, idx) => (
                     <GrindRow
                       key={g.id ?? g.tank}
                       grind={g}
                       index={idx}
+                      celebrating={celebrating?.id === g.id}
+                      busy={celebrating !== null}
                       onEdit={() => editGrind(g)}
                       onDelete={() => setDeletingGrind(g)}
+                      onComplete={() => setCompleting(g)}
                     />
                   ))}
                 </EntityList>
               )}
             </div>
           </PageSection>
+
+          {/* ===== SPLNĚNÉ GRINDY ===== */}
+          {completedRes.status === "error" ? (
+            <ErrorState message="Historii splněných grindů se nepodařilo načíst." onRetry={() => void completedRes.reload()} />
+          ) : (
+            <CompletedGrinds items={completions} highlightId={completedNotice?.id || null} />
+          )}
+
+          {/* ===== MILNÍKY ===== */}
+          <PageSection
+            labelledBy="wot-milestones"
+            title="Mka & nejlepší bitvy"
+            description="Památné bitvy se statistikami a screenshoty."
+            actions={
+              <Button size="sm" variant="primary" onClick={() => setMilestoneForm({ open: true, milestone: null })} aria-haspopup="dialog">
+                Přidat Mko
+              </Button>
+            }
+          >
+            {milestonesRes.loading ? (
+              <LoadingState lines={2} label="Načítám milníky…" />
+            ) : milestonesRes.status === "error" ? (
+              <ErrorState message="Milníky se nepodařilo načíst." onRetry={() => void milestonesRes.reload()} />
+            ) : milestones.length === 0 ? (
+              <EmptyState
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => setMilestoneForm({ open: true, milestone: null })}>
+                    Přidat první Mko
+                  </Button>
+                }
+              >
+                Zatím žádné uložené Mko ani památná bitva.
+              </EmptyState>
+            ) : (
+              <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-label="Milníky">
+                {milestones.map((m) => (
+                  <MilestoneCard
+                    key={m.id}
+                    milestone={m}
+                    busy={busyMilestone === m.id}
+                    onEdit={() => setMilestoneForm({ open: true, milestone: m })}
+                    onToggleFavorite={() => void toggleFavorite(m)}
+                    onDelete={() => setDeletingMilestone(m)}
+                  />
+                ))}
+              </ul>
+            )}
+          </PageSection>
         </div>
       )}
 
+      <ConfirmDialog
+        open={completing != null}
+        title={`Označit ${completing?.tank ?? ""} jako splněný?`}
+        message="Grind se přesune do Splněných grindů (průběh 100 %). Data grindu zůstanou zachovaná."
+        confirmLabel="Splněno"
+        busyLabel="Ukládám…"
+        danger={false}
+        onConfirm={confirmCompleteGrind}
+        onCancel={() => setCompleting(null)}
+      />
+      <ConfirmDialog
+        open={deletingMilestone != null}
+        title={`Smazat milník ${deletingMilestone?.tank ?? ""}?`}
+        message="Smaže se záznam i všechny jeho screenshoty. Tato akce je nevratná."
+        confirmLabel="Smazat milník"
+        busyLabel="Mažu…"
+        onConfirm={confirmDeleteMilestone}
+        onCancel={() => setDeletingMilestone(null)}
+      />
+      <MilestoneForm
+        open={milestoneForm.open}
+        milestone={milestoneForm.milestone}
+        knownTanks={knownTanks}
+        today={todayIso}
+        onClose={() => setMilestoneForm({ open: false, milestone: null })}
+        onSaved={() => milestonesRes.reload()}
+      />
       <ConfirmDialog
         open={deletingGrind != null}
         title={`Smazat grind ${deletingGrind?.tank ?? ""}?`}
@@ -381,53 +567,5 @@ export default function WotPage() {
         onCancel={() => setDeletingGrind(null)}
       />
     </ContentContainer>
-  );
-}
-
-function GrindRow({
-  grind: g,
-  index,
-  onEdit,
-  onDelete,
-}: {
-  grind: WotGrind;
-  index: number;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const priority = priorityTone(g.priority);
-  const status = grindStatusMeta(g.status);
-  const done = String(g.status).toLowerCase() === "completed";
-  return (
-    <EntityRow
-      searchTarget={g.id != null ? `grind-${g.id}` : undefined}
-      style={staggerStyle(index)}
-      className="motion-card"
-      muted={done}
-      leading={<GameImage kind="tank" name={g.tank} size="sm" />}
-      badges={
-        <>
-          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-          <StatusBadge tone={priority.tone}>Priorita: {priority.label}</StatusBadge>
-        </>
-      }
-      title={g.tank}
-      meta={
-        <span className="tabular-nums">
-          Zbývá <span className="font-medium text-ink">{formatNumber(g.xp_remaining)} XP</span>
-        </span>
-      }
-      actions={
-        <>
-          <Button size="sm" variant="secondary" onClick={onEdit}>
-            Upravit
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onDelete} aria-label={`Smazat grind ${g.tank}`}>
-            Smazat
-          </Button>
-        </>
-      }
-    >
-    </EntityRow>
   );
 }
