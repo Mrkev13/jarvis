@@ -367,5 +367,60 @@ class FileAndSecurityTestCase(ReplayApiBase):
             self.assertTrue(hit["subtitle"].startswith("Replay · Útesy · 14. 9. 2026"), hit["subtitle"])
 
 
+
+class FriendlyTankNameTestCase(ReplayApiBase):
+    """Regrese z lokálního ověření: replay znal jen technický tag → Global Search / Aktivita ukazovaly
+    „It08_Progetto_M40_mod_65" a „Progetto 65" / „T57 Heavy" se nenašly. Frontend při uploadu pošle název
+    z manifestu Tankopedie (Game Enrichment A); backend ho uloží vedle tagu, tag zůstává technická identita."""
+
+    def upload_named(self, data, tank_name, name="real.wotreplay", status=200):
+        r = self.client.post("/wot/replays", params={"filename": name, "tank_name": tank_name}, content=data,
+                             headers={"Content-Type": "application/octet-stream"})
+        self.assertEqual(r.status_code, status, r.text)
+        return r.json()
+
+    def test_upload_persists_friendly_name_and_keeps_raw_tag(self):
+        self.login()
+        body = self.upload_named(fx.REAL_T57_LOSS, "T57 Heavy")
+        self.assertEqual((body["tank_name"], body["tank_tag"]), ("T57 Heavy", "usa:A67_T57_58"))
+        act = self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="WotReplay").one())
+        self.assertEqual(act.summary, "Replay nahrán: T57 Heavy · Overlord", "Aktivita s lidským názvem, ne tagem")
+
+    def test_name_hint_is_cleaned_and_untrusted_without_vehicle(self):
+        self.login()
+        body = self.upload_named(fx.REAL_ELC, "  ELC   EVEN 90 ")
+        self.assertEqual(body["tank_name"], "ELC EVEN 90", "mezery sjednocené stejným validátorem jako úprava")
+        # bez rozpoznaného vozidla (nečitelná hlavička) se název z klienta neukládá – nemá k čemu patřit
+        bad = self.upload_named(fx.UNSUPPORTED, "Cokoli", name="x.wotreplay")
+        self.assertIsNone(bad["tank_name"])
+        # příliš dlouhý / prázdný název upload nezablokuje (soubor je důležitější než popisek), jen se ignoruje
+        long_name = self.upload_named(fx.REAL_HEADER_ONLY, "X" * 300, name="y.wotreplay")
+        self.assertIsNone(long_name["tank_name"])
+        self.assertEqual(long_name["tank_tag"], "czech:Cz17_Vz_55")
+
+    def test_natural_name_search_library_and_global(self):
+        self.login()
+        ids = {
+            "T57 Heavy": self.upload_named(fx.REAL_T57_LOSS, "T57 Heavy", name="t57.wotreplay")["id"],
+            "ELC EVEN 90": self.upload_named(fx.REAL_ELC, "ELC EVEN 90", name="elc.wotreplay")["id"],
+        }
+        for q, name in (("T57 Heavy", "T57 Heavy"), ("heavy", "T57 Heavy"), ("ELC EVEN 90", "ELC EVEN 90"), ("elc 90", "ELC EVEN 90")):
+            lib = self.client.get("/wot/replays", params={"q": q}).json()["items"]
+            self.assertEqual([x["id"] for x in lib], [ids[name]], f"knihovna: {q}")
+            hits = [x for x in self.q(lambda db: search_service.search(db, q))["results"] if x["type"] == "wot_replay"]
+            self.assertEqual([x["title"] for x in hits], [name], f"Global Search: {q}")
+        # technický tag zůstává dohledatelný
+        hits = [x for x in self.q(lambda db: search_service.search(db, "A67_T57_58"))["results"] if x["type"] == "wot_replay"]
+        self.assertEqual([x["title"] for x in hits], ["T57 Heavy"])
+
+    def test_legacy_replay_without_name_falls_back_to_tag(self):
+        self.login()
+        body = self.upload()  # bez názvu (starší klient / chybí manifest)
+        self.assertIsNone(body["tank_name"])
+        hits = [x for x in self.q(lambda db: search_service.search(db, "progetto"))["results"] if x["type"] == "wot_replay"]
+        self.assertEqual([x["title"] for x in hits], ["It13_Progetto_M35_mod_46"])
+        act = self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="WotReplay").one())
+        self.assertIn("italy:It13_Progetto_M35_mod_46", act.summary)
+
 if __name__ == "__main__":
     unittest.main()

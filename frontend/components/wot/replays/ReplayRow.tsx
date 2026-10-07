@@ -104,6 +104,7 @@ export function ReplayRow({
             disabled={busy}
             aria-pressed={r.favorite}
             aria-label={r.favorite ? `Zrušit oblíbení: ${title}` : `Oblíbit replay: ${title}`}
+            className="pointer-coarse:min-w-11"
           >
             <span aria-hidden="true">{r.favorite ? "★" : "☆"}</span>
           </Button>

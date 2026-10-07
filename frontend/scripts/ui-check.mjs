@@ -1879,11 +1879,15 @@ const settle = (page, ms = 500) => page.waitForTimeout(ms);
   const input = page.getByTestId("replay-file-input");
   await input.setInputFiles({ name: "bitva.zip", mimeType: "application/zip", buffer: Buffer.from("PK") });
   check("replaye upload: jiná přípona odmítnuta v prohlížeči", (await page.getByTestId("replay-notice").innerText()).includes(".wotreplay") && (await page.getByTestId("replay-notice").getAttribute("role")) === "alert");
+  const uploadUrls = [];
+  page.on("request", (rq) => { const u = new URL(rq.url()); if (u.port === "8000" && u.pathname === "/wot/replays" && rq.method() === "POST") uploadUrls.push(u.search); });
   await input.setInputFiles({ name: "20261005_2105_usa-A67_T57_58_08_ruinberg.wotreplay", mimeType: "application/octet-stream", buffer: REPLAY_FILE });
   const form = page.getByTestId("replay-form");
   await form.waitFor({ timeout: 4000 }).catch(() => undefined);
   check("replaye upload: hned kontrola údajů v panelu", (await page.getByRole("dialog", { name: "Zkontroluj údaje replaye" }).count()) === 1 && (await form.locator('[data-parser-status="parsed"]').innerText()).includes("Načteno z replaye"));
   await settle(page, 300);
+  // Regrese z lokálního ověření: replay znal jen technický tag → hledání „T57 Heavy" a Aktivita s tagem
+  check("replaye upload: lidský název z manifestu poslaný se souborem", uploadUrls.length === 1 && new URLSearchParams(uploadUrls[0]).get("tank_name") === "T57 Heavy", JSON.stringify(uploadUrls));
   check("replaye upload: tank předvyplněný z manifestu, statistiky z replaye", (await form.getByLabel("Tank").inputValue()) === "T57 Heavy" && (await form.getByLabel("Poškození").inputValue()) === "7410" && (await form.getByLabel("Odznak zvládnutí").inputValue()) === "ace" && (await form.getByLabel("Výsledek").inputValue()) === "win");
   const formTank = await imageState(page, '[data-testid="replay-form"] [data-game-image="tank"]');
   check("replaye upload: obrázek tanku ve formuláři (Game Enrichment A)", formTank[0]?.state === "image" && formTank[0]?.src === "wot/tanks/14881.png", JSON.stringify(formTank));
@@ -1989,6 +1993,22 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   check(`replaye @${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   // celostránkový screenshot až na konci: v Chromiu po něm emulace přestane hlásit pointer: coarse
   if (width < 500) {
+    // Regrese z lokálního ověření: hledání a filtry měly 40 px, hvězdička 36 px na šířku
+    const targets = await page.evaluate(() => {
+      const box = (el) => { const b = el.getBoundingClientRect(); return [Math.round(b.width), Math.round(b.height)]; };
+      const back = [...document.querySelectorAll("main a")].find((a) => a.textContent.includes("World of Tanks") && a.getAttribute("href") === "/wot");
+      const bb = back.getBoundingClientRect();
+      const hit = (dy) => { const el = document.elementFromPoint(bb.left + bb.width / 2, bb.top + bb.height / 2 + dy); return Boolean(el && back.contains(el)); };
+      return {
+        search: box(document.querySelector('main input[type="search"]')),
+        selects: [...document.querySelectorAll("main select")].map(box),
+        stars: [...document.querySelectorAll('main button[aria-label^="Oblíbit replay"], main button[aria-label^="Zrušit oblíbení"]')].map(box),
+        backHit44: hit(-21) && hit(21),
+      };
+    });
+    check("replaye mobil: hledání a filtry ≥ 44 px", targets.search[1] >= 44 && targets.selects.length >= 6 && targets.selects.every(([, h]) => h >= 44), JSON.stringify(targets));
+    check("replaye mobil: hvězdička ≥ 44 × 44 px", targets.stars.length > 0 && targets.stars.every(([w, h]) => w >= 44 && h >= 44), JSON.stringify(targets.stars));
+    check("replaye mobil: odkaz zpět má dotykovou plochu ≥ 44 px", targets.backHit44);
     await replayRow(page, 1).getByRole("button", { name: "Detail replaye: Progetto 65" }).tap();
     const d = page.getByTestId("replay-detail");
     await d.waitFor({ timeout: 3000 }).catch(() => undefined);

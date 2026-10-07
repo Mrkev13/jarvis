@@ -352,6 +352,9 @@ createServer(async (req, res) => {
         tank_tag: null, map_name: null, played_at: null, damage: null, assist: null, kills: null, base_xp: null, mastery: null, battle_result: null, game_version: null };
     } else return respond(400, { detail: { error: "invalid_file", message: "Soubor nevypadá jako replay World of Tanks." } }, 300);
     const id = ++wotState.seq;
+    // jako backend: lidský název z manifestu (frontend) se uloží jen k rozpoznanému vozidlu
+    const hint = (url.searchParams.get("tank_name") || "").split(/\s+/).filter(Boolean).join(" ");
+    if (r.tank_tag && hint && hint.length <= 100) r = { ...r, tank_name: hint };
     r = { ...r, id, file_size: data.length, download_url: `/wot/replays/${id}/file`, uploaded_at: wotNow(), created_at: wotNow(), updated_at: wotNow(), tags: [], favorite: false, linked_milestone_id: null };
     wotState.replays.push(r);
     return respond(200, replayView(r), 600);

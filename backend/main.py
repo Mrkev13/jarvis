@@ -1310,16 +1310,17 @@ def wot_replays(q: str | None = None, tank: str | None = None, map: str | None =
 
 
 @app.post("/wot/replays")
-async def wot_replay_upload(request: Request, filename: str | None = None):
+async def wot_replay_upload(request: Request, filename: str | None = None, tank_name: str | None = None):
     """Upload jednoho .wotreplay jako surové tělo požadavku (`filename` = jen metadata, musí končit .wotreplay).
-    Stejný obsah (SHA-256) → 409 duplicate s id existujícího replaye. Parser jen předvyplní metadata."""
+    Stejný obsah (SHA-256) → 409 duplicate s id existujícího replaye. Parser jen předvyplní metadata.
+    `tank_name` = lidský název vozidla z manifestu ve frontendu (uloží se vedle technického tagu)."""
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > wot_replay_service.MAX_BYTES:
         raise HTTPException(status_code=413, detail={"error": "invalid_file", "message": "Replay je moc velký."})
     body = await request.body()
     db = SessionLocal()
     try:
-        replay = _wot_call(lambda: _replay_call(lambda: wot_replay_service.upload_replay(db, body, filename)))
+        replay = _wot_call(lambda: _replay_call(lambda: wot_replay_service.upload_replay(db, body, filename, tank_name=tank_name)))
         try:
             db.commit()
         except Exception:

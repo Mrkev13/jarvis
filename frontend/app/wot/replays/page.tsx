@@ -35,7 +35,9 @@ import {
   REPLAY_EXT,
   replayFileError,
   replayQuery,
+  REPLAY_HEADER_PEEK_BYTES,
   replayUploadPath,
+  replayVehicleTag,
   RESULT_OPTIONS,
   SORT_OPTIONS,
   tagLabel,
@@ -101,7 +103,10 @@ function ReplayLibrary() {
     setUploading(true);
     setNotice(null);
     try {
-      const res = await apiFetch(replayUploadPath(file.name), { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+      // lidský název vozidla z manifestu (Game Enrichment A) podle tagu z hlavičky → server ho uloží pro hledání a Aktivitu
+      const tag = replayVehicleTag(new Uint8Array(await file.slice(0, REPLAY_HEADER_PEEK_BYTES).arrayBuffer()));
+      const tankName = tag && manifest ? resolveTankTag(manifest.tanks, tag)?.name : null;
+      const res = await apiFetch(replayUploadPath(file.name, tankName), { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
       const body = (await res.json().catch(() => null)) as unknown;
       if (res.status === 409) {
         const id = duplicateReplayId(body);

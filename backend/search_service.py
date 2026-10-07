@@ -131,7 +131,9 @@ def _candidates(db: Session, q: str):
         title = r.tank_name or (r.tank_tag.split(":", 1)[-1] if r.tank_tag else None) or r.original_filename or f"Replay #{r.id}"
         tags = " ".join(r.tags or [])
         sub = _join("Replay", r.map_name, format_date_cz(to_local(r.played_at)) if r.played_at else "", "★" if r.favorite else "")
-        yield "wot_replay", r.id, title, sub, f"{tags} {r.notes or ''} {r.original_filename or ''} wot replay zaznam", "wot", f"/wot/replays?replay={r.id}"
+        # technický tag zůstává dohledatelný i když má replay lidský název („A67_T57_58")
+        tag = r.tank_tag.split(":", 1)[-1] if r.tank_tag else ""
+        yield "wot_replay", r.id, title, sub, f"{tags} {r.notes or ''} {r.original_filename or ''} {tag} wot replay zaznam", "wot", f"/wot/replays?replay={r.id}"
     for c in db.query(MffCharacter).limit(ROW_LIMIT).all():
         sub = _join(f"{c.tier} · Lv. {c.level}" if c.level else c.tier, _MFF_STATUS.get((c.status or "").lower(), ""), c.uniform)
         yield "mff_character", c.id, c.name, sub, f"{c.uniform} {c.team} {c.role} mff postava", "mff", f"/mff?character={c.id}"

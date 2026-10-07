@@ -183,8 +183,21 @@ def validate_upload(data: bytes, filename: str | None) -> None:
         raise WotError(f"Replay je větší než {MAX_BYTES // (1024 * 1024)} MB.", status=413, code="invalid_file")
 
 
-def upload_replay(db: Session, data: bytes, filename: str | None, *, now: datetime | None = None) -> WotReplay:
-    """Ověří, odhalí duplicitu, zkusí parser, uloží soubor a založí záznam. Soubor se při chybě commitu maže volající."""
+def _tank_name_hint(raw: str | None, tank_tag: str | None) -> str | None:
+    """Lidský název vozidla poslaný frontendem (z manifestu Tankopedie podle tagu z hlavičky). Platí jen pro replay
+    s rozpoznaným vozidlem a jen v mezích jako ruční úprava; neplatný se tiše zahodí – upload kvůli popisku nepadá."""
+    if not tank_tag:
+        return None
+    try:
+        return _clean_text(raw, "tank_name", 100)
+    except WotError:
+        return None
+
+
+def upload_replay(db: Session, data: bytes, filename: str | None, *, tank_name: str | None = None,
+                  now: datetime | None = None) -> WotReplay:
+    """Ověří, odhalí duplicitu, zkusí parser, uloží soubor a založí záznam. Soubor se při chybě commitu maže volající.
+    `tank_name` = lidský název z frontendu; technický `tank_tag` z hlavičky zůstává beze změny."""
     validate_upload(data, filename)
     digest = sha256(data)
     existing = db.query(WotReplay).filter(WotReplay.sha256 == digest).first()
@@ -201,6 +214,7 @@ def upload_replay(db: Session, data: bytes, filename: str | None, *, now: dateti
         parser_status=result.status, parser_version=result.parser_version, parser_warnings=result.warnings,
         **{k: v for k, v in result.metadata.items() if k in {"tank_tag", "map_name", "played_at", "game_version", "damage",
                                                               "assist", "kills", "base_xp", "mastery", "battle_result"}},
+        tank_name=_tank_name_hint(tank_name, result.metadata.get("tank_tag")),
     )
     try:
         db.add(r)

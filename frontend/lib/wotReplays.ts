@@ -124,8 +124,34 @@ export function replayFileError(file: { name: string; size: number }): string | 
   return null;
 }
 
-export function replayUploadPath(filename: string): string {
-  return `/wot/replays?${new URLSearchParams({ filename }).toString()}`;
+/** `tankName` = lidský název z manifestu Tankopedie; server ho uloží vedle technického tagu z hlavičky. */
+export function replayUploadPath(filename: string, tankName?: string | null): string {
+  const params = new URLSearchParams({ filename });
+  if (tankName) params.set("tank_name", tankName);
+  return `/wot/replays?${params.toString()}`;
+}
+
+const REPLAY_MAGIC = [0x12, 0x32, 0x34, 0x11];
+/** Kolik bajtů souboru stačí na první blok hlavičky (skutečné hlavičky mají desítky kB). */
+export const REPLAY_HEADER_PEEK_BYTES = 1024 * 1024;
+
+/**
+ * Technický tag vozidla z první hlavičky replaye („usa:A67_T57_58"), jen pro dohledání lidského názvu v manifestu
+ * před uploadem. Stejná struktura a meze jako serverový parser; cokoli jiného → null (název se prostě nepošle).
+ */
+export function replayVehicleTag(head: Uint8Array): string | null {
+  if (head.length < 12 || REPLAY_MAGIC.some((b, i) => head[i] !== b)) return null;
+  const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
+  const blocks = view.getUint32(4, true);
+  const size = view.getUint32(8, true);
+  if (blocks < 1 || blocks > 16 || size === 0 || 12 + size > head.length) return null;
+  try {
+    const header = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(12, 12 + size))) as { playerVehicle?: unknown };
+    const m = typeof header.playerVehicle === "string" ? /^([a-z]+)-([A-Za-z0-9_-]{1,80})$/.exec(header.playerVehicle) : null;
+    return m ? `${m[1]}:${m[2]}` : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 409 z uploadu: `{detail: {error: "duplicate", replay_id}}` → id existujícího replaye. */
