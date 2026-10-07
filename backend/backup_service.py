@@ -1,5 +1,7 @@
 import os
+import re
 import gzip
+import glob
 import shutil
 import hashlib
 import subprocess
@@ -20,6 +22,48 @@ BACKUP_HOUR_OF_DAY = env_int("BACKUP_HOUR_OF_DAY", 3)
 BACKUP_RETENTION_DAYS = env_int("BACKUP_RETENTION_DAYS", 30, minimum=1)
 
 _DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+pysqlite:///./standa-hub.db")
+
+class PgDumpNotFound(RuntimeError):
+    """pg_dump se nepodařilo najít – zpráva říká, co nastavit (bez přihlašovacích údajů)."""
+
+
+def _windows_pg_dump_candidates() -> list[str]:
+    """Standardní instalace PostgreSQL na Windows: %ProgramFiles%/PostgreSQL/<verze>/bin/pg_dump.exe.
+    Žádná cesta konkrétního stroje v kódu – jen proměnné prostředí Windows. Nejvyšší verze první."""
+    found: list[str] = []
+    for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+        root = os.environ.get(var)
+        if root:
+            found += glob.glob(os.path.join(root, "PostgreSQL", "*", "bin", "pg_dump.exe"))
+
+    def version(path: str) -> tuple:
+        m = re.search(r"PostgreSQL[\\/](\d+)(?:\.(\d+))?", path)
+        return (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+
+    return sorted(set(found), key=version, reverse=True)
+
+
+def find_pg_dump() -> str:
+    """Cesta k pg_dump: 1) PG_DUMP_PATH, 2) PATH, 3) na Windows standardní instalace PostgreSQL.
+    Explicitně nastavená, ale neexistující PG_DUMP_PATH je chyba (žádný tichý přechod na jiný pg_dump)."""
+    explicit = (os.environ.get("PG_DUMP_PATH") or "").strip().strip('"')
+    if explicit:
+        resolved = explicit if os.path.isfile(explicit) else shutil.which(explicit)
+        if not resolved:
+            raise PgDumpNotFound(f"PG_DUMP_PATH ukazuje na neexistující soubor ({explicit}) – oprav cestu k pg_dump.")
+        return resolved
+    on_path = shutil.which("pg_dump")
+    if on_path:
+        return on_path
+    if os.name == "nt":
+        candidates = _windows_pg_dump_candidates()
+        if candidates:
+            return candidates[0]
+    raise PgDumpNotFound(
+        "pg_dump nenalezen: nastav PG_DUMP_PATH na pg_dump(.exe) (např. ve složce bin instalace PostgreSQL) "
+        "nebo přidej tu složku do PATH."
+    )
+
 
 def _backup_dir_path() -> Path:
     p = Path(BACKUP_DIR).resolve()
@@ -83,7 +127,7 @@ def _backup_postgres(dst: Path) -> tuple[bool, str]:
         host, port = hostport.split(":", 1) if ":" in hostport else (hostport, "5432")
         env["PGPASSWORD"] = password
         cmd = [
-            "pg_dump",
+            find_pg_dump(),
             f"--host={host}",
             f"--port={port}",
             f"--username={user}",
@@ -106,12 +150,14 @@ def _backup_postgres(dst: Path) -> tuple[bool, str]:
             err = stderr_b.decode("utf-8", errors="replace") if stderr_b else "unknown"
             return False, f"pg_dump failed ({proc.returncode}): {err[:500]}"
         return True, ""
+    except PgDumpNotFound as e:
+        return False, str(e)
     except FileNotFoundError:
         try:
             dst.unlink(missing_ok=True)
         except Exception:
             pass
-        return False, "pg_dump not found in PATH"
+        return False, "pg_dump se nepodařilo spustit – zkontroluj PG_DUMP_PATH / PATH"
     except subprocess.TimeoutExpired:
         try:
             dst.unlink(missing_ok=True)
