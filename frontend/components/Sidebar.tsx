@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NotificationsBell from "@/components/NotificationsBell";
+import { JarvisCompanionToggle } from "@/components/jarvis/JarvisCompanionToggle";
 import { QuickAddButton } from "@/components/quick-add/QuickAddButton";
 import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
@@ -144,7 +145,7 @@ export function MobileHeader() {
 export function DesktopSidebar() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   return (
-    <aside className="hidden md:flex md:flex-col w-60 min-h-screen shrink-0 border-r border-line bg-app/80 px-4 py-5">
+    <aside data-desktop-sidebar className="hidden md:flex md:flex-col w-60 min-h-screen shrink-0 border-r border-line bg-app/80 px-4 py-5">
       <div className="mb-6 flex items-center justify-between gap-2 px-1">
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}
@@ -154,6 +155,9 @@ export function DesktopSidebar() {
         <QuickAddButton variant="field" />
       </div>
       <Sidebar />
+      <div className="mt-auto hidden border-t border-line pt-3 lg:block">
+        <JarvisCompanionToggle />
+      </div>
     </aside>
   );
 }

@@ -20,7 +20,8 @@ const ACCENT: Record<JarvisState, string> = {
   error: "#fb7185",
 };
 
-function Eyes({ state }: { state: JarvisState }) {
+/** Výraz (oči + značka stavu) přes hlavu z jarvis-shell.svg – sdílí ho i JarvisFigure (companion). */
+export function JarvisEyes({ state }: { state: JarvisState }) {
   const color = ACCENT[state];
   return (
     <svg aria-hidden="true" viewBox="0 0 180 180" className="pointer-events-none absolute inset-0 h-full w-full">
@@ -43,7 +44,7 @@ function Eyes({ state }: { state: JarvisState }) {
   );
 }
 
-function ShellFallback() {
+export function JarvisShellFallback() {
   return (
     <div data-testid="jarvis-fallback" className="absolute inset-[17%] rounded-[38%] border border-cyan-300/35 bg-slate-950 shadow-[inset_0_8px_18px_rgba(41,75,110,.35)]">
       <div className="absolute -top-[18%] left-[8%] h-[28%] w-[76%] -rotate-6 rounded-t-[70%] rounded-br-full border border-slate-600 bg-slate-900" />
@@ -98,9 +99,9 @@ export function JarvisAvatar({
           priority={size === "md"}
         />
       ) : (
-        <ShellFallback />
+        <JarvisShellFallback />
       )}
-      <Eyes state={state} />
+      <JarvisEyes state={state} />
     </span>
   );
 }

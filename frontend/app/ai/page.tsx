@@ -9,6 +9,7 @@ import { Drawer } from "@/components/ui";
 import { useAiChat } from "@/hooks/useAiChat";
 import { useAiVoice } from "@/hooks/useAiVoice";
 import { useConversations } from "@/hooks/useConversations";
+import { useJarvisSource } from "@/hooks/useJarvisCompanion";
 import { aiJarvisState } from "@/lib/jarvisAvatar";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 
@@ -115,6 +116,7 @@ export default function AiPage() {
     pending: chat.pendingActions.length,
     success: chat.outcomes.some((outcome) => outcome.kind === "success"),
   });
+  useJarvisSource("ai", jarvisState);
 
   const panel = (showHeading: boolean) => (
     <ConversationPanel
@@ -139,7 +141,7 @@ export default function AiPage() {
       tabIndex={-1}
       className="flex h-[calc(100dvh-var(--mobile-header-h))] min-h-0 w-full focus:outline-none md:h-dvh"
     >
-      <aside aria-label="Konverzace" className="hidden w-72 shrink-0 flex-col border-r border-line bg-surface/40 p-4 lg:flex">
+      <aside aria-label="Konverzace" data-jarvis-ai-dock className="hidden w-72 shrink-0 flex-col border-r border-line bg-surface/40 p-4 lg:flex">
         {panel(true)}
       </aside>
 

@@ -15,6 +15,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { useApiResource, type ApiResource } from "@/hooks/useApiResource";
+import { useJarvisSource } from "@/hooks/useJarvisCompanion";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import {
   briefingView,
@@ -154,6 +155,8 @@ export default function DailyBriefingCard({ index, resource }: { index?: number;
     generating: view?.kind === "generating",
     warning: view?.kind === "ready" && Boolean(view.warning),
   });
+  // companion reaguje až na práci s briefingem, ne na každé načtení Řídicího centra
+  useJarvisSource("briefing", briefing.loading ? "idle" : jarvisState);
 
   return (
     <HudFrame>

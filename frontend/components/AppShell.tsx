@@ -2,10 +2,12 @@
 
 import { usePathname } from "next/navigation";
 import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
+import { JarvisCompanion } from "@/components/jarvis/JarvisCompanion";
 import { PageTransition } from "@/components/motion/PageTransition";
 import { SearchHighlighter } from "@/components/search/SearchHighlighter";
 import { QuickAddProvider } from "@/components/quick-add/QuickAddProvider";
 import { SearchProvider } from "@/components/search/SearchProvider";
+import { companionLayout } from "@/lib/jarvisCompanion";
 import { isBareRoute, MAIN_CONTENT_ID } from "@/lib/shell";
 
 /**
@@ -31,11 +33,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <DesktopSidebar />
           <div className="hud-grid flex min-w-0 flex-1 flex-col">
             <MobileHeader />
-            <div className="flex-1">
+            <div className="flex-1" data-jarvis-lane={companionLayout(pathname) === "ai" ? "ai" : "dock"}>
               <PageTransition>{children}</PageTransition>
             </div>
           </div>
           <SearchHighlighter />
+          <JarvisCompanion />
         </div>
       </QuickAddProvider>
     </SearchProvider>

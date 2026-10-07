@@ -24,7 +24,10 @@ export function ChatHeader({
   return (
     <header className="border-b border-line">
       <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3 md:px-6">
-        <JarvisAvatar state={jarvisState} size="sm" className="shadow-[0_0_24px_-12px_rgba(46,220,255,.75)]" />
+        {/* Na desktopu se zapnutým companionem ho CSS skryje (jarvis-companion.css) – jeden Jarvis na stránce. */}
+        <span data-jarvis-header-avatar className="contents">
+          <JarvisAvatar state={jarvisState} size="sm" className="shadow-[0_0_24px_-12px_rgba(46,220,255,.75)]" />
+        </span>
         <div className="min-w-0 flex-1">
           <HudLabel className="hidden items-center gap-1.5 sm:flex">
             <StatusPulse tone="ai" className="h-1.5 w-1.5" /> Standa AI · asistent
