@@ -14,18 +14,34 @@
  */
 
 :root {
-  /* Trvání */
-  --motion-fast: 140ms;
-  --motion-normal: 240ms;
-  --motion-slow: 700ms;
-  --motion-highlight-duration: 1600ms;
-  --motion-attention-duration: 1800ms;
-  --motion-shimmer-duration: 1200ms;
-  --motion-flame-duration: 1400ms;
+  /*
+   * Roadmap 6A – sémantické tokeny (JS zrcadlo: lib/motionTokens.ts, test hlídá shodu).
+   * Pět délek a čtyři křivky; nové komponenty používají jen tyto.
+   */
+  --motion-duration-instant: 0ms;
+  --motion-duration-fast: 140ms;
+  --motion-duration-normal: 240ms;
+  --motion-duration-deliberate: 700ms;
+  --motion-duration-celebration: 1200ms;
 
-  /* Easing */
-  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);      /* zpomalení – vstupy, hover */
-  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* symetrické – pulzy */
+  --motion-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Trvání – původní názvy (aliasy na sémantické tokeny; zachované kvůli existujícím třídám) */
+  --motion-fast: var(--motion-duration-fast);
+  --motion-normal: var(--motion-duration-normal);
+  --motion-slow: var(--motion-duration-deliberate);
+  --motion-attention-duration: var(--motion-duration-celebration);
+  /* Časování konkrétních komponent (ne obecné tokeny): */
+  --motion-highlight-duration: 1600ms; /* nový řádek / výsledek AI akce – zrcadlí MOTION.highlightMs */
+  --motion-shimmer-duration: 1200ms;   /* probíhající AI akce */
+  --motion-flame-duration: 1400ms;     /* volitelné plápolání streaku */
+
+  /* Easing – původní názvy */
+  --motion-ease: var(--motion-ease-enter);             /* zpomalení – vstupy, hover */
+  --motion-ease-in-out: var(--motion-ease-standard);   /* symetrické – pulzy */
 
   /* Vzdálenosti a měřítka */
   --motion-enter-distance: 6px;
