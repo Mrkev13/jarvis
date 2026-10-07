@@ -2310,7 +2310,7 @@ await wotReset();
     const top = { state: await cState(page), anchor: await cAnchor(page), shown: await cShown(page) };
     const coveredTop = await coveredContent(page);
     check(`companion @${label} nahoře: nezakrývá karty ani ovládání`, coveredTop.length === 0, `${JSON.stringify(top)} ${coveredTop.join(", ")}`);
-    check(`companion @${label} nahoře: je vidět (volná kotva nebo vykouknutí od okraje)`, top.shown === "true" && ["left", "center", "right", "edge"].includes(top.anchor ?? ""), JSON.stringify(top));
+    check(`companion @${label} nahoře: je vidět (volná kotva nebo vykouknutí od okraje)`, top.shown === "true" && ["left", "left-mid", "center", "right-mid", "right", "edge"].includes(top.anchor ?? ""), JSON.stringify(top));
     const sidebar = await page.locator("[data-desktop-sidebar]").boundingBox();
     check(`companion @${label}: nepřekrývá navigaci`, !overlap(await cBox(page), sidebar));
     await page.screenshot({ path: `${OUT}companion-top-${label}.png` });
@@ -2327,7 +2327,7 @@ await wotReset();
 
     await toBottom(page);
     const bottom = { anchor: await cAnchor(page), shown: await cShown(page) };
-    check(`companion @${label} dole: v pruhu na běžné kotvě`, ["left", "center", "right"].includes(bottom.anchor ?? "") && bottom.shown === "true", JSON.stringify(bottom));
+    check(`companion @${label} dole: v pruhu na běžné kotvě`, ["left", "left-mid", "center", "right-mid", "right"].includes(bottom.anchor ?? "") && bottom.shown === "true", JSON.stringify(bottom));
     check(`companion @${label} dole: nic nezakrývá`, (await coveredContent(page)).length === 0);
     const lane = await lanePadding(page);
     check(`companion @${label}: pruh dole jen 104 px (žádná velká mrtvá plocha)`, lane === "104px", lane);
@@ -2419,28 +2419,36 @@ await wotReset();
     await ctx.close();
   }
 
-  // chůze mezi kotvami (řízený čas – klidný přesun je vzácný, ~90 s)
+  // chůze mezi kotvami (řízený čas): vzácně (~40–50 s), krátký skok k sousední kotvě,
+  // otočení → rozjezd/cesta/dojezd (linear() křivka) → doběhnutí na kotvě
   {
     const { ctx, page, errors } = await open("/", { width: 1366, height: 768, setup: (p) => p.clock.install() });
+    const phase = () => companion(page).getAttribute("data-walk-phase");
+    const tick = async (ms) => {
+      await page.clock.fastForward(ms);
+      await settle(page, 120);
+    };
     await companion(page).waitFor({ timeout: 4000 }).catch(() => undefined);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await settle(page, 150); // scroll událost přijde až s dalším snímkem
-    await page.clock.fastForward(2_000);
-    await settle(page, 100);
+    await tick(2_000);
     check("companion: dole stojí na pravé kotvě", (await cState(page)) === "idle" && (await cAnchor(page)) === "right", `${await cState(page)} ${await cAnchor(page)}`);
-    await page.clock.fastForward(30_000);
+    await tick(30_000);
     check("companion: po 30 s pořád stojí (žádný neustálý pohyb)", (await cState(page)) === "idle");
-    await page.clock.fastForward(61_000);
-    await settle(page, 100);
-    const walking = { state: await cState(page), anchor: await cAnchor(page), facing: await companion(page).getAttribute("data-companion-facing") };
-    check("companion: po ~90 s klidně přejde ke středové kotvě", walking.state === "walking" && walking.anchor === "→center" && walking.facing === "left", JSON.stringify(walking));
+    await tick(13_000);
+    const depart = { state: await cState(page), anchor: await cAnchor(page), facing: await companion(page).getAttribute("data-companion-facing"), phase: await phase() };
+    check("companion: po ~45 s vyrazí k sousední kotvě, nejdřív se otočí", depart.state === "walking" && depart.anchor === "→right-mid" && depart.facing === "left" && depart.phase === "depart", JSON.stringify(depart));
+    const motion = await companion(page).evaluate((el) => ({ delay: el.style.transitionDelay, easing: el.style.transitionTimingFunction, step: el.style.getPropertyValue("--jarvis-step") }));
+    check("companion: cesta s rozjezdem a dojezdem (linear() křivka, vykročení po otočení)", motion.delay === "280ms" && motion.easing.startsWith("linear(") && motion.step === "500ms", JSON.stringify(motion));
+    await tick(300);
     const legs = await page.locator(".jarvis-leg-l").evaluate((el) => getComputedStyle(el).animationName);
-    check("companion: při chůzi kroky nohou", legs === "jarvis-swing", legs);
+    check("companion: při cestě kroky nohou synchronizované s rychlostí", (await phase()) === "travel" && legs === "jarvis-swing", `${await phase()} ${legs}`);
     await page.screenshot({ path: `${OUT}companion-walking.png` });
-    await page.clock.fastForward(8_000);
-    await settle(page, 100);
+    // fáze arrive (doběhnutí 360 ms) je pokrytá deterministicky v lib/jarvisCompanion.test.mjs
+    await tick(8_000);
+    await tick(1_000);
     const arrived = { state: await cState(page), anchor: await cAnchor(page) };
-    check("companion: dojde na kotvu a zase stojí", arrived.state === "idle" && arrived.anchor === "center", JSON.stringify(arrived));
+    check("companion: dojde na sousední kotvu a zase stojí", arrived.state === "idle" && arrived.anchor === "right-mid", JSON.stringify(arrived));
     check("companion chůze: bez chyb JS", errors.length === 0, errors.join("; "));
     await ctx.close();
   }
@@ -2460,7 +2468,7 @@ await wotReset();
       await settle(page, 600);
     };
     await block("right:30px;width:170px");
-    check("companion: obsazená pravá kotva → přesun na volnou", ["center", "→center"].includes(await cAnchor(page) ?? ""), await cAnchor(page));
+    check("companion: obsazená pravá kotva → přesun na volnou", ["right-mid", "→right-mid"].includes(await cAnchor(page) ?? ""), await cAnchor(page));
     await settle(page, 6500);
     check("companion: po přesunu nic nezakrývá", (await coveredContent(page)).filter((c) => !c.includes("companion-blocker")).length === 0);
     await block("left:240px;width:1080px");

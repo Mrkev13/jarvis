@@ -37,11 +37,20 @@ export const COMPANION_TIMING = {
   bubbleMs: 2400,
   /** Stejná bublina se nezopakuje dřív – žádný spam. */
   bubbleCooldownMs: 20_000,
-  /** Klidný přesun v nečinnosti – vzácně, ne náhodně. */
-  relocateEveryMs: 90_000,
-  walkPxPerSecond: 90,
-  minWalkMs: 1200,
-  maxWalkMs: 7000,
+  /** Klidný přesun v nečinnosti – základ; skutečné pauzy se deterministicky střídají (`RELOCATION_PAUSE_OFFSETS`). */
+  relocateEveryMs: 44_000,
+  /** Cestovní (ustálená) rychlost; rozjezd a dojezd jsou pomalejší. */
+  walkPxPerSecond: 72,
+  /** Délka jednoho kroku – z ní a z rychlosti plyne délka krokového cyklu, aby nohy „neklouzaly". */
+  stridePx: 18,
+  /** Otočení a nakročení před odchodem (stojí na místě). */
+  departMs: 280,
+  /** Doběhnutí po příchodu (ještě „walking", už stojí na kotvě). */
+  settleMs: 360,
+  /** Podíl cesty, kdy zrychluje (a stejný podíl na konci, kdy zpomaluje). */
+  accelFraction: 0.22,
+  minTravelMs: 900,
+  maxTravelMs: 7000,
   /** Scroll se považuje za ukončený po této pauze; pak se znovu změří volné kotvy. */
   scrollSettleMs: 220,
   /** Jedna pozdější kontrola po změně rozvržení – obsah stránky se často načítá až po vykreslení. */
@@ -59,7 +68,7 @@ const AI_COLUMN_WIDTH = 288;
 
 export const COMPANION_PREF_KEY = "standa-hub:jarvis-companion:v1";
 
-export type AnchorId = "left" | "center" | "right" | "ai" | "edge";
+export type AnchorId = "left" | "left-mid" | "center" | "right-mid" | "right" | "ai" | "edge";
 export interface CompanionAnchor {
   id: AnchorId;
   x: number;
@@ -79,8 +88,10 @@ export interface CompanionViewport {
 }
 export type CompanionLayout = "default" | "ai";
 
-/** Pořadí klidných přesunů z výchozí pravé kotvy (dokola). */
-export const RELOCATION_ORDER: readonly AnchorId[] = ["center", "left", "center", "right"];
+/** Pauzy mezi klidnými přesuny se střídají (± pár sekund) – živější, ale stále deterministické. */
+export const RELOCATION_PAUSE_OFFSETS: readonly number[] = [0, 9_000, -5_000, 4_000];
+/** Krokový cyklus (dva kroky) synchronizovaný s cestovní rychlostí. */
+export const WALK_STEP_CYCLE_MS = Math.round(((2 * COMPANION_TIMING.stridePx) / COMPANION_TIMING.walkPxPerSecond) * 1000);
 /** Pevná kotva bez roamingu (reduced motion). */
 const FIXED_ANCHOR: AnchorId = "right";
 
@@ -92,11 +103,18 @@ const BUBBLES: Partial<Record<CompanionState, string>> = {
   error: "Tohle se nepovedlo.",
 };
 
+export type WalkPhase = "depart" | "travel" | "arrive";
+
 export interface CompanionWalk {
   from: number;
   to: number;
   target: AnchorId;
   start: number;
+  /** otočení/nakročení → cesta → doběhnutí */
+  departMs: number;
+  travelMs: number;
+  settleMs: number;
+  /** celkem (depart + travel + settle) */
   duration: number;
 }
 
@@ -113,6 +131,9 @@ export interface CompanionMachine {
   walk: CompanionWalk | null;
   pendingTarget: AnchorId | null;
   relocationIndex: number;
+  /** Směr klidných přesunů po sousedních kotvách (−1 doleva, +1 doprava); na konci se otočí. */
+  relocationDir: -1 | 1;
+  walkPhase: WalkPhase | null;
   nextRelocateAt: number;
   bubble: { text: string; until: number } | null;
   lastBubbleAt: Partial<Record<CompanionState, number>>;
@@ -137,6 +158,7 @@ export type CompanionEvent =
   | { type: "layout"; anchors: CompanionAnchor[]; now: number }
   | { type: "goto"; target: AnchorId; now: number }
   | { type: "scroll"; now: number }
+  | { type: "stroll"; now: number }
   | { type: "occupancy"; occupied: AnchorId[]; now: number };
 
 // ---------- rozvržení ----------
@@ -161,12 +183,13 @@ export function companionAnchors(vp: CompanionViewport, layout: CompanionLayout)
     const x = clampX(vp.sidebar + (AI_COLUMN_WIDTH - COMPANION_BOX.width) / 2, vp);
     return [{ id: "ai", x, y, width: COMPANION_BOX.width, reserved: true }];
   }
-  const laneWidth = vp.width - vp.sidebar;
+  // pět rovnoměrných kotev → klidné přesuny jsou krátké skoky k sousedovi, ne přejezd přes celou obrazovku
+  const first = vp.sidebar + COMPANION_BOX.margin;
+  const last = vp.width - COMPANION_BOX.margin - COMPANION_BOX.width;
   const width = COMPANION_BOX.width;
+  const ids: AnchorId[] = ["left", "left-mid", "center", "right-mid", "right"];
   return [
-    { id: "left", x: clampX(vp.sidebar + COMPANION_BOX.margin, vp), y, width },
-    { id: "center", x: clampX(vp.sidebar + (laneWidth - COMPANION_BOX.width) / 2, vp), y, width },
-    { id: "right", x: clampX(vp.width - COMPANION_BOX.margin - COMPANION_BOX.width, vp), y, width },
+    ...ids.map((id, i) => ({ id, x: clampX(first + ((last - first) * i) / (ids.length - 1), vp), y, width })),
     { id: "edge", x: vp.width - COMPANION_PEEK_WIDTH, y, width: COMPANION_PEEK_WIDTH, peek: true },
   ];
 }
@@ -241,14 +264,59 @@ export function serializeCompanionPref(enabled: boolean): string {
 
 // ---------- stroj ----------
 
-export function walkPosition(walk: CompanionWalk, now: number): number {
-  const t = Math.min(Math.max((now - walk.start) / walk.duration, 0), 1);
-  return Math.round(walk.from + (walk.to - walk.from) * t);
+/**
+ * Lichoběžníkový průběh rychlosti: rozjezd (zrychlení), cesta stálou rychlostí, dojezd (zpomalení).
+ * Vrací podíl uražené dráhy v čase t ∈ [0, 1].
+ */
+function trapezoid(t: number): number {
+  const r = COMPANION_TIMING.accelFraction;
+  const k = 2 * r * (1 - r);
+  if (t < r) return (t * t) / k;
+  if (t > 1 - r) return 1 - ((1 - t) * (1 - t)) / k;
+  return (t - r / 2) / (1 - r);
 }
 
-function walkDuration(distance: number): number {
-  const ms = (Math.abs(distance) / COMPANION_TIMING.walkPxPerSecond) * 1000;
-  return Math.round(Math.min(Math.max(ms, COMPANION_TIMING.minWalkMs), COMPANION_TIMING.maxWalkMs));
+/** Vzorky průběhu – stejné body používá CSS `linear()` i `walkPosition`, takže přerušení sedí na pixel. */
+export const WALK_EASING_POINTS: readonly number[] = Array.from({ length: 25 }, (_, i) => Math.round(trapezoid(i / 24) * 10_000) / 10_000);
+
+export function walkEasingCss(): string {
+  return `linear(${WALK_EASING_POINTS.join(", ")})`;
+}
+
+function easeWalk(t: number): number {
+  const n = WALK_EASING_POINTS.length - 1;
+  const at = Math.min(Math.max(t, 0), 1) * n;
+  const i = Math.min(Math.floor(at), n - 1);
+  return WALK_EASING_POINTS[i] + (WALK_EASING_POINTS[i + 1] - WALK_EASING_POINTS[i]) * (at - i);
+}
+
+export function walkPhase(walk: CompanionWalk, now: number): WalkPhase {
+  const elapsed = now - walk.start;
+  if (elapsed < walk.departMs) return "depart";
+  if (elapsed < walk.departMs + walk.travelMs) return "travel";
+  return "arrive";
+}
+
+export function walkPosition(walk: CompanionWalk, now: number): number {
+  const t = (now - walk.start - walk.departMs) / walk.travelMs;
+  return Math.round(walk.from + (walk.to - walk.from) * easeWalk(t));
+}
+
+/** Doba cesty tak, aby ustálená rychlost byla přesně `walkPxPerSecond` (průměr je nižší kvůli rozjezdu a dojezdu). */
+function travelDuration(distance: number): number {
+  const cruise = COMPANION_TIMING.walkPxPerSecond * (1 - COMPANION_TIMING.accelFraction);
+  const ms = (Math.abs(distance) / cruise) * 1000;
+  return Math.round(Math.min(Math.max(ms, COMPANION_TIMING.minTravelMs), COMPANION_TIMING.maxTravelMs));
+}
+
+function walkTo(from: number, to: number, target: AnchorId, start: number): CompanionWalk {
+  const { departMs, settleMs } = COMPANION_TIMING;
+  const travelMs = travelDuration(to - from);
+  return { from, to, target, start, departMs, travelMs, settleMs, duration: departMs + travelMs + settleMs };
+}
+
+function relocationPause(index: number): number {
+  return COMPANION_TIMING.relocateEveryMs + RELOCATION_PAUSE_OFFSETS[index % RELOCATION_PAUSE_OFFSETS.length];
 }
 
 function findAnchor(m: CompanionMachine, id: AnchorId): CompanionAnchor | undefined {
@@ -265,27 +333,26 @@ function startWalk(m: CompanionMachine, target: AnchorId, now: number): Companio
   if (!anchor || anchor.x === m.x) {
     return anchor ? { ...m, anchor: anchor.id, x: anchor.x, pendingTarget: null } : { ...m, pendingTarget: null };
   }
-  return {
-    ...m,
-    walk: { from: m.x, to: anchor.x, target, start: now, duration: walkDuration(anchor.x - m.x) },
-    facing: anchor.x > m.x ? "right" : "left",
-    pendingTarget: null,
-  };
+  // otočí se hned na začátku (fáze depart), ještě než vykročí
+  return { ...m, walk: walkTo(m.x, anchor.x, target, now), walkPhase: "depart", facing: anchor.x > m.x ? "right" : "left", pendingTarget: null };
 }
 
 function snapTo(m: CompanionMachine, target: AnchorId): CompanionMachine {
   const anchor = resolveAnchor(m.anchors, target);
-  if (!anchor) return { ...m, walk: null, pendingTarget: null };
-  return { ...m, anchor: anchor.id, x: anchor.x, walk: null, pendingTarget: null };
+  if (!anchor) return { ...m, walk: null, walkPhase: null, pendingTarget: null };
+  return { ...m, anchor: anchor.id, x: anchor.x, walk: null, walkPhase: null, pendingTarget: null };
 }
 
-function nextRelocationTarget(m: CompanionMachine): { target: AnchorId | null; index: number } {
-  for (let step = 0; step < RELOCATION_ORDER.length; step += 1) {
-    const index = (m.relocationIndex + step) % RELOCATION_ORDER.length;
-    const id = RELOCATION_ORDER[index];
-    if (id !== m.anchor && findAnchor(m, id) && !m.occupied.includes(id)) return { target: id, index: (index + 1) % RELOCATION_ORDER.length };
+/** Sousední volná kotva ve směru chůze; na konci řady (nebo před obsazenou) se směr otočí. */
+function nextRelocationTarget(m: CompanionMachine): { target: AnchorId | null; dir: -1 | 1 } {
+  const lane = m.anchors.filter((a) => !a.peek && !a.reserved).sort((a, b) => a.x - b.x);
+  const i = lane.findIndex((a) => a.id === m.anchor);
+  if (i < 0) return { target: null, dir: m.relocationDir };
+  for (const dir of [m.relocationDir, (m.relocationDir * -1) as -1 | 1]) {
+    const next = lane[i + dir];
+    if (next && !m.occupied.includes(next.id)) return { target: next.id, dir };
   }
-  return { target: null, index: m.relocationIndex };
+  return { target: null, dir: m.relocationDir };
 }
 
 /** Nejvyšší požadovaný stav bez ohledu na chůzi. */
@@ -322,8 +389,9 @@ function place(m: CompanionMachine, now: number, wasVisible: boolean): Companion
   const target = chooseCompanionAnchor(m.anchors, m.occupied, heading, x);
   if (!target) return { ...m, parked: true, walk: null, pendingTarget: null };
   const next = { ...m, parked: false };
-  if (target === heading && (next.walk || next.pendingTarget || target === next.anchor)) return next;
   const anchor = findAnchor(next, target);
+  if (target === heading && (next.walk || next.pendingTarget)) return next;
+  if (target === next.anchor && anchor && anchor.x === x) return next;
   // viditelný a v klidu → dojde; jinak (průhledný, reakce, reduced motion, okraj) se přestaví na místě
   const calm = COMPANION_PRIORITY[desiredState(next, now)] <= COMPANION_PRIORITY.walking;
   const canWalk = wasVisible && next.roaming && !anchor?.peek && calm;
@@ -348,7 +416,7 @@ function applyEvent(m: CompanionMachine, e: CompanionEvent): CompanionMachine {
       const x = m.walk ? walkPosition(m.walk, e.now) : m.x;
       const heading = m.walk?.target ?? m.pendingTarget ?? m.anchor;
       const settle = e.now + COMPANION_TIMING.scrollSettleMs;
-      return { ...m, measured: false, walk: null, pendingTarget: null, x, anchor: heading, scrollUntil: settle };
+      return { ...m, measured: false, walk: null, walkPhase: null, pendingTarget: null, x, anchor: heading, scrollUntil: settle };
     }
     case "occupancy": {
       const next = { ...m, occupied: [...e.occupied], measured: true };
@@ -362,13 +430,13 @@ function applyEvent(m: CompanionMachine, e: CompanionEvent): CompanionMachine {
     }
     case "enabled": {
       if (e.value === m.enabled) return m;
-      const next = { ...m, enabled: e.value, nextRelocateAt: e.now + COMPANION_TIMING.relocateEveryMs };
+      const next = { ...m, enabled: e.value, nextRelocateAt: e.now + relocationPause(m.relocationIndex) };
       // po zapnutí nejdřív ověřit, že pod ním nic není
       return e.value ? requestMeasure({ ...next, measured: false }) : next;
     }
     case "roaming": {
       if (e.value === m.roaming) return m;
-      const next = { ...m, roaming: e.value, nextRelocateAt: e.now + COMPANION_TIMING.relocateEveryMs };
+      const next = { ...m, roaming: e.value, nextRelocateAt: e.now + relocationPause(m.relocationIndex) };
       // bez roamingu pevná kotva – pokud je obsazená, nejbližší volná (přestaví se, nechodí)
       return e.value ? next : place(snapTo(next, FIXED_ANCHOR), e.now, false);
     }
@@ -379,6 +447,9 @@ function applyEvent(m: CompanionMachine, e: CompanionEvent): CompanionMachine {
       const next = snapTo(reset, m.roaming ? keep : m.anchor);
       return requestMeasure({ ...next, checkAt: e.now + COMPANION_TIMING.recheckAfterLayoutMs });
     }
+    case "stroll":
+      // ruční „projdi se" (vývojová ukázka) – stejný přesun jako v nečinnosti, jen hned
+      return { ...m, nextRelocateAt: e.now };
     case "goto":
       if (!findAnchor(m, e.target)) return m;
       // během reakce by chůzi hned zastavila priorita → ustoupit rovnou (pole pod ním nesmí zůstat zakryté)
@@ -411,27 +482,30 @@ export function stepCompanion(machine: CompanionMachine, event: CompanionEvent):
 
   // dojít do cíle
   if (m.walk && now >= m.walk.start + m.walk.duration) {
-    m = { ...m, x: m.walk.to, anchor: m.walk.target, walk: null, nextRelocateAt: now + COMPANION_TIMING.relocateEveryMs };
+    m = { ...m, x: m.walk.to, anchor: m.walk.target, walk: null, walkPhase: null, nextRelocateAt: now + relocationPause(m.relocationIndex) };
   }
 
   const desired = desiredState(m, now);
   if (desired === "idle" && COMPANION_PRIORITY[machine.state] > COMPANION_PRIORITY.walking) {
     // po reakci chvíli klid – žádné okamžité odkráčení
-    m = { ...m, nextRelocateAt: now + COMPANION_TIMING.relocateEveryMs };
+    m = { ...m, nextRelocateAt: now + relocationPause(m.relocationIndex) };
   }
   if (COMPANION_PRIORITY[desired] > COMPANION_PRIORITY.walking || desired === "hidden") {
     // reakce přeruší chůzi: zastavit na místě, cíl si zapamatovat
-    if (m.walk) m = { ...m, x: walkPosition(m.walk, now), pendingTarget: m.walk.target, walk: null };
+    if (m.walk) m = { ...m, x: walkPosition(m.walk, now), pendingTarget: m.walk.target, walk: null, walkPhase: null };
   } else if (!m.walk && m.roaming) {
     if (m.pendingTarget) {
       m = startWalk(m, m.pendingTarget, now);
     } else if (now >= m.nextRelocateAt && m.measured && m.anchors.length > 1) {
-      const { target, index } = nextRelocationTarget(m);
-      m = { ...m, relocationIndex: index, nextRelocateAt: now + COMPANION_TIMING.relocateEveryMs };
+      const { target, dir } = nextRelocationTarget(m);
+      const index = m.relocationIndex + 1;
+      m = { ...m, relocationIndex: index, relocationDir: dir, nextRelocateAt: now + relocationPause(index) };
       if (target) m = startWalk(m, target, now);
     }
   }
 
+  const phase = m.walk ? walkPhase(m.walk, now) : null;
+  if (phase !== m.walkPhase) m = { ...m, walkPhase: phase };
   const state: CompanionState = m.walk ? "walking" : desired;
   m = state === m.state ? m : { ...m, state };
   return withBubble(m, machine.state, now);
@@ -462,7 +536,9 @@ export function createCompanion({
     walk: null,
     pendingTarget: null,
     relocationIndex: 0,
-    nextRelocateAt: now + COMPANION_TIMING.relocateEveryMs,
+    relocationDir: -1,
+    walkPhase: null,
+    nextRelocateAt: now + relocationPause(0),
     bubble: null,
     lastBubbleAt: {},
     occupied: [],
@@ -484,7 +560,12 @@ export function nextCompanionDeadline(m: CompanionMachine): number {
   if (m.state === "hidden") return times.length ? Math.min(...times) : Infinity;
   if (m.flash) times.push(m.flash.until);
   if (m.bubble) times.push(m.bubble.until);
-  if (m.walk) times.push(m.walk.start + m.walk.duration);
+  if (m.walk) {
+    // hranice fází chůze (vykročení, příchod, konec doběhnutí)
+    const { start, departMs, travelMs, duration } = m.walk;
+    const boundary = { depart: start + departMs, travel: start + departMs + travelMs, arrive: start + duration };
+    times.push(boundary[m.walkPhase ?? "depart"]);
+  }
   const atEdge = findAnchor(m, m.anchor)?.peek === true; // z okraje ho vrátí až měření, ne klidný přesun
   if (m.state === "idle" && m.roaming && m.measured && !atEdge && m.anchors.length > 1) times.push(m.nextRelocateAt);
   return times.length ? Math.min(...times) : Infinity;

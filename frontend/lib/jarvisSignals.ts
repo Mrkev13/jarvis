@@ -8,7 +8,7 @@
 import type { JarvisState } from "./jarvisAvatar.ts";
 
 export type JarvisPulse = "success" | "error";
-export type JarvisSignal = { type: "mood"; mood: JarvisState } | { type: "pulse"; kind: JarvisPulse };
+export type JarvisSignal = { type: "mood"; mood: JarvisState } | { type: "pulse"; kind: JarvisPulse } | { type: "stroll" };
 
 const MOOD_RANK: Partial<Record<JarvisState, number>> = { listening: 1, thinking: 1, warning: 2 };
 
@@ -56,6 +56,11 @@ export function clearJarvisSource(id: string) {
 
 export function pulseJarvis(kind: JarvisPulse) {
   emit({ type: "pulse", kind });
+}
+
+/** Ať se hned projde k sousední kotvě (vývojová ukázka pohybu). */
+export function strollJarvis() {
+  emit({ type: "stroll" });
 }
 
 export function currentJarvisMood(): JarvisState {

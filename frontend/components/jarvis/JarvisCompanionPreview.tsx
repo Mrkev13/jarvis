@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
 import { JarvisAvatar } from "@/components/jarvis/JarvisAvatar";
 import { JARVIS_STATES, type JarvisState } from "@/lib/jarvisAvatar";
-import { clearJarvisSource, publishJarvisSource, pulseJarvis } from "@/lib/jarvisSignals";
+import { clearJarvisSource, publishJarvisSource, pulseJarvis, strollJarvis } from "@/lib/jarvisSignals";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 
 /** Ruční spouštění reakcí companiona (stejné signály, jaké posílají AI, briefing, Rychlé přidání a grindy). */
@@ -33,6 +33,10 @@ export function JarvisCompanionPreview() {
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => pulseJarvis("success")}>Úspěch</Button>
           <Button variant="secondary" onClick={() => pulseJarvis("error")}>Chyba</Button>
+        </div>
+        <p className="text-sm text-ink-muted">Pohyb (jinak sám zhruba každých 40–50 s v klidu):</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => strollJarvis()}>Projít se</Button>
         </div>
       </Card>
       <Card className="space-y-3">

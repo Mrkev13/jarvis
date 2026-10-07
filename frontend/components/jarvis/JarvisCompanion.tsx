@@ -17,6 +17,8 @@ import {
   nextCompanionDeadline,
   pickSafeAnchor,
   stepCompanion,
+  WALK_STEP_CYCLE_MS,
+  walkEasingCss,
   type CompanionEvent,
   type CompanionMachine,
 } from "@/lib/jarvisCompanion";
@@ -40,6 +42,7 @@ const CONTENT_SELECTOR = [
   "label, summary, [role='button'], [role='link'], [role='tab'], [role='switch']",
   "img, video, canvas, table, p, h1, h2, h3, h4, h5, h6, li",
 ].join(", ");
+const WALK_EASING = walkEasingCss();
 /** Scroll události se do stroje posílají nejvýš jednou za tuto dobu (prodlužují jen dobu dosednutí). */
 const SCROLL_DISPATCH_MS = 60;
 
@@ -148,7 +151,9 @@ export function JarvisCompanion() {
   useEffect(() => {
     dispatch({ type: "mood", mood: currentJarvisMood(), now: now() });
     return subscribeJarvisSignals((signal) => {
-      dispatch(signal.type === "mood" ? { type: "mood", mood: signal.mood, now: now() } : { type: "pulse", kind: signal.kind, now: now() });
+      if (signal.type === "mood") dispatch({ type: "mood", mood: signal.mood, now: now() });
+      else if (signal.type === "pulse") dispatch({ type: "pulse", kind: signal.kind, now: now() });
+      else dispatch({ type: "stroll", now: now() });
     });
   }, []);
 
@@ -199,11 +204,18 @@ export function JarvisCompanion() {
       data-companion-anchor={machine.walk ? `→${machine.walk.target}` : machine.anchor}
       data-companion-facing={peek ? "left" : machine.facing}
       data-companion-visible={machine.measured ? "true" : "false"}
+      data-walk-phase={machine.walkPhase ?? undefined}
       className="jarvis-companion"
-      style={{
-        transform: `translate3d(${x}px, ${y}px, 0)`,
-        transitionDuration: machine.walk ? `${machine.walk.duration}ms` : "0ms",
-      }}
+      style={
+        {
+          transform: `translate3d(${x}px, ${y}px, 0)`,
+          // otočení/nakročení (delay) → cesta s rozjezdem a dojezdem (stejná křivka jako walkPosition)
+          transitionDuration: machine.walk ? `${machine.walk.travelMs}ms` : "0ms",
+          transitionDelay: machine.walk ? `${machine.walk.departMs}ms` : "0ms",
+          transitionTimingFunction: machine.walk ? WALK_EASING : undefined,
+          "--jarvis-step": `${WALK_STEP_CYCLE_MS}ms`,
+        } as React.CSSProperties
+      }
     >
       <div className="jarvis-companion-fade">
       <div
