@@ -29,6 +29,7 @@ import {
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiFetch, jsonBody } from "@/lib/api";
 import { formatNumber, plural, pragueDayKey } from "@/lib/format";
+import { pulseJarvis } from "@/lib/jarvisSignals";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
@@ -194,6 +195,7 @@ export default function WotPage() {
       const body = res.ok ? ((await res.json()) as { completion?: { id?: string } }) : null;
       setCompleting(null);
       setCompletedNotice({ tank: g.tank, id: body?.completion?.id ?? "" });
+      if (res.ok) pulseJarvis("success");
       if (res.status === 409) {
         await Promise.all([grindsRes.reload(), completedRes.reload()]); // jiná záložka už grind splnila
         return;
@@ -214,6 +216,7 @@ export default function WotPage() {
       console.error(err);
       setCompleting(null);
       setError("Grind se nepodařilo označit jako splněný.");
+      pulseJarvis("error");
     }
   }
 
