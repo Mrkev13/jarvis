@@ -1,6 +1,7 @@
 "use client";
 
 import { GameImage } from "@/components/games/GameImage";
+import { CompletionState } from "@/components/motion/CompletionState";
 import { Button, EntityRow, Progress, StatusBadge } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
 import { staggerStyle } from "@/lib/motion";
@@ -35,21 +36,28 @@ export function GrindRow({
     <EntityRow
       searchTarget={g.id != null ? `grind-${g.id}` : undefined}
       style={staggerStyle(index)}
-      className={cx("motion-card", celebrating && "motion-grind-complete border-accent/60")}
+      className={cx("motion-card", celebrating && "border-accent/60")}
       tone={celebrating ? "accent" : "neutral"}
       leading={<GameImage kind="tank" name={g.tank} size="sm" />}
       badges={
         <>
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
           <StatusBadge tone={priority.tone}>Priorita: {priority.label}</StatusBadge>
-          {celebrating ? (
-            <span
-              data-testid="grind-complete"
-              className="motion-grind-complete-label font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-accent-strong"
-            >
-              Grind complete
-            </span>
-          ) : null}
+          <CompletionState
+            as="span"
+            complete={Boolean(celebrating)}
+            className="rounded-md"
+            label={
+              <span
+                data-testid="grind-complete"
+                className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-accent-strong"
+              >
+                Grind complete
+              </span>
+            }
+          >
+            {null}
+          </CompletionState>
         </>
       }
       title={g.tank}

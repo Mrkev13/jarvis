@@ -26,7 +26,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 | Effects | `shadow-card` · `shadow-[var(--shadow-elevated)]` · `shadow-glow` / `shadow-glow-violet` | default · dialogs · *rare* active highlight |
 | Layout | `--page-max` 76 rem · `--page-max-narrow` 56 rem · gutters 1 / 2 rem | `ContentContainer` |
 | HUD | `--hud-line-opacity` 0.035 · `--hud-corner*` | grid background, frame corners |
-| Motion | `--motion-fast` 140 ms · `--motion-normal` 240 ms · `--motion-pulse-duration` 2.4 s | interactions · entries · live pulse |
+| Motion | `--motion-duration-{instant 0 · fast 140 · normal 240 · deliberate 700 · celebration 1200 ms}` · `--motion-ease-{standard,enter,exit,emphasized}` | see § 6 (semantic categories) |
 
 **Contrast (WCAG):** on every surface `ink` ≥ 15:1, `ink-2` ≥ 10:1, `ink-muted` ≥ 5.6:1, accents/semantic ≥ 6:1.
 `ink-faint` (3–3.5:1) is **never** used for text that must be read (only placeholders, decoration, disabled).
@@ -102,13 +102,76 @@ Rules:
    effects until it looks like a professional tool again.
 5. Mobile shows less decoration (no grid lines; fewer frames).
 
-## 6. Motion
+## 6. Motion (Roadmap 6A)
 
-- Reuse `motion.css`: `motion-card` (staggered entry via `staggerStyle(i)`), `motion-press`, `motion-hover-lift`,
-  `motion-progress`, `motion-attention` (3 pulses for due items) etc.
-- Under `prefers-reduced-motion: reduce` every `motion-*`, Tailwind `animate-pulse/bounce/ping/spin` and the HUD pulse
-  stop; states remain visible (static skeleton blocks, aria-busy, text labels).
-- No infinite animation except the slow `StatusPulse live` for genuinely live states.
+Call sites say **what happened**, never how to animate it: `<CompletionState complete>`, `motionClass("error")` – not
+`scale-105 duration-300`. Timing and easing belong to the motion system. No animation library (CSS + a few thin
+React wrappers, zero dependencies).
+
+Code: tokens `app/motion.css` (`:root`) mirrored by `lib/motionTokens.ts` (a test keeps them equal); base utilities
+`app/motion.css`; semantic primitives `app/motion-semantic.css`; timing logic `lib/motionState.ts`; hooks
+`lib/motion.ts`; components `components/motion/*`. Dev preview: `/dev/motion` (404 unless `MOTION_PREVIEW=1`).
+
+**Tokens** – keep the set small; never add a one-off duration.
+
+| Duration | ms | Use | Easing | Curve | Use |
+|---|---|---|---|---|---|
+| `instant` | 0 | state change, reduced-motion target | `standard` | `0.4, 0, 0.2, 1` | value changes, pulses |
+| `fast` | 140 | press, hover, exit | `enter` | `0.2, 0.8, 0.2, 1` | entrances, progress |
+| `normal` | 240 | entrance, success pop | `exit` | `0.4, 0, 1, 1` | leaving elements |
+| `deliberate` | 700 | progress value, streak bump, warning/error ring | `emphasized` | `0.2, 0, 0, 1` | completion, milestone |
+| `celebration` | 1200 | completion/milestone glow (hard cap 1.5 s), one attention pulse | | | |
+
+Old names (`--motion-fast/normal/slow`, `--motion-ease`, `--motion-ease-in-out`) are aliases. Component-specific
+timings that stay as they are: highlight 1.6 s (new row, AI outcome), shimmer 1.2 s (executing), flame flicker 1.4 s.
+
+**Semantic categories** (`MOTION_SPEC` in `lib/motionTokens.ts`):
+
+| Category | API | Behaviour | Reduced motion |
+|---|---|---|---|
+| entrance | `Card index={i}` / `motion-card` + `staggerStyle(i)`, `motion-page` | 6 px rise + fade, stagger ≤ 8 | visible immediately |
+| exit | `motionClass("exit")` | opacity fade, `fast`; caller removes after `motionDurationMs("exit")` | hidden immediately |
+| success | `<SuccessPulse signal={n}>` | one small pop when `n` increases (never on load) | static |
+| completion | `<CompletionState complete label? announce?>` | one green glow ≤ 1.2 s on incomplete → complete only; optional label; `role=status` message | label + status, no glow |
+| progress | `Progress` (`motion-progress-fill`) | fill slides by `transform` (no layout), grows from 0 on first paint | value jumps |
+| streak | `<StreakFlame days idle? size="sm"\|"md">` | static flame; one burst when `days` increases; optional idle flicker; milestone = warmer chip | static flame |
+| milestone | `<MilestoneGlow reached announce?>` | permanent subtle cyan ring + one glow when reached | ring only |
+| warning / error | `motionClass("warning" \| "error")` | one soft ring (`deliberate`), **no shake, no translate** | static border/colour |
+| attention | `motion-attention` | 3 slow pulses (1.2 s each), then calm – due/overdue items | static |
+
+Primitives fire only on a **transition** of real data (`useTransitionSignal(value, ready, trigger)`); first load
+and loading → loaded never celebrate. Possible future categories (`achievement`, `level-up`) must reuse completion /
+milestone – no confetti, fireworks, overlays or full-screen effects.
+
+**When to use motion:** confirming a user action (success), a state the user worked towards (completion, milestone,
+streak), a value that changed in place (progress, animated numbers), new content arriving (entrance, highlight).
+**When not to:** on page load for data that was already true, in long lists (no idle loops per row), on text that must
+be read (errors never move), to decorate static content, or anywhere it delays navigation or input.
+
+**Rules**
+
+- Animate `opacity` / `transform` only; glows are a pre-drawn `::after` layer whose opacity animates. Warning/error
+  rings animate `box-shadow` once on a single element. No width/height/blur animation, no JS animation loops
+  (only `useAnimatedNumber` uses `requestAnimationFrame`, for the duration of one tween).
+- One-shot by default. Infinite only for the live `StatusPulse`, the AI "executing" shimmer and the opt-in
+  `StreakFlame idle` – never in lists. Nothing flashes more than 3×/s (pulses are ≥ 0.7 s, soft rings, no inversion).
+- Information never depends on animation: status text, `role=status` / `role=alert`, labels, `aria-valuenow`.
+  Decorative layers are pseudo-elements or `aria-hidden`.
+- Nothing blocks: no modal celebrations, no `pointer-events` capture, no focus moves, no awaited animations before
+  navigation.
+- `prefers-reduced-motion: reduce` stops every `motion-*` animation, the semantic primitives, Tailwind
+  `animate-pulse/bounce/ping/spin` and the HUD pulse; progress updates instantly; the final state (label, ring,
+  colour, status message) stays visible. Tests: `lib/reducedMotion.test.mjs`, `lib/motionTokens.test.mjs`,
+  `lib/motionState.test.mjs`; browser: ui-check § 5b/5c (both motion modes).
+
+**Examples**
+
+```tsx
+<CompletionState complete={pct >= 100} announce={`Cíl ${title} je splněn na 100 %`} as="span">…</CompletionState>
+<MilestoneGlow reached={isNewRecord} announce="Nový osobní rekord" className="rounded-card">…</MilestoneGlow>
+<StreakFlame days={streak} size="sm" />            // list row: static, bump on increase
+<li className={cx(state === "failed" && motionClass("error"))}>…</li>
+```
 
 ## 7. Accessibility checklist (per page)
 

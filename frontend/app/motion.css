@@ -14,18 +14,34 @@
  */
 
 :root {
-  /* Trvání */
-  --motion-fast: 140ms;
-  --motion-normal: 240ms;
-  --motion-slow: 700ms;
-  --motion-highlight-duration: 1600ms;
-  --motion-attention-duration: 1800ms;
-  --motion-shimmer-duration: 1200ms;
-  --motion-flame-duration: 1400ms;
+  /*
+   * Roadmap 6A – sémantické tokeny (JS zrcadlo: lib/motionTokens.ts, test hlídá shodu).
+   * Pět délek a čtyři křivky; nové komponenty používají jen tyto.
+   */
+  --motion-duration-instant: 0ms;
+  --motion-duration-fast: 140ms;
+  --motion-duration-normal: 240ms;
+  --motion-duration-deliberate: 700ms;
+  --motion-duration-celebration: 1200ms;
 
-  /* Easing */
-  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);      /* zpomalení – vstupy, hover */
-  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* symetrické – pulzy */
+  --motion-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Trvání – původní názvy (aliasy na sémantické tokeny; zachované kvůli existujícím třídám) */
+  --motion-fast: var(--motion-duration-fast);
+  --motion-normal: var(--motion-duration-normal);
+  --motion-slow: var(--motion-duration-deliberate);
+  --motion-attention-duration: var(--motion-duration-celebration);
+  /* Časování konkrétních komponent (ne obecné tokeny): */
+  --motion-highlight-duration: 1600ms; /* nový řádek / výsledek AI akce – zrcadlí MOTION.highlightMs */
+  --motion-shimmer-duration: 1200ms;   /* probíhající AI akce */
+  --motion-flame-duration: 1400ms;     /* volitelné plápolání streaku */
+
+  /* Easing – původní názvy */
+  --motion-ease: var(--motion-ease-enter);             /* zpomalení – vstupy, hover */
+  --motion-ease-in-out: var(--motion-ease-standard);   /* symetrické – pulzy */
 
   /* Vzdálenosti a měřítka */
   --motion-enter-distance: 6px;
@@ -33,7 +49,6 @@
   --motion-press-scale: 0.97;
   --motion-pop-scale: 1.04;
   --motion-pulse-scale: 1.22;
-  --motion-shake-distance: 4px;
   --motion-done-shift: 4px;
   --motion-stagger: 45ms;
 
@@ -50,20 +65,10 @@
   to   { opacity: 1; transform: none; }
 }
 
-@keyframes motion-grow {
-  from { transform: scaleX(0); }
-  to   { transform: scaleX(1); }
-}
-
 @keyframes motion-pop {
   0%   { transform: scale(1); }
   40%  { transform: scale(var(--motion-pop-scale)); }
   100% { transform: scale(1); }
-}
-
-@keyframes motion-success-glow {
-  from { box-shadow: 0 0 0 0 rgb(var(--motion-success-rgb) / 0.55); }
-  to   { box-shadow: 0 0 0 10px rgb(var(--motion-success-rgb) / 0); }
 }
 
 @keyframes motion-badge-pulse {
@@ -81,14 +86,6 @@
 @keyframes motion-highlight-row {
   0%   { background-color: rgb(var(--motion-highlight-rgb) / 0.14); }
   100% { background-color: rgb(var(--motion-highlight-rgb) / 0); }
-}
-
-@keyframes motion-shake {
-  0%, 100% { transform: translateX(0); }
-  20%      { transform: translateX(calc(var(--motion-shake-distance) * -1)); }
-  40%      { transform: translateX(var(--motion-shake-distance)); }
-  60%      { transform: translateX(calc(var(--motion-shake-distance) * -0.5)); }
-  80%      { transform: translateX(calc(var(--motion-shake-distance) * 0.5)); }
 }
 
 @keyframes motion-attention {
@@ -165,12 +162,7 @@
   transform: scale(var(--motion-press-scale));
 }
 
-/* Progress bar: první vykreslení „naroste" zleva, změny šířky plynule. */
-.motion-progress {
-  transform-origin: left center;
-  animation: motion-grow var(--motion-slow) var(--motion-ease) backwards;
-  transition: width var(--motion-slow) var(--motion-ease);
-}
+/* Progress bar → `.motion-progress-fill` v motion-semantic.css (transform místo šířky). */
 
 /* Boční panel (Drawer) – krátký vjezd zprava. */
 .motion-drawer {
@@ -182,12 +174,7 @@
   animation: motion-pop var(--motion-normal) var(--motion-ease);
 }
 
-/* Dokončení (100 %) – pop + jeden zelený záblesk. */
-.motion-complete {
-  animation:
-    motion-pop var(--motion-normal) var(--motion-ease),
-    motion-success-glow var(--motion-slow) ease-out;
-}
+/* Dokončení (100 %) → `CompletionState` / `.motion-completion` v motion-semantic.css. */
 
 /* Upozornění – jeden puls (znovu spustit = nový key / znovu přidat třídu). */
 .motion-pulse {
@@ -203,10 +190,7 @@
   animation: motion-highlight-row var(--motion-highlight-duration) ease-out;
 }
 
-/* Chyba – krátké zatřesení. */
-.motion-shake {
-  animation: motion-shake calc(var(--motion-normal) * 1.5) var(--motion-ease-in-out);
-}
+/* Chyba → `.motion-error` v motion-semantic.css (krátký obrys, bez třesení – text zůstává čitelný). */
 
 /* Po termínu – 3 jemné pulzy, pak klid (žádná trvalá animace). */
 .motion-attention {
@@ -284,42 +268,20 @@
     motion-flame-flicker var(--motion-flame-duration) var(--motion-ease-in-out) calc(var(--motion-slow) * 2) infinite;
 }
 
-/* Game Enrichment B: „GRIND COMPLETE" – krátký azurový záblesk karty (≈1,3 s), žádné konfety. */
-@keyframes motion-grind-complete {
-  0%   { box-shadow: 0 0 0 0 rgb(34 211 238 / 0); }
-  30%  { box-shadow: 0 0 0 2px rgb(34 211 238 / 0.55), 0 0 32px -6px rgb(34 211 238 / 0.65); }
-  100% { box-shadow: 0 0 0 1px rgb(34 211 238 / 0.3), 0 0 0 0 rgb(34 211 238 / 0); }
-}
-@keyframes motion-grind-complete-label {
-  from { opacity: 0; letter-spacing: 0.4em; }
-  to   { opacity: 1; letter-spacing: 0.2em; }
-}
-.motion-grind-complete {
-  animation: motion-grind-complete 1300ms var(--motion-ease) forwards;
-}
-.motion-grind-complete-label {
-  animation: motion-grind-complete-label 500ms var(--motion-ease) both;
-}
-
 /* ===== Omezený pohyb ===== */
 @media (prefers-reduced-motion: reduce) {
   .motion-page,
   .motion-card,
   .motion-drawer,
-  .motion-progress,
   .motion-success,
-  .motion-complete,
   .motion-pulse,
   .motion-highlight,
   .motion-highlight-row,
-  .motion-shake,
   .motion-attention,
   .motion-flame-active,
   .motion-flame-milestone,
   .motion-undo-timer,
   .motion-palette,
-  .motion-grind-complete,
-  .motion-grind-complete-label,
   .search-target-active,
   .motion-executing::after {
     animation: none !important;
@@ -332,7 +294,6 @@
     animation: none !important;
   }
   /* Barvy se mění dál (nejde o pohyb), jen bez transformací a bez plynulé šířky/posunu. */
-  .motion-progress,
   .motion-done-transition {
     transition: none !important;
   }
