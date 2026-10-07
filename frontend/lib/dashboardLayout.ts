@@ -4,7 +4,12 @@
  * Registr widgetů je EXPLICITNÍ seznam (žádné objevování modulů za běhu). Uložené rozložení obsahuje jen
  * sémantiku – id, viditelnost, pořadí, velikost – nikdy pixely ani CSS. Každá breakpointová podoba se z něj
  * odvozuje: mobil 1 sloupec v pořadí, tablet 2 sloupce, desktop 6 jednotek (packDesktop).
+ *
+ * Roadmap 6C: widget může patřit modulům (`modules`). Widget vypnutého modulu se do rozložení vůbec nedostane
+ * (nevykreslí se, nic nenačte, není ani mezi „Skrytými"), ale jeho uložený záznam zůstane v úložišti beze změny
+ * (`preserveUnavailable`) – po opětovném zapnutí se vrátí na své místo s uloženou viditelností a velikostí.
  */
+import type { ModuleAccess } from "./modules.ts";
 
 export type WidgetSize = "small" | "medium" | "large" | "full";
 
@@ -50,6 +55,8 @@ export interface WidgetDef {
   allowedSizes: WidgetSize[];
   /** Widget čte společný payload GET /dashboard (skrytím všech takových se dotaz vůbec nepošle). */
   usesDashboardData: boolean;
+  /** Moduly widgetu (Roadmap 6C): dostupný, když aspoň jeden smí na dashboard. Bez nich = jádro. */
+  modules?: string[];
 }
 
 export const WIDGETS: WidgetDef[] = [
@@ -57,14 +64,19 @@ export const WIDGETS: WidgetDef[] = [
   { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 20, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
   { id: "today", title: "Dnes", area: null, defaultVisible: true, defaultOrder: 30, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
   { id: "attention", title: "Vyžaduje pozornost", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
-  { id: "key_metrics", title: "Klíčová čísla", area: null, defaultVisible: true, defaultOrder: 50, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: true },
-  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
-  { id: "upcoming", title: "Nadcházející", area: "school", defaultVisible: true, defaultOrder: 70, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
-  { id: "work", title: "Práce", area: "work", defaultVisible: true, defaultOrder: 80, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true },
-  { id: "finance", title: "Finance", area: "finance", defaultVisible: true, defaultOrder: 90, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true },
-  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
+  { id: "key_metrics", title: "Klíčová čísla", area: null, defaultVisible: true, defaultOrder: 50, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: true, modules: ["work", "finance"] },
+  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
+  { id: "upcoming", title: "Nadcházející", area: "school", defaultVisible: true, defaultOrder: 70, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["school"] },
+  { id: "work", title: "Práce", area: "work", defaultVisible: true, defaultOrder: 80, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true, modules: ["work"] },
+  { id: "finance", title: "Finance", area: "finance", defaultVisible: true, defaultOrder: 90, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true, modules: ["finance"] },
+  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
   { id: "quick_actions", title: "Rychlé akce", area: null, defaultVisible: true, defaultOrder: 110, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: false },
 ];
+
+/** Widgety, které smí aktuální moduly ukázat (pořadí registru). */
+export function availableWidgets(access: ModuleAccess, defs: WidgetDef[] = WIDGETS): WidgetDef[] {
+  return defs.filter((d) => access.allowsAny(d.modules, "dashboard"));
+}
 
 export const LAYOUT_VERSION = 1;
 export const LAYOUT_STORAGE_KEY = "standa-hub:dashboard-layout:v1";
@@ -155,6 +167,25 @@ export function parseStoredLayout(raw: string | null, defs: WidgetDef[] = WIDGET
   } catch {
     return defaultLayout(defs);
   }
+}
+
+/**
+ * Před uložením vrátí do rozložení záznamy widgetů, které jsou v registru, ale teď nedostupné (vypnutý modul) –
+ * každý za widget, který mu v předchozím uloženém rozložení předcházel (jinak na konec). Úpravy dashboardu
+ * s vypnutým modulem tak nesmažou jeho uložené nastavení. Neznámá id (smazané widgety) se dál zahazují.
+ */
+export function preserveUnavailable(next: DashboardLayout, previousRaw: string | null, available: WidgetDef[], defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  if (!previousRaw) return next;
+  const previous = parseStoredLayout(previousRaw, defs);
+  const availableIds = new Set(available.map((d) => d.id));
+  let widgets = [...next.widgets];
+  previous.widgets.forEach((w, index) => {
+    if (availableIds.has(w.id) || widgets.some((x) => x.id === w.id)) return;
+    const before = previous.widgets.slice(0, index).reverse().find((p) => widgets.some((x) => x.id === p.id));
+    const at = before ? widgets.findIndex((x) => x.id === before.id) + 1 : widgets.length;
+    widgets = [...widgets.slice(0, at), w, ...widgets.slice(at)];
+  });
+  return { version: LAYOUT_VERSION, widgets: widgets.map((w, i) => ({ ...w, order: (i + 1) * ORDER_STEP })) };
 }
 
 export function serializeLayout(layout: DashboardLayout): string {

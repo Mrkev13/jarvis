@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
 import { JarvisCompanion } from "@/components/jarvis/JarvisCompanion";
+import { ModuleRouteGuard } from "@/components/modules/ModuleRouteGuard";
 import { PageTransition } from "@/components/motion/PageTransition";
 import { SearchHighlighter } from "@/components/search/SearchHighlighter";
 import { QuickAddProvider } from "@/components/quick-add/QuickAddProvider";
@@ -34,7 +35,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="hud-grid flex min-w-0 flex-1 flex-col">
             <MobileHeader />
             <div className="flex-1" data-jarvis-lane={companionLayout(pathname) === "ai" ? "ai" : "dock"}>
-              <PageTransition>{children}</PageTransition>
+              <PageTransition>
+                <ModuleRouteGuard>{children}</ModuleRouteGuard>
+              </PageTransition>
             </div>
           </div>
           <SearchHighlighter />

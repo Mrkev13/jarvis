@@ -11,7 +11,8 @@ import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
-import { NAV_PAGES } from "@/lib/navigation";
+import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { navPagesFor } from "@/lib/navigation";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
@@ -20,7 +21,8 @@ interface SidebarProps {
 }
 
 // Česká navigace (Roadmap 4A); seznam stránek sdílí s globálním vyhledáváním (lib/navigation.ts).
-export const NAV_LINKS = NAV_PAGES.map(({ href, label }) => ({ href, label }));
+// Roadmap 6C: jen stránky dostupných modulů (desktop i mobilní menu používají tuto komponentu).
+export const NAV_LINKS = navPagesFor(MODULE_ACCESS).map(({ href, label }) => ({ href, label }));
 
 export function isActiveLink(href: string, pathname: string | null): boolean {
   return href === "/" ? pathname === "/" : Boolean(pathname?.startsWith(href));

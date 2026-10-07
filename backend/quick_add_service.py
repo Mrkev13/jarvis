@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from models import Subject
+from module_registry import ModuleAccess, current_access
 from text_utils import format_czk_cz, format_date_cz, format_hours_cz, format_num_cz
 from time_utils import local_to_utc, now_local, utc_now
 
@@ -519,7 +520,8 @@ def _subjects(db: Session | None) -> list[dict]:
             db.query(Subject).filter(Subject.active == True).order_by(Subject.name).limit(200).all()]  # noqa: E712
 
 
-def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = None, subjects: list[dict] | None = None) -> dict:
+def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = None, subjects: list[dict] | None = None,
+          access: ModuleAccess | None = None) -> dict:
     now_utc = now_utc or utc_now()
     t = _Text(text)
     subj = subjects if subjects is not None else _subjects(db)
@@ -528,6 +530,9 @@ def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = No
         d.kind = "empty"
     else:
         d.kind, d.confidence = classify(t)
+        if d.kind in KINDS and not (access or current_access()).allows_quick_add_kind(d.kind):
+            # Roadmap 6C: vypnutý modul = jako by druh neexistoval (nic se nepředvyplní ani neuloží).
+            d.kind, d.confidence = "unknown", "low"
         if d.kind == "reminder":
             _parse_reminder(t, d, now_utc)
         elif d.kind == "finance":
@@ -574,8 +579,12 @@ def _float(v, fld: str, d: Draft):
         return None
 
 
-def to_tool_call(db: Session, kind: str, fields: dict, now_utc: datetime | None = None) -> tuple[str, dict]:
+def to_tool_call(db: Session, kind: str, fields: dict, now_utc: datetime | None = None, *,
+                 access: ModuleAccess | None = None) -> tuple[str, dict]:
     """Ověří pole z náhledu (po úpravách) a vrátí (WRITE tool, argumenty). Chyby → QuickAddInvalid."""
+    if kind in KINDS and not (access or current_access()).allows_quick_add_kind(kind):
+        # frontend se nikdy nebere za pravdu – ani ručně poslaný druh vypnutého modulu nic nevytvoří
+        raise QuickAddInvalid([{"field": "kind", "message": "Tento modul je vypnutý."}])
     now_utc = now_utc or utc_now()
     today = now_local(now_utc).date()
     f = fields if isinstance(fields, dict) else {}

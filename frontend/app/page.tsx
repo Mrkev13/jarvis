@@ -42,7 +42,7 @@ const TITLE = new Map(WIDGETS.map((w) => [w.id, w.title]));
  * „Upravit dashboard" zapne režim úprav; změny platí a ukládají se hned, „Hotovo" režim jen ukončí.
  */
 export default function Home() {
-  const { layout, update, reset } = useDashboardLayout();
+  const { layout, update, reset, available } = useDashboardLayout();
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false); // po prvních úpravách už se vstupní animace karet nepřehrávají
   const [confirmReset, setConfirmReset] = useState(false);
@@ -136,7 +136,7 @@ export default function Home() {
         actions={
           editing ? (
             <>
-              <Button variant="ghost" onClick={() => setConfirmReset(true)} disabled={!layout || isDefaultLayout(layout)}>
+              <Button variant="ghost" onClick={() => setConfirmReset(true)} disabled={!layout || isDefaultLayout(layout, available)}>
                 Obnovit výchozí rozložení
               </Button>
               <Button variant="primary" onClick={finishEditing} data-focus-key="dashboard:done">

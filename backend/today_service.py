@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 import reminder_service as rs
 from models import Assignment, Exam, Reminder, Subject
+from module_registry import ModuleAccess, current_access
 from notifications_service import list_notifications
 from planner_service import generate_plan
 from statuses import is_assignment_done, is_exam_open, norm
@@ -356,7 +357,12 @@ def date_label(d: date) -> str:
     return f"{WEEKDAYS_CZ[d.weekday()]} {format_date_cz(d)}"
 
 
-def build_today(db: Session, now_utc: datetime | None = None) -> dict:
+def gate_items(items: list[TodayItem], access: ModuleAccess) -> list[TodayItem]:
+    """Roadmap 6C: položky modulu, který nesmí do Dnes, se vynechají (podle refu „<typ>:<id>")."""
+    return [it for it in items if access.allows_ref(it.id, "today")]
+
+
+def build_today(db: Session, now_utc: datetime | None = None, *, access: ModuleAccess | None = None) -> dict:
     now_utc = now_utc or utc_now()
     local_now = now_local(now_utc)
     c = _Ctx(db=db, now_utc=now_utc, today=local_now.date(), now_local_naive=local_now.replace(tzinfo=None))
@@ -379,6 +385,8 @@ def build_today(db: Session, now_utc: datetime | None = None) -> dict:
     attention, severity_by_ref = section("attention", lambda: build_attention(c), ([], {}))
     priorities = section("priorities", lambda: build_priorities(c), [])
     upcoming = section("upcoming", lambda: build_upcoming(c), [])
+    access = access or current_access()
+    timeline, attention, priorities, upcoming = (gate_items(s, access) for s in (timeline, attention, priorities, upcoming))
     sections = dedupe(timeline, attention, priorities, upcoming, severity_by_ref)
 
     nxt, minutes = next_item(sections["timeline"], c.now_local_naive)

@@ -17,6 +17,7 @@ from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, Notification, WorkSession, WotGrind, WotResource
+from module_registry import ModuleAccess, current_access
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_month_bounds_utc, now_local
 from text_utils import WEEKDAYS_CZ_SHORT, clip
@@ -320,6 +321,7 @@ def build_current_context(
     now_utc: datetime | None = None,
     target_tokens: int = CONTEXT_TARGET_TOKENS,
     max_tokens: int = CONTEXT_MAX_TOKENS,
+    access: ModuleAccess | None = None,
 ) -> CurrentContext:
     local = now_local(now_utc)
     today = local.date()
@@ -346,7 +348,10 @@ def build_current_context(
     }
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
     explicit = classify_areas(message, projects, tanks, implied=False) | named
-    ordered =sorted((k for k in _AREA_SECTIONS_ORDER if k in areas), key=lambda k: k not in explicit)
+    # Roadmap 6C: modul, který nesmí do AI kontextu (vypnutý flag), nedodá sekci CURRENT STATE.
+    access = access or current_access()
+    ordered = sorted((k for k in _AREA_SECTIONS_ORDER if k in areas and access.allows_context_area(k)),
+                     key=lambda k: k not in explicit)
     sections = [(key, builders[key]()) for key in ordered]
 
     memories = rank_memories(db.query(Memory).filter(Memory.active.is_(True)).all(), message, areas, planner=planner_like)
