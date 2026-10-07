@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+  <defs>
+    <linearGradient id="hood" x1="45" y1="116" x2="137" y2="177" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.55" stop-color="#05070B"/>
+      <stop offset="1" stop-color="#172033"/>
+    </linearGradient>
+    <linearGradient id="helmet" x1="46" y1="45" x2="137" y2="126" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263247"/>
+      <stop offset="0.38" stop-color="#090C12"/>
+      <stop offset="1" stop-color="#1A2230"/>
+    </linearGradient>
+    <radialGradient id="visor" cx="0" cy="0" r="1" gradientTransform="translate(74 72) rotate(55) scale(66 75)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#142439"/>
+      <stop offset="0.4" stop-color="#05080E"/>
+      <stop offset="1" stop-color="#000207"/>
+    </radialGradient>
+    <linearGradient id="cap" x1="56" y1="29" x2="133" y2="57" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D2635"/>
+      <stop offset="1" stop-color="#05070B"/>
+    </linearGradient>
+    <filter id="cyanGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <path d="M42 176c2-30 20-50 48-50s46 20 48 50H42Z" fill="url(#hood)" stroke="#253149" stroke-width="3"/>
+  <path d="M61 139 48 154l14 22h56l14-22-13-15-18 14H79l-18-14Z" fill="#080B11"/>
+  <path d="m69 135 11 18h20l11-18" stroke="#117EA9" stroke-width="3" stroke-linecap="round"/>
+  <path d="M82 154h16v22H82z" fill="#0C1420"/>
+  <path d="M85 160h10" stroke="#2EDCFF" stroke-width="2.5" stroke-linecap="round" filter="url(#cyanGlow)"/>
+
+  <path d="M39 75c0-35 22-55 51-55s51 20 51 55" stroke="#111827" stroke-width="12" stroke-linecap="round"/>
+  <rect x="30" y="70" width="22" height="44" rx="10" fill="#111827" stroke="#314158" stroke-width="3"/>
+  <rect x="128" y="70" width="22" height="44" rx="10" fill="#111827" stroke="#314158" stroke-width="3"/>
+  <path d="M41 79v26M139 79v26" stroke="#20D7FF" stroke-width="4" stroke-linecap="round" filter="url(#cyanGlow)"/>
+
+  <rect x="43" y="45" width="94" height="88" rx="38" fill="url(#helmet)" stroke="#26344A" stroke-width="3"/>
+  <rect x="49" y="57" width="82" height="64" rx="29" fill="url(#visor)" stroke="#167DA1" stroke-width="2"/>
+  <path d="M61 65c14-9 42-10 58 1" stroke="#48617B" stroke-width="3" stroke-linecap="round" opacity=".42"/>
+  <path d="M57 106c15 8 50 10 67-1" stroke="#0B3A51" stroke-width="2" stroke-linecap="round" opacity=".7"/>
+
+  <path d="M48 50c5-25 23-37 47-37 22 0 38 9 44 29-28-8-60-6-91 8Z" fill="url(#cap)" stroke="#29364A" stroke-width="3"/>
+  <path d="M87 21 96 34l8-9" stroke="#2EDCFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#cyanGlow)"/>
+  <path d="M104 44c18-2 33 0 47 7-12 4-27 4-43 0" fill="#05070A" stroke="#202B3C" stroke-width="2"/>
+
+  <path d="M53 160 41 176h23M127 160l12 16h-23" stroke="#183F59" stroke-width="4" stroke-linecap="round"/>
+  <path d="M51 163h9v9h-9zM120 163h9v9h-9z" fill="#0A1521" stroke="#22CFF3" stroke-width="1.5"/>
+</svg>

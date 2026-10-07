@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { JarvisAvatar } from "@/components/jarvis/JarvisAvatar";
 import {
   AccentLine,
   Button,
@@ -25,6 +26,7 @@ import {
   type BriefingPayload,
   type FallbackItem,
 } from "@/lib/briefing";
+import { briefingJarvisState } from "@/lib/jarvisAvatar";
 import { cx } from "@/lib/ui";
 
 function MaybeLink({ url, children }: { url: string; children: React.ReactNode }) {
@@ -145,6 +147,13 @@ export default function DailyBriefingCard({ index, resource }: { index?: number;
   const view = data ? briefingView(data) : null;
   const action = generateAction(data);
   const caption = data ? generatedCaption(data) : null;
+  const jarvisState = briefingJarvisState({
+    loading: briefing.loading,
+    busy,
+    error: briefing.status === "error" || Boolean(message) || view?.kind === "failed",
+    generating: view?.kind === "generating",
+    warning: view?.kind === "ready" && Boolean(view.warning),
+  });
 
   return (
     <HudFrame>
@@ -152,12 +161,15 @@ export default function DailyBriefingCard({ index, resource }: { index?: number;
         <AccentLine />
         <div className="p-4 md:p-5">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <HudLabel as="p" tone="accent">Denní přehled{data?.date ? ` · ${data.date.split("-").reverse().map(Number).join(". ")}` : ""}</HudLabel>
-              <h2 id="briefing-title" className="mt-1 text-lg md:text-xl font-semibold text-ink">
-                Co je dnes důležité
-              </h2>
-              {caption ? <p className="mt-0.5 text-xs text-ink-muted">{caption}</p> : null}
+            <div className="flex min-w-0 items-start gap-3">
+              <JarvisAvatar state={jarvisState} size="sm" />
+              <div className="min-w-0">
+                <HudLabel as="p" tone="accent">Denní přehled{data?.date ? ` · ${data.date.split("-").reverse().map(Number).join(". ")}` : ""}</HudLabel>
+                <h2 id="briefing-title" className="mt-1 text-lg md:text-xl font-semibold text-ink">
+                  Co je dnes důležité
+                </h2>
+                {caption ? <p className="mt-0.5 text-xs text-ink-muted">{caption}</p> : null}
+              </div>
             </div>
             {action ? (
               <Button
