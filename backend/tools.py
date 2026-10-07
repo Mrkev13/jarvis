@@ -39,18 +39,11 @@ def get_wot_grinds():
     db = SessionLocal()
 
     try:
+        from wot_service import serialize_grind  # Game Enrichment B: + xp_start, started_at, progress
+
         grinds = db.query(WotGrind).all()
 
-        return [
-            {
-                "id": item.id,
-                "tank": item.tank,
-                "xp_remaining": item.xp_remaining,
-                "priority": item.priority,
-                "status": item.status
-            }
-            for item in grinds
-        ]
+        return [serialize_grind(item) for item in grinds]
 
     finally:
         db.close()

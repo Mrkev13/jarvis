@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta, timezone
 
@@ -27,6 +27,8 @@ from tools import get_mff_characters, get_mff_summary, upsert_mff_character
 from tools import get_goals, get_goals_summary
 
 from fastapi.middleware.cors import CORSMiddleware
+import media_storage
+import wot_service
 
 
 from ai import DailyLimitError, LLMRateLimitError, ask_ai, execute_confirm_action, propose_undo_action, reject_pending, _get_pending_action, _check_pending_expired
@@ -45,7 +47,7 @@ import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz, planner_action_line
-from time_utils import local_month_bounds_utc, today_local
+from time_utils import local_month_bounds_utc, today_local, utc_now
 from env_config import env_bool
 
 
@@ -1042,10 +1044,19 @@ def add_wot_grind(request: WotGrindRequest):
             for f in tracked_fields:
                 setattr(old_obj, f, getattr(existing, f, None))
 
+            was_completed = (existing.status or "").lower() == "completed"
+            xp_before = existing.xp_remaining
             existing.xp_remaining = request.xp_remaining
             existing.priority = request.priority
             existing.status = request.status
             item_id = existing.id
+            now_completed = (request.status or "").lower() == "completed"
+            if was_completed and not now_completed:
+                # Game Enrichment B: znovu aktivovaný grind = nový základ průběhu (historie splnění zůstává)
+                existing.xp_start = request.xp_remaining
+                existing.started_at = utc_now()
+            elif existing.xp_start is None and not now_completed:
+                existing.xp_start = request.xp_remaining
 
             xp_str = f"{float(request.xp_remaining or 0):,.0f}".replace(",", " ")
             summary = f"Grind {request.tank} upraven – zbývá {xp_str} XP"
@@ -1055,12 +1066,19 @@ def add_wot_grind(request: WotGrindRequest):
                 delta=delta_dict(old_obj, existing, tracked_fields),
                 user_context="manual"
             )
+            if now_completed and not was_completed:
+                # stav „Dokončeno" z formuláře = stejné splnění jako tlačítko Splněno (100 %, historie, událost)
+                existing.xp_remaining = 0
+                db.flush()
+                wot_service.record_completion(db, existing, source="manual", xp_before=xp_before, now=utc_now())
         else:
             item = WotGrind(
                 tank=request.tank,
                 xp_remaining=request.xp_remaining,
                 priority=request.priority,
-                status=request.status
+                status=request.status,
+                xp_start=request.xp_remaining,  # Game Enrichment B: základ průběhu
+                started_at=utc_now(),
             )
             db.add(item)
             db.flush()
@@ -1088,6 +1106,169 @@ def add_wot_grind(request: WotGrindRequest):
 @app.get("/wot/grinds")
 def wot_grinds():
     return get_wot_grinds()
+
+# ===== Game Enrichment B: splnění grindů, historie, milníky a screenshoty =====
+
+def _wot_call(fn):
+    try:
+        return fn()
+    except wot_service.WotError as exc:
+        raise HTTPException(status_code=exc.status, detail={"error": exc.code, "message": str(exc)}) from None
+
+
+class WotMilestoneRequest(BaseModel):
+    tank: str | None = None
+    map_name: str | None = None
+    played_on: str | None = None
+    damage: int | None = None
+    assist: int | None = None
+    kills: int | None = None
+    base_xp: int | None = None
+    mastery: str | None = None
+    milestone_type: str | None = None
+    notes: str | None = None
+    favorite: bool | None = None
+
+
+class WotScreenshotUpdateRequest(BaseModel):
+    caption: str | None = None
+    position: int | None = None
+
+
+@app.post("/wot/grind/{grind_id}/complete")
+def wot_grind_complete(grind_id: int):
+    """Výslovné „Splněno": 100 %, grind odchází z aktivních, záznam do historie + událost wot_grind_completed.
+    Dvojí splnění → 409 already_completed (nic se nezapíše podruhé)."""
+    db = SessionLocal()
+    try:
+        grind, completion = _wot_call(lambda: wot_service.complete_grind(db, grind_id))
+        db.commit()
+        return {"ok": True, "grind": wot_service.serialize_grind(grind), "completion": wot_service.serialize_completion(completion)}
+    finally:
+        db.close()
+
+
+@app.get("/wot/grinds/completed")
+def wot_grinds_completed():
+    db = SessionLocal()
+    try:
+        return wot_service.list_completions(db)
+    finally:
+        db.close()
+
+
+@app.get("/wot/milestones")
+def wot_milestones():
+    db = SessionLocal()
+    try:
+        return wot_service.list_milestones(db)
+    finally:
+        db.close()
+
+
+@app.post("/wot/milestones")
+def wot_milestone_create(request: WotMilestoneRequest):
+    db = SessionLocal()
+    try:
+        m = _wot_call(lambda: wot_service.create_milestone(db, request.model_dump()))
+        db.commit()
+        db.refresh(m)
+        return wot_service.serialize_milestone(m)
+    finally:
+        db.close()
+
+
+@app.patch("/wot/milestones/{milestone_id}")
+def wot_milestone_update(milestone_id: int, request: WotMilestoneRequest):
+    db = SessionLocal()
+    try:
+        m = _wot_call(lambda: wot_service.update_milestone(db, milestone_id, request.model_dump(exclude_unset=True)))
+        db.commit()
+        db.refresh(m)
+        return wot_service.serialize_milestone(m)
+    finally:
+        db.close()
+
+
+@app.delete("/wot/milestones/{milestone_id}")
+def wot_milestone_delete(milestone_id: int):
+    db = SessionLocal()
+    try:
+        files = _wot_call(lambda: wot_service.delete_milestone(db, milestone_id))
+        db.commit()
+        removed = sum(media_storage.delete_file(wot_service.SCREENSHOT_FOLDER, f) for f in files)
+        return {"ok": True, "id": milestone_id, "files_removed": removed}
+    finally:
+        db.close()
+
+
+@app.post("/wot/milestones/{milestone_id}/screenshots")
+async def wot_screenshot_upload(milestone_id: int, request: Request, filename: str | None = None, caption: str | None = None):
+    """Upload jednoho screenshotu jako surové tělo požadavku (Content-Type obrázku); `filename` je jen metadata.
+    Typ se ověřuje podle obsahu, limit velikosti před i po načtení, název souboru generuje server."""
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > media_storage.MAX_BYTES:
+        raise HTTPException(status_code=413, detail={"error": "invalid_file", "message": "Soubor je moc velký."})
+    body = await request.body()
+    db = SessionLocal()
+    try:
+        shot = _wot_call(lambda: wot_service.add_screenshot(db, milestone_id, body, filename, caption))
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            media_storage.delete_file(wot_service.SCREENSHOT_FOLDER, shot.stored_name)
+            raise
+        db.refresh(shot)
+        return wot_service.serialize_screenshot(shot)
+    finally:
+        db.close()
+
+
+@app.get("/wot/screenshots/{screenshot_id}/file")
+def wot_screenshot_file(screenshot_id: int):
+    """Jen soubor patřící existujícímu záznamu (žádné cesty od klienta); chybějící soubor = 404."""
+    db = SessionLocal()
+    try:
+        shot = _wot_call(lambda: wot_service.get_screenshot(db, screenshot_id))
+        try:
+            path = media_storage.path_for(wot_service.SCREENSHOT_FOLDER, shot.stored_name)
+        except media_storage.MediaError:
+            raise HTTPException(status_code=404, detail="Soubor neexistuje.") from None
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Soubor neexistuje.")
+        return FileResponse(path, media_type=shot.content_type, headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        })
+    finally:
+        db.close()
+
+
+@app.patch("/wot/screenshots/{screenshot_id}")
+def wot_screenshot_update(screenshot_id: int, request: WotScreenshotUpdateRequest):
+    db = SessionLocal()
+    try:
+        shot = _wot_call(lambda: wot_service.update_screenshot(db, screenshot_id, request.model_dump(exclude_unset=True)))
+        db.commit()
+        db.refresh(shot)
+        return wot_service.serialize_screenshot(shot)
+    finally:
+        db.close()
+
+
+@app.delete("/wot/screenshots/{screenshot_id}")
+def wot_screenshot_delete(screenshot_id: int):
+    db = SessionLocal()
+    try:
+        name = _wot_call(lambda: wot_service.delete_screenshot(db, screenshot_id))
+        db.commit()
+        removed = media_storage.delete_file(wot_service.SCREENSHOT_FOLDER, name)
+        return {"ok": True, "id": screenshot_id, "file_removed": removed}
+    finally:
+        db.close()
+
 
 @app.post("/finance/transaction")
 def add_finance_transaction(request: FinanceTransactionRequest):
@@ -2702,6 +2883,7 @@ def delete_wot_grind(item_id: int):
             raise HTTPException(status_code=404, detail="WotGrind not found")
 
         tracked_fields = ["tank", "xp_remaining", "priority", "status"]
+        wot_service.detach_completions(db, item.id)  # Game Enrichment B: historie splnění zůstává
         log_activity(
             db, "wot", "delete", f"Grind smazán: {item.tank}",
             entity_type="WotGrind", entity_id=item.id,

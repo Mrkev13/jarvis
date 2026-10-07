@@ -652,6 +652,9 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
             delta = {"active": {"old": True, "new": False}}
         log_activity(db, ent.area, "delete", _short(f"Smazáno ({_origin(user_context)}): {label}", 480),
                      entity_type=ent.entity_type, entity_id=obj.id, delta=delta, user_context=user_context)
+        if ent.name == "wot_grind":
+            from wot_service import detach_completions
+            detach_completions(db, obj.id)  # historie splnění zůstává (Game Enrichment B)
         if ent.name != "memory":
             db.delete(obj)
         return effects
