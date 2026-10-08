@@ -1,6 +1,7 @@
 // Sdílená UI primitiva (Roadmap 4A/4B) – viz docs/design-system.md.
 export { AreaBadge } from "./AreaBadge";
-export { Button, ButtonLink, TextLink, buttonClass } from "./Button";
+export { Button, ButtonLink, IconButton, TextLink, buttonClass } from "./Button";
+export { Icon, IconTile } from "./Icon";
 export { Card, CardHeader } from "./Card";
 export { default as ConfirmDialog } from "./ConfirmDialog";
 export { Drawer } from "./Drawer";
