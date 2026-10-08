@@ -253,6 +253,8 @@ def _dispatch(events: list[EventSnapshot]) -> None:
 
 @sa_event.listens_for(Session, "after_commit")
 def _after_commit(session: Session) -> None:
+    if session.in_nested_transaction():
+        return  # uvolnění savepointu není commit – vnější transakce se ještě může vrátit
     pending = session.info.pop(_PENDING_KEY, None)
     if pending:
         _dispatch(pending)

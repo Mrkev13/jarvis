@@ -162,10 +162,11 @@ class HabitsEventsTestCase(_DbCase):
         with self.Session() as db, patch.object(habits, "created_day", lambda _h: today):
             habits.set_entry(db, hid, "done", day=today, today=today)
             habits.set_entry(db, hid, "done", day=today, today=today, note="po obědě")
+            habits.set_entry(db, hid, "done", day=today, today=today, note="večer")
             db.commit()
         self.assertEqual([e[1] for e in self.events()], ["habits.entry.done"], "stejný stav = žádný další fakt")
         rows = [a for a in self.activity("habits") if a[0] in ("check", "update")]
-        self.assertEqual(len(rows), 2, "úprava poznámky zůstává v historii (Aktivita)")
+        self.assertEqual(len(rows), 3, "každá úprava poznámky zůstává v historii (Aktivita)")
 
     def test_habit_rollback_drops_entry_and_event(self):
         today = date(2026, 10, 8)
@@ -261,6 +262,12 @@ class AfterCommitTestCase(_DbCase):
                 sp.rollback()
                 db.commit()
             self.assertEqual(seen, ["school.assignment.completed"], "rollback savepointu nezahodí vnější událost")
+            with self.Session() as db:
+                school_service.reopen_assignment(db, 1)
+                db.begin_nested().commit()
+                self.assertEqual(seen, ["school.assignment.completed"], "uvolnění savepointu není commit")
+                db.rollback()
+            self.assertEqual(seen, ["school.assignment.completed"], "vrácená vnější transakce nic nepošle")
             db = self.Session()
             school_service.reopen_assignment(db, 1)
             db.close()  # bez commitu → transakce končí, čekající snapshot se zahodí

@@ -12,6 +12,8 @@ se nic neodvozuje jako `missed`; po obnovení jiný den začíná odvozování o
 """
 from __future__ import annotations
 
+import uuid
+
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
@@ -268,5 +270,7 @@ def set_entry(db: Session, habit_id: int, state: str, *, day: date | None = None
         else:
             # jen hodnota / doba / poznámka – žádný nový fakt, jen historie
             log_activity(db, AREA, action, summary, entity_type="habit_entry", entity_id=entry.id, delta=delta,
-                         user_context=user_context)
+                         user_context=user_context,
+                         # shrnutí je pro všechny úpravy dne stejné → vlastní klíč, jinak by druhou úpravu zahodil
+                         dedupe_key=f"habit_entry:{entry.id}:edit:{uuid.uuid4().hex}")
     return entry
