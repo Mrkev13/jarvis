@@ -638,3 +638,45 @@ images to small stat rows or turn modules into galleries.
 - Upload → review drawer immediately; it states that the replay is already saved ("Doplnit později"). Parser status
   is a badge + one plain sentence; raw warnings only for partial/unsupported replays.
 
+
+## 22. Icons, status and actions (MRK-15 visual foundation)
+
+**Icons** – one set of line icons, `lib/icons.ts` (data) and `components/ui/Icon` (render). Rules:
+- Grid 24 × 24, `currentColor` stroke 1.75, round caps/joins.
+- Size tokens: `xs` 12 (in a badge), `sm` 16 (button/row), `md` 20 (card header), `lg` 24.
+- Without `label` an icon is decorative (`aria-hidden`), so it must sit next to text. With `label` it becomes `role="img"`.
+- `filled` exists only for toggle states (star = favorite).
+- No icon library dependency; add new shapes to `lib/icons.ts` only, kebab-case names.
+- **No emoji as functional icons** – an icon only where it carries information (section type, state, an action without room for text). The icon test guards the migrated screens.
+
+**Primitives**
+- `IconTile` – the restrained duotone frame (cyan 10 %) used by `CardHeader icon="calendar"` and the quick actions. A tone is used only when the icon carries a state.
+- `CardHeader icon` – accepts an icon name (preferred) or a legacy node.
+- `StatusBadge icon` – small state icon before the text. Tones keep their semantics:
+  - success = done;
+  - warning = soon / attention;
+  - danger = error / overdue;
+  - info = in progress / informational;
+  - neutral = category;
+  - accent = brand mark.
+- `Button icon` – leading icon; the text stays.
+- `IconButton` – icon-only "subtle" action. `label` is required (aria-label + title), the square matches the Button height, it is ≥ 44 px on touch, and `pressed` → `aria-pressed` for toggles.
+- Action hierarchy is unchanged: primary (one per view), secondary, success (outline), danger (outline), ghost/IconButton (subtle).
+
+**Applied so far**
+- Dashboard: all widget headers and quick actions, plus the hidden-widgets card.
+- Weekly review card and Today section headers.
+- School: deadline badges (alert = overdue, clock = due soon).
+- WoT: favorite star on milestone cards and replay rows; completed-grind check.
+- Shell: notification bell and mobile menu icon.
+
+**Migration backlog** (next passes, module by module):
+- AI assistant controls: 🎤 🔊 ✎ 🗑 ✕, and `⚠️/❌/✅` prefixes in `lib/aiChat.ts` / `aiActions.ts` (coordinate with Jarvis / MRK-16).
+- Today "✓ Hotovo" buttons → `Button icon="check"`.
+- Text arrows "Všechny →" → `chevron-right`.
+- Emoji inside backend notification titles (⏰).
+- `StreakFlame` 🔥 – Motion System, keep until a motion review.
+- Replay/milestone form "★" labels.
+- MotionPreview.
+- Empty-state icons.
+- Work / Finance / Goals / MFF / Activity / Quick Add / Search adoption.
