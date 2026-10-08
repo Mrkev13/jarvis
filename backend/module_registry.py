@@ -78,7 +78,9 @@ MODULES: tuple[ModuleDef, ...] = (
               api_prefixes=("/goals", "/goal")),
     ModuleDef("wot", "World of Tanks", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},
-              entity_types=frozenset({"wot_grind", "wot_resource"}), context_areas=frozenset({"wot"}),
+              # wot_replay = Replay Library (Game Enrichment C) ve vyhledávání; /wot pokrývá i /wot/replays,
+              # /wot/milestones a /wot/screenshots (milníky ani splnění se nevyhledávají – nemají vlastní typ výsledku).
+              entity_types=frozenset({"wot_grind", "wot_resource", "wot_replay"}), context_areas=frozenset({"wot"}),
               api_prefixes=("/wot",)),
     ModuleDef("mff", "Marvel Future Fight", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},

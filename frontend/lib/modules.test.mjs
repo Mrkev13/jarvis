@@ -225,3 +225,25 @@ test("Today and AI context: canonical capability answers", () => {
   assert.equal(DEFAULTS.allows("school", "today"), true);
   assert.equal(off("school").allows("school", "today"), false);
 });
+
+test("MRK-7 main-era: Replay Library and milestones belong to WoT", () => {
+  const off = createModuleAccess({ wot: false });
+  const on = createModuleAccess({});
+  // stránky knihovny replayů a deep linky z vyhledávání
+  for (const path of ["/wot", "/wot/replays", "/wot/replays?replay=1"]) {
+    assert.equal(allowsHref(on, path), true, path);
+    assert.equal(allowsHref(off, path), false, path);
+  }
+  assert.equal(off.moduleForPath("/wot/replays")?.id, "wot");
+  // výsledky Ctrl+K: replay i grind zmizí, jádro a jiné moduly zůstanou
+  const results = [
+    { id: "wot_replay:1", type: "wot_replay", title: "Progetto 65", subtitle: "Replay · Útesy", area: "wot", href: "/wot/replays?replay=1", score: 85 },
+    { id: "wot_grind:2", type: "wot_grind", title: "Kranvagn", subtitle: "Grind", area: "wot", href: "/wot?grind=2", score: 80 },
+    { id: "exam:3", type: "exam", title: "test", subtitle: "Test", area: "school", href: "/school?exam=3", score: 70 },
+  ];
+  assert.deepEqual(filterAvailable(results, on).map((r) => r.id), ["wot_replay:1", "wot_grind:2", "exam:3"]);
+  assert.deepEqual(filterAvailable(results, off).map((r) => r.id), ["exam:3"]);
+  assert.equal(off.allowsEntity("wot_replay", "search"), false, "typ je ve vlastnictví WoT, ne jádra");
+  // core trasy hlavního menu (Dnes, AI s Jarvisem) zůstávají
+  for (const path of ["/", "/today", "/ai", "/reminders"]) assert.equal(allowsHref(off, path), true, path);
+});

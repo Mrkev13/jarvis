@@ -31,7 +31,9 @@ import tool_router  # noqa: E402
 import tools  # noqa: E402
 from context_service import build_current_context  # noqa: E402
 from database import Base  # noqa: E402
-from models import Assignment, FinanceTransaction, Goal, MffCharacter, Subject, WorkSession, WotGrind  # noqa: E402
+from models import (  # noqa: E402
+    Assignment, Exam, FinanceTransaction, Goal, MffCharacter, Subject, WorkSession, WotGrind, WotMilestone, WotReplay,
+)
 from module_registry import ModuleAccess, ModuleDef  # noqa: E402
 from today_service import TodayItem, gate_items  # noqa: E402
 
@@ -383,6 +385,134 @@ class FrontendParityTestCase(unittest.TestCase):
                      "entity_types": set(m.entity_types), "quick_add_kinds": set(m.quick_add_kinds)} for m in mr.MODULES}
         self.assertEqual(list(fe), list(be))
         self.assertEqual(fe, be)
+
+    def test_frontend_routes_are_backend_api_prefixes(self):
+        """MRK-7: stránka modulu (frontend routes) má stejný prefix i na backendu – brána stránky i API sedí."""
+        if not self.TS.exists():
+            self.skipTest("frontend není k dispozici")
+        src = self.TS.read_text(encoding="utf-8")
+        for line in src.splitlines():
+            m = re.match(r'\s*\{ id: "(\w+)"', line)
+            if m:
+                routes = set(re.findall(r'"(/[a-z/]+)"', re.search(r"routes: \[([^\]]*)\]", line).group(1)))
+                self.assertTrue(routes <= set(mr.ModuleAccess({}).get(m.group(1)).api_prefixes), m.group(1))
+
+
+
+class MainEraGateTestCase(unittest.TestCase):
+    """MRK-7: přírůstky mainu od původní větve flagů – Replay Library, milníky WoT, splnění ve Škole, AI zápisy."""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+    def setUp(self):
+        self.engine, self.Session = _session()
+        self._orig = (auth_service.SessionLocal, main.SessionLocal, tools.SessionLocal, auth_service.AUTH_PIN_HASH,
+                      auth_service._failed_attempts)
+        auth_service.SessionLocal = main.SessionLocal = tools.SessionLocal = self.Session
+        auth_service._failed_attempts = {}
+        auth_service.AUTH_PIN_HASH = ""
+        db = self.Session()
+        subj = Subject(name="Fyzika", active=True)
+        db.add(subj)
+        db.flush()
+        now = datetime(2026, 10, 7, 12)
+        db.add_all([
+            WotGrind(tank="Kranvagn", xp_remaining=52000, status="active", priority="high"),
+            WotMilestone(tank="Progetto 65", milestone_type="mastery", mastery="ace", favorite=False, created_at=now, updated_at=now),
+            WotReplay(original_filename="progetto.wotreplay", stored_filename="0" * 32 + ".wotreplay", file_size=10, sha256="a" * 64,
+                      uploaded_at=now, created_at=now, updated_at=now, tank_name="Progetto 65", map_name="Útesy", tags=["carry"],
+                      favorite=False, parser_status="parsed"),
+            Assignment(title="Protokol", subject_id=subj.id, status="todo"),
+            Exam(title="Zápočet", subject_id=subj.id, status="upcoming"),
+        ])
+        db.commit()
+        db.close()
+        self.client = TestClient(main.app)
+        self._env = patch.dict(os.environ, _clean_env(), clear=True)
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+        (auth_service.SessionLocal, main.SessionLocal, tools.SessionLocal, auth_service.AUTH_PIN_HASH,
+         auth_service._failed_attempts) = self._orig
+        self.engine.dispose()
+
+    def counts(self):
+        db = self.Session()
+        try:
+            return tuple(db.query(m).count() for m in (WotGrind, WotMilestone, WotReplay))
+        finally:
+            db.close()
+
+    def test_wot_off_gates_replays_milestones_and_search_without_touching_data(self):
+        self.assertEqual(self.client.get("/wot/replays").status_code, 200)
+        self.assertEqual(self.client.get("/wot/milestones").status_code, 200)
+        db = self.Session()
+        try:
+            on = {r["type"] for r in ss.search(db, "progetto")["results"]}
+        finally:
+            db.close()
+        self.assertEqual(on, {"wot_replay"})
+        before = self.counts()
+
+        os.environ["MODULE_WOT_ENABLED"] = "false"
+        for method, url in (("get", "/wot/replays"), ("get", "/wot/replays/1"), ("get", "/wot/replays/1/file"),
+                            ("post", "/wot/replays?filename=x.wotreplay"), ("patch", "/wot/replays/1"),
+                            ("delete", "/wot/replays/1"), ("get", "/wot/milestones"), ("delete", "/wot/milestones/1"),
+                            ("post", "/wot/milestones/1/screenshots"), ("get", "/wot/screenshots/1/file"),
+                            ("get", "/wot/grinds/completed"), ("post", "/wot/grind/1/complete")):
+            kwargs = {"json": {}} if method == "patch" else {"content": self.PNG} if method == "post" else {}
+            r = getattr(self.client, method)(url, **kwargs)
+            self.assertEqual((r.status_code, r.json()["detail"]["module"]), (404, "wot"), url)
+        db = self.Session()
+        try:
+            self.assertEqual(ss.search(db, "progetto")["results"], [], "replaye zmizí z vyhledávání")
+            self.assertEqual(ss.search(db, "kranvagn")["results"], [])
+        finally:
+            db.close()
+        self.assertIsNone(self.client.get("/dashboard").json()["wot"])
+        self.assertEqual(self.counts(), before, "data WoT zůstávají beze změny")
+
+        os.environ["MODULE_WOT_ENABLED"] = "true"
+        self.assertEqual(len(self.client.get("/wot/replays").json()["items"]), 1, "po zapnutí vše zpět")
+        self.assertEqual(len(self.client.get("/wot/milestones").json()), 1)
+        self.assertIsNotNone(self.client.get("/dashboard").json()["wot"])
+
+    def test_school_completion_endpoints_follow_the_school_flag(self):
+        os.environ["MODULE_SCHOOL_ENABLED"] = "false"
+        for url in ("/school/assignment/1/complete", "/school/assignment/1/reopen", "/school/exam/1/close", "/school/exam/1/reopen"):
+            self.assertEqual(self.client.post(url, json={}).status_code, 404, url)
+        os.environ["MODULE_SCHOOL_ENABLED"] = "true"
+        self.assertEqual(self.client.post("/school/assignment/1/complete").status_code, 200)
+
+    def test_ai_mutations_of_disabled_module_are_refused(self):
+        import mutation_service as ms
+
+        os.environ["MODULE_WOT_ENABLED"] = "false"
+        db = self.Session()
+        try:
+            with self.assertRaises(ms.MutationRefused) as ctx:
+                ms.resolve_mutation(db, "wot_grind", "update", {"id": 1}, {"priority": "low"})
+            self.assertEqual(ctx.exception.code, "module_unavailable")
+            ms.resolve_mutation(db, "school_assignment", "complete", {"id": 1})  # jiný modul beze změny
+            os.environ["MODULE_WOT_ENABLED"] = "true"
+            plan = ms.resolve_mutation(db, "wot_grind", "update", {"id": 1}, {"priority": "low"})
+            os.environ["MODULE_WOT_ENABLED"] = "false"  # vypnuto mezi návrhem a potvrzením → nic se nezmění
+            with patch.object(ms, "SessionLocal", self.Session), self.assertRaises(ms.StaleTarget):
+                ms.apply_mutation_plan(plan)
+        finally:
+            db.close()
+        db = self.Session()
+        try:
+            self.assertEqual(db.get(WotGrind, 1).priority, "high")
+        finally:
+            db.close()
+
+    def test_quick_add_time_parsing_is_core(self):
+        """MRK-11: schůzka s časem je připomínka (jádro) – funguje i se všemi moduly vypnutými."""
+        off = ModuleAccess({m.id: False for m in mr.MODULES})
+        r = qa.parse("21.10.2026 fyzio od 14 hodin", now_utc=datetime(2026, 10, 3, 10), subjects=[], access=off)
+        self.assertEqual((r["kind"], r["fields"]["due_local"], r["ready"]), ("reminder", "2026-10-21T14:00", True))
 
 
 if __name__ == "__main__":
