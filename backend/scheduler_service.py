@@ -50,6 +50,16 @@ def _run_hourly_job() -> None:
             db.rollback()
             print(f"[scheduler] notifications failed: {_nerr}")
         try:
+            # MRK-19: retence přenosové historie událostí (jen domain_events; Aktivita a historie zůstávají)
+            from domain_events import cleanup_domain_events
+            removed = cleanup_domain_events(db)
+            db.commit()
+            if removed:
+                print(f"[scheduler] domain events retention removed: {removed}")
+        except Exception as _eerr:
+            db.rollback()
+            print(f"[scheduler] domain events retention failed: {type(_eerr).__name__}")
+        try:
             from backup_service import run_backup, should_run_backup_daily
             if should_run_backup_daily():
                 bid = run_backup(db)
