@@ -5,7 +5,7 @@
  * Čisté funkce, testy: search.test.mjs.
  */
 import { areaMeta } from "./areas.ts";
-import { allowsHref, type ModuleAccess } from "./modules.ts";
+import { allowsHref, MODULE_UI, MODULES, type ModuleAccess } from "./modules.ts";
 import { NAV_PAGES, type NavPage } from "./navigation.ts";
 
 export type SearchResult = {
@@ -75,7 +75,23 @@ export function searchNavigation(raw: string, pages: NavPage[] = NAV_PAGES): Sea
     .sort((a, b) => b.score - a.score);
 }
 
-const GROUP_ORDER = ["page", "school", "reminders", "work", "finance", "goals", "memory", "wot", "mff"];
+/** Skupiny jádra ve vyhledávání (oblast → parametr odkazu a pořadí); skupiny modulů dodává `MODULE_UI`. */
+const CORE_SEARCH = [
+  { area: "reminders", params: ["reminder"], order: 20 },
+  { area: "memory", params: ["memory"], order: 60 },
+];
+
+const SEARCH_AREAS = [
+  ...CORE_SEARCH,
+  ...MODULES.filter((m) => m.implemented && MODULE_UI[m.id]?.searchGroupOrder !== undefined).map((m) => ({
+    area: m.id,
+    params: MODULE_UI[m.id].searchParams ?? [],
+    order: MODULE_UI[m.id].searchGroupOrder!,
+  })),
+].sort((a, b) => a.order - b.order);
+
+/** Pořadí skupin při shodě skóre: navigace, pak oblasti podle `order` (MRK-20: odvozeno z manifestů). */
+export const GROUP_ORDER: string[] = ["page", ...SEARCH_AREAS.map((g) => g.area)];
 
 function groupKey(r: SearchResult): string {
   return r.type === "page" ? "page" : r.area ?? "other";
@@ -152,8 +168,11 @@ export function isSearchShortcut(e: { key: string; ctrlKey: boolean; metaKey: bo
   return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K");
 }
 
-/** Parametry odkazů z vyhledávání (backend search_service: href) → cíl `data-search-target` na stránce. */
-export const SEARCH_TARGET_PARAMS = ["subject", "assignment", "exam", "reminder", "session", "transaction", "goal", "memory", "grind", "character", "replay"] as const;
+/**
+ * Parametry odkazů z vyhledávání (backend `<modul>_integrations.py`: href) → cíl `data-search-target` na stránce.
+ * MRK-20: jádro + `MODULE_UI.searchParams`.
+ */
+export const SEARCH_TARGET_PARAMS: readonly string[] = SEARCH_AREAS.flatMap((g) => g.params);
 
 export function searchTargetFromParams(params: { get(name: string): string | null }): string | null {
   for (const key of SEARCH_TARGET_PARAMS) {
