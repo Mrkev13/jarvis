@@ -188,6 +188,58 @@ for (const [id, path] of Object.entries(MODULE_PAGES).filter(([m]) => m === "wot
   await ctx.close();
 }
 
+// 6) MRK-7: přírůstky mainu – Replay Library, vyhledávání replayů, Quick Add s časem, splnění ve Škole, Jarvis, Dnes
+for (const path of ["/wot/replays", "/wot/replays?replay=1"]) {
+  const { ctx, page, errors, apiCalls } = await open(path);
+  const off = DISABLED.has("wot");
+  const unavailable = await page.getByTestId("module-unavailable").count();
+  const replayCalls = apiCalls.filter((p) => p.startsWith("/wot/"));
+  if (off) {
+    check(`${path}: stav „Modul není dostupný“, žádné /wot API`, unavailable === 1 && replayCalls.length === 0, replayCalls.join(", "));
+  } else {
+    check(`${path}: knihovna replayů se otevře`, unavailable === 0 && (await page.locator("h1").innerText()) === "Knihovna replayů" && replayCalls.length >= 1);
+    if (path.includes("replay=1")) check(`${path}: detail replaye`, (await page.getByTestId("replay-detail").count()) === 1);
+  }
+  check(`${path}: bez chyb JS`, errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/");
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  await dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" }).fill("progetto");
+  await page.waitForTimeout(700);
+  const hits = await dialog.getByRole("option", { name: /Progetto 65/ }).count();
+  check(`hledání: replay „progetto“ ${DISABLED.has("wot") ? "skryt" : "nalezen"}`, DISABLED.has("wot") ? hits === 0 : hits >= 1, String(hits));
+  check("hledání replayů: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/");
+  check("Jarvis companion je vidět (jádro, nezávisí na modulech)", (await page.getByTestId("jarvis-companion").count()) === 1);
+  await page.keyboard.press("Control+Shift+K");
+  const dialog = page.getByRole("dialog", { name: "Rychlé přidání" });
+  await dialog.getByLabel("Co chceš přidat?").fill("21.10.2026 fyzio od 14 hodin");
+  await page.waitForTimeout(600);
+  check("quick add: „fyzio od 14 hodin“ = připomínka (MRK-11, jádro)", (await dialog.getByTestId("quick-add-preview").getAttribute("data-kind")) === "reminder");
+  check("quick add s časem: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/school");
+  const school = DISABLED.has("school");
+  check(`škola: akce Splnit ${school ? "nedostupná" : "je vidět"}`, ((await page.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1) === !school);
+  check("škola: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/today");
+  const dead = await page.locator("main a[href]").evaluateAll((as, off) => as.map((a) => a.getAttribute("href")).filter((h) => off.some((p) => h === p || h.startsWith(`${p}?`) || h.startsWith(`${p}/`))), [...DISABLED].map((id) => MODULE_PAGES[id]));
+  check("dnes: žádný odkaz na vypnutý modul", dead.length === 0, dead.join(", "));
+  check("dnes: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n[${MODE}] ${results.length - failed.length}/${results.length} kontrol prošlo.`);
