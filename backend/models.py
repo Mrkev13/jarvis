@@ -2,7 +2,7 @@ from datetime import datetime
 import json as _json
 import re
 
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Date, Boolean, Index, TypeDecorator
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -714,3 +714,18 @@ class ModuleSetting(Base):
 from modules.habits.models import Habit, HabitEntry  # noqa: E402
 
 MODULE_MODELS = (Habit, HabitEntry)
+
+
+class DomainEvent(Base):
+    """MRK-19: doménová událost (transakční outbox). Zapisuje se VE STEJNÉ transakci jako business změna
+    (`domain_events.append_domain_event`). Append-only; aplikace řádky nemění. Konečná přenosová historie
+    (retence 180 dní) – trvalá historie zůstává v Aktivitě a business tabulkách (docs/domain-events.md)."""
+    __tablename__ = "domain_events"
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    aggregate_type = Column(String(50), nullable=False)
+    aggregate_id = Column(String(64), nullable=True)
+    module_id = Column(String(50), nullable=True, index=True)  # None = jádro (system.*)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    payload = Column(JSON, nullable=False, default=dict)

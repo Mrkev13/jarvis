@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
+from domain_events import ActivityProjection, append_domain_event
 from modules.habits.models import ENTRY_STATES, HABIT_KINDS, Habit, HabitEntry
 from text_utils import format_date_cz, format_num_cz
 from time_utils import to_local, today_local, utc_now
@@ -254,6 +255,13 @@ def set_entry(db: Session, habit_id: int, state: str, *, day: date | None = None
              if (old or {}).get(k) != new[k]}
     if delta:
         when = "dnes" if day == today else format_date_cz(day)
-        log_activity(db, AREA, "update" if old else "check", f"{h.name}: {STATE_LABELS[state]} ({when})",
-                     entity_type="habit_entry", entity_id=entry.id, delta=delta, user_context=user_context)
+        # MRK-19: fakt habits.entry.done / .skipped; Aktivita je projekce (právě jeden řádek na změnu)
+        append_domain_event(
+            db, event_type=f"habits.entry.{state}", aggregate_type="entry", aggregate_id=entry.id,
+            payload={"habit_id": h.id, "entry_id": entry.id, "date": day.isoformat(), "state": state,
+                     "previous_state": (old or {}).get("state")},
+            activity=ActivityProjection(
+                AREA, "update" if old else "check", f"{h.name}: {STATE_LABELS[state]} ({when})",
+                entity_type="habit_entry", entity_id=entry.id, delta=delta, user_context=user_context),
+        )
     return entry

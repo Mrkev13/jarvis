@@ -1,12 +1,11 @@
 import logging
 import os
 import re
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta, timezone
 
@@ -2457,6 +2456,20 @@ def today_action_prepare(request: TodayActionRequest):
         db.close()
 
 
+@app.get("/events/stream")
+async def events_stream(request: Request, last_event_id: str | None = None, modules: str | None = None,
+                        types: str | None = None):
+    """MRK-19: SSE doménových událostí (session auth jako celé API). id = domain_events.id, Last-Event-ID
+    replay, `reset` při mezeře, keepalive. Kontrakt: docs/domain-events.md."""
+    import event_stream as es
+    cursor = es.parse_cursor(request.headers.get("last-event-id"), last_event_id)
+    return StreamingResponse(
+        es.stream_events(request.is_disconnected, cursor, modules=es.parse_filter(modules), types=es.parse_filter(types)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/modules")
 def modules_get():
     """Roadmap 6C / MRK-18 A2: runtime stav modulů pro frontend (id, název, stav, zdroj, zámek, schopnosti).
@@ -2487,13 +2500,15 @@ def modules_put(module_id: str, request: ModuleSettingRequest):
         mr.save_override(db, module_id, request.enabled)
         effective = module.default_enabled if request.enabled is None else request.enabled
         if effective != before.enabled:
-            log_activity(
-                db, "system", "module.enabled" if effective else "module.disabled",
-                f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
-                entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}},
-                user_context="manual",
-                # každá změna je samostatný fakt (výchozí klíč podle shrnutí by druhé vypnutí téhož modulu zahodil)
-                dedupe_key=f"module:{module_id}:{'on' if effective else 'off'}:{uuid.uuid4().hex}",
+            # MRK-19: fakt system.module.enabled/disabled; Aktivita je projekce s klíčem podle id události
+            from domain_events import ActivityProjection, append_domain_event
+            action = "module.enabled" if effective else "module.disabled"
+            append_domain_event(
+                db, event_type=f"system.{action}", aggregate_type="module", aggregate_id=module_id,
+                payload={"module_id": module_id, "enabled": effective, "previous": before.enabled},
+                activity=ActivityProjection(
+                    "system", action, f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
+                    entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}}),
             )
         db.commit()
     except Exception:

@@ -78,6 +78,8 @@ class ModuleDef:
     # přes `ModuleAccess.contributions(...)`, takže vypnutý modul nepřispívá nikam a nový modul nevyžaduje
     # úpravu agregátorů.
     integrations: ModuleIntegrations = NO_INTEGRATIONS
+    # MRK-19: doménové události modulu `<modul>.<agregát>.<akce>`; nedeklarovaný typ `append_domain_event` odmítne.
+    event_types: frozenset[str] = frozenset()
 
     @property
     def env_name(self) -> str:
@@ -93,7 +95,9 @@ MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("school", "Škola", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"subject", "assignment", "exam"}), context_areas=frozenset({"school"}),
               api_prefixes=("/school",), quick_add_kinds=("exam", "assignment"),
-              integrations=school_integrations.INTEGRATIONS),
+              integrations=school_integrations.INTEGRATIONS,
+              event_types=frozenset({"school.assignment.completed", "school.assignment.reopened",
+                                     "school.exam.closed", "school.exam.reopened"})),
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
               api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
@@ -120,7 +124,8 @@ MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("habits", "Návyky", default_enabled=True, implemented=True,
               capabilities=frozenset({"nav", "search", "today", "dashboard", "ai_context"}),
               entity_types=frozenset({"habit"}), context_areas=frozenset({"habits"}), api_prefixes=("/habits",),
-              integrations=habits_integrations.INTEGRATIONS),
+              integrations=habits_integrations.INTEGRATIONS,
+              event_types=frozenset({"habits.entry.done", "habits.entry.skipped"})),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),

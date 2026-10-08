@@ -14,7 +14,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from activity_service import log_activity
+from domain_events import ActivityProjection, append_domain_event, iso
 from models import Assignment, Exam
 from statuses import is_assignment_done, is_exam_open
 from time_utils import utc_now
@@ -92,9 +92,14 @@ def complete_assignment(db: Session, item_id: int, *, now: datetime | None = Non
     old = a.status
     a.status = "done"
     a.completed_at = now or utc_now()
-    log_activity(db, "school", "complete", f"Úkol splněn: {a.title}", entity_type="Assignment", entity_id=a.id,
-                 delta={"status": {"old": old, "new": "done"}, "completed_at": {"old": None, "new": a.completed_at.isoformat()}},
-                 user_context="manual")
+    # MRK-19: fakt = doménová událost; řádek Aktivity je její projekce ve stejné transakci (právě jednou)
+    append_domain_event(
+        db, event_type="school.assignment.completed", aggregate_type="assignment", aggregate_id=a.id,
+        payload={"assignment_id": a.id, "subject_id": a.subject_id, "completed_at": iso(a.completed_at)},
+        activity=ActivityProjection(
+            "school", "complete", f"Úkol splněn: {a.title}", entity_type="Assignment", entity_id=a.id,
+            delta={"status": {"old": old, "new": "done"}, "completed_at": {"old": None, "new": a.completed_at.isoformat()}}),
+    )
     return a
 
 
@@ -105,10 +110,14 @@ def reopen_assignment(db: Session, item_id: int) -> Assignment:
     old_status, old_at = a.status, a.completed_at
     a.status = "todo"
     a.completed_at = None
-    log_activity(db, "school", "update", f"Úkol znovu otevřen: {a.title}", entity_type="Assignment", entity_id=a.id,
-                 delta={"status": {"old": old_status, "new": "todo"},
-                        "completed_at": {"old": old_at.isoformat() if old_at else None, "new": None}},
-                 user_context="manual")
+    append_domain_event(
+        db, event_type="school.assignment.reopened", aggregate_type="assignment", aggregate_id=a.id,
+        payload={"assignment_id": a.id, "subject_id": a.subject_id, "previous_completed_at": iso(old_at)},
+        activity=ActivityProjection(
+            "school", "update", f"Úkol znovu otevřen: {a.title}", entity_type="Assignment", entity_id=a.id,
+            delta={"status": {"old": old_status, "new": "todo"},
+                   "completed_at": {"old": old_at.isoformat() if old_at else None, "new": None}}),
+    )
     return a
 
 
@@ -125,8 +134,14 @@ def close_exam(db: Session, item_id: int, data: dict, *, now: datetime | None = 
     e.completed_at = now or utc_now()
     delta = {k: {"old": v, "new": getattr(e, k)} for k, v in old.items() if v != getattr(e, k)}
     delta["completed_at"] = {"old": None, "new": e.completed_at.isoformat()}
-    log_activity(db, "school", "complete", f"Zkouška uzavřena: {e.title}" + (f" ({rv})" if rv and rt != "pass_fail" else ""),
-                 entity_type="Exam", entity_id=e.id, delta=delta, user_context="manual")
+    append_domain_event(
+        db, event_type="school.exam.closed", aggregate_type="exam", aggregate_id=e.id,
+        payload={"exam_id": e.id, "subject_id": e.subject_id, "outcome": e.status, "result_type": e.result_type,
+                 "completed_at": iso(e.completed_at)},
+        activity=ActivityProjection(
+            "school", "complete", f"Zkouška uzavřena: {e.title}" + (f" ({rv})" if rv and rt != "pass_fail" else ""),
+            entity_type="Exam", entity_id=e.id, delta=delta),
+    )
     return e
 
 
@@ -138,7 +153,11 @@ def reopen_exam(db: Session, item_id: int) -> Exam:
            "completed_at": e.completed_at.isoformat() if e.completed_at else None}
     e.status, e.result_type, e.result_value, e.completed_at = "upcoming", None, None, None
     # původní výsledek zůstává v Aktivitě (delta.old) – historie se neztratí
-    log_activity(db, "school", "update", f"Zkouška znovu otevřena: {e.title}", entity_type="Exam", entity_id=e.id,
-                 delta={k: {"old": v, "new": None if k != "status" else "upcoming"} for k, v in old.items()},
-                 user_context="manual")
+    append_domain_event(
+        db, event_type="school.exam.reopened", aggregate_type="exam", aggregate_id=e.id,
+        payload={"exam_id": e.id, "subject_id": e.subject_id, "previous_outcome": old["status"]},
+        activity=ActivityProjection(
+            "school", "update", f"Zkouška znovu otevřena: {e.title}", entity_type="Exam", entity_id=e.id,
+            delta={k: {"old": v, "new": None if k != "status" else "upcoming"} for k, v in old.items()}),
+    )
     return e
