@@ -85,7 +85,11 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    - co bylo ověřeno lokálně na reálné DB/Windows a co jen v cloudu.
 6. Po merge přejde issue na Done (Linear ↔ GitHub), jinak ho přepni ručně.
 
-## Handoff (povinný komentář do Linear issue při každém ukončení práce)
+## Handoff (povinný při každém ukončení práce)
+
+Preferovaně vlož níže uvedený handoff jako komentář do Linear issue. Pokud Linear není
+dostupný, vrať přesně stejný handoff ve finální odpovědi a vlož ho do Linearu při nejbližší
+dostupné příležitosti.
 
 ```
 Stav: hotovo / rozpracováno / blokováno

@@ -94,10 +94,14 @@ setup_backend() {
   local key="py$version|$target|$(hash_files "${reqs[@]}")"
   local stamp="backend-$([[ $system_python -eq 1 ]] && echo system || echo venv)"
 
-  if [[ ${#PYCMD[@]} -gt 0 ]] && up_to_date "$stamp" "$key"; then
+  # The external stamp survives deleting/recreating a venv at the same path.
+  # Its in-venv marker must also survive; system Python keeps stamp-only behavior.
+  local marker="$VENV/.standa-hub-setup-ok"
+  if [[ ${#PYCMD[@]} -gt 0 ]] && up_to_date "$stamp" "$key" && \
+     [[ $system_python -eq 1 || -f "$marker" ]]; then
     log "backend up to date (Python $version)"; return
   fi
-  if [[ $check -eq 1 ]]; then log "backend STALE (missing venv or requirements changed)"; stale=1; return; fi
+  if [[ $check -eq 1 ]]; then log "backend STALE (missing venv/setup marker or requirements changed)"; stale=1; return; fi
 
   if [[ ${#PYCMD[@]} -eq 0 ]]; then
     find_python || no_python
@@ -110,9 +114,12 @@ setup_backend() {
   fi
   [[ "$version" == "3.12" ]] || log "warning: Python $version, CI uses 3.12"
 
+  # A failed forced reinstall must not leave an old success marker behind.
+  if [[ $system_python -eq 0 ]]; then rm -f "$marker"; fi
   log "installing backend/requirements-dev.txt"
   "${PYCMD[@]}" -m pip install --disable-pip-version-check -q -r "$ROOT/backend/requirements-dev.txt"
   write_stamp "$stamp" "$key"
+  if [[ $system_python -eq 0 ]]; then touch "$marker"; fi
   log "backend ready (${PYCMD[*]})"
 }
 
