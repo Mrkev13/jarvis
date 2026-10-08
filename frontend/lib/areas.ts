@@ -2,6 +2,8 @@
  * Oblasti (škola, práce, finance…) – identita, ne stav (Roadmap 4B: jedno místo místo kopií).
  * Celé názvy tříd zde doslova, aby je Tailwind našel. Testy: areas.test.mjs.
  */
+import { MODULE_UI, MODULES } from "./modules.ts";
+
 export const AREA_STYLES: Record<string, { bg: string; border: string; text: string; label: string }> = {
   school:   { bg: "bg-indigo-500/10",    border: "border-indigo-400/30",    text: "text-indigo-200",    label: "Škola" },
   work:     { bg: "bg-emerald-500/10",  border: "border-emerald-400/30",  text: "text-emerald-200",  label: "Práce" },
@@ -23,9 +25,17 @@ export const AREA_STYLES: Record<string, { bg: string; border: string; text: str
   system:   { bg: "bg-zinc-500/10",     border: "border-zinc-400/30",     text: "text-zinc-200",     label: "Systém" },
 };
 
+/** MRK-21: oblast modulu z manifestu (barva `MODULE_UI.area`, název = název modulu) – nový modul sem nic nepřidává. */
+function moduleArea(key: string) {
+  const m = MODULES.find((x) => x.id === key);
+  const style = m ? MODULE_UI[m.id]?.area : undefined;
+  return m && style ? { ...style, label: m.label } : undefined;
+}
+
 export function areaMeta(area: string | undefined | null) {
+  const key = String(area ?? "").toLowerCase();
   return (
-    AREA_STYLES[String(area ?? "").toLowerCase()] ?? {
+    AREA_STYLES[key] ?? moduleArea(key) ?? {
       bg: "bg-zinc-500/10",
       border: "border-zinc-400/30",
       text: "text-zinc-200",

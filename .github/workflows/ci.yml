@@ -39,7 +39,7 @@ jobs:
       - name: Install backend and test dependencies
         run: python -m pip install -r backend/requirements-dev.txt
       - name: Check app code
-        run: python -m pyflakes backend/*.py backend/scripts/*.py
+        run: python -m pyflakes backend/*.py backend/scripts/*.py backend/modules/*.py backend/modules/*/*.py
       - name: Run tests without network access
         run: python -m pytest backend/tests --disable-socket --allow-unix-socket -x -q
 

@@ -23,11 +23,11 @@ test("manifest: only implemented modules, nav for every module with the nav capa
 
 test("derived registries equal the previous hand-written lists (zero-surprise)", () => {
   assert.deepEqual(NAV_PAGES.map((p) => p.href), [
-    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/wot", "/mff",
+    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/habits", "/wot", "/mff",
     "/activity", "/memory", "/ai", "/settings",
   ]);
   for (const p of NAV_PAGES.filter((x) => x.module)) assert.equal(p.area, p.module);
-  assert.deepEqual(GROUP_ORDER, ["page", "school", "reminders", "work", "finance", "goals", "memory", "wot", "mff"]);
+  assert.deepEqual(GROUP_ORDER, ["page", "school", "reminders", "work", "finance", "goals", "memory", "wot", "habits", "mff"]);
   assert.deepEqual(KIND_AREAS, { reminder: "reminders", finance: "finance", work: "work", exam: "school", assignment: "school" });
   assert.deepEqual(KIND_HREFS, { reminder: "/reminders", finance: "/finance", work: "/work", exam: "/school", assignment: "/school" });
 });
@@ -36,8 +36,9 @@ test("search params and groups: unique, every module param is an href the backen
   assert.equal(new Set(SEARCH_TARGET_PARAMS).size, SEARCH_TARGET_PARAMS.length);
   assert.equal(new Set(GROUP_ORDER).size, GROUP_ORDER.length);
   for (const [id, ui] of Object.entries(MODULE_UI)) {
-    const provider = new URL(`../../backend/${id}_integrations.py`, import.meta.url);
-    if (!existsSync(provider)) continue; // frontend bez backendu
+    const provider = [new URL(`../../backend/${id}_integrations.py`, import.meta.url),
+      new URL(`../../backend/modules/${id}/integrations.py`, import.meta.url)].find((u) => existsSync(u));
+    if (!provider) continue; // frontend bez backendu
     const src = readFileSync(provider, "utf8");
     for (const param of ui.searchParams ?? []) assert.ok(src.includes(`?${param}=`), `${id}: backend nevytváří ?${param}=`);
   }
