@@ -1,0 +1,6 @@
+.env
+.env.*
+node_modules
+.next
+.git
+scripts/.ui-check

@@ -6,6 +6,7 @@ from database import SessionLocal
 from notifications_service import create_all_overdue_and_upcoming_notifications
 from goal_history_service import ensure_goal_progress_snapshot_for_all_active_automatic_goals
 from env_config import env_bool, env_int
+from scheduler_health import tracked_job, job_failed, job_history
 
 _scheduler: BackgroundScheduler | None = None
 SCHEDULER_ENABLED = env_bool("SCHEDULER_ENABLED", False)
@@ -27,6 +28,7 @@ SINGLE_WORKER_ASSUMPTION_DOC = (
 )
 
 
+@tracked_job("standa_hub_hourly")
 def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job started at {datetime.utcnow().isoformat()}")
     db = SessionLocal()
@@ -39,6 +41,7 @@ def _run_hourly_job() -> None:
             print(f"[scheduler] notifications created: {notif_count}")
             db.commit()
         except Exception as _nerr:
+            job_failed("standa_hub_hourly")
             db.rollback()
             print(f"[scheduler] notifications failed: {_nerr}")
         try:
@@ -47,8 +50,10 @@ def _run_hourly_job() -> None:
                 bid = run_backup(db)
                 print(f"[scheduler] daily backup ran id={bid}")
         except Exception as _berr:
+            job_failed("standa_hub_hourly")
             print(f"[scheduler] daily backup skipped: {_berr}")
     except Exception as _jerr:
+        job_failed("standa_hub_hourly")
         import traceback
         print(f"[scheduler] hourly job FAILED: {_jerr}")
         traceback.print_exc()
@@ -61,15 +66,19 @@ def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job finished at {datetime.utcnow().isoformat()}")
 
 
+@tracked_job("standa_hub_reminders")
 def _run_reminders_job() -> None:
     from reminder_service import process_due_reminders
 
     db = SessionLocal()
     try:
         stats = process_due_reminders(db)
+        if stats.get("failed"):
+            job_failed("standa_hub_reminders")
         if stats["fired"] or stats["failed"]:
             print(f"[scheduler] reminders: {stats}")
     except Exception as _rerr:  # noqa: BLE001 - job nesmí shodit scheduler
+        job_failed("standa_hub_reminders")
         try:
             db.rollback()
         except Exception:
@@ -80,9 +89,12 @@ def _run_reminders_job() -> None:
         from delivery_service import run_delivery_cycle
 
         dstats = run_delivery_cycle(db)
+        if dstats.get("failed"):
+            job_failed("standa_hub_reminders")
         if dstats.get("enqueued") or dstats.get("sent") or dstats.get("failed") or dstats.get("retry"):
             print(f"[scheduler] external delivery: {dstats}")
     except Exception as _derr:  # noqa: BLE001
+        job_failed("standa_hub_reminders")
         try:
             db.rollback()
         except Exception:
@@ -92,6 +104,7 @@ def _run_reminders_job() -> None:
         db.close()
 
 
+@tracked_job("standa_hub_briefing")
 def _run_briefing_job() -> None:
     from briefing_service import run_scheduled
 
@@ -101,6 +114,7 @@ def _run_briefing_job() -> None:
         if state in ("generated", "retried"):
             print(f"[scheduler] daily briefing: {state}")
     except Exception as _berr:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
+        job_failed("standa_hub_briefing")
         try:
             db.rollback()
         except Exception:
@@ -110,6 +124,7 @@ def _run_briefing_job() -> None:
         db.close()
 
 
+@tracked_job("standa_hub_weekly_review")
 def _run_weekly_review_job() -> None:
     from weekly_review_service import run_scheduled
 
@@ -119,6 +134,7 @@ def _run_weekly_review_job() -> None:
         if state in ("generated", "retried"):
             print(f"[scheduler] weekly review: {state}")
     except Exception as _werr:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
+        job_failed("standa_hub_weekly_review")
         try:
             db.rollback()
         except Exception:
@@ -204,3 +220,35 @@ def stop_scheduler() -> None:
             _scheduler.shutdown(wait=False)
         finally:
             _scheduler = None
+
+
+def scheduler_snapshot() -> dict:
+    """Only operational IDs/timestamps; no job args or business data."""
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    expected = [
+        ("standa_hub_hourly", SCHEDULER_ENABLED, SCHEDULER_INTERVAL_SECONDS),
+        ("standa_hub_reminders", REMINDERS_CHECK_ENABLED, REMINDERS_CHECK_SECONDS),
+        ("standa_hub_briefing", DAILY_BRIEFING_ENABLED, DAILY_BRIEFING_CHECK_SECONDS),
+        ("standa_hub_weekly_review", WEEKLY_REVIEW_ENABLED, WEEKLY_REVIEW_CHECK_SECONDS),
+    ]
+    sched = _scheduler
+    running = bool(sched and sched.running)
+    active = {job.id: job for job in sched.get_jobs()} if running else {}
+    jobs = []
+    degraded = False
+    for job_id, enabled, interval in expected:
+        history = job_history(job_id)
+        job = active.get(job_id)
+        status = "disabled" if not enabled else "scheduled" if job else "missing"
+        started = history["last_started"]
+        if enabled and started and (now - datetime.fromisoformat(started)).total_seconds() > max(interval * 3, 300):
+            status = "stale"
+        if enabled and history["last_result"] == "failed":
+            status = "failed"
+        if enabled and status in ("missing", "stale", "failed"):
+            degraded = True
+        jobs.append({"id": job_id, "enabled": enabled, "status": status, **history, "next_run": job.next_run_time.isoformat() if job and job.next_run_time else None})
+    enabled = any(flag for _, flag, _ in expected)
+    status = "disabled" if not enabled else "stopped" if not running else "degraded" if degraded else "running"
+    return {"status": status, "running": running, "backup_job_enabled": SCHEDULER_ENABLED, "jobs": jobs}

@@ -244,7 +244,7 @@ allowed_origins = [
 ]
 
 # Cesty dostupné bez session (login flow + health check).
-AUTH_PUBLIC_PATHS = frozenset({"/", "/auth/login", "/auth/logout", "/auth/session/validate"})
+AUTH_PUBLIC_PATHS = frozenset({"/health", "/", "/auth/login", "/auth/logout", "/auth/session/validate"})
 
 
 def require_auth(request: Request) -> dict:
@@ -466,6 +466,16 @@ class TodayActionRequest(BaseModel):
 
 class ExecutePendingRequest(BaseModel):
     pending_id: str
+
+
+@app.get("/health")
+def health_endpoint():
+    from health_service import runtime_health
+    result = runtime_health()
+    return JSONResponse(
+        result, status_code=503 if result["status"] == "unhealthy" else 200,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/")

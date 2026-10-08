@@ -1,0 +1,75 @@
+name: standa-hub-production
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set the production database name}
+      POSTGRES_USER: ${POSTGRES_USER:?Set the production database user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a production password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    stop_grace_period: 60s
+
+  backend:
+    image: standa-hub-backend:${RELEASE_TAG:?Set a release tag, normally the Git commit}
+    build:
+      context: ../backend
+    init: true
+    restart: unless-stopped
+    env_file: ../backend/.env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${PRODUCTION_DATABASE_URL:?Set an explicit production PostgreSQL URL}
+      PRODUCTION_DATABASE_NAME: ${POSTGRES_DB:?Set the production database name}
+      MEDIA_DIR: /data/media
+      BACKUP_DIR: /data/backups
+    volumes:
+      - media:/data/media
+      - backups:/data/backups
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=12).read()"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 60s
+
+  frontend:
+    image: standa-hub-frontend:${RELEASE_TAG:?Set a release tag, normally the Git commit}
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?Set the browser-visible backend URL}
+    init: true
+    restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-standa_hub_session}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "Promise.all(['/health','/login'].map(p=>fetch('http://127.0.0.1:3000'+p,{signal:AbortSignal.timeout(10000)}))).then(rs=>{if(rs.some(r=>!r.ok))process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+
+volumes:
+  postgres_data:
+  media:
+  backups:

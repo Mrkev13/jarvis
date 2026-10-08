@@ -278,13 +278,14 @@ def _backup_sqlite(dst: Path) -> tuple[bool, str]:
 def _backup_postgres(dst: Path) -> tuple[bool, str]:
     try:
         env = os.environ.copy()
-        url = _DATABASE_URL
-        stripped = url.split("://", 1)[1]
-        userpass, hostpath = stripped.split("@", 1)
-        user, password = userpass.split(":", 1) if ":" in userpass else (userpass, "")
-        hostport, dbname = hostpath.split("/", 1)
-        host, port = hostport.split(":", 1) if ":" in hostport else (hostport, "5432")
-        env["PGPASSWORD"] = password
+        url = make_url(_DATABASE_URL)
+        # Use the same decoded credentials as SQLAlchemy (passwords may contain
+        # reserved URI characters). Never pass the password on the command line.
+        user = url.username or ""
+        host = url.host or "localhost"
+        port = url.port or 5432
+        dbname = url.database or ""
+        env["PGPASSWORD"] = url.password or ""
         cmd = [
             find_pg_dump(),
             f"--host={host}",

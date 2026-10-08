@@ -1,7 +1,7 @@
 .env
 .env.*
 !.env.template
-.venv/
+.venv
 __pycache__/
 node_modules/
 .next/
@@ -48,3 +48,5 @@ frontend/scripts/.ui-check/
 
 # Game Enrichment B: nahrané screenshoty (MEDIA_DIR, výchozí backend/media)
 media/
+
+!.env.production.template
