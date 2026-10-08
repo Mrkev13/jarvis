@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("GROQ_API_KEY", "unused-test-key")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+for _p in (Path(__file__).resolve().parents[1], Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))  # backend + tests (replay_fixtures), nezávisle na pořadí testů
 
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
