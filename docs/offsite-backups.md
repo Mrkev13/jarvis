@@ -59,7 +59,7 @@ Structured outcomes are allowlisted: `success`, `local_backup_failure`, `encrypt
 
 ## Retention
 
-The pure `plan_retention` helper is provider-independent and useful for deterministic dry-runs. An executable cleanup plan must come from `plan_verified_retention`, which retrieves and fully verifies every candidate immediately before planning; `cleanup_retention` refuses a non-fresh plan. A corrupt newest artifact is marked invalid and cannot displace an older recoverable backup.
+The pure `plan_retention` helper is provider-independent and useful for deterministic previews. `cleanup_retention` is dry-run only and refuses destructive execution. Real deletion is exposed only through `apply_verified_retention`, which retrieves and fully verifies every candidate, creates the plan, revalidates every retained run, and then executes deletion inside the same operation. A stale/caller-constructed plan therefore cannot authorize deletion, and a corrupt newest artifact cannot displace an older recoverable backup.
 
 Retention defaults to the `Europe/Prague` calendar while storing/comparing aware UTC instants. It keeps the newest freshly verified completed run in each of:
 
@@ -69,7 +69,7 @@ Retention defaults to the `Europe/Prague` calendar while storing/comparing aware
 
 The three sets are unioned by run ID. The newest valid completed run is always retained, even if all tier counts are zero. Within every bucket only its newest run qualifies. Invalid/incomplete metadata is reported separately and is never automatically deleted.
 
-`cleanup_retention(..., dry_run=True)` returns the deterministic delete set without calling the provider. Real cleanup requires `plan.verification_fresh`, records individual successes/failures and returns `retention_cleanup_failure` if any deletion fails; it does not hide partial cleanup.
+`cleanup_retention(..., dry_run=True)` returns the deterministic delete set without calling the provider. `apply_verified_retention` aborts without deleting anything when retained-run revalidation fails; otherwise it records individual deletion successes/failures and returns `retention_cleanup_failure` if any deletion fails. It does not hide partial cleanup.
 
 ## Scratch restore drill and TAR safety
 

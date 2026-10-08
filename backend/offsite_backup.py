@@ -744,7 +744,6 @@ class RetentionPlan:
     keep: tuple[str, ...]
     delete: tuple[str, ...]
     invalid: tuple[str, ...]
-    verification_fresh: bool = False
 
 
 def plan_retention(
@@ -762,7 +761,6 @@ def plan_retention(
         monthly=monthly,
         timezone_name=timezone_name,
         verified_run_ids=None,
-        verification_fresh=False,
     )
 
 
@@ -774,7 +772,6 @@ def _plan_retention(
     monthly: int,
     timezone_name: str,
     verified_run_ids: set[str] | None,
-    verification_fresh: bool,
 ) -> RetentionPlan:
     if min(daily, weekly, monthly) < 0:
         raise ValueError("retention counts must be nonnegative")
@@ -827,7 +824,6 @@ def _plan_retention(
         keep_ordered,
         delete_ordered,
         tuple(sorted(invalid)),
-        verification_fresh=verification_fresh,
     )
 
 
@@ -860,7 +856,6 @@ def plan_verified_retention(
         monthly=monthly,
         timezone_name=timezone_name,
         verified_run_ids=verified_run_ids,
-        verification_fresh=True,
     )
 
 
@@ -891,17 +886,20 @@ class CleanupResult:
 
 
 def cleanup_retention(target: OffsiteTarget, plan: RetentionPlan, *, dry_run: bool) -> CleanupResult:
+    """Preview a plan. Destructive cleanup is only available through apply_verified_retention."""
     started = _now()
     if dry_run:
         return CleanupResult(
             "retention_cleanup", True, OffsiteOutcome.SUCCESS, None, started, _now(),
             would_delete=plan.delete,
         )
-    if not plan.verification_fresh:
-        return CleanupResult(
-            "retention_cleanup", False, OffsiteOutcome.RETENTION_CLEANUP_FAILURE,
-            None, started, _now(), failed=plan.delete,
-        )
+    return CleanupResult(
+        "retention_cleanup", False, OffsiteOutcome.RETENTION_CLEANUP_FAILURE,
+        None, started, _now(), failed=plan.delete,
+    )
+
+
+def _execute_retention(target: OffsiteTarget, plan: RetentionPlan, started: datetime) -> CleanupResult:
     deleted: list[str] = []
     failed: list[str] = []
     for run_id in plan.delete:
@@ -917,3 +915,41 @@ def cleanup_retention(target: OffsiteTarget, plan: RetentionPlan, *, dry_run: bo
         deleted=tuple(deleted),
         failed=tuple(failed),
     )
+
+
+def apply_verified_retention(
+    target: OffsiteTarget,
+    *,
+    encryptor: Encryptor | None = None,
+    daily: int = DEFAULT_DAILY_RETENTION,
+    weekly: int = DEFAULT_WEEKLY_RETENTION,
+    monthly: int = DEFAULT_MONTHLY_RETENTION,
+    timezone_name: str = DEFAULT_RETENTION_TIMEZONE,
+    scratch_root: Path | None = None,
+) -> CleanupResult:
+    """Verify, plan, revalidate retained runs, then execute cleanup as one operation."""
+    started = _now()
+    plan = plan_verified_retention(
+        target,
+        encryptor=encryptor,
+        daily=daily,
+        weekly=weekly,
+        monthly=monthly,
+        timezone_name=timezone_name,
+        scratch_root=scratch_root,
+    )
+    retained_are_valid = all(
+        verify_offsite_run(
+            target,
+            run_id,
+            encryptor=encryptor,
+            scratch_root=scratch_root,
+        ).success
+        for run_id in plan.keep
+    )
+    if not retained_are_valid:
+        return CleanupResult(
+            "retention_cleanup", False, OffsiteOutcome.RETENTION_CLEANUP_FAILURE,
+            None, started, _now(), failed=plan.keep,
+        )
+    return _execute_retention(target, plan, started)

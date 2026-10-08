@@ -20,6 +20,7 @@ from offsite_backup import (
     LocalFilesystemOffsiteTarget,
     OffsiteOutcome,
     OffsiteRunMetadata,
+    apply_verified_retention,
     cleanup_retention,
     copy_completed_run,
     plan_retention,
@@ -464,12 +465,11 @@ def test_retention_cleanup_deletes_only_expired_completed_run(tmp_path: Path):
     new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
     assert copy_completed_run(source, new_path, target).success
     plan = plan_verified_retention(target, daily=0, weekly=0, monthly=0)
-
     dry_run = cleanup_retention(target, plan, dry_run=True)
     assert dry_run.would_delete == ("20261007_120000_000001",)
     assert len(target.list_runs()) == 2
 
-    cleanup = cleanup_retention(target, plan, dry_run=False)
+    cleanup = apply_verified_retention(target, daily=0, weekly=0, monthly=0)
     assert cleanup.success
     assert cleanup.deleted == ("20261007_120000_000001",)
     assert [run.run_id for run in target.list_runs()] == ["20261008_120000_000001"]
@@ -491,7 +491,6 @@ def test_retention_freshly_verifies_runs_before_deleting_older_copy(tmp_path: Pa
     assert plan.keep == ("20261007_120000_000001",)
     assert plan.delete == ()
     assert plan.invalid == ("20261008_120000_000001",)
-    assert plan.verification_fresh is True
 
 
 def test_cleanup_refuses_non_fresh_retention_plan(tmp_path: Path):
@@ -508,6 +507,35 @@ def test_cleanup_refuses_non_fresh_retention_plan(tmp_path: Path):
     assert result.code is OffsiteOutcome.RETENTION_CLEANUP_FAILURE
     assert result.deleted == ()
     assert len(target.list_runs()) == 2
+
+
+def test_verified_cleanup_aborts_if_kept_run_changes_after_planning(tmp_path: Path, monkeypatch):
+    source = tmp_path / "source"
+    old_path = _write_backup(source, run_id="20261007_120000_000001", started_at="2026-10-07T12:00:00Z")
+    target_root = tmp_path / "offsite"
+    target = LocalFilesystemOffsiteTarget(target_root)
+    assert copy_completed_run(source, old_path, target).success
+    new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
+    assert copy_completed_run(source, new_path, target).success
+    original_retrieve = target.retrieve_run
+    newest_retrievals = 0
+
+    def corrupt_before_revalidation(run_id: str, destination: Path):
+        nonlocal newest_retrievals
+        if run_id == "20261008_120000_000001":
+            newest_retrievals += 1
+            if newest_retrievals == 2:
+                (target_root / run_id / "payload.tar").write_bytes(b"corrupt between plan and cleanup")
+        return original_retrieve(run_id, destination)
+
+    monkeypatch.setattr(target, "retrieve_run", corrupt_before_revalidation)
+    result = apply_verified_retention(target, daily=0, weekly=0, monthly=0)
+
+    assert result.code is OffsiteOutcome.RETENTION_CLEANUP_FAILURE
+    assert result.deleted == ()
+    assert {run.run_id for run in target.list_runs()} == {
+        "20261007_120000_000001", "20261008_120000_000001",
+    }
 
 
 def test_abandoned_unique_staging_does_not_block_retry_and_can_be_cleaned(tmp_path: Path):
@@ -536,7 +564,7 @@ def test_abandoned_unique_staging_does_not_block_retry_and_can_be_cleaned(tmp_pa
     assert not abandoned.exists()
 
 
-def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: Path):
+def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: Path, monkeypatch):
     now = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
     valid = _metadata("valid", now)
     invalid = _metadata("invalid", now.replace(year=2020), transfer_completed=False)
@@ -545,14 +573,17 @@ def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: 
     assert plan.invalid == ("invalid",)
     assert "invalid" not in plan.delete
 
-    class CleanupFailureTarget:
-        def delete_run(self, run_id: str) -> None:
-            raise OSError("secret cleanup path")
-
-    forced = replace(plan, delete=("expired",), verification_fresh=True)
-    dry = cleanup_retention(CleanupFailureTarget(), forced, dry_run=True)
-    failed = cleanup_retention(CleanupFailureTarget(), forced, dry_run=False)
-    assert dry.success and dry.deleted == () and dry.would_delete == ("expired",)
+    source = tmp_path / "source"
+    old_path = _write_backup(source, run_id="20261007_120000_000001", started_at="2026-10-07T12:00:00Z")
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+    assert copy_completed_run(source, old_path, target).success
+    new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
+    assert copy_completed_run(source, new_path, target).success
+    preview = plan_verified_retention(target, daily=0, weekly=0, monthly=0)
+    dry = cleanup_retention(target, preview, dry_run=True)
+    monkeypatch.setattr(target, "delete_run", lambda run_id: (_ for _ in ()).throw(OSError("secret cleanup path")))
+    failed = apply_verified_retention(target, daily=0, weekly=0, monthly=0)
+    assert dry.success and dry.deleted == () and dry.would_delete == ("20261007_120000_000001",)
     assert failed.code is OffsiteOutcome.RETENTION_CLEANUP_FAILURE
     assert "secret cleanup path" not in json.dumps(failed.to_dict())
     assert failed.operation == "retention_cleanup"
