@@ -13,8 +13,9 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import briefing_snapshot  # noqa: E402
-import context_service  # noqa: E402
+import goals_integrations  # noqa: E402
 import read_queries  # noqa: E402
+import school_integrations  # noqa: E402
 import reminder_service  # noqa: E402
 import statuses  # noqa: E402
 import weekly_snapshot  # noqa: E402
@@ -38,8 +39,9 @@ class CanonicalStatusesTestCase(unittest.TestCase):
         self.assertIs(read_queries.EXAM_OPEN_STATUSES, statuses.EXAM_OPEN_STATUSES)
         self.assertIs(briefing_snapshot._EXAM_OPEN, statuses.EXAM_OPEN_STATUSES)
         self.assertIs(briefing_snapshot._GOAL_INACTIVE, statuses.GOAL_INACTIVE_STATUSES)
-        self.assertIs(context_service._EXAM_OPEN_STATUSES, statuses.EXAM_OPEN_STATUSES)
-        self.assertIs(context_service._INACTIVE_GOAL_STATUSES, statuses.GOAL_INACTIVE_STATUSES)
+        # MRK-20: sekce AI kontextu jsou v modulech (school/goals_integrations) – sdílí kanonické množiny
+        self.assertIs(school_integrations.EXAM_OPEN_STATUSES, statuses.EXAM_OPEN_STATUSES)
+        self.assertIs(goals_integrations.GOAL_INACTIVE_STATUSES, statuses.GOAL_INACTIVE_STATUSES)
         self.assertIs(weekly_snapshot._GOAL_INACTIVE, statuses.GOAL_INACTIVE_STATUSES)
         self.assertEqual(reminder_service.ACTIVE_STATUSES,
                          (reminder_service.STATUS_SCHEDULED, reminder_service.STATUS_FIRED))
