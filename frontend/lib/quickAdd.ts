@@ -10,6 +10,8 @@
  * navrženou hodnotu („Je to 820 Kč?" → „Ano"). Enter v poli jen znovu rozebere text, nikdy neukládá.
  */
 
+import type { ModuleAccess } from "./modules.ts";
+
 export type QuickAddKind = "reminder" | "finance" | "work" | "exam" | "assignment";
 export type ParsedKind = QuickAddKind | "unknown" | "empty";
 export type Confidence = "high" | "medium" | "low";
@@ -153,6 +155,42 @@ export const QUICK_ADD_EXAMPLES: { kind: QuickAddKind; text: string }[] = [
 
 export function isQuickAddKind(kind: unknown): kind is QuickAddKind {
   return typeof kind === "string" && (QUICK_ADD_KINDS as string[]).includes(kind);
+}
+
+// ---------- dostupnost modulů (Roadmap 6C) ----------
+
+/** Druhy, které smí Rychlé přidání nabídnout (druh vypnutého modulu ne; připomínka je jádro). */
+export function availableKinds(access: ModuleAccess): QuickAddKind[] {
+  return QUICK_ADD_KINDS.filter((k) => access.allowsQuickAddKind(k));
+}
+
+export function examplesFor(access: ModuleAccess): typeof QUICK_ADD_EXAMPLES {
+  return QUICK_ADD_EXAMPLES.filter((ex) => access.allowsQuickAddKind(ex.kind));
+}
+
+const HINT_ALL = "Umím připomínku, výdaj nebo příjem, odpracované hodiny a školní test nebo úkol.";
+
+/** Nápověda „co umím" – při všech druzích beze změny, jinak jen dostupné. */
+export function kindsHint(access: ModuleAccess): string {
+  const kinds = availableKinds(access);
+  if (kinds.length === QUICK_ADD_KINDS.length) return HINT_ALL;
+  return `Umím: ${kinds.map((k) => KIND_LABELS[k].toLowerCase()).join(", ")}.`;
+}
+
+/** Úvodní výzva prázdného dialogu – při všech druzích beze změny. */
+export function promptHint(access: ModuleAccess): string {
+  return availableKinds(access).length === QUICK_ADD_KINDS.length
+    ? "Napiš, co chceš přidat – připomínku, výdaj, práci nebo školní termín."
+    : `Napiš, co chceš přidat. ${kindsHint(access)}`;
+}
+
+/**
+ * Pojistka pro rozjeté flagy frontendu a backendu: rozbor druhu vypnutého modulu se chová jako „nerozumím"
+ * (žádná pole, nic k uložení). Backend totéž vynucuje v /quick-add/parse i /quick-add/prepare.
+ */
+export function gateParse(result: QuickAddParse, access: ModuleAccess): QuickAddParse {
+  if (!isQuickAddKind(result.kind) || access.allowsQuickAddKind(result.kind)) return result;
+  return { ...result, kind: "unknown", confidence: "low", fields: {}, warnings: [], needs_input: [], errors: [], ready: false };
 }
 
 /** Ctrl/⌘ + Shift + K. Ctrl+K (bez Shiftu) zůstává globálnímu vyhledávání. */

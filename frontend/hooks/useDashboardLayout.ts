@@ -2,19 +2,26 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import {
+  availableWidgets,
   defaultLayout,
   LAYOUT_STORAGE_KEY,
   parseStoredLayout,
+  preserveUnavailable,
   serializeLayout,
   type DashboardLayout,
 } from "@/lib/dashboardLayout";
+import { MODULE_ACCESS } from "@/lib/moduleConfig";
 
 /**
  * Rozložení Řídicího centra (Roadmap 4F) v localStorage (verzovaný klíč, ověřený obsah, poškozená data → výchozí).
  * Server ani první hydratace localStorage nevidí → `layout = null`: stránka ukáže kostru a hned po hydrataci
  * vykreslí ULOŽENÉ rozložení – žádné bliknutí výchozího a žádný hydration mismatch.
  * Změny se ukládají hned (žádný koncept, nic se neztratí zavřením úprav); jiná záložka se srovná přes `storage`.
+ * Roadmap 6C: rozložení obsahuje jen widgety dostupných modulů; uložené záznamy vypnutých zůstávají (viz
+ * preserveUnavailable), takže vypnutí modulu nic nesmaže a zapnutí vrátí widget, jak byl.
  */
+const AVAILABLE = availableWidgets(MODULE_ACCESS);
+const availableDefault = () => defaultLayout(AVAILABLE);
 const CHANGE_EVENT = "standa-hub:dashboard-layout";
 
 let cache: { raw: string | null; layout: DashboardLayout } | null = null;
@@ -31,7 +38,7 @@ function readRaw(): string | null {
 
 function getSnapshot(): DashboardLayout {
   const raw = readRaw();
-  if (!cache || cache.raw !== raw) cache = { raw, layout: parseStoredLayout(raw) };
+  if (!cache || cache.raw !== raw) cache = { raw, layout: parseStoredLayout(raw, AVAILABLE) };
   return cache.layout;
 }
 
@@ -52,11 +59,12 @@ function subscribe(onChange: () => void): () => void {
 }
 
 function write(layout: DashboardLayout | null) {
+  const raw = layout ? serializeLayout(preserveUnavailable(layout, readRaw(), AVAILABLE)) : null;
   try {
-    if (layout) window.localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(layout));
+    if (raw) window.localStorage.setItem(LAYOUT_STORAGE_KEY, raw);
     else window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
   } catch {
-    memoryRaw = layout ? serializeLayout(layout) : null;
+    memoryRaw = raw;
   }
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
@@ -70,5 +78,5 @@ export function useDashboardLayout() {
   }, []);
   /** Výchozí rozložení = smazaný klíč (budoucí změny výchozího se tak projeví i u resetovaných uživatelů). */
   const reset = useCallback(() => write(null), []);
-  return { layout, update, reset, defaults: defaultLayout };
+  return { layout, update, reset, defaults: availableDefault, available: AVAILABLE };
 }

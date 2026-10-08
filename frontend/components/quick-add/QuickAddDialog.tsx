@@ -9,10 +9,11 @@ import { apiFetch, errorMessage, isAbortError, jsonBody, readErrorDetail } from 
 import { pulseJarvis } from "@/lib/jarvisSignals";
 import { confirmActionBody, rejectActionPath, type PendingAction } from "@/lib/pendingActions";
 import {
-  canAcknowledge, CONFIDENCE_META, FIELD_DEFS, fieldsToForm, formToFields, isQuickAddKind, KIND_AREAS, KIND_HREFS,
-  KIND_LABELS, normalizeParse, prepareErrors, QUICK_ADD_EXAMPLES, readiness, type FieldDef, type FormValues,
+  canAcknowledge, CONFIDENCE_META, examplesFor, FIELD_DEFS, fieldsToForm, formToFields, gateParse, isQuickAddKind,
+  KIND_AREAS, KIND_HREFS, KIND_LABELS, kindsHint, normalizeParse, prepareErrors, promptHint, readiness, type FieldDef, type FormValues,
   type QuickAddIssue, type QuickAddKind, type QuickAddParse,
 } from "@/lib/quickAdd";
+import { MODULE_ACCESS } from "@/lib/moduleConfig";
 import { cx } from "@/lib/ui";
 
 const PARSE_DEBOUNCE_MS = 180;
@@ -86,7 +87,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
     try {
       const res = await apiFetch("/quick-add/parse", { ...jsonBody("POST", { text: value }), signal: controller.signal });
       if (!res.ok) throw new Error(await readErrorDetail(res));
-      const result = normalizeParse(await res.json());
+      const result = gateParse(normalizeParse(await res.json()), MODULE_ACCESS);
       if (seq !== seqRef.current) return;
       setParse({ status: "done", result });
       setForm(isQuickAddKind(result.kind) ? fieldsToForm(result.kind, result.fields) : {});
@@ -292,7 +293,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
               <p className="text-sm text-ink" data-testid="quick-add-unknown">
                 Tomu zatím nerozumím.
               </p>
-              <p className="text-xs text-ink-muted">Umím připomínku, výdaj nebo příjem, odpracované hodiny a školní test nebo úkol. Třeba:</p>
+              <p className="text-xs text-ink-muted">{kindsHint(MODULE_ACCESS)} Třeba:</p>
               <Examples onPick={setText} />
             </div>
           ) : kind && shown ? (
@@ -309,7 +310,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
             <p className="text-sm text-ink-muted">Rozebírám…</p>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-ink-2">Napiš, co chceš přidat – připomínku, výdaj, práci nebo školní termín.</p>
+              <p className="text-sm text-ink-2">{promptHint(MODULE_ACCESS)}</p>
               <Examples onPick={setText} />
             </div>
           )}
@@ -357,7 +358,7 @@ function summaryTitle(kind: QuickAddKind, form: FormValues): string {
 function Examples({ onPick }: { onPick: (text: string) => void }) {
   return (
     <ul className="flex flex-wrap gap-2" aria-label="Příklady">
-      {QUICK_ADD_EXAMPLES.map((ex) => (
+      {examplesFor(MODULE_ACCESS).map((ex) => (
         <li key={ex.text}>
           <button
             type="button"

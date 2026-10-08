@@ -41,6 +41,21 @@ _PRIORITIES = ("high", "medium", "low")
 _ASSIGNMENT_DONE = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
 
 
+def _require_module(ent) -> None:
+    """MRK-7: záznamy vypnutého modulu AI nemění (oblast entity = oblast kontextu modulu; jádro = vždy)."""
+    from module_registry import current_access
+    if not current_access().allows_context_area(ent.area):
+        raise MutationRefused("module_unavailable", f"Modul „{ent.area}“ je vypnutý – jeho záznamy teď měnit nejde.")
+
+
+def _require_module_at_apply(ent) -> None:
+    """Potvrzení / vrácení po vypnutí modulu: nic se nezmění (jako zastaralý cíl)."""
+    try:
+        _require_module(ent)
+    except MutationRefused as refused:
+        raise StaleTarget(refused.detail) from None
+
+
 class MutationRefused(Exception):
     """Cíl nelze bezpečně určit / změna je neplatná → žádná pending akce, model se má doptat."""
 
@@ -535,6 +550,7 @@ def resolve_mutation(db: Session, entity: str, action: str, target: dict, change
     ent = ENTITIES.get(str(entity or "").strip())
     if ent is None:
         raise MutationRefused("unsupported_entity", f"Podporované entity: {sorted(ENTITIES)}")
+    _require_module(ent)
     action = str(action or "").strip().lower()
     if action not in ent.actions:
         raise MutationRefused(
@@ -695,6 +711,7 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
     action = plan.get("action")
     if ent is None or action not in ent.actions:
         raise ValueError("Plán obsahuje nepodporovanou entitu nebo akci")
+    _require_module_at_apply(ent)
     targets = plan.get("targets") or []
     if not targets or len(targets) > MAX_BATCH:
         raise ValueError("Plán nemá platný počet cílů")
@@ -1011,6 +1028,7 @@ def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
             raise StaleTarget("Tahle změna už byla vrácena (nebo není provedená).")
 
         ent = ENTITIES[rec["entity"]]
+        _require_module_at_apply(ent)
         ids = []
         for item in rec.get("items") or []:
             diff = _undo_item(db, ent, rec["action"], item, apply=True)

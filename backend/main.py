@@ -51,6 +51,7 @@ from activity_service import log_activity, delta_dict
 from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz, planner_action_line
 from time_utils import local_month_bounds_utc, today_local, utc_now
 from env_config import env_bool
+from module_registry import current_access
 
 
 PLANNER_MODE_DAILY = "daily"
@@ -261,10 +262,19 @@ def require_auth(request: Request) -> dict:
     return info
 
 
+def require_module_available(request: Request) -> None:
+    """Roadmap 6C: REST cesty vypnutého modulu → 404 (čistě, ne 500). Běží až PO auth (pořadí dependencies),
+    takže nepřihlášený dostane 401 dřív, než se cokoliv dozví o modulech. Flag nic nepovoluje – jen ubírá."""
+    access = current_access()
+    module = access.module_for_path(request.url.path)
+    if module and not access.is_available(module.id):
+        raise HTTPException(status_code=404, detail={"message": "Modul není dostupný.", "module": module.id})
+
+
 app = FastAPI(
     title="Standa Hub API",
     lifespan=lifespan,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_auth), Depends(require_module_available)],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -2673,6 +2683,8 @@ def today_action_prepare(request: TodayActionRequest):
     kind, _, raw_id = (request.ref or "").partition(":")
     if request.action != "complete" or kind != "assignment" or not raw_id.isdigit():
         raise HTTPException(status_code=422, detail="Tuhle akci režim Dnes nepodporuje.")
+    if not current_access().allows_ref(request.ref, "today"):
+        raise HTTPException(status_code=404, detail="Modul není dostupný.")
     db = SessionLocal()
     try:
         try:
@@ -2689,13 +2701,26 @@ def today_action_prepare(request: TodayActionRequest):
         db.close()
 
 
+@app.get("/modules")
+def modules_get():
+    """Roadmap 6C: dostupnost modulů (jen id, název, booleovské schopnosti – žádné hodnoty prostředí)."""
+    return {"modules": current_access().public_config()}
+
+
+# Typy položek GET /dashboard → typ záznamu modulu (ref), pokud se liší.
+_DASHBOARD_ENTITY = {"goal_target": "goal"}
+
+
 @app.get("/dashboard")
 def dashboard_get():
+    access = current_access()
+    shows = lambda module_id: access.allows(module_id, "dashboard")  # noqa: E731
     db = SessionLocal()
     try:
         today_plan = generate_plan(db, mode="daily")
         db.commit()
-        today_actions = today_plan.get("actions") or []
+        # Roadmap 6C: sekce vypnutého modulu se nepočítají (None) a jeho položky se vynechají.
+        today_actions = [a for a in (today_plan.get("actions") or []) if access.allows_ref(a.get("ref"), "dashboard")]
         summary_text = today_plan.get("summary") or ""
 
         today_deadline = None
@@ -2722,17 +2747,22 @@ def dashboard_get():
             "preview": notif_preview,
         }
 
-        goals_list = _top_active_goals(db, limit=3)
-        goals = {
-            "top": goals_list,
-            "count": len(goals_list),
-        }
+        goals = None
+        if shows("goals"):
+            goals_list = _top_active_goals(db, limit=3)
+            goals = {
+                "top": goals_list,
+                "count": len(goals_list),
+            }
 
-        work = _get_work_with_goal(db)
-        finance = _get_finance_with_goal(db)
-        upcoming = _get_upcoming(db, limit=5)
-        wot = _get_wot_quick_status(db, limit=2)
-        mff = _get_mff_quick_status(db)
+        work = _get_work_with_goal(db) if shows("work") else None
+        finance = _get_finance_with_goal(db) if shows("finance") else None
+        upcoming = [
+            u for u in (_get_upcoming(db, limit=5) if shows("school") else [])
+            if access.allows_entity(_DASHBOARD_ENTITY.get(u.get("type"), u.get("type")), "dashboard")
+        ]
+        wot = _get_wot_quick_status(db, limit=2) if shows("wot") else None
+        mff = _get_mff_quick_status(db) if shows("mff") else None
 
         recent_activity_rows = (
             db.query(ActivityLog)

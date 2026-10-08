@@ -28,6 +28,8 @@ import type { ApiResource } from "@/hooks/useApiResource";
 import type { BriefingPayload } from "@/lib/briefing";
 import type { IconName } from "@/lib/icons";
 import { formatDate, formatDays, formatNumber, formatRelativeDays } from "@/lib/format";
+import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { allowsHref } from "@/lib/modules";
 import { staggerStyle } from "@/lib/motion";
 import type { WidgetId } from "@/lib/dashboardLayout";
 import { clampPercent, cx, priorityTone, severityTone, type Tone } from "@/lib/ui";
@@ -110,22 +112,23 @@ export type DashboardPayload = {
     info: number;
     preview: NotificationPreview[];
   };
-  goals: { top: GoalQuick[]; count: number };
-  work: WorkQuick;
-  finance: FinanceQuick;
+  // Roadmap 6C: sekce vypnutého modulu je null (backend ji vůbec nepočítá).
+  goals: { top: GoalQuick[]; count: number } | null;
+  work: WorkQuick | null;
+  finance: FinanceQuick | null;
   upcoming: UpcomingItem[];
   wot: {
     top_grinds: Array<{ id: number; tank: string; xp_remaining: number; priority: string; status: string }>;
     credits?: number | null;
     free_xp?: number | null;
     bonds?: number | null;
-  };
+  } | null;
   mff: {
     tracked_characters: number;
     t4_count: number;
     priority_count: number;
     average_build_completeness: number;
-  };
+  } | null;
 };
 
 const fmt0 = (v: number) => formatNumber(v, 0);
@@ -224,13 +227,16 @@ function GoalProgressBlock({
   );
 }
 
+// Roadmap 6C: widgety čtou dostupnost modulů jen přes MODULE_ACCESS (žádné vlastní flagy).
+const shows = (moduleId: string) => MODULE_ACCESS.allows(moduleId, "dashboard");
+
 const QUICK_ACTIONS = [
   { href: "/work", icon: "briefcase" as IconName, title: "Zapsat práci", hint: "Odpracované hodiny" },
   { href: "/finance", icon: "wallet" as IconName, title: "Přidat výdaj", hint: "Finance" },
   { href: "/goals", icon: "target" as IconName, title: "Nový cíl", hint: "Cíle" },
   { href: "/ai", icon: "bot" as IconName, title: "AI asistent", hint: "Chat" },
   { href: "/planner", icon: "clipboard" as IconName, title: "Plánovač", hint: "Den / týden" },
-];
+].filter((q) => allowsHref(MODULE_ACCESS, q.href));
 
 export type WidgetProps = {
   data: DashboardPayload | null;
@@ -321,22 +327,30 @@ function KeyMetricsWidget({ data, loading, index }: WidgetProps) {
           ))}
         </StatGrid>
       ) : data ? (
-        <StatGrid>
-          <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
-          <MetricCard label="Výdělek · měsíc" value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />} unit="Kč" />
-          <MetricCard
-            label="Bilance"
-            value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
-            unit="Kč"
-            tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
-            hint={`${finance?.transactions_count ?? 0} transakcí`}
-          />
-          <MetricCard
-            label="Výdaje · měsíc"
-            value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
-            unit="Kč"
-            hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
-          />
+        <StatGrid cols={shows("work") && shows("finance") ? 4 : 2}>
+          {shows("work") ? (
+            <>
+              <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
+              <MetricCard label="Výdělek · měsíc" value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />} unit="Kč" />
+            </>
+          ) : null}
+          {shows("finance") ? (
+            <>
+              <MetricCard
+                label="Bilance"
+                value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
+                unit="Kč"
+                tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
+                hint={`${finance?.transactions_count ?? 0} transakcí`}
+              />
+              <MetricCard
+                label="Výdaje · měsíc"
+                value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
+                unit="Kč"
+                hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
+              />
+            </>
+          ) : null}
         </StatGrid>
       ) : null}
     </section>
@@ -363,7 +377,9 @@ function TodayWidget({ data, loading, index }: WidgetProps) {
           ))}
         </EntityList>
       ) : data ? (
-        <EmptyState action={<TextLink href="/goals">Nastavit cíle →</TextLink>}>Dnes podle plánovače nic nehoří.</EmptyState>
+        <EmptyState action={shows("goals") ? <TextLink href="/goals">Nastavit cíle →</TextLink> : undefined}>
+          Dnes podle plánovače nic nehoří.
+        </EmptyState>
       ) : null}
     </Card>
   );
@@ -491,62 +507,66 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
         icon="gamepad"
         actions={
           <>
-            <TextLink href="/wot">WoT →</TextLink>
-            <TextLink href="/mff">MFF →</TextLink>
+            {shows("wot") ? <TextLink href="/wot">WoT →</TextLink> : null}
+            {shows("mff") ? <TextLink href="/mff">MFF →</TextLink> : null}
           </>
         }
       />
       {loading ? (
         <LoadingState lines={2} />
       ) : (
-        <div className="grid gap-3 text-sm md:grid-cols-2">
-          <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="font-medium text-ink">World of Tanks</span>
-              {wot?.credits !== undefined && wot.credits !== null ? (
-                <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
-              ) : null}
+        <div className={cx("grid gap-3 text-sm", shows("wot") && shows("mff") ? "md:grid-cols-2" : null)}>
+          {shows("wot") ? (
+            <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="font-medium text-ink">World of Tanks</span>
+                {wot?.credits !== undefined && wot.credits !== null ? (
+                  <span className="text-xs tabular-nums text-ink-muted">{formatNumber(wot.credits, 0)} kreditů</span>
+                ) : null}
+              </div>
+              {wot?.top_grinds?.length ? (
+                wot.top_grinds.slice(0, 2).map((g) => (
+                  <div key={g.id} className="flex justify-between gap-2">
+                    <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
+                    <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
+              )}
             </div>
-            {wot?.top_grinds?.length ? (
-              wot.top_grinds.slice(0, 2).map((g) => (
-                <div key={g.id} className="flex justify-between gap-2">
-                  <span className="min-w-0 truncate text-ink-2">{g.tank}</span>
-                  <span className="shrink-0 tabular-nums text-ink-muted">{formatNumber(g.xp_remaining, 0)} XP</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-xs text-ink-muted">Žádné aktivní grindy.</p>
-            )}
-          </div>
-          <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="font-medium text-ink">Marvel Future Fight</span>
-              {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
+          ) : null}
+          {shows("mff") ? (
+            <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="font-medium text-ink">Marvel Future Fight</span>
+                {mff ? <span className="text-xs text-ink-muted">{mff.tracked_characters} sledovaných</span> : null}
+              </div>
+              {mff ? (
+                <>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-ink-muted">T4 postavy</span>
+                    <span className="tabular-nums text-ink">{mff.t4_count}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-ink-muted">Vysoká priorita</span>
+                    <span className="tabular-nums text-ink">{mff.priority_count}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-3">
+                    <Progress
+                      size="sm"
+                      value={mff.average_build_completeness}
+                      label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
+                      className="flex-1"
+                    />
+                    <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-ink-muted">Žádné postavy.</p>
+              )}
             </div>
-            {mff ? (
-              <>
-                <div className="flex justify-between gap-2">
-                  <span className="text-ink-muted">T4 postavy</span>
-                  <span className="tabular-nums text-ink">{mff.t4_count}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-ink-muted">Vysoká priorita</span>
-                  <span className="tabular-nums text-ink">{mff.priority_count}</span>
-                </div>
-                <div className="mt-2 flex items-center gap-3">
-                  <Progress
-                    size="sm"
-                    value={mff.average_build_completeness}
-                    label={`Průměrná rozpracovanost buildů ${mff.average_build_completeness} %`}
-                    className="flex-1"
-                  />
-                  <span className="text-xs tabular-nums text-ink-muted">{mff.average_build_completeness} %</span>
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-ink-muted">Žádné postavy.</p>
-            )}
-          </div>
+          ) : null}
         </div>
       )}
     </Card>

@@ -2,7 +2,10 @@
 
 import { useMemo } from "react";
 import { useApiResource } from "@/hooks/useApiResource";
+import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { navPagesFor } from "@/lib/navigation";
 import {
+  filterAvailable,
   groupResults,
   MIN_REMOTE_QUERY,
   normalize,
@@ -15,6 +18,9 @@ import {
 export const SEARCH_DEBOUNCE_MS = 180;
 
 type RemoteResponse = { query: string; results: SearchResult[]; total: number };
+
+/** Roadmap 6C: Ctrl+K hledá jen stránky dostupných modulů (stejný seznam jako navigace). */
+const PAGES = navPagesFor(MODULE_ACCESS);
 
 /**
  * Výsledky globálního vyhledávání: navigace hned (lokálně), záznamy z GET /search s debounce.
@@ -32,13 +38,14 @@ export function useGlobalSearch(query: string, { enabled, recent }: { enabled: b
 
   const groups: SearchGroup[] = useMemo(() => {
     if (!nq) {
-      const nav = searchNavigation("");
+      const nav = searchNavigation("", PAGES);
+      const recentAvailable = filterAvailable(recent, MODULE_ACCESS);
       return [
-        ...(recent.length ? [{ key: "recent", label: "Nedávno otevřené", results: recent }] : []),
+        ...(recentAvailable.length ? [{ key: "recent", label: "Nedávno otevřené", results: recentAvailable }] : []),
         { key: "page", label: "Navigace", results: nav },
       ];
     }
-    return groupResults([...searchNavigation(q), ...(fresh?.results ?? [])]);
+    return groupResults([...searchNavigation(q, PAGES), ...filterAvailable(fresh?.results ?? [], MODULE_ACCESS)]);
   }, [nq, q, fresh, recent]);
 
   return {

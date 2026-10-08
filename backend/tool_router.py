@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 
 from context_service import classify_areas, fold_text, is_planner_like
+from module_registry import current_access
 from planner_guard import PLANNER_REQUIRED_TOOLS
 from tool_registry import (
     AREA_ACTIVITY,
@@ -107,7 +108,10 @@ class ToolRoute:
 
 
 def _ordered(names: set[str]) -> tuple[str, ...]:
-    return tuple(s.name for s in TOOL_SPECS if s.name in names)
+    """Pořadí registru; Roadmap 6C: bez toolů, jejichž VŠECHNY oblasti patří modulům bez `ai_context`."""
+    access = current_access()
+    return tuple(s.name for s in TOOL_SPECS
+                 if s.name in names and (not s.areas or any(access.allows_context_area(a) for a in s.areas)))
 
 
 def _with_requirements(names: set[str]) -> set[str]:

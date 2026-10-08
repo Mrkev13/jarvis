@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, MffCharacter, Reminder, Subject, WorkSession, WotGrind, WotReplay
+from module_registry import ModuleAccess, current_access
 from reminder_service import describe_recurrence, format_local
 from statuses import REMINDER_ACTIVE_STATUSES, is_assignment_done
 from time_utils import to_local
@@ -139,13 +140,19 @@ def _candidates(db: Session, q: str):
         yield "mff_character", c.id, c.name, sub, f"{c.uniform} {c.team} {c.role} mff postava", "mff", f"/mff?character={c.id}"
 
 
-def search(db: Session, raw_query: str, limit: int = MAX_RESULTS) -> dict:
-    """Výsledky seřazené podle skóre (u shody pořadí podle typu a titulku), max. PER_TYPE na typ."""
+def search(db: Session, raw_query: str, limit: int = MAX_RESULTS, *, access: ModuleAccess | None = None) -> dict:
+    """Výsledky seřazené podle skóre (u shody pořadí podle typu a titulku), max. PER_TYPE na typ.
+
+    Roadmap 6C: záznamy modulu, který nesmí do vyhledávání (vypnutý flag), se vynechají – řazení beze změny.
+    """
     q = normalize(raw_query)[:MAX_QUERY]
     if len(q) < MIN_QUERY:
         return {"query": q, "results": [], "total": 0}
+    access = access or current_access()
     found: list[SearchResult] = []
     for typ, rid, title, subtitle, extra, area, href in _candidates(db, q):
+        if not access.allows_entity(typ, "search"):
+            continue
         s = score_text(q, title, f"{subtitle} {extra}")
         if s:
             found.append(SearchResult(f"{typ}:{rid}", typ, str(title), subtitle, area, href, s))

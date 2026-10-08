@@ -5,7 +5,8 @@
  * Čisté funkce, testy: search.test.mjs.
  */
 import { areaMeta } from "./areas.ts";
-import { NAV_PAGES } from "./navigation.ts";
+import { allowsHref, type ModuleAccess } from "./modules.ts";
+import { NAV_PAGES, type NavPage } from "./navigation.ts";
 
 export type SearchResult = {
   id: string;
@@ -51,7 +52,7 @@ export function scoreText(query: string, title: string, extra = ""): number {
   return 0;
 }
 
-const navResult = (p: (typeof NAV_PAGES)[number], score: number): SearchResult => ({
+const navResult = (p: NavPage, score: number): SearchResult => ({
   id: `nav:${p.href}`,
   type: "page",
   title: p.label,
@@ -61,11 +62,11 @@ const navResult = (p: (typeof NAV_PAGES)[number], score: number): SearchResult =
   score,
 });
 
-/** Stránky podle dotazu (prázdný dotaz = všechny v pořadí navigace). */
-export function searchNavigation(raw: string): SearchResult[] {
+/** Stránky podle dotazu (prázdný dotaz = všechny v pořadí navigace). `pages` = jen dostupné (navPagesFor). */
+export function searchNavigation(raw: string, pages: NavPage[] = NAV_PAGES): SearchResult[] {
   const q = normalize(raw);
-  if (!q) return NAV_PAGES.map((p) => navResult(p, 0));
-  return NAV_PAGES.map((p) => {
+  if (!q) return pages.map((p) => navResult(p, 0));
+  return pages.map((p) => {
     // klíčová slova se hodnotí jako titulek (např. „dashboard"), ale o stupeň níž než skutečný název
     const best = Math.max(scoreText(q, p.label), ...p.keywords.map((k) => Math.max(0, scoreText(q, k) - 10)));
     return best ? navResult(p, best + NAV_BOOST) : null;
@@ -99,6 +100,15 @@ export function groupResults(results: SearchResult[], perGroup = 6): SearchGroup
   return [...map.entries()]
     .map(([key, list]) => ({ key, label: groupLabel(key), results: list.sort((a, b) => b.score - a.score) }))
     .sort((a, b) => b.results[0].score - a.results[0].score || GROUP_ORDER.indexOf(a.key) - GROUP_ORDER.indexOf(b.key));
+}
+
+/**
+ * Roadmap 6C: dostupnost modulů jako vstupní filtr (řazení beze změny). Záznamy vypnutého modulu (podle typu)
+ * a odkazy na jeho stránky (i ze starších „Nedávno otevřené") se nezobrazí. Backend filtruje stejně –
+ * tohle je pojistka pro rozjeté flagy frontendu a backendu.
+ */
+export function filterAvailable(results: SearchResult[], access: ModuleAccess): SearchResult[] {
+  return results.filter((r) => (r.type === "page" || access.allowsEntity(r.type, "search")) && allowsHref(access, r.href));
 }
 
 /** Řádky v pořadí zobrazení (pro šipky a Enter). */
