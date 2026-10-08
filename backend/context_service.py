@@ -7,7 +7,6 @@ kol. Výběr oblastí je deterministický (klíčová slova), bez LLM volání. 
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -20,7 +19,7 @@ from models import Assignment, Exam, FinanceTransaction, Goal, Memory, Notificat
 from module_registry import ModuleAccess, current_access
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_month_bounds_utc, now_local
-from text_utils import WEEKDAYS_CZ_SHORT, clip
+from text_utils import WEEKDAYS_CZ_SHORT, clip, fold_text
 
 CONTEXT_TARGET_TOKENS = DEFAULT_CONTEXT_TARGET_TOKENS
 CONTEXT_MAX_TOKENS = DEFAULT_MAX_CONTEXT_TOKENS
@@ -95,18 +94,12 @@ def _split_memory(text: str) -> str:
 
 
 def _fold(text: str) -> str:
-    """Lowercase bez diakritiky – deterministické porovnávání českých slov."""
-    nfkd = unicodedata.normalize("NFKD", (text or "").lower())
-    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+    """Lowercase bez diakritiky – deterministické porovnávání českých slov (text_utils.fold_text)."""
+    return fold_text(text)
 
 
 def _has(text: str, words) -> bool:
     return any(w in text for w in words)
-
-
-def fold_text(text: str) -> str:
-    """Veřejný alias _fold pro sdílené deterministické klasifikátory (tool_router)."""
-    return _fold(text)
 
 
 def is_planner_like(message: str) -> bool:
