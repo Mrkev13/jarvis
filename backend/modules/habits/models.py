@@ -28,6 +28,9 @@ class Habit(Base):
     active = Column(Boolean, nullable=False, default=True)  # False = archivovaný (spolu s archived_at)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     archived_at = Column(DateTime, nullable=True)
+    # Pražský den, od kterého se odvozuje „missed" (po obnovení z archivu = den obnovení; None = den založení).
+    # Dny archivace se tak nikdy nepočítají jako vynechané; uložené záznamy platí vždy.
+    tracked_since = Column(Date, nullable=True)
 
     entries = relationship("HabitEntry", back_populates="habit", passive_deletes="all", order_by="HabitEntry.date")
 

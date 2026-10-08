@@ -17,7 +17,8 @@ habit-tracking product: no streaks, achievements, analytics, reminders, recurren
 ## Model
 
 - `Habit`: `name`, `kind` (`check` | `count` | `duration`), optional `target_value` and `unit` (e.g. 2 l, 20 min),
-  `active`, `created_at`, `archived_at`. Every habit is **daily**: there is no weekday schedule and no recurrence
+  `active`, `created_at`, `archived_at`, `tracked_since` (the day missed-inference starts after a
+  restore; empty = the creation day). Every habit is **daily**: there is no weekday schedule and no recurrence
   engine.
 - `HabitEntry`: `habit_id`, `date` (Prague calendar day), `state`, optional `value` (count), `duration_minutes`
   (duration), `note`, `created_at`, `updated_at`. **Unique `(habit_id, date)`.**
@@ -28,7 +29,7 @@ habit-tracking product: no streaks, achievements, analytics, reminders, recurren
 |---|---|---|
 | `done` | stored entry | completed that day (with optional value or minutes) |
 | `skipped` | stored entry | deliberately skipped. Not counted as a failure in the 7-day summary. |
-| `missed` | **inferred** on read | a past day (from the habit's creation day up to yesterday) with no entry |
+| `missed` | **inferred** on read | a past day with no entry, from `tracked_since` (creation day, or the restore day) up to yesterday, and never on or after the archive day while the habit is archived |
 | `open` | inferred | today, no entry yet |
 
 How "missed" works:
@@ -39,6 +40,9 @@ How "missed" works:
 
 ## History guarantees (tested)
 
+- **Archived days are never missed.** While a habit is archived, nothing from the archive day on is inferred as missed.
+  A restore on a later day starts inference again from the restore day, so the archive gap is not counted as failure.
+  Stored done/skipped entries from before are still shown. A same-day archive and restore changes nothing.
 - **Archiving never deletes entries.** It sets `active = false` and `archived_at`. Restoring brings the full history
   back.
 - **No cascade deletes.** The FK is `ON DELETE RESTRICT` and the ORM relationship uses `passive_deletes="all"`.

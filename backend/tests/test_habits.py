@@ -137,6 +137,35 @@ class HabitServiceTestCase(unittest.TestCase):
         hist = {d["date"]: d["state"] for d in service.list_habits(self.db, TODAY)["active"][0]["history"]}
         self.assertEqual(hist["2026-10-06"], "done", "historie se vrátila s návykem")
 
+    def test_archived_days_are_never_inferred_as_missed(self):
+        h = self._habit()  # založeno 3. 10.; 3. 10. splněno, 4. 10. archivováno, 7. 10. obnoveno
+        service.set_entry(self.db, h.id, "done", day=date(2026, 10, 3), today=TODAY)
+        with patch.object(service, "utc_now", return_value=datetime(2026, 10, 4, 8, 0)):
+            service.set_active(self.db, h.id, False)
+        self.db.commit()
+        archived = {d["date"]: d["state"] for d in service.list_habits(self.db, TODAY)["archived"][0]["history"]}
+        self.assertEqual([archived[f"2026-10-0{d}"] for d in range(3, 8)], ["done", None, None, None, None],
+                         "archivovaný návyk nic nevynechává")
+        with patch.object(service, "today_local", return_value=TODAY):
+            service.set_active(self.db, h.id, True)
+        self.db.commit()
+        restored = service.list_habits(self.db, TODAY)["active"][0]
+        hist = {d["date"]: d["state"] for d in restored["history"]}
+        self.assertEqual([hist[f"2026-10-0{d}"] for d in range(3, 8)], ["done", None, None, None, "open"],
+                         "dny archivace se po obnovení nepočítají jako vynechané")
+        self.assertEqual(service.summary(self.db, TODAY)["week_expected"], 1)
+        self.assertEqual(service.summary(self.db, TODAY + timedelta(days=1))["week_expected"], 2, "od obnovení se zase počítá")
+
+    def test_same_day_archive_and_restore_keeps_inference(self):
+        h = self._habit()
+        with patch.object(service, "utc_now", return_value=NOW_UTC):
+            service.set_active(self.db, h.id, False)
+        with patch.object(service, "today_local", return_value=TODAY):
+            service.set_active(self.db, h.id, True)
+        self.db.commit()
+        hist = {d["date"]: d["state"] for d in service.list_habits(self.db, TODAY)["active"][0]["history"]}
+        self.assertEqual(hist["2026-10-04"], "missed")
+
     def test_entries_cannot_be_deleted_by_cascade(self):
         h = self._habit()
         service.set_entry(self.db, h.id, "done", today=TODAY)

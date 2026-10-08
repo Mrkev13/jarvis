@@ -7,7 +7,8 @@ Stavy dne:
 - `open` – dnešek bez záznamu.
 
 Historie: záznam se nikdy nemaže; změna stavu dne přepíše řádek, ale Aktivita uloží deltu (původní stav, hodnotu).
-Archivace jen skryje návyk z Dnes a z nových zápisů – záznamy zůstávají a po obnovení jsou zpět.
+Archivace jen skryje návyk z Dnes a z nových zápisů – záznamy zůstávají a po obnovení jsou zpět. Od dne archivace
+se nic neodvozuje jako `missed`; po obnovení jiný den začíná odvozování od dne obnovení (`Habit.tracked_since`).
 """
 from __future__ import annotations
 
@@ -53,11 +54,18 @@ def target_label(h: Habit) -> str:
     return f"{format_num_cz(h.target_value)} {h.unit or ''}".strip()
 
 
+def tracked_since(h: Habit) -> date:
+    """První den, od kterého chybějící záznam znamená „missed" (založení, po obnovení z archivu den obnovení)."""
+    return max(created_day(h), h.tracked_since) if h.tracked_since else created_day(h)
+
+
 def day_state(h: Habit, day: date, entry: HabitEntry | None, today: date) -> str | None:
-    """Stav návyku v daný den; None = den před založením nebo v budoucnu (nic se neočekává)."""
+    """Stav návyku v daný den; None = nic se neočekává (před sledováním, v budoucnu, nebo od archivace)."""
     if entry is not None:
         return entry.state
-    if day > today or day < created_day(h):
+    if day > today or day < tracked_since(h):
+        return None
+    if not h.active and h.archived_at and day >= to_local(h.archived_at).date():
         return None
     return "open" if day == today else "missed"
 
@@ -189,6 +197,9 @@ def set_active(db: Session, habit_id: int, active: bool, *, user_context: str | 
     h = get_habit(db, habit_id)
     if bool(h.active) == active:
         return h
+    if active and h.archived_at and to_local(h.archived_at).date() < today_local():
+        # dny archivace (a neznámé dny před ní) se po obnovení nepočítají jako vynechané
+        h.tracked_since = today_local()
     h.active = active
     h.archived_at = None if active else utc_now()
     log_activity(db, AREA, "restore" if active else "archive",

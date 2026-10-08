@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("archived_at", sa.DateTime(), nullable=True),
+        sa.Column("tracked_since", sa.Date(), nullable=True),
         sa.CheckConstraint("kind IN ('check', 'count', 'duration')", name="ck_habits_kind"),
         sa.PrimaryKeyConstraint("id"),
     )
