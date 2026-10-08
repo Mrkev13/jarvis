@@ -23,7 +23,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from module_contracts import QuickAddKind, QuickAddRule
-from module_registry import ModuleAccess, all_contributions, current_access
+from module_registry import MODULES, ModuleAccess, all_contributions, current_access
 from quick_add_text import MAX_TEXT, Draft, Text
 from time_utils import now_local, utc_now
 
@@ -37,10 +37,18 @@ _KINDS: dict[str, QuickAddKind] = {spec.kind: spec for _owner, spec in all_contr
 KINDS = tuple(_KINDS)
 
 
-def classify(t: Text) -> tuple[str, str]:
+def _tables(access: ModuleAccess | None) -> tuple[tuple[QuickAddRule, ...], dict[str, QuickAddKind]]:
+    """Pravidla a druhy registru, který `access` popisuje (výchozí registr = předpočítané tabulky)."""
+    if access is None or access.modules is MODULES:
+        return _RULES, _KINDS
+    rules = tuple(sorted((r for _o, r in all_contributions("quick_add_rules", access.modules)), key=lambda r: r.priority))
+    return rules, {k.kind: k for _o, k in all_contributions("quick_add_kinds", access.modules)}
+
+
+def classify(t: Text, rules: tuple[QuickAddRule, ...] = _RULES) -> tuple[str, str]:
     """(druh, jistota): první pravidlo podle priority, které text rozpozná (dřív pevný řetězec if – stejné pořadí:
     výslovná připomínka > škola > práce > relativní čas / čas > peníze)."""
-    for rule in _RULES:
+    for rule in rules:
         confidence = rule.detect(t)
         if confidence:
             return rule.kind, confidence
@@ -63,17 +71,18 @@ def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = No
     overrides = dict(context or {})
     if subjects is not None:
         overrides.setdefault("subjects", subjects)
+    rules, kinds = _tables(access)
     d = Draft()
     spec: QuickAddKind | None = None
     ctx = overrides
     if len(t.raw) < 2:
         d.kind = "empty"
     else:
-        d.kind, d.confidence = classify(t)
-        if d.kind in KINDS and not (access or current_access()).allows_quick_add_kind(d.kind):
+        d.kind, d.confidence = classify(t, rules)
+        if d.kind in kinds and not (access or current_access()).allows_quick_add_kind(d.kind):
             # Roadmap 6C: vypnutý modul = jako by druh neexistoval (nic se nepředvyplní ani neuloží).
             d.kind, d.confidence = "unknown", "low"
-        spec = _KINDS.get(d.kind)
+        spec = kinds.get(d.kind)
         if spec is not None:
             ctx = _context(spec, db, overrides)
             spec.parse(t, d, now_utc, ctx)
@@ -88,7 +97,7 @@ def parse(text: str, *, db: Session | None = None, now_utc: datetime | None = No
         "warnings": d.warnings,
         "needs_input": d.needs_input,
         "errors": d.errors,
-        "ready": d.kind in KINDS and not d.needs_input and not d.errors,
+        "ready": d.kind in kinds and not d.needs_input and not d.errors,
     }
     if spec is not None and spec.output is not None:
         result.update(spec.output(ctx))
@@ -107,14 +116,15 @@ class QuickAddInvalid(Exception):
 def to_tool_call(db: Session, kind: str, fields: dict, now_utc: datetime | None = None, *,
                  access: ModuleAccess | None = None) -> tuple[str, dict]:
     """Ověří pole z náhledu (po úpravách) a vrátí (WRITE tool, argumenty). Chyby → QuickAddInvalid."""
-    if kind in KINDS and not (access or current_access()).allows_quick_add_kind(kind):
+    _rules, kinds = _tables(access)
+    if kind in kinds and not (access or current_access()).allows_quick_add_kind(kind):
         # frontend se nikdy nebere za pravdu – ani ručně poslaný druh vypnutého modulu nic nevytvoří
         raise QuickAddInvalid([{"field": "kind", "message": "Tento modul je vypnutý."}])
     now_utc = now_utc or utc_now()
     today = now_local(now_utc).date()
     f = fields if isinstance(fields, dict) else {}
     d = Draft()
-    spec = _KINDS.get(kind)
+    spec = kinds.get(kind)
     if spec is None:
         d.error("kind", "Neznámý typ záznamu.")
         tool, args = "", {}

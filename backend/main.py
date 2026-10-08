@@ -2537,7 +2537,7 @@ def dashboard_get():
         }
 
         # MRK-20: sekce modulů. Klíč je v odpovědi vždy (tvar stálý); vypnutý modul = `empty` a nic se nepočítá.
-        sections = {sec.key: sec.empty for _owner, sec in all_contributions("dashboard")}
+        sections = {sec.key: sec.empty for _owner, sec in all_contributions("dashboard", access.modules)}
         for owner, sec in access.contributions("dashboard"):
             try:
                 sections[sec.key] = sec.build(db, access)

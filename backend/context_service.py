@@ -22,7 +22,7 @@ from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
 from models import Memory
 from module_contracts import ContextRequest
-from module_registry import ModuleAccess, all_contributions, current_access
+from module_registry import MODULES, ModuleAccess, all_contributions, current_access
 from statuses import REMINDER_ACTIVE_STATUSES
 from time_utils import now_local
 from text_utils import WEEKDAYS_CZ_SHORT, fold_text
@@ -96,7 +96,8 @@ def is_planner_like(message: str) -> bool:
 
 
 def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bool = True,
-                   hints: dict[str, list[str]] | None = None) -> frozenset[str]:
+                   hints: dict[str, list[str]] | None = None,
+                   words: dict[str, tuple[str, ...]] | None = None) -> frozenset[str]:
     """Oblasti dotazu. implied=False vrátí jen explicitně zmíněné oblasti (pro pořadí při ořezu).
 
     `hints` = názvy záznamů podle oblasti (`ContextSection.name_hints`); `project_names` / `tank_names` jsou
@@ -104,8 +105,8 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     """
     t = f" {_fold(message)} "
     areas: set[str] = set()
-    for area, words in _AREA_WORDS.items():
-        if _has(t, words):
+    for area, area_words in (_AREA_WORDS if words is None else words).items():
+        if _has(t, area_words):
             areas.add(area)
     named = {area: list(names) for area, names in (hints or {}).items()}
     named.setdefault(AREA_WORK, []).extend(project_names)
@@ -186,8 +187,9 @@ def build_current_context(
     access = access or current_access()
     sections_by_area = {sec.area: sec for _owner, sec in access.contributions("context")}
     hints = {area: list(sec.name_hints(db)) for area, sec in sections_by_area.items() if sec.name_hints}
+    words = None if access.modules is MODULES else {s.area: s.keywords for _o, s in all_contributions("context", access.modules)}
     named = _named_reminder_areas(db, message)
-    areas = classify_areas(message, hints=hints) | named
+    areas = classify_areas(message, hints=hints, words=words) | named
     planner_like = is_planner_like(message)
 
     tomorrow = today + timedelta(days=1)
@@ -198,7 +200,7 @@ def build_current_context(
     ]
     req = ContextRequest(db=db, today=today, local_now=local)
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
-    explicit = classify_areas(message, implied=False, hints=hints) | named
+    explicit = classify_areas(message, implied=False, hints=hints, words=words) | named
     with_section = sorted((sec for sec in sections_by_area.values() if sec.build and sec.order is not None and sec.area in areas),
                           key=lambda sec: sec.order)
     ordered = sorted(with_section, key=lambda sec: sec.area not in explicit)
@@ -232,7 +234,7 @@ def build_current_context(
         text = _render(header, sections, memory_lines)
 
     included = [key for key, _ in sections]
-    covered = {tool for key in included for tool in _COVERED_TOOLS.get(key, ())}
+    covered = {tool for key in included for tool in (sections_by_area[key].covered_tools if key in sections_by_area else ())}
     if memory_checked and (memory_lines or planner_like):
         covered |= set(_COVERED_TOOLS[AREA_MEMORY])
     section_names = ("date", *included, *(("memory",) if memory_lines else ()))
