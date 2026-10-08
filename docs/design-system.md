@@ -396,7 +396,13 @@ hours without a work word (work, *medium*) > relative time "za 2 hodiny" or a cl
 expense words > a bare number (finance, asks). Dates and times use the Prague calendar (`time_utils`): dnes /
 zítra / pozítří, weekdays ("v pátek" = nearest, "příští pátek" = next calendar week), "18. 10." (rolls to next year
 if already past), ISO dates; reminders without a time get 09:00 (shown as a warning); a time that already passed
-today moves to tomorrow (warning). Finance categories only from explicit words (Albert/Lidl → Potraviny,
+today moves to tomorrow (warning). **Clock time vs. duration (MRK-11):** a preposition + hour is a *clock time*
+– "od 14 hodin", "ve 14", "v 14", "v 10:30", "o 8", "kolem 9", "od 9" (only after od/v/ve/o/kolem may "hodin/hod/h"
+follow; "na 4 hodiny" stays a duration). An hour without a preposition is a *duration* – "4 h", "práce 4 hodiny",
+"Servind 6h", "14 hodin práce". Hours inside a clock phrase or a relative phrase never count as work hours, so an
+appointment ("21.10.2026 fyzio od 14 hodin") is a **reminder at the start time** (with the hint "Začátek v 14:00 –
+uloží se jako připomínka na tento čas"; there is no calendar/event entity yet), never 14 hours of work. An explicit
+work word with only a start time ("práce od 8 hodin") stays work and asks for the hours. Finance categories only from explicit words (Albert/Lidl → Potraviny,
 oběd/káva → Jídlo, MHD/benzín → Doprava, …); otherwise "Ostatní" with a visible warning. Subjects match by full
 name or code first, then by the stem of the first word ("z práva" → Právo); more candidates = no choice made.
 

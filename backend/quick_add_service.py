@@ -61,7 +61,15 @@ RE_RATE = re.compile(rf"(?:\bza\s+)?({_NUM})\s*(?:kc|czk)?\s*/\s*(?:h|hod|hodinu
 RE_MONEY = re.compile(rf"(?<![\w/])({_NUM})\s*(?:kc|czk|korun\w*|,-)(?![\w/])")
 RE_HOURS = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)\s*(?:h|hod|hodin|hodiny|hodinu|hodina)\b(?!\s*/)")
 RE_RELATIVE = re.compile(r"\bza\s+(\d+(?:[.,]\d+)?|pul|hodinu|minutu)\s*(minut\w*|min|hodin\w*|hodinu|h)?\b")
-RE_TIME = re.compile(r"(?:\b(?:v|ve|o|na|kolem)\s+(\d{1,2})(?:[:.](\d{2}))?\b(?!\s*(?:h\b|hod|kc|\.)))|(?:\b(\d{1,2}):(\d{2})\b)")
+# Čas hodin (MRK-11). Předložka + hodina [+ :minuty] [+ „hodin/h"] = ČAS ZAČÁTKU, ne délka:
+# „od 14 hodin", „ve 14", „v 10:30", „přednáška od 9", „doktor ve 13:15". Jen u od/v/ve/o/kolem smí za číslem
+# stát „hodin/hod/h" (při „na" zůstává „na 4 hodiny" délkou); „o 2 hodiny" / „v 5 hodinách" čas nejsou.
+# Délka práce zůstává bez předložky: „4 h", „práce 4 hodiny", „Servind 6h", „14 hodin práce".
+RE_TIME = re.compile(
+    r"(?:\b(?P<prep>od|v|ve|o|kolem)\s+(?P<h1>\d{1,2})(?:[:.](?P<m1>\d{2}))?(?:\s*(?:hodin|hod|h)\b)?(?!\s*(?:h\b|hod|kc|czk|/|\.)))"
+    r"|(?:\bna\s+(?P<h2>\d{1,2})(?:[:.](?P<m2>\d{2}))?\b(?!\s*(?:h\b|hod|kc|czk|/|\.)))"
+    r"|(?:\b(?P<h3>\d{1,2}):(?P<m3>\d{2})\b)"
+)
 RE_DATE = re.compile(r"\b(\d{1,2})\.\s*(\d{1,2})\.(?:\s*(\d{4}))?")
 RE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 RE_BARE_NUM = re.compile(rf"(?<![\w.,:/-])({_NUM})(?![\w.,:/])")
@@ -189,13 +197,26 @@ def _find_date(t: _Text, today: date, d: Draft, *, allow_past: bool = False) -> 
     return None
 
 
+def _clock_spans(f: str) -> list[tuple[int, int]]:
+    return [m.span() for m in RE_TIME.finditer(f)]
+
+
+def duration_matches(f: str) -> list[re.Match]:
+    """„4 h", „3 hodiny" – ale ne „14 hodin" uvnitř času („od 14 hodin") ani v relativním čase („za 2 hodiny")."""
+    blocked = _clock_spans(f)
+    rel = RE_RELATIVE.search(f)
+    if rel:
+        blocked.append(rel.span())
+    return [m for m in RE_HOURS.finditer(f) if not any(a <= m.start() < b for a, b in blocked)]
+
+
 def _find_time(t: _Text, d: Draft) -> str | None:
     m = RE_TIME.search(t.f)
     if not m:
         return None
     t.take(m)
-    h = int(m.group(1) or m.group(3))
-    mi = int(m.group(2) or m.group(4) or 0)
+    h = int(m.group("h1") or m.group("h2") or m.group("h3"))
+    mi = int(m.group("m1") or m.group("m2") or m.group("m3") or 0)
     if h > 23 or mi > 59:
         d.error("time", f"Čas {h}:{mi:02d} neexistuje.")
         return None
@@ -222,7 +243,7 @@ def classify(t: _Text) -> tuple[str, str]:
     if KW_ASSIGNMENT.search(f):
         return "assignment", "high"
     relative = RE_RELATIVE.search(f)
-    hours = [m for m in RE_HOURS.finditer(f) if not (relative and relative.start() <= m.start() < relative.end())]
+    hours = duration_matches(f)  # čas hodin („od 14 hodin") se jako délka práce nepočítá (MRK-11)
     if KW_WORK.search(f) or RE_RATE.search(f):
         return "work", "high"
     if hours:
@@ -258,7 +279,11 @@ def _parse_reminder(t: _Text, d: Draft, now_utc: datetime):
         due = (local_now + timedelta(minutes=minutes)).replace(second=0, microsecond=0, tzinfo=None)
     else:
         day = _find_date(t, today, d)
+        starts = RE_TIME.search(t.f)
         tm = _find_time(t, d)
+        if tm and not km and starts and starts.group("prep") == "od":
+            # událost s časem začátku – samostatný kalendář zatím není, uloží se jako připomínka v čas začátku
+            d.warnings.append(f"Začátek v {tm} – uloží se jako připomínka na tento čas.")
         if d.errors:
             pass
         elif day is None and tm is None:
@@ -331,7 +356,8 @@ def _parse_work(t: _Text, d: Draft, now_utc: datetime, confidence: str):
     if rate_m:
         t.take(rate_m)
         rate = _num(rate_m.group(1))
-    hm = RE_HOURS.search(t.f)
+    durations = duration_matches(t.f)
+    hm = durations[0] if durations else None
     hours = None
     if hm:
         t.take(hm)

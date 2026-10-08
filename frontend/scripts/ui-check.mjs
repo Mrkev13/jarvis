@@ -1045,6 +1045,16 @@ async function qaType(page, text) {
   check("quick add: připomínka zítra v 17:00", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-12T17:00" && (await preview.getByText("zítra v 17:00").count()) === 1);
   await page.screenshot({ path: `${OUT}quick-add-reminder.png` });
 
+  // MRK-11: „od 14 hodin" = čas začátku → připomínka, ne 14 hodin práce; „práce 4 h" zůstává délkou
+  await qaType(page, "21.10.2026 fyzio od 14 hodin");
+  check("quick add: „fyzio od 14 hodin“ = připomínka ve 14:00, ne práce", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-21T14:00" && (await preview.getByText("st 21. 10. 2026 v 14:00").count()) === 1 && (await dialog.getByLabel(/^Hodiny/).count()) === 0);
+  check("quick add: čas začátku vysvětlený v náhledu", (await dialog.getByText("Začátek v 14:00 – uloží se jako připomínka na tento čas.").count()) === 1 && (await save.isEnabled()));
+  await page.screenshot({ path: `${OUT}quick-add-appointment.png` });
+  await qaType(page, "přednáška od 9");
+  check("quick add: „přednáška od 9“ = čas 09:00", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-12T09:00");
+  await qaType(page, "práce 4 h");
+  check("quick add: „práce 4 h“ zůstává délkou práce", (await preview.getAttribute("data-kind")) === "work" && (await dialog.getByLabel(/^Hodiny/).inputValue()) === "4");
+
   // škola: předmět + datum; neznámý předmět = otázka, výběr ze seznamu povolí uložení
   await qaType(page, "test z fyziky 18. 10.");
   check("quick add: škola – předmět a termín", (await preview.getAttribute("data-kind")) === "exam" && (await dialog.getByLabel(/^Předmět/).inputValue()) === "2" && (await dialog.getByLabel(/^Termín/).inputValue()) === "2026-10-18");
