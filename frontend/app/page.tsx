@@ -214,7 +214,7 @@ export default function Home() {
 
       {editing && layout ? (
         <Card aria-labelledby="hidden-widgets-title" className="mt-4 md:mt-6">
-          <CardHeader title={<span id="hidden-widgets-title">Skryté widgety</span>} icon="🗂️" />
+          <CardHeader title={<span id="hidden-widgets-title">Skryté widgety</span>} icon="folder" />
           {hidden.length ? (
             <ul className="flex flex-wrap gap-2" aria-label="Skryté widgety">
               {hidden.map((w) => (

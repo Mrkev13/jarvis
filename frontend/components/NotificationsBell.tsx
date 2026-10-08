@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/Icon";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AreaBadge, Button, Drawer, EmptyState, ErrorState, LoadingState, StatusBadge } from "@/components/ui";
@@ -122,7 +123,7 @@ export default function NotificationsBell() {
         onClick={() => (open ? setOpen(false) : void openPanel())}
         className="motion-press relative grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface text-sm transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
       >
-        <span aria-hidden="true" className="select-none">🔔</span>
+        <Icon name="bell" size="md" className="text-ink-2" />
         {unread > 0 && (
           <span
             // key se mění jen při NÁRŮSTU unread → puls se přehraje, ne při každém obnovení
