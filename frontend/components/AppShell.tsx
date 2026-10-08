@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
 import { JarvisCompanion } from "@/components/jarvis/JarvisCompanion";
 import { ModuleRouteGuard } from "@/components/modules/ModuleRouteGuard";
+import { ModuleRuntimeLoader } from "@/components/modules/ModuleRuntimeLoader";
 import { PageTransition } from "@/components/motion/PageTransition";
 import { SearchHighlighter } from "@/components/search/SearchHighlighter";
 import { QuickAddProvider } from "@/components/quick-add/QuickAddProvider";
@@ -41,6 +42,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <SearchHighlighter />
+          <ModuleRuntimeLoader />
           <JarvisCompanion />
         </div>
       </QuickAddProvider>

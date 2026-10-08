@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { handleAi } from "./mock-ai.mjs";
 import { stubPng } from "./stub-png.mjs";
+import { MODULES } from "../lib/modules.ts";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const PORT = Number(process.env.MOCK_API_PORT || 8000);
@@ -48,7 +49,7 @@ function send(res, req, status, body, extraHeaders = {}) {
     "Access-Control-Allow-Origin": req.headers.origin || "*",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   });
   res.end(body === undefined ? "" : JSON.stringify(body));
 }
@@ -138,6 +139,23 @@ let quickAddSeq = 0;
 const todayState = { fixture: "today", fail: null, calls: [], seq: 0, undone: new Set() };
 const sessionOf = (req) => /(?:^|;\s*)standa_hub_session=([^;]+)/.exec(req.headers.cookie || "")?.[1] ?? null;
 
+// MRK-18 A2: stav modulů mocku (uložené volby a vynucení „prostředím").
+const moduleOverrides = new Map();
+const moduleLocked = new Map();
+function modulesConfig() {
+  return MODULES.map((m) => {
+    const locked = moduleLocked.has(m.id);
+    const enabled = locked ? moduleLocked.get(m.id) : moduleOverrides.has(m.id) ? moduleOverrides.get(m.id) : m.defaultEnabled;
+    const available = enabled && m.implemented;
+    return {
+      id: m.id, label: m.label, available, enabled,
+      source: locked ? "env" : moduleOverrides.has(m.id) ? "db" : "default",
+      locked, implemented: m.implemented, default_enabled: m.defaultEnabled, depends_on: [],
+      capabilities: available ? m.capabilities : [],
+    };
+  });
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
@@ -178,6 +196,30 @@ createServer(async (req, res) => {
     return respond(200, hit ? { ...hit[1], query: nq } : { query: nq, results: [], total: 0 }, 220);
   }
   if (url.pathname === "/__mock/search-calls") return respond(200, searchCalls.splice(0));
+  // MRK-18 A2: runtime stav modulů jako backend (public_config). Volby z Nastavení (PUT) platí hned, bez buildu.
+  // /__mock/modules?disabled=wot,finance&locked=wot simuluje uložené volby a vynucení prostředím; /reset vše vrátí.
+  if (url.pathname === "/__mock/modules/reset") {
+    moduleOverrides.clear();
+    moduleLocked.clear();
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/modules") {
+    for (const id of (url.searchParams.get("disabled") || "").split(",").filter(Boolean)) moduleOverrides.set(id, false);
+    for (const id of (url.searchParams.get("locked") || "").split(",").filter(Boolean)) moduleLocked.set(id, moduleOverrides.get(id) ?? true);
+    return respond(200, { modules: modulesConfig() });
+  }
+  if (url.pathname === "/modules" && req.method === "GET") return respond(200, { modules: modulesConfig() }, 80);
+  const moduleMatch = url.pathname.match(/^\/modules\/([a-z_]+)$/);
+  if (moduleMatch && req.method === "PUT") {
+    const m = MODULES.find((x) => x.id === moduleMatch[1]);
+    if (!m) return respond(404, { detail: { message: "Neznámý modul.", module: moduleMatch[1] } });
+    if (!m.implemented) return respond(422, { detail: { message: "Modul zatím není hotový.", module: m.id } });
+    if (moduleLocked.has(m.id)) return respond(409, { detail: { message: "Vynuceno konfigurací serveru.", module: m.id } }, 120);
+    if (typeof body?.enabled !== "boolean" && body?.enabled !== null) return respond(422, { detail: "enabled musí být true/false/null" });
+    if (body.enabled === null || body.enabled === m.defaultEnabled) moduleOverrides.delete(m.id);
+    else moduleOverrides.set(m.id, body.enabled);
+    return respond(200, modulesConfig().find((x) => x.id === m.id), 120);
+  }
   // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service.parse (fixtures/quick-add.json,
   // now = 2026-10-11 17:00 UTC jako ostatní fixtures, předměty ze school-subjects.json); neznámý text = „unknown". /quick-add/prepare vrátí pending akci „qa-…", /actions/confirm
   // ji „zapíše" (bez undo). Popis „chyba" = první potvrzení selže (kontrola cesty „Zkusit znovu").

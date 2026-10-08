@@ -47,6 +47,11 @@ export async function readErrorDetail(res: Response): Promise<string> {
     const body = (await res.json()) as { detail?: unknown };
     const d = body?.detail;
     if (typeof d === "string" && d.trim()) return d;
+    // strukturovaný detail backendu ({ message, module } – např. 409 „Vynuceno konfigurací serveru.")
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const message = (d as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) return message;
+    }
     if (Array.isArray(d) && d.length) {
       const first = d[0] as { msg?: unknown };
       if (typeof first?.msg === "string") return first.msg;

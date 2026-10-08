@@ -28,7 +28,7 @@ import type { ApiResource } from "@/hooks/useApiResource";
 import type { BriefingPayload } from "@/lib/briefing";
 import type { IconName } from "@/lib/icons";
 import { formatDate, formatDays, formatNumber, formatRelativeDays } from "@/lib/format";
-import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { useModuleAccess } from "@/hooks/useModules";
 import { allowsHref } from "@/lib/modules";
 import { staggerStyle } from "@/lib/motion";
 import type { WidgetId } from "@/lib/dashboardLayout";
@@ -227,8 +227,11 @@ function GoalProgressBlock({
   );
 }
 
-// Roadmap 6C: widgety čtou dostupnost modulů jen přes MODULE_ACCESS (žádné vlastní flagy).
-const shows = (moduleId: string) => MODULE_ACCESS.allows(moduleId, "dashboard");
+// Roadmap 6C / MRK-18 A2: widgety čtou dostupnost modulů za běhu (GET /modules), žádné vlastní flagy.
+function useShows(): (moduleId: string) => boolean {
+  const { access } = useModuleAccess();
+  return (moduleId: string) => access.allows(moduleId, "dashboard");
+}
 
 const QUICK_ACTIONS = [
   { href: "/work", icon: "briefcase" as IconName, title: "Zapsat práci", hint: "Odpracované hodiny" },
@@ -236,7 +239,7 @@ const QUICK_ACTIONS = [
   { href: "/goals", icon: "target" as IconName, title: "Nový cíl", hint: "Cíle" },
   { href: "/ai", icon: "bot" as IconName, title: "AI asistent", hint: "Chat" },
   { href: "/planner", icon: "clipboard" as IconName, title: "Plánovač", hint: "Den / týden" },
-].filter((q) => allowsHref(MODULE_ACCESS, q.href));
+];
 
 export type WidgetProps = {
   data: DashboardPayload | null;
@@ -311,6 +314,7 @@ function AttentionWidget({ data, loading, index }: WidgetProps) {
 }
 
 function KeyMetricsWidget({ data, loading, index }: WidgetProps) {
+  const shows = useShows();
   const work = data?.work;
   const finance = data?.finance;
 
@@ -358,6 +362,7 @@ function KeyMetricsWidget({ data, loading, index }: WidgetProps) {
 }
 
 function TodayWidget({ data, loading, index }: WidgetProps) {
+  const shows = useShows();
   const today = data?.today;
 
   return (
@@ -498,6 +503,7 @@ function FinanceWidget({ data, loading, index }: WidgetProps) {
 }
 
 function GamesWidget({ data, loading, index }: WidgetProps) {
+  const shows = useShows();
   const wot = data?.wot;
   const mff = data?.mff;
   return (
@@ -574,11 +580,13 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
 }
 
 function QuickActionsWidget({ index }: WidgetProps) {
+  const { access } = useModuleAccess();
+  const quickActions = QUICK_ACTIONS.filter((q) => allowsHref(access, q.href));
   return (
     <Card index={index} aria-labelledby="quick-title">
       <CardHeader title={<span id="quick-title">Rychlé akce</span>} icon="zap" />
       <nav aria-label="Rychlé akce" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {QUICK_ACTIONS.map((q) => (
+        {quickActions.map((q) => (
           <Link
             key={q.href}
             href={q.href}

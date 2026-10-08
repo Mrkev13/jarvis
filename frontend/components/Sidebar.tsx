@@ -11,7 +11,7 @@ import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
-import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { useModuleAccess } from "@/hooks/useModules";
 import { navPagesFor } from "@/lib/navigation";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
@@ -21,8 +21,11 @@ interface SidebarProps {
 }
 
 // Česká navigace (Roadmap 4A); seznam stránek sdílí s globálním vyhledáváním (lib/navigation.ts).
-// Roadmap 6C: jen stránky dostupných modulů (desktop i mobilní menu používají tuto komponentu).
-export const NAV_LINKS = navPagesFor(MODULE_ACCESS).map(({ href, label }) => ({ href, label }));
+// Roadmap 6C / MRK-18 A2: jen stránky dostupných modulů podle runtime stavu (desktop i mobilní menu).
+export function useNavLinks(): { href: string; label: string }[] {
+  const { access } = useModuleAccess();
+  return navPagesFor(access).map(({ href, label }) => ({ href, label }));
+}
 
 export function isActiveLink(href: string, pathname: string | null): boolean {
   return href === "/" ? pathname === "/" : Boolean(pathname?.startsWith(href));
@@ -30,9 +33,10 @@ export function isActiveLink(href: string, pathname: string | null): boolean {
 
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const pathname = usePathname();
+  const navLinks = useNavLinks();
   return (
     <nav aria-label="Hlavní navigace" className="space-y-0.5">
-      {NAV_LINKS.map((link) => {
+      {navLinks.map((link) => {
         const active = isActiveLink(link.href, pathname);
         return (
           <Link

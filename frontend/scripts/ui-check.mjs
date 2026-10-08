@@ -835,7 +835,7 @@ async function searchCalls() {
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   await page.waitForTimeout(80);
   check("hledání: fokus v poli (combobox s popiskem)", await input.evaluate((el) => el === document.activeElement));
-  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 14);
+  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 15); // + Nastavení (MRK-18 A2)
   await page.screenshot({ path: `${OUT}search-empty.png` });
 
   const first = async () => (await dialog.getByRole("option").first().innerText()).split("\n")[0];

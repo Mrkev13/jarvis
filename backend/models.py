@@ -697,3 +697,13 @@ class WeeklyReview(Base):
 
 
 Index("ix_weekly_reviews_week_start", WeeklyReview.week_start, unique=True)
+
+
+class ModuleSetting(Base):
+    """MRK-18 A2: uložená volba zapnutí modulu (Nastavení). Jen explicitní odchylky od výchozího stavu –
+    řádek = override; návrat na výchozí hodnotu řádek maže. Proměnná prostředí má vždy přednost."""
+    __tablename__ = "module_settings"
+
+    module_id = Column(String(50), primary_key=True)
+    enabled = Column(Boolean, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

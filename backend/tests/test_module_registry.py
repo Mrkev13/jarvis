@@ -156,10 +156,16 @@ class RegistryTestCase(unittest.TestCase):
             config = mr.current_access().public_config()
         self.assertEqual([c["id"] for c in config], [m.id for m in mr.MODULES])
         for entry in config:
-            self.assertEqual(set(entry), {"id", "label", "available", "capabilities"})
-            self.assertIsInstance(entry["available"], bool)
+            # A2: + enabled/source/locked/implemented/default_enabled/depends_on – stále žádné hodnoty prostředí
+            self.assertEqual(set(entry), {"id", "label", "available", "capabilities", "enabled", "source", "locked",
+                                          "implemented", "default_enabled", "depends_on"})
+            for key in ("available", "enabled", "locked", "implemented", "default_enabled"):
+                self.assertIsInstance(entry[key], bool)
+            self.assertIn(entry["source"], {"env", "db", "default"})
+            self.assertNotIn("false", str(entry["label"]).lower())
         wot = next(c for c in config if c["id"] == "wot")
         self.assertEqual((wot["available"], wot["capabilities"]), (False, []))
+        self.assertEqual((wot["enabled"], wot["source"], wot["locked"]), (False, "env", True))
 
 
 class TodayGateTestCase(unittest.TestCase):

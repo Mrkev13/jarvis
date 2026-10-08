@@ -10,8 +10,11 @@ first everywhere and an enabled flag grants nothing.
 |---|---|
 | Registry (backend, canonical for data/API/AI) | `backend/module_registry.py` – `MODULES`, `ModuleAccess`, `current_access()` |
 | Registry (frontend mirror) | `frontend/lib/modules.ts` – `MODULES`, `createModuleAccess()` |
-| Env parsing (backend) | `backend/env_config.py` – `parse_flag` / `env_flag` |
-| Env reading (frontend, the only place) | `frontend/lib/moduleConfig.ts` – `MODULE_FLAGS`, `MODULE_ACCESS` |
+| Env parsing (backend) | `backend/env_config.py` – `parse_flag` (used by `module_registry.env_override`) |
+| Resolver env > DB > default (backend, the only place) | `backend/module_registry.py` – `resolve_states`, `save_override` |
+| Stored settings | `module_settings` table (`models.ModuleSetting`, migration `0016_module_settings`) |
+| Runtime state (frontend, the only place) | `frontend/lib/moduleRuntime.ts` + `frontend/hooks/useModules.ts` (`useModuleAccess()`) |
+| Settings UI | `frontend/app/settings/page.tsx` → `components/modules/ModuleSettings.tsx` |
 | Parity FE ↔ BE | `backend/tests/test_module_registry.py::FrontendParityTestCase` |
 
 A module is **available** when it is `implemented` **and** its flag is on. A planned module (`food`, `fitness`,
@@ -19,7 +22,7 @@ A module is **available** when it is `implemented` **and** its flag is on. A pla
 `true` – a flag never exposes an unfinished page.
 
 Everything that belongs to no module is **core** and always available: Řídicí centrum, Dnes, Týdenní přehled,
-Plánovač, Připomínky, Aktivita, Paměť, AI asistent, notifications.
+Plánovač, Připomínky, Aktivita, Paměť, AI asistent, Nastavení, notifications.
 
 ### Capabilities
 
@@ -40,24 +43,49 @@ prefix), `allows_ref("exam:12", cap)`, `allows_context_area(area)`, `allows_quic
 Gating is by **entity type / ref**, not by the `area` label: `fitness`, `travel` etc. are already used as labels
 on memories and goals, and those must not disappear when the future Fitness module is off.
 
-## Configuration
+## Configuration (MRK-18 A2: runtime, env > DB > default)
 
-| Side | Variable | Read | Change takes effect |
-|---|---|---|---|
-| Backend | `MODULE_<ID>_ENABLED` in `backend/.env` | per call (`current_access()`) | restart (dotenv loads once) |
-| Frontend | `NEXT_PUBLIC_MODULE_<ID>_ENABLED` in `frontend/.env.local` | inlined at `next build` | rebuild |
+One backend resolver (`module_registry.resolve_states`) decides whether a module is enabled:
 
-Values: `1/true/yes/on`, `0/false/no/off` (trimmed, case-insensitive). Missing, blank **or invalid** = the
-module's default (a typo never hides a shipped module or enables a future one; the backend logs a warning once).
-Unlike `env_bool`, invalid is not `false` on purpose.
+| Priority | Source | Where | Change takes effect | Settings toggle |
+|---|---|---|---|---|
+| 1 | **env override** | `MODULE_<ID>_ENABLED` in `backend/.env` | backend restart (dotenv loads once) | **locked** ("Vynuceno konfigurací serveru"), `PUT` → **409** |
+| 2 | **DB setting** | `module_settings` row (Nastavení → Moduly) | immediately, no rebuild/restart | editable |
+| 3 | **manifest default** | `ModuleDef.default_enabled` | release | editable |
 
-Set both sides the same. If they drift, it still fails cleanly: the backend is authoritative for data (search,
-Today, Quick Add, AI, REST 404), the frontend additionally filters what it renders (search results, Quick Add
-parse result, recent items) so a mismatched build never shows a disabled module's records.
+`implemented=False` always wins: a planned module stays unavailable whatever the source says.
 
-Client exposure: only the 14 boolean `NEXT_PUBLIC_MODULE_*` values are inlined (literal references in
-`moduleConfig.ts`; dynamic `process.env[name]` would not be). Flags are not secrets. `GET /modules` (auth
-required) returns `{id, label, available, capabilities}` only – no env values.
+**What counts as an env override:** the variable is present **and** holds a valid boolean
+(`1/true/yes/on`, `0/false/no/off`, trimmed, case-insensitive). Absent or blank = no override.
+**Malformed** (`ture`, `maybe`) = **no override** (A1 policy: a typo must neither hide nor force a module) –
+logged once as a warning, then DB/default apply.
+
+**DB settings** hold only explicit deviations: one row per module whose chosen state differs from the manifest.
+Choosing the default value (or `enabled: null`) deletes the row – defaults are never duplicated into the DB.
+The backend caches the rows in-process (single uvicorn worker) and refreshes on every `PUT`; a 30 s TTL covers
+manual DB edits. A DB error (e.g. table missing before migration) falls back to the last known state, otherwise
+env/manifest – request gating never raises because of settings.
+
+**Frontend has no module flags.** It loads runtime state from `GET /modules` (`hooks/useModules.ts`, started by
+`ModuleRuntimeLoader` in `AppShell`, refreshed when the window becomes visible and after each Settings change),
+caches it in localStorage (`standa-hub:modules:v1`) so a returning visit renders without a flash, and stays
+**conservative** while the state is unknown or unavailable: only core pages in nav/Ctrl+K, module routes show a
+loading/error state (never content), module widgets hidden. The backend remains authoritative for data
+(search, Today, Quick Add, AI, REST 404); the frontend additionally filters what it renders.
+
+### API
+
+`GET /modules` (auth) – per module: `id`, `label`, `available` (implemented && enabled), `enabled`, `source`
+(`env | db | default`), `locked` (= `source == "env"`), `implemented`, `default_enabled`, `depends_on` (empty for now),
+`capabilities` (only when available). Booleans and enums only – never env values.
+
+`PUT /modules/{id}` (auth), body `{"enabled": true | false | null}` (`null` = back to default):
+- `200` → the module's new `GET /modules` entry; writes only `module_settings` (module data is never touched);
+  each real change is audited as `system` / `module.enabled` | `module.disabled`;
+- `404` unknown module · `409` env-forced (`{"detail": {"message": "Vynuceno konfigurací serveru.", "module": id}}`)
+  · `422` planned/unimplemented module or invalid body.
+
+Core (Řídicí centrum, Dnes, Plánovač, Připomínky, Paměť, AI, Nastavení…) is not in the registry and cannot be disabled.
 
 ## Behaviour per surface
 
@@ -97,8 +125,8 @@ default to enabled, all eight future modules default to disabled and have no cap
      `implemented=True`, `default_enabled` (usually `False` until ready), `capabilities`, `entity_types`
      (search result types / ref prefixes), `context_areas`, `api_prefixes`, `quick_add_kinds`.
    - `frontend/lib/modules.ts`: the same entry on one line (`routes` instead of `api_prefixes`).
-   - Brand-new id (not in the list yet): also add the literal line to `frontend/lib/moduleConfig.ts` and the
-     templates (`backend/.env.template`, `frontend/.env.template`). Tests fail if `moduleConfig.ts` misses it.
+   - Brand-new id (not in the list yet): also add the commented `MODULE_<ID>_ENABLED` line to
+     `backend/.env.template`. The frontend needs nothing else – state arrives at runtime via `GET /modules`.
 2. **Navigation / search page:** add the page to `NAV_PAGES` with `module: "<id>"`.
 3. **Search records:** add the source to `search_service._candidates()` with a type listed in `entity_types` –
    filtering is automatic.
@@ -110,7 +138,8 @@ default to enabled, all eight future modules default to disabled and have no cap
 8. **Routes:** page under `frontend/app/<route>/`, REST under the declared prefix – both gated automatically.
 9. **Tests:** `test_module_registry.py` parity passes; add the module to the browser check if it has a page.
 
-Nothing else should need an `if (FOOD_ENABLED)` check. If a component needs one, ask `MODULE_ACCESS.allows(id, cap)`.
+Nothing else should need an `if (FOOD_ENABLED)` check. If a component needs one, ask
+`useModuleAccess().access.allows(id, cap)` (frontend) or `current_access().allows(id, cap)` (backend).
 
 ## Future: user-level preferences (not implemented)
 
@@ -125,22 +154,23 @@ Rule: a user can only turn a module **off**, never on something the app disabled
 narrowing would happen after loading the preference (e.g. from `GET /modules` extended with user data);
 `createModuleAccess(flags)` already accepts any mapping. DB storage, an endpoint and a settings UI are out of scope.
 
-## A1 vs. A2 (MRK-18)
+## A1 vs. A2 (MRK-18) – A2 complete
 
-This is **A1**: flags come from the environment only, and the frontend needs a rebuild after a change.
-- Backend: `MODULE_<ID>_ENABLED`.
-- Frontend: `NEXT_PUBLIC_MODULE_<ID>_ENABLED`, inlined at build time. Set both the same.
+- **A1 (MRK-7):** registry, capabilities, gating, `GET /modules`; flags from env only, frontend rebuilt per change.
+- **A2 (MRK-18):** `module_settings` table (migration `0016_module_settings`), env > DB > default resolver,
+  `PUT /modules/{id}` with env lock (409), Settings → Moduly page, frontend runtime state (no `NEXT_PUBLIC_*`
+  module flags, `moduleConfig.ts` removed). Disabling a module never deletes its data; re-enabling restores
+  records and the stored dashboard layout (`preserveUnavailable`).
 
-`GET /modules` already reports availability. **A2** will:
-- add a DB `module_settings` table and a Settings toggle;
-- resolve flags as env > DB > default;
-- switch the frontend from build-time `NEXT_PUBLIC_MODULE_*` to runtime `GET /modules`.
-
-None of that is implemented yet.
+**Next: MRK-19** (event bus / outbox) – not started here.
 
 ## Verification
 
-- Unit: `backend/tests/test_module_registry.py`, `frontend/lib/modules.test.mjs`.
-- Browser: `frontend/scripts/module-flags-check.mjs` (incl. Replay Library routes/deep links, replay search, Quick Add
-  time parsing, School completion action, Jarvis companion, Today links) against a default build and a build with
-  `NEXT_PUBLIC_MODULE_WOT_ENABLED=false NEXT_PUBLIC_MODULE_FINANCE_ENABLED=false` (`UI_FLAGS_DISABLED=wot,finance`).
+- Unit: `backend/tests/test_module_registry.py`, `backend/tests/test_module_settings.py` (precedence, DB cache,
+  `PUT`, 409, audit, data intact), `frontend/lib/modules.test.mjs`, `frontend/lib/moduleRuntime.test.mjs`
+  (runtime gating, conservative unknown/error state, no `NEXT_PUBLIC_MODULE` dependency).
+- Migration: `test_alembic_migration.py` (0016 up/down on SQLite) and `test_migration_postgres.py` (head = models).
+- Browser: `frontend/scripts/module-flags-check.mjs` against **one** build – mock API state is switched at runtime:
+  default run (plus Settings toggle without rebuild, env-locked toggle + 409, `/modules` unavailable) and
+  `UI_FLAGS_DISABLED=wot,finance` (stored-setting simulation; incl. Replay Library, replay search, Quick Add,
+  School completion, Jarvis companion, Today links).
