@@ -20,16 +20,27 @@ Co do žádného modulu nepatří (připomínky, paměť, plánovač, notifikace
 Flagy řídí dostupnost, NE oprávnění: auth (`main.require_auth`) běží vždy dřív a zapnutý modul nic nepovoluje.
 
 Frontend má zrcadlový registr `frontend/lib/modules.ts` (parita hlídaná testem `test_module_registry.py`).
-Budoucí uživatelské preference: `ModuleAccess(flags)` dostane flagy už zúžené o volbu uživatele
-(uživatel smí modul jen vypnout, nikdy zapnout to, co aplikace vypnula) – viz docs/module-feature-flags.md.
+
+MRK-18 A2 – runtime nastavení. Zapnutí modulu se určuje JEDINÝM resolverem (`resolve_states`):
+
+    1. prostředí  MODULE_<ID>_ENABLED s platnou hodnotou  → vynuceno (locked, Nastavení ho nezmění)
+    2. databáze   řádek v `module_settings`               → volba z Nastavení
+    3. manifest   `ModuleDef.default_enabled`
+
+Chybějící/prázdná proměnná = žádné vynucení. Nesmyslná hodnota („ture") = také žádné vynucení (A1 politika:
+překlep nesmí potichu schovat modul) – jen varování v logu, platí DB/manifest. `implemented=False` vždy vyhrává.
+Frontend stav čte za běhu z GET /modules (žádné build-time flagy).
 """
 from __future__ import annotations
 
 import logging
+import os
+import threading
+import time
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
-from env_config import env_flag, parse_flag
+from env_config import parse_flag
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +62,8 @@ class ModuleDef:
     # REST cesty modulu (přesná shoda nebo vše pod „<prefix>/").
     api_prefixes: tuple[str, ...] = ()
     quick_add_kinds: tuple[str, ...] = ()
+    # Moduly, bez kterých tento nedává smysl (zatím žádné; GET /modules je jen hlásí).
+    depends_on: tuple[str, ...] = ()
 
     @property
     def env_name(self) -> str:
@@ -96,28 +109,140 @@ MODULES: tuple[ModuleDef, ...] = (
     _planned("entertainment", "Zábava"),
 )
 
+SOURCE_ENV = "env"
+SOURCE_DB = "db"
+SOURCE_DEFAULT = "default"
+
 _warned: set[str] = set()
 
 
-def resolve_flags(modules: Iterable[ModuleDef] = MODULES, env: Mapping[str, str] | None = None) -> dict[str, bool]:
-    """Hodnoty flagů (bez ohledu na `implemented`). `env` = testy; jinak prostředí procesu (env_config)."""
-    out: dict[str, bool] = {}
+@dataclass(frozen=True)
+class ModuleState:
+    """Rozhodnutý stav jednoho modulu: hodnota flagu a odkud pochází (env vynucuje = locked)."""
+    enabled: bool
+    source: str
+
+    @property
+    def locked(self) -> bool:
+        return self.source == SOURCE_ENV
+
+
+def env_override(module: ModuleDef, env: Mapping[str, str | None]) -> bool | None:
+    """Vynucení z prostředí: True/False jen pro přítomnou PLATNOU hodnotu; jinak None (nevynuceno)."""
+    raw = env.get(module.env_name)
+    if raw is None or not str(raw).strip():
+        return None
+    value, valid = parse_flag(raw, module.default_enabled)
+    if not valid:
+        if module.env_name not in _warned:
+            _warned.add(module.env_name)
+            log.warning("module flags: %s has an invalid value – ignored (no override)", module.env_name)
+        return None
+    return value
+
+
+def resolve_states(modules: Iterable[ModuleDef] = MODULES, env: Mapping[str, str | None] | None = None,
+                   overrides: Mapping[str, bool] | None = None) -> dict[str, ModuleState]:
+    """Kanonický resolver A2: prostředí > databáze > manifest. `env`/`overrides` = testy; jinak proces a DB."""
+    env = os.environ if env is None else env
+    overrides = db_overrides() if overrides is None else overrides
+    out: dict[str, ModuleState] = {}
     for m in modules:
-        value, valid = env_flag(m.env_name, m.default_enabled) if env is None else parse_flag(env.get(m.env_name), m.default_enabled)
-        if not valid and m.env_name not in _warned:
-            _warned.add(m.env_name)
-            log.warning("module flags: %s has an invalid value – using default %s", m.env_name, m.default_enabled)
-        out[m.id] = value
+        forced = env_override(m, env)
+        if forced is not None:
+            out[m.id] = ModuleState(forced, SOURCE_ENV)
+        elif m.id in overrides:
+            out[m.id] = ModuleState(bool(overrides[m.id]), SOURCE_DB)
+        else:
+            out[m.id] = ModuleState(m.default_enabled, SOURCE_DEFAULT)
     return out
+
+
+def resolve_flags(modules: Iterable[ModuleDef] = MODULES, env: Mapping[str, str] | None = None,
+                  overrides: Mapping[str, bool] | None = None) -> dict[str, bool]:
+    """Hodnoty flagů (bez ohledu na `implemented`) – zkratka nad `resolve_states`."""
+    return {mid: st.enabled for mid, st in resolve_states(modules, env, overrides).items()}
+
+
+# ---------- uložené volby (module_settings) ----------
+# Jeden proces (uvicorn --workers 1) → stačí cache v paměti: zápis přes `save_override` ji hned obnoví,
+# TTL jen pojistka pro ruční zásah do DB. Chyba DB (chybějící tabulka před migrací, výpadek) = poslední známý
+# stav, jinak žádné overridy → manifest/env, nikdy výjimka v gatingu požadavku.
+DB_CACHE_TTL_SECONDS = 30.0
+
+try:
+    from database import SessionLocal  # noqa: E402  (testy patchují module_registry.SessionLocal)
+except Exception:  # pragma: no cover - import bez DB_URL
+    SessionLocal = None  # type: ignore[assignment]
+
+_cache_lock = threading.Lock()
+_cache: tuple[float, dict[str, bool]] | None = None
+_clock: Callable[[], float] = time.monotonic
+
+
+def invalidate_cache() -> None:
+    global _cache
+    with _cache_lock:
+        _cache = None
+
+
+def _load_from_db() -> dict[str, bool]:
+    from models import ModuleSetting
+    db = SessionLocal()
+    try:
+        known = {m.id for m in MODULES}
+        return {row.module_id: bool(row.enabled) for row in db.query(ModuleSetting).all() if row.module_id in known}
+    finally:
+        db.close()
+
+
+def db_overrides() -> dict[str, bool]:
+    global _cache
+    with _cache_lock:
+        if _cache is not None and _clock() - _cache[0] < DB_CACHE_TTL_SECONDS:
+            return dict(_cache[1])
+        previous = _cache
+    try:
+        loaded = _load_from_db()
+    except Exception as exc:  # noqa: BLE001 - gating nesmí spadnout kvůli nastavení
+        if "module_settings_db" not in _warned:
+            _warned.add("module_settings_db")
+            log.warning("module settings: DB overrides unavailable (%s) – using env/manifest", type(exc).__name__)
+        return dict(previous[1]) if previous else {}
+    with _cache_lock:
+        _cache = (_clock(), loaded)
+    return dict(loaded)
+
+
+def save_override(db, module_id: str, enabled: bool | None) -> None:
+    """Uloží volbu z Nastavení (jen tabulka module_settings, data modulu se nemění). `None` nebo hodnota
+    shodná s manifestem = žádný řádek (výchozí stav se do DB neduplikuje). Commit dělá volající."""
+    from models import ModuleSetting
+    module = next((m for m in MODULES if m.id == module_id), None)
+    if module is None:
+        raise KeyError(module_id)
+    row = db.get(ModuleSetting, module_id)
+    if enabled is None or enabled == module.default_enabled:
+        if row is not None:
+            db.delete(row)
+    elif row is None:
+        db.add(ModuleSetting(module_id=module_id, enabled=enabled))
+    else:
+        row.enabled = enabled
 
 
 class ModuleAccess:
     """Odpovědi „je modul dostupný / smí přispět do X" pro jednu sadu flagů (čisté, bez I/O)."""
 
-    def __init__(self, flags: Mapping[str, bool] | None = None, modules: Iterable[ModuleDef] = MODULES):
+    def __init__(self, flags: Mapping[str, bool] | None = None, modules: Iterable[ModuleDef] = MODULES,
+                 states: Mapping[str, ModuleState] | None = None):
         self.modules = tuple(modules)
         self._by_id = {m.id: m for m in self.modules}
-        self.flags = dict(flags) if flags is not None else resolve_flags(self.modules)
+        if states is None:
+            states = ({mid: ModuleState(bool(v), SOURCE_DEFAULT) for mid, v in flags.items()} if flags is not None
+                      else resolve_states(self.modules))
+        self.states = dict(states)
+        self.flags = {mid: st.enabled for mid, st in self.states.items()}
         self._by_entity = {t: m for m in self.modules for t in m.entity_types}
         self._by_context_area = {a: m for m in self.modules for a in m.context_areas}
         self._by_kind = {k: m for m in self.modules for k in m.quick_add_kinds}
@@ -163,19 +288,30 @@ class ModuleAccess:
         m = self.module_for_path(path)
         return m is None or self.is_available(m.id)
 
+    def state(self, module_id: str) -> ModuleState:
+        m = self._by_id[module_id]
+        return self.states.get(module_id) or ModuleState(m.default_enabled, SOURCE_DEFAULT)
+
     def public_config(self) -> list[dict]:
-        """Bezpečný výpis pro klienta – jen id, název a booleovské hodnoty (žádné env hodnoty ani tajemství)."""
-        return [
-            {
+        """Bezpečný výpis pro klienta – id, název, booleovské hodnoty a zdroj (žádné env hodnoty ani tajemství)."""
+        out = []
+        for m in self.modules:
+            st = self.state(m.id)
+            out.append({
                 "id": m.id,
                 "label": m.label,
                 "available": self.is_available(m.id),
+                "enabled": st.enabled,
+                "source": st.source,
+                "locked": st.locked,
+                "implemented": m.implemented,
+                "default_enabled": m.default_enabled,
+                "depends_on": list(m.depends_on),
                 "capabilities": [c for c in CAPABILITIES if self.allows(m.id, c)],
-            }
-            for m in self.modules
-        ]
+            })
+        return out
 
 
 def current_access() -> ModuleAccess:
-    """Flagy z aktuálního prostředí (čte se při každém volání – levné a testovatelné přes patch.dict)."""
+    """Stav z prostředí (čte se při každém volání) + uložených voleb (cache v paměti) – viz `resolve_states`."""
     return ModuleAccess()

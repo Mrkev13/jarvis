@@ -2709,8 +2709,49 @@ def today_action_prepare(request: TodayActionRequest):
 
 @app.get("/modules")
 def modules_get():
-    """Roadmap 6C: dostupnost modulů (jen id, název, booleovské schopnosti – žádné hodnoty prostředí)."""
+    """Roadmap 6C / MRK-18 A2: runtime stav modulů pro frontend (id, název, stav, zdroj, zámek, schopnosti).
+    Žádné hodnoty prostředí ani tajemství – jen booleovské hodnoty a zdroj (env | db | default)."""
     return {"modules": current_access().public_config()}
+
+
+class ModuleSettingRequest(BaseModel):
+    # True/False = uložená volba; None = zpět na výchozí stav (řádek se smaže).
+    enabled: bool | None
+
+
+@app.put("/modules/{module_id}")
+def modules_put(module_id: str, request: ModuleSettingRequest):
+    """MRK-18 A2: zapnutí/vypnutí modulu z Nastavení. Mění JEN tabulku module_settings – data modulu zůstávají.
+    Vynuceno prostředím → 409 (Nastavení je zamčené); neznámý modul → 404; neimplementovaný → 422."""
+    import module_registry as mr
+    module = next((m for m in mr.MODULES if m.id == module_id), None)
+    if module is None:
+        raise HTTPException(status_code=404, detail={"message": "Neznámý modul.", "module": module_id})
+    if not module.implemented:
+        raise HTTPException(status_code=422, detail={"message": "Modul zatím není hotový.", "module": module_id})
+    if mr.env_override(module, os.environ) is not None:
+        raise HTTPException(status_code=409, detail={"message": "Vynuceno konfigurací serveru.", "module": module_id})
+    db = SessionLocal()
+    try:
+        before = current_access().state(module_id)
+        mr.save_override(db, module_id, request.enabled)
+        effective = module.default_enabled if request.enabled is None else request.enabled
+        if effective != before.enabled:
+            log_activity(
+                db, "system", "module.enabled" if effective else "module.disabled",
+                f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
+                entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}},
+                user_context="manual",
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        mr.invalidate_cache()
+    access = current_access()
+    return next(entry for entry in access.public_config() if entry["id"] == module_id)
 
 
 # Typy položek GET /dashboard → typ záznamu modulu (ref), pokud se liší.
