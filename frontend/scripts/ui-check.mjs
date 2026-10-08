@@ -2267,6 +2267,76 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
 }
 await wotReset();
 
+// 24) MRK-14 – Škola: Splnit / Uzavřít (volitelný výsledek) / Znovu otevřít (stavový mock).
+{
+  const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  await schoolReset();
+  const { ctx, page, errors } = await open("/school");
+  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  const closedList = page.getByRole("list", { name: "Hotové úkoly a uzavřené zkoušky" });
+  const inOpen = async (t) => (await openList.locator(`[data-search-target="${t}"]`).count()) === 1;
+  const inClosed = async (t) => (await closedList.locator(`[data-search-target="${t}"]`).count()) === 1;
+  check("škola: otevřený úkol má Splnit i Smazat", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Smazat úkol Sada" }).count()) === 1);
+  check("škola: otevřená zkouška má Uzavřít", (await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).count()) === 1);
+  check("škola: hotová položka má Znovu otevřít", (await closedList.getByRole("button", { name: "Znovu otevřít úkol Esej" }).count()) === 1);
+
+  // úkol po termínu → Splnit → potvrzení → Hotové a uzavřené
+  check("škola: úkol po termínu je v otevřených", (await inOpen("assignment-1")) && (await openList.locator('[data-search-target="assignment-1"]').innerText()).includes("Po termínu"));
+  await openList.getByRole("button", { name: "Splnit úkol Sada" }).click();
+  const confirmDone = page.getByRole("dialog", { name: "Splnit úkol Sada?" });
+  check("škola: Splnit chce lehké potvrzení", (await confirmDone.count()) === 1 && (await confirmDone.innerText()).includes("znovu otevřít"));
+  await confirmDone.getByRole("button", { name: "Splnit", exact: true }).click();
+  await page.getByTestId("school-notice").waitFor({ timeout: 3000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("škola: splněný úkol přejde do Hotové a uzavřené", (await inClosed("assignment-1")) && !(await inOpen("assignment-1")));
+  const doneRow = closedList.locator('[data-search-target="assignment-1"]');
+  check("škola: přechod zvýrazněný (Motion System) + datum splnění", ((await doneRow.getAttribute("class")) || "").includes("motion-highlight-row") && (await doneRow.innerText()).includes("splněno"));
+  check("škola: oznámení pro čtečky", (await page.getByTestId("school-notice").getAttribute("role")) === "status" && (await page.getByTestId("school-notice").innerText()).includes("Sada"));
+  await page.screenshot({ path: `${OUT}school-completed.png`, fullPage: true });
+
+  // zkouška → Uzavřít s výsledkem (nejdřív neplatný)
+  await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).click();
+  const closeDlg = page.getByRole("dialog", { name: "Uzavřít zkoušku test?" });
+  check("škola: Uzavřít = dialog s nepovinným výsledkem", (await closeDlg.count()) === 1 && (await closeDlg.getByLabel("Výsledek zkoušky").inputValue()) === "passed" && (await closeDlg.getByLabel("Hodnocení").inputValue()) === "");
+  await closeDlg.getByLabel("Hodnocení").selectOption("percent");
+  await closeDlg.getByLabel("Hodnota").fill("120");
+  await closeDlg.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  check("škola: neplatný výsledek = chyba, dialog zůstane", (await closeDlg.getByRole("alert").innerText()).includes("0–100") && (await inOpen("exam-3")));
+  await closeDlg.getByLabel("Hodnota").fill("87,5");
+  await page.screenshot({ path: `${OUT}school-close-exam.png` });
+  await closeDlg.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  await page.waitForTimeout(800);
+  const examRow = closedList.locator('[data-search-target="exam-3"]');
+  check("škola: uzavřená zkouška s výsledkem v Hotové", (await inClosed("exam-3")) && (await examRow.innerText()).includes("87,5 %") && (await examRow.innerText()).includes("Splněno"));
+
+  // zkouška bez hodnocení
+  await openList.getByRole("button", { name: "Uzavřít zkoušku Zkouška fyzika" }).click();
+  const closeDlg2 = page.getByRole("dialog", { name: "Uzavřít zkoušku Zkouška fyzika?" });
+  await closeDlg2.getByLabel("Výsledek zkoušky").selectOption("closed");
+  await closeDlg2.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  await page.waitForTimeout(800);
+  check("škola: uzavření bez hodnocení → Uzavřeno", (await inClosed("exam-1")) && (await closedList.locator('[data-search-target="exam-1"]').innerText()).includes("Uzavřeno"));
+
+  // znovu otevřít
+  await closedList.getByRole("button", { name: "Znovu otevřít zkoušku test" }).click();
+  await page.waitForTimeout(800);
+  check("škola: znovu otevřená zkouška zpět v otevřených, bez výsledku", (await inOpen("exam-3")) && !(await openList.locator('[data-search-target="exam-3"]').innerText()).includes("87,5"));
+  await closedList.getByRole("button", { name: "Znovu otevřít úkol Sada" }).click();
+  await page.waitForTimeout(800);
+  check("škola: znovu otevřený úkol zpět v otevřených", (await inOpen("assignment-1")) && (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1);
+  check("škola: mazání zůstává samostatná akce", (await page.getByRole("button", { name: /^Smazat (úkol|zkoušku) / }).count()) === 10);
+  check("škola akce: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await schoolReset();
+}
+{
+  const { ctx, page, errors } = await open("/school", { width: 390, height: 844 });
+  check("škola mobil: akce bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const b = await page.getByRole("button", { name: "Splnit úkol Sada" }).boundingBox();
+  check("škola mobil: Splnit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));
+  check("škola mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
 // 30) MRK-16 – Jarvis companion: volné kotvy (nezakrývá obsah), scroll, stavy, chůze, klik, bubliny,
 //     reduced motion, vypnutí, mobil, záloha obrázku, jediný Jarvis na /ai.
 {

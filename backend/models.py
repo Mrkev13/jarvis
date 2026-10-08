@@ -307,6 +307,8 @@ class Assignment(Base):
     due_date = Column(Date, nullable=True)
     priority = Column(String(20), default="medium")
     status = Column(String(20), default="todo")
+    # MRK-14: kdy byl úkol splněn (null = otevřený nebo starší data bez času)
+    completed_at = Column(DateTime, nullable=True)
 
     subject_id = Column(
         Integer,
@@ -326,6 +328,10 @@ class Exam(Base):
     exam_date = Column(Date, nullable=True)
     status = Column(String(20), default="upcoming")
     notes = Column(String(1000), default="")
+    # MRK-14: uzavření zkoušky a volitelný výsledek (žádná klasifikační kniha – jedna hodnota a její druh)
+    completed_at = Column(DateTime, nullable=True)
+    result_type = Column(String(20), nullable=True)  # percent | points | grade | pass_fail
+    result_value = Column(String(40), nullable=True)
 
     subject_id = Column(
         Integer,

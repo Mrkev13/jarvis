@@ -21,7 +21,8 @@ import {
   StatGrid,
   StatusBadge,
 } from "@/components/ui";
-import { apiFetch } from "@/lib/api";
+import { SuccessPulse } from "@/components/motion/SuccessPulse";
+import { apiFetch, jsonBody } from "@/lib/api";
 import { formatDate, formatRelativeDays } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
 import {
@@ -29,7 +30,13 @@ import {
   creditsLabel,
   daysUntil,
   deadlineMeta,
+  emptyCloseDraft,
+  examCloseBody,
+  examResultLabel,
   examStatusMeta,
+  EXAM_OUTCOMES,
+  RESULT_TYPES,
+  type ExamCloseDraft,
   examTypeLabel,
   isDoneStatus,
   isExamClosed,
@@ -53,6 +60,7 @@ type Assignment = {
   due_date: string | null;
   priority: string;
   status: string;
+  completed_at?: string | null;
   subject_id: number;
   subject_name: string;
 };
@@ -64,6 +72,9 @@ type Exam = {
   exam_date: string | null;
   status: string;
   notes: string;
+  completed_at?: string | null;
+  result_type?: string | null;
+  result_value?: string | null;
   subject_id: number;
   subject_name: string;
 };
@@ -117,6 +128,14 @@ export default function SchoolPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingAssignment, setDeletingAssignment] = useState<Assignment | null>(null);
   const [deletingExam, setDeletingExam] = useState<Exam | null>(null);
+  // MRK-14: splnění / uzavření / znovuotevření
+  const [completingAssignment, setCompletingAssignment] = useState<Assignment | null>(null);
+  const [closingExam, setClosingExam] = useState<Exam | null>(null);
+  const [closeDraft, setCloseDraft] = useState<ExamCloseDraft>(emptyCloseDraft);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [reopening, setReopening] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; signal: number } | null>(null);
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
 
   const [subjectDraft, setSubjectDraft] = useState({
     name: "",
@@ -363,6 +382,85 @@ export default function SchoolPage() {
     }
   }
 
+  /** Po úspěšném přechodu: obnovit data, zvýraznit řádek v nové sekci a oznámit to (i čtečce). */
+  async function afterTransition(key: string, text: string) {
+    await loadData();
+    setHighlightKey(key);
+    setNotice((n) => ({ text, signal: (n?.signal ?? 0) + 1 }));
+  }
+
+  async function schoolAction(path: string, body?: object): Promise<"ok" | "stale" | "error"> {
+    const res = await apiFetch(path, body ? jsonBody("POST", body) : { method: "POST" });
+    if (res.ok) return "ok";
+    return res.status === 409 || res.status === 404 ? "stale" : "error";
+  }
+
+  async function confirmCompleteAssignment() {
+    const a = completingAssignment;
+    if (!a) return;
+    try {
+      const r = await schoolAction(`/school/assignment/${a.id}/complete`);
+      if (r === "error") throw new Error("complete failed");
+      if (r === "stale") await loadData();
+      else await afterTransition(`a-${a.id}`, `Úkol „${a.title}“ je splněný – najdeš ho v Hotové a uzavřené.`);
+    } catch (err) {
+      console.error(err);
+      setError("Úkol se nepodařilo označit jako splněný.");
+    } finally {
+      setCompletingAssignment(null);
+    }
+  }
+
+  function updateClose(patch: Partial<ExamCloseDraft>) {
+    setCloseDraft((d) => ({ ...d, ...patch }));
+    setCloseError(null);
+  }
+
+  function openCloseExam(e: Exam) {
+    setCloseDraft(emptyCloseDraft());
+    setCloseError(null);
+    setClosingExam(e);
+  }
+
+  async function confirmCloseExam() {
+    const e = closingExam;
+    if (!e) return;
+    const parsed = examCloseBody(closeDraft);
+    if (!parsed.ok) {
+      setCloseError(parsed.error);
+      return;
+    }
+    try {
+      const r = await schoolAction(`/school/exam/${e.id}/close`, parsed.body);
+      if (r === "error") {
+        setCloseError("Zkoušku se nepodařilo uzavřít.");
+        return;
+      }
+      setClosingExam(null);
+      if (r === "stale") await loadData();
+      else await afterTransition(`e-${e.id}`, `Zkouška „${e.title}“ je uzavřená.`);
+    } catch (err) {
+      console.error(err);
+      setCloseError("Zkoušku se nepodařilo uzavřít.");
+    }
+  }
+
+  async function reopen(kind: "assignment" | "exam", id: number, title: string) {
+    const key = `${kind === "assignment" ? "a" : "e"}-${id}`;
+    setReopening(key);
+    try {
+      const r = await schoolAction(`/school/${kind}/${id}/reopen`);
+      if (r === "error") throw new Error("reopen failed");
+      if (r === "stale") await loadData();
+      else await afterTransition(key, `${kind === "assignment" ? "Úkol" : "Zkouška"} „${title}“ je znovu otevřen${kind === "assignment" ? "ý" : "á"}.`);
+    } catch (err) {
+      console.error(err);
+      setError("Položku se nepodařilo znovu otevřít.");
+    } finally {
+      setReopening(null);
+    }
+  }
+
   const activeSubjects = subjects.filter((s) => s.active).length;
   const openAssignmentList = assignments.filter((a) =>
     ["todo", "in_progress"].includes(a.status.toLowerCase()),
@@ -401,7 +499,7 @@ export default function SchoolPage() {
           key={entry.key}
           searchTarget={`assignment-${a.id}`}
           style={stagger}
-          className={cx("motion-card motion-done-transition", done && "motion-done", overdue && "motion-attention")}
+          className={cx("motion-card motion-done-transition", done && "motion-done", overdue && "motion-attention", highlightKey === entry.key && "motion-highlight-row")}
           tone={overdue ? "danger" : "neutral"}
           muted={done}
           badges={
@@ -417,12 +515,24 @@ export default function SchoolPage() {
             <>
               {a.subject_name || "—"}
               {a.due_date ? ` · termín ${formatDate(a.due_date)}` : ""}
+              {done && a.completed_at ? ` · splněno ${formatDate(a.completed_at)}` : ""}
             </>
           }
           actions={
-            <Button size="sm" variant="ghost" onClick={() => setDeletingAssignment(a)} aria-label={`Smazat úkol ${a.title}`}>
-              Smazat
-            </Button>
+            <>
+              {done ? (
+                <Button size="sm" variant="secondary" onClick={() => void reopen("assignment", a.id, a.title)} busy={reopening === entry.key} busyLabel="Otevírám…" aria-label={`Znovu otevřít úkol ${a.title}`}>
+                  Znovu otevřít
+                </Button>
+              ) : (
+                <Button size="sm" variant="success" onClick={() => setCompletingAssignment(a)} aria-label={`Splnit úkol ${a.title}`}>
+                  Splnit
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setDeletingAssignment(a)} aria-label={`Smazat úkol ${a.title}`}>
+                Smazat
+              </Button>
+            </>
           }
         >
           {a.description ? <p className="mt-1 max-w-prose whitespace-pre-wrap break-words text-sm text-ink-2">{a.description}</p> : null}
@@ -437,7 +547,7 @@ export default function SchoolPage() {
         key={entry.key}
         searchTarget={`exam-${e.id}`}
         style={stagger}
-        className="motion-card"
+        className={cx("motion-card motion-done-transition", closed && "motion-done", highlightKey === entry.key && "motion-highlight-row")}
         muted={closed}
         badges={
           <>
@@ -451,12 +561,26 @@ export default function SchoolPage() {
           <>
             {e.subject_name || "—"}
             {e.exam_date ? ` · ${formatDate(e.exam_date)}` : ""}
+            {closed && examResultLabel(e.result_type, e.result_value) ? (
+              <span className="font-medium text-ink"> · {examResultLabel(e.result_type, e.result_value)}</span>
+            ) : null}
           </>
         }
         actions={
-          <Button size="sm" variant="ghost" onClick={() => setDeletingExam(e)} aria-label={`Smazat zkoušku ${e.title}`}>
-            Smazat
-          </Button>
+          <>
+            {closed ? (
+              <Button size="sm" variant="secondary" onClick={() => void reopen("exam", e.id, e.title)} busy={reopening === entry.key} busyLabel="Otevírám…" aria-label={`Znovu otevřít zkoušku ${e.title}`}>
+                Znovu otevřít
+              </Button>
+            ) : (
+              <Button size="sm" variant="success" onClick={() => openCloseExam(e)} aria-label={`Uzavřít zkoušku ${e.title}`}>
+                Uzavřít
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setDeletingExam(e)} aria-label={`Smazat zkoušku ${e.title}`}>
+              Smazat
+            </Button>
+          </>
         }
       >
         {e.notes ? <p className="mt-1 max-w-prose whitespace-pre-wrap break-words text-sm text-ink-2">{e.notes}</p> : null}
@@ -723,6 +847,17 @@ export default function SchoolPage() {
               </Card>
             )}
 
+            {notice ? (
+              <p role="status" data-testid="school-notice" className="flex items-center gap-2 rounded-[var(--radius-control)] border border-success/40 bg-success/5 px-3 py-2 text-sm text-ink">
+                <SuccessPulse signal={notice.signal} className="min-w-0 flex-1">
+                  {notice.text}
+                </SuccessPulse>
+                <Button size="sm" variant="ghost" onClick={() => setNotice(null)} aria-label="Zavřít oznámení">
+                  ×
+                </Button>
+              </p>
+            ) : null}
+
             {openAgenda.length > 0 ? (
               <EntityList label="Otevřené úkoly a zkoušky">{openAgenda.map(renderAgendaRow)}</EntityList>
             ) : (
@@ -853,6 +988,75 @@ export default function SchoolPage() {
           </PageSection>
         </>
       )}
+
+      <ConfirmDialog
+        open={completingAssignment != null}
+        title={`Splnit úkol ${completingAssignment?.title ?? ""}?`}
+        message="Úkol se přesune do Hotové a uzavřené. Záznam zůstane a půjde znovu otevřít."
+        confirmLabel="Splnit"
+        busyLabel="Ukládám…"
+        danger={false}
+        onConfirm={confirmCompleteAssignment}
+        onCancel={() => setCompletingAssignment(null)}
+      />
+
+      <ConfirmDialog
+        open={closingExam != null}
+        title={`Uzavřít zkoušku ${closingExam?.title ?? ""}?`}
+        message={
+          <div className="space-y-3 text-left" data-testid="exam-close-form">
+            <p>Zkouška se přesune do Hotové a uzavřené. Výsledek je nepovinný.</p>
+            <FormField label="Výsledek zkoušky">
+              {(p) => (
+                <select {...p} value={closeDraft.outcome} onChange={(ev) => updateClose({ outcome: ev.target.value })} className={fieldClass}>
+                  {EXAM_OUTCOMES.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </FormField>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Hodnocení">
+                {(p) => (
+                  <select {...p} value={closeDraft.result_type} onChange={(ev) => updateClose({ result_type: ev.target.value })} className={fieldClass}>
+                    {RESULT_TYPES.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+              {closeDraft.result_type && closeDraft.result_type !== "pass_fail" ? (
+                <FormField label="Hodnota">
+                  {(p) => (
+                    <input
+                      {...p}
+                      value={closeDraft.result_value}
+                      onChange={(ev) => updateClose({ result_value: ev.target.value })}
+                      className={fieldClass}
+                      placeholder={RESULT_TYPES.find((o) => o.value === closeDraft.result_type)?.placeholder}
+                      maxLength={20}
+                    />
+                  )}
+                </FormField>
+              ) : null}
+            </div>
+            {closeError ? (
+              <p role="alert" className="text-sm text-danger">
+                {closeError}
+              </p>
+            ) : null}
+          </div>
+        }
+        confirmLabel="Uzavřít"
+        busyLabel="Ukládám…"
+        danger={false}
+        onConfirm={confirmCloseExam}
+        onCancel={() => setClosingExam(null)}
+      />
 
       <ConfirmDialog
         open={deletingAssignment != null}
