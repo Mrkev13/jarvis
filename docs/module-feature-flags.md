@@ -69,9 +69,23 @@ required) returns `{id, label, available, capabilities}` only – no env values.
 | Dashboard storage | Stored entries of disabled widgets are kept untouched when the user edits the layout (`preserveUnavailable`); re-enabling restores position, visibility and size. With no stored entry the existing “new widget after its predecessor” rule applies. “Obnovit výchozí” clears everything (as before). |
 | Quick Add | `parse` returns `unknown` for a disabled kind (no fields, nothing to save); `prepare` refuses it with 422 even if a client sends it. Frontend hides its examples/hint and treats such a parse as unknown. Future modules: register `quick_add_kinds`; no parser is needed for the gate. |
 | Today | Items whose ref belongs to a module without `today` are dropped from every section (`today_service.gate_items`); `POST /today/actions/prepare` returns 404 for such a ref. |
-| AI context | CURRENT STATE sections of modules without `ai_context` are not built (`context_service`); tools whose every area belongs to such modules are not offered (`tool_router._ordered`), so the AI cannot write hidden data either. Multi-area tools (`modify_records`) stay. |
+| AI context | CURRENT STATE sections of modules without `ai_context` are not built (`context_service`); tools whose every area belongs to such modules are not offered (`tool_router._ordered`). The multi-area tool `modify_records` stays offered, but `mutation_service` refuses entities of a disabled module (`module_unavailable` at proposal time; a module switched off before confirm/undo = stale target, nothing changes). |
 | Routes (frontend) | `ModuleRouteGuard` (in `AppShell`) renders “Modul není dostupný” with a link to Řídicí centrum; the page component is never mounted, so it fetches nothing. |
 | Routes (backend API) | Global dependency `require_module_available` → `404 {"detail": {"message": "Modul není dostupný.", "module": id}}`, evaluated **after** `require_auth` (unauthenticated callers still get 401). |
+
+### Main-era coverage (MRK-7)
+
+The flags branch predates Game Enrichment B/C, Motion, Jarvis, School completion and Quick Add time parsing. When it
+was ported onto current `main`:
+
+- **WoT**
+  - `wot_replay` (Replay Library search results) belongs to `wot.entity_types`.
+  - The `/wot` prefix also covers `/wot/replays`, `/wot/milestones`, `/wot/screenshots` and `/wot/grind/{id}/complete`, for both the frontend route guard and the backend API.
+  - Milestones and grind completions have no search result type, so they need no entity type.
+  - The dashboard "Hry" widget shows its WoT part only when WoT is available.
+- **School**: the completion endpoints (`/school/assignment/{id}/complete|reopen`, `/school/exam/{id}/close|reopen`) follow the `school` flag through the `/school` prefix.
+- **Core, never gated**: Quick Add clock-time parsing (appointments become reminders), the Jarvis companion and avatar, Motion, the icon system, Today, reminders and the AI page.
+- **Parity**: besides ids, defaults, capabilities, entity types and Quick Add kinds, a test now checks that every frontend module route is also a backend API prefix.
 
 Initial rollout is zero-surprise: all six shipped modules (`school`, `work`, `finance`, `goals`, `wot`, `mff`)
 default to enabled, all eight future modules default to disabled and have no capabilities.
@@ -111,8 +125,22 @@ Rule: a user can only turn a module **off**, never on something the app disabled
 narrowing would happen after loading the preference (e.g. from `GET /modules` extended with user data);
 `createModuleAccess(flags)` already accepts any mapping. DB storage, an endpoint and a settings UI are out of scope.
 
+## A1 vs. A2 (MRK-18)
+
+This is **A1**: flags come from the environment only, and the frontend needs a rebuild after a change.
+- Backend: `MODULE_<ID>_ENABLED`.
+- Frontend: `NEXT_PUBLIC_MODULE_<ID>_ENABLED`, inlined at build time. Set both the same.
+
+`GET /modules` already reports availability. **A2** will:
+- add a DB `module_settings` table and a Settings toggle;
+- resolve flags as env > DB > default;
+- switch the frontend from build-time `NEXT_PUBLIC_MODULE_*` to runtime `GET /modules`.
+
+None of that is implemented yet.
+
 ## Verification
 
 - Unit: `backend/tests/test_module_registry.py`, `frontend/lib/modules.test.mjs`.
-- Browser: `frontend/scripts/module-flags-check.mjs` against a default build and a build with
+- Browser: `frontend/scripts/module-flags-check.mjs` (incl. Replay Library routes/deep links, replay search, Quick Add
+  time parsing, School completion action, Jarvis companion, Today links) against a default build and a build with
   `NEXT_PUBLIC_MODULE_WOT_ENABLED=false NEXT_PUBLIC_MODULE_FINANCE_ENABLED=false` (`UI_FLAGS_DISABLED=wot,finance`).
