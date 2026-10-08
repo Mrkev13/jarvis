@@ -126,14 +126,16 @@ export default function HabitsPage() {
             {state === "open" ? (
               <>
                 {h.kind !== "check" ? (
-                  <input
-                    aria-label={h.kind === "duration" ? `Minuty: ${h.name}` : `Hodnota: ${h.name}`}
-                    inputMode="decimal"
-                    placeholder={h.kind === "duration" ? "min" : h.unit ?? "počet"}
-                    value={values[h.id] ?? ""}
-                    onChange={(e) => setValues((v) => ({ ...v, [h.id]: e.target.value }))}
-                    className={cx(fieldClass, "w-20")}
-                  />
+                  <span className="block w-20 shrink-0">
+                    <input
+                      aria-label={h.kind === "duration" ? `Minuty: ${h.name}` : `Hodnota: ${h.name}`}
+                      inputMode="decimal"
+                      placeholder={h.kind === "duration" ? "min" : h.unit ?? "počet"}
+                      value={values[h.id] ?? ""}
+                      onChange={(e) => setValues((v) => ({ ...v, [h.id]: e.target.value }))}
+                      className={fieldClass}
+                    />
+                  </span>
                 ) : null}
                 <Button size="sm" variant="secondary" busy={busy} busyLabel="Ukládám…" onClick={() => void record(h, "done")}
                   aria-label={`Splnit návyk: ${h.name}`}>

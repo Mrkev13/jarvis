@@ -7,6 +7,13 @@ Architecture and contracts: [module-framework.md](module-framework.md). Flags: [
 Principles: [architecture-principles.md](architecture-principles.md).
 
 ## 0. Manifest (always)
+New modules (MRK-21+) live in packages: `backend/modules/<id>/` (`models.py`, `service.py`, `router.py`,
+`integrations.py`) and `frontend/modules/<id>/` (`manifest.ts`, page, components, `lib.ts` + tests). The worked example
+is Habits ([habits.md](habits.md)), and the exact list of files touched is in module-framework.md §8.
+- [ ] REST through `integrations.routers` (an `APIRouter` under the module's `api_prefixes`). Do not add routes to `main.py`.
+- [ ] Today row actions through `MODULE_UI.<id>.todayActions`, widgets through `MODULE_UI.<id>.widgets` plus a
+      component entry in `frontend/modules/registry.tsx`, area colour through `MODULE_UI.<id>.area`. Prefer
+      `defaultVisible: false` for new widgets so existing dashboards keep their layout.
 - [ ] `backend/module_registry.py`: replace `_planned("<id>", …)` with `ModuleDef(...)`: `implemented=True`,
       `default_enabled` (`False` until usable), `capabilities`, `entity_types` (ref prefixes / search result types),
       `context_areas`, `api_prefixes`, `quick_add_kinds`, `integrations=<id>_integrations.INTEGRATIONS` (one import).

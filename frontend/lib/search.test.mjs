@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { NAV_PAGES } from "./navigation.ts";
 import { flatten, groupResults, isSearchShortcut, searchTargetFromParams, moveSelection, normalize, parseRecent, pushRecent, scoreText, searchNavigation } from "./search.ts";
 
 test("Czech normalization keeps meaning, drops diacritics and case", () => {
@@ -34,7 +35,7 @@ test("navigation: Czech names, keywords and diacritic-insensitive input", () => 
   assert.equal(searchNavigation("jarvis")[0].href, "/ai");
   assert.equal(searchNavigation("wot")[0].href, "/wot");
   assert.equal(searchNavigation("marvel")[0].href, "/mff");
-  assert.equal(searchNavigation("").length, 16); // + Nastavení (MRK-18 A2), Návyky (MRK-21)
+  assert.equal(searchNavigation("").length, NAV_PAGES.length); // celý registr (jádro + moduly z manifestu)
   assert.equal(searchNavigation("moduly")[0]?.href, "/settings");
   assert.equal(searchNavigation("dnes")[0].href, "/today");
   assert.equal(searchNavigation("today")[0].href, "/today");
