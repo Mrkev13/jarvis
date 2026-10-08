@@ -42,6 +42,30 @@ const GET_ROUTES = {
   "/today": () => fixture(todayState.fixture),
 };
 
+// MRK-19: doménové události mocku – SSE /events/stream (Last-Event-ID replay, keepalive). Události vznikají
+// z PUT /modules/{id} (system.module.enabled/disabled) a z /__mock/events/emit?type=…; /__mock/events = seznam.
+const mockEvents = [];
+const sseClients = new Set();
+const sseFrame = (e) => `id: ${e.id}\nevent: domain_event\ndata: ${JSON.stringify(e)}\n\n`;
+function mockEvent(type, moduleId, aggregateType, aggregateId, payload) {
+  const e = { id: mockEvents.length + 1, type, module_id: moduleId, aggregate_type: aggregateType, aggregate_id: aggregateId,
+    occurred_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), payload };
+  mockEvents.push(e);
+  for (const res of sseClients) res.write(sseFrame(e));
+  return e;
+}
+function openEventStream(req, res, url) {
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Credentials": "true" });
+  res.write("retry: 1000\n\n");
+  const raw = req.headers["last-event-id"] ?? url.searchParams.get("last_event_id");
+  const cursor = /^\d+$/.test(String(raw ?? "")) ? Number(raw) : null;
+  if (cursor !== null) for (const e of mockEvents.filter((x) => x.id > cursor)) res.write(sseFrame(e));
+  sseClients.add(res);
+  const beat = setInterval(() => res.write(": keepalive\n\n"), 15000);
+  req.on("close", () => { clearInterval(beat); sseClients.delete(res); });
+}
+
 function send(res, req, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     ...extraHeaders,
@@ -209,6 +233,8 @@ createServer(async (req, res) => {
     return respond(200, { modules: modulesConfig() });
   }
   if (url.pathname === "/modules" && req.method === "GET") return respond(200, { modules: modulesConfig() }, 80);
+  if (url.pathname === "/events/stream" && req.method === "GET") return openEventStream(req, res, url);
+  if (url.pathname === "/__mock/events") return respond(200, mockEvents);
   const moduleMatch = url.pathname.match(/^\/modules\/([a-z_]+)$/);
   if (moduleMatch && req.method === "PUT") {
     const m = MODULES.find((x) => x.id === moduleMatch[1]);
@@ -216,8 +242,11 @@ createServer(async (req, res) => {
     if (!m.implemented) return respond(422, { detail: { message: "Modul zatím není hotový.", module: m.id } });
     if (moduleLocked.has(m.id)) return respond(409, { detail: { message: "Vynuceno konfigurací serveru.", module: m.id } }, 120);
     if (typeof body?.enabled !== "boolean" && body?.enabled !== null) return respond(422, { detail: "enabled musí být true/false/null" });
+    const before = modulesConfig().find((x) => x.id === m.id).enabled;
     if (body.enabled === null || body.enabled === m.defaultEnabled) moduleOverrides.delete(m.id);
     else moduleOverrides.set(m.id, body.enabled);
+    const after = modulesConfig().find((x) => x.id === m.id).enabled;
+    if (after !== before) mockEvent(after ? "system.module.enabled" : "system.module.disabled", null, "module", m.id, { module_id: m.id, enabled: after, previous: before });
     return respond(200, modulesConfig().find((x) => x.id === m.id), 120);
   }
   // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service.parse (fixtures/quick-add.json,

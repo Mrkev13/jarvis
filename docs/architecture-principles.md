@@ -23,6 +23,7 @@ Use these; never re-declare their content locally.
 | One-shot structured LLM calls (strict schema, error categories, usage) | `backend/structured_llm.py` |
 | Grounding checks (numbers, dates, names) | `backend/planner_guard.py` |
 | Audit trail | `backend/activity_service.log_activity` |
+| Domain events (transactional outbox, SSE, retention) | `backend/domain_events.append_domain_event` + `backend/event_stream.py` – see [domain-events.md](domain-events.md) |
 | Module availability (env override > `module_settings` DB > manifest default; env-forced = locked) | `backend/module_registry.py` (`resolve_states`, `current_access()`); frontend runtime: `frontend/hooks/useModules.ts` (`GET /modules`) – see [module-feature-flags.md](module-feature-flags.md) |
 | Module integrations (search, Today, dashboard, AI context, Quick Add, hourly steps) | `ModuleDef.integrations` from `backend/<module>_integrations.py`; frontend nav/search registries from `MODULE_UI` in `frontend/lib/modules.ts` – see [module-framework.md](module-framework.md) |
 | Notification → external delivery | `backend/delivery_service.py` (`deliverable_types`) |
@@ -123,6 +124,8 @@ Completed or closed facts are historical facts. They must not be silently destru
 Deletion of completed records should be soft or otherwise preserved in history/audit where appropriate.
 Corrections and reopening are allowed, but must retain the previous fact; a current-state row alone
 is not a historical record. Bounded inventory and follow-ups: [MRK-29 audit](mrk-29-history-audit.md).
+`domain_events` are a finite transport/replay log (default 180 days) – durable history stays in
+`activity_logs` and the business tables ([domain-events.md](domain-events.md)).
 
 ---
 
