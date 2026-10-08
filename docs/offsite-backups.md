@@ -23,21 +23,24 @@ An offsite target implements:
 - `retrieve_run(run_id, destination)` — copy the opaque artifact to caller-owned scratch space;
 - `delete_run(run_id)` — remove one explicitly selected expired run.
 
-`LocalFilesystemOffsiteTarget` is the first implementation. Its root contains one directory per validated run ID, `payload.tar` or `payload.age`, `metadata.json`, and an empty `complete` marker. It reserves a new run directory exclusively, writes without overwrite, and makes the run visible only after the marker exists. Reusing a run ID fails; it never replaces the existing artifact. Delete is restricted to a validated completed run below the provider root.
+`LocalFilesystemOffsiteTarget` is the first implementation. Its root contains one directory per validated portable run ID, `payload.tar` or `payload.age`, `metadata.json`, and an empty `complete` marker. It reserves a new run directory exclusively, writes without overwrite, verifies the transferred payload bytes, and makes the run visible only after the marker exists. Reusing a run ID fails; it never replaces the existing artifact. Provider-controlled run directories and child files may not be symlinks or Windows junctions/reparse directories. Delete is restricted to a validated completed run below the provider root and first atomically renames it to a unique provider-owned quarantine name.
 
 S3, Backblaze B2, Google Drive and OneDrive adapters should implement the same opaque-object operations. Cloud credentials, SDKs, retries and multipart uploads are intentionally not part of MRK-25. A future provider must preserve immutable create semantics and publish a completion boundary equivalent to the filesystem marker.
 
 ## Encryption
 
-`Encryptor` is a small adapter with `available`, `encrypt` and `decrypt`. Tests use a deterministic fake adapter; it is not production cryptography.
+`Encryptor` is a small adapter with separate `can_encrypt` / `can_decrypt` capabilities plus `encrypt` and `decrypt`. Tests use a deterministic fake adapter; it is not production cryptography.
 
 `AgeEncryptor` supports the external [age](https://age-encryption.org/) executable with recipient-based encryption. Install and key provisioning are deployment responsibilities. The recipient and identity-file path are runtime inputs; neither identity contents nor key/secret values enter metadata or structured status. Subprocess output and raw exceptions are not exposed.
 
 When encryption is required:
 
 - no adapter or unavailable executable => `encryption_failure`;
+- missing decryption identity/capability => `encryption_failure` before publication;
 - encryption failure => no completed offsite run;
 - verification without a usable decryption identity => `encryption_failure`.
+
+Before publication, the newly encrypted artifact is decrypted back into scratch and the complete DB/manifest/media checksum contract is verified again. Successful encryption alone is therefore never reported as a completed, restorable copy.
 
 This workstation has OpenSSL 3.3, but not `age`, `7z`, GPG or the PostgreSQL CLI tools. OpenSSL is not selected automatically because MRK-25 does not define a safe passphrase/key lifecycle for it. No global dependency was installed.
 

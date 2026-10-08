@@ -25,6 +25,7 @@ from offsite_backup import (
     safe_extract_tar,
     verify_offsite_run,
 )
+import offsite_backup
 
 
 def _sha(data: bytes) -> str:
@@ -99,7 +100,10 @@ class FakeEncryptor:
     def __init__(self, secret: str = "super-secret-canary"):
         self.secret = secret
 
-    def available(self) -> bool:
+    def can_encrypt(self) -> bool:
+        return True
+
+    def can_decrypt(self) -> bool:
         return True
 
     def encrypt(self, source: Path, destination: Path) -> None:
@@ -113,8 +117,21 @@ class FakeEncryptor:
 
 
 class UnavailableEncryptor(FakeEncryptor):
-    def available(self) -> bool:
+    def can_encrypt(self) -> bool:
         return False
+
+    def can_decrypt(self) -> bool:
+        return False
+
+
+class EncryptOnlyEncryptor(FakeEncryptor):
+    def can_decrypt(self) -> bool:
+        return False
+
+
+class BrokenRoundTripEncryptor(FakeEncryptor):
+    def decrypt(self, source: Path, destination: Path) -> None:
+        destination.write_bytes(b"not a tar archive")
 
 
 def _metadata(run_id: str, when: datetime, **changes) -> OffsiteRunMetadata:
@@ -179,6 +196,22 @@ def test_required_encryption_unavailable_fails_closed(tmp_path: Path):
     )
 
     assert result.success is False
+    assert result.code is OffsiteOutcome.ENCRYPTION_FAILURE
+    assert target.list_runs() == []
+
+
+@pytest.mark.parametrize("encryptor", [EncryptOnlyEncryptor(), BrokenRoundTripEncryptor()])
+def test_required_encryption_requires_verified_decryption_before_publish(tmp_path: Path, encryptor):
+    source = tmp_path / "source"
+    run_path = _write_backup(source)
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+
+    result = copy_completed_run(
+        source, run_path, target,
+        encryption_required=True,
+        encryptor=encryptor,
+    )
+
     assert result.code is OffsiteOutcome.ENCRYPTION_FAILURE
     assert target.list_runs() == []
 
@@ -274,6 +307,45 @@ def test_existing_run_is_never_overwritten(tmp_path: Path):
 
     assert second.code is OffsiteOutcome.OFFSITE_TRANSFER_FAILURE
     assert _tree_digest(tmp_path / "offsite" / first.run_id) == original
+
+
+def test_filesystem_provider_verifies_transferred_payload(tmp_path: Path, monkeypatch):
+    payload = tmp_path / "payload.tar"
+    payload.write_bytes(b"expected payload")
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+    metadata = _metadata("run-1", datetime(2026, 10, 8, 12, tzinfo=timezone.utc))
+    original_copy = offsite_backup.shutil.copyfileobj
+
+    def corrupt_copy(source, destination, length=0):
+        original_copy(source, destination, length=length)
+        destination.seek(0)
+        destination.write(b"corrupt")
+        destination.truncate()
+
+    monkeypatch.setattr(offsite_backup.shutil, "copyfileobj", corrupt_copy)
+    with pytest.raises(RuntimeError):
+        target.store_run(payload, metadata)
+    assert target.list_runs() == []
+
+
+def test_provider_rejects_symlinked_payload_child(tmp_path: Path):
+    source = tmp_path / "source"
+    run_path = _write_backup(source)
+    target_root = tmp_path / "offsite"
+    target = LocalFilesystemOffsiteTarget(target_root)
+    result = copy_completed_run(source, run_path, target)
+    payload = target_root / result.run_id / "payload.tar"
+    outside = tmp_path / "outside.tar"
+    outside.write_bytes(payload.read_bytes())
+    payload.unlink()
+    try:
+        payload.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this Windows host")
+
+    assert target.list_runs() == []
+    with pytest.raises(Exception):
+        target.retrieve_run(result.run_id, tmp_path / "retrieved")
 
 
 def test_verification_detects_corruption_and_missing_db_or_media(tmp_path: Path):
@@ -396,10 +468,66 @@ def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: 
     assert dry.success and dry.deleted == () and dry.would_delete == ("expired",)
     assert failed.code is OffsiteOutcome.RETENTION_CLEANUP_FAILURE
     assert "secret cleanup path" not in json.dumps(failed.to_dict())
+    assert failed.operation == "retention_cleanup"
+    assert failed.started_at.tzinfo is not None
+    assert failed.finished_at >= failed.started_at
+
+
+def test_conflicting_valid_and_invalid_retention_id_is_never_deleted():
+    now = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
+    newest = _metadata("newest", now)
+    valid = _metadata("conflict", now.replace(year=2025))
+    invalid = replace(valid, transfer_completed=False)
+
+    plan = plan_retention([newest, valid, invalid], daily=0, weekly=0, monthly=0)
+
+    assert plan.keep == ("newest",)
+    assert plan.delete == ()
+    assert plan.invalid == ("conflict",)
+
+
+@pytest.mark.parametrize("identifier", ["CON", "aux.txt", "trailing."])
+def test_provider_rejects_nonportable_windows_identifiers(tmp_path: Path, identifier: str):
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+    with pytest.raises(ValueError):
+        target.retrieve_run(identifier, tmp_path / "retrieved")
 
 
 def test_age_adapter_reports_missing_executable_without_exposing_identity(tmp_path: Path):
     identity = tmp_path / "secret-identity.txt"
     adapter = AgeEncryptor(recipient="age1publicrecipient", identity_file=identity, executable="definitely-missing-age")
-    assert adapter.available() is False
+    assert adapter.can_encrypt() is False
+    assert adapter.can_decrypt() is False
     assert str(identity) not in repr(adapter)
+
+
+def test_age_adapter_uses_recipient_and_identity_without_key_contents(tmp_path: Path, monkeypatch):
+    executable = tmp_path / "age.exe"
+    executable.write_bytes(b"")
+    identity = tmp_path / "identity.txt"
+    identity.write_text("AGE-SECRET-KEY-secret-canary", encoding="utf-8")
+    source = tmp_path / "source.tar"
+    source.write_bytes(b"payload")
+    encrypted = tmp_path / "payload.age"
+    decrypted = tmp_path / "decrypted.tar"
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        output = Path(command[command.index("--output") + 1])
+        output.write_bytes(Path(command[-1]).read_bytes())
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(offsite_backup.subprocess, "run", fake_run)
+    adapter = AgeEncryptor(
+        recipient="age1publicrecipient",
+        identity_file=identity,
+        executable=str(executable),
+    )
+    adapter.encrypt(source, encrypted)
+    adapter.decrypt(encrypted, decrypted)
+
+    assert decrypted.read_bytes() == b"payload"
+    assert "age1publicrecipient" in commands[0]
+    assert str(identity) in commands[1]
+    assert all("AGE-SECRET-KEY-secret-canary" not in part for command in commands for part in command)

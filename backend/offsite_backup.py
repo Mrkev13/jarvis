@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import ntpath
+import os
 import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -29,6 +31,11 @@ DEFAULT_RETENTION_TIMEZONE = "Europe/Prague"
 
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _CHECKSUM = re.compile(r"[a-f0-9]{64}\Z")
+_WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 
 
 class OffsiteOutcome(str, Enum):
@@ -70,7 +77,11 @@ def _parse_time(value: object) -> datetime:
 
 
 def _valid_identifier(value: str) -> bool:
-    return bool(_SAFE_IDENTIFIER.fullmatch(value)) and value not in {".", ".."}
+    if not isinstance(value, str) or not _SAFE_IDENTIFIER.fullmatch(value) or value in {".", ".."}:
+        return False
+    if value.endswith(".") or value.split(".", 1)[0].upper() in _WINDOWS_RESERVED:
+        return False
+    return True
 
 
 def _require_identifier(value: str) -> str:
@@ -343,7 +354,8 @@ def safe_extract_tar(archive_path: Path, destination: Path) -> None:
 
 
 class Encryptor(Protocol):
-    def available(self) -> bool: ...
+    def can_encrypt(self) -> bool: ...
+    def can_decrypt(self) -> bool: ...
     def encrypt(self, source: Path, destination: Path) -> None: ...
     def decrypt(self, source: Path, destination: Path) -> None: ...
 
@@ -368,10 +380,17 @@ class AgeEncryptor:
         self._timeout_seconds = timeout_seconds
 
     def __repr__(self) -> str:
-        return f"AgeEncryptor(available={self.available()!r})"
+        return f"AgeEncryptor(can_encrypt={self.can_encrypt()!r}, can_decrypt={self.can_decrypt()!r})"
 
-    def available(self) -> bool:
+    def can_encrypt(self) -> bool:
         return bool(self._executable and self._recipient)
+
+    def can_decrypt(self) -> bool:
+        return bool(
+            self._executable
+            and self._identity_file is not None
+            and self._identity_file.is_file()
+        )
 
     def _run(self, command: list[str], destination: Path) -> None:
         if destination.exists():
@@ -393,7 +412,7 @@ class AgeEncryptor:
             raise _EncryptionError("age operation failed")
 
     def encrypt(self, source: Path, destination: Path) -> None:
-        if not self.available():
+        if not self.can_encrypt():
             raise _EncryptionError("age is unavailable")
         self._run([
             self._executable, "--encrypt", "--recipient", self._recipient,
@@ -401,7 +420,7 @@ class AgeEncryptor:
         ], destination)
 
     def decrypt(self, source: Path, destination: Path) -> None:
-        if not self._executable or self._identity_file is None or not self._identity_file.is_file():
+        if not self.can_decrypt():
             raise _EncryptionError("age decryption is unavailable")
         self._run([
             self._executable, "--decrypt", "--identity", str(self._identity_file),
@@ -426,12 +445,7 @@ class LocalFilesystemOffsiteTarget:
 
     def _run_dir(self, run_id: str) -> Path:
         run_id = _require_identifier(run_id)
-        candidate = (self.root / run_id).resolve()
-        try:
-            candidate.relative_to(self.root)
-        except ValueError as exc:
-            raise ValueError("invalid run location") from exc
-        return candidate
+        return self.root / run_id
 
     @staticmethod
     def _payload_name(encrypted: bool) -> str:
@@ -447,8 +461,11 @@ class LocalFilesystemOffsiteTarget:
             final.mkdir(exist_ok=False)
             reserved = True
             payload_target = final / self._payload_name(metadata.encrypted)
+            source_checksum = _sha256(payload)
             with payload.open("rb") as source, payload_target.open("xb") as output:
                 shutil.copyfileobj(source, output, length=1024 * 1024)
+            if _sha256(payload_target) != source_checksum:
+                raise _TransferError("offsite payload verification failed")
             with (final / "metadata.json").open("x", encoding="utf-8", newline="\n") as handle:
                 json.dump(metadata.to_dict(), handle, ensure_ascii=True, sort_keys=True, indent=2)
                 handle.write("\n")
@@ -459,14 +476,41 @@ class LocalFilesystemOffsiteTarget:
                 shutil.rmtree(final, ignore_errors=True)
             raise _TransferError("offsite publication failed") from exc
 
+    @staticmethod
+    def _is_linklike(path: Path) -> bool:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        return bool(is_junction and is_junction())
+
+    def _safe_child_file(self, run_dir: Path, name: str) -> Path:
+        child = run_dir / name
+        if self._is_linklike(child) or not child.is_file():
+            raise ValueError("unsafe provider file")
+        resolved = child.resolve(strict=True)
+        try:
+            resolved.relative_to(run_dir.resolve(strict=True))
+        except ValueError as exc:
+            raise ValueError("unsafe provider file") from exc
+        return child
+
+    @staticmethod
+    def _read_nofollow(path: Path) -> bytes:
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            return handle.read()
+
     def _read_completed(self, run_dir: Path) -> OffsiteRunMetadata:
-        if run_dir.is_symlink() or not run_dir.is_dir() or not (run_dir / "complete").is_file():
+        if self._is_linklike(run_dir) or not run_dir.is_dir():
             raise ValueError("incomplete run")
-        metadata = OffsiteRunMetadata.from_dict(json.loads((run_dir / "metadata.json").read_text("utf-8")))
+        self._safe_child_file(run_dir, "complete")
+        metadata_file = self._safe_child_file(run_dir, "metadata.json")
+        metadata = OffsiteRunMetadata.from_dict(json.loads(self._read_nofollow(metadata_file).decode("utf-8")))
         if metadata.run_id != run_dir.name or metadata.offsite_target_identifier != self.identifier:
             raise ValueError("mismatched run metadata")
-        payload = run_dir / self._payload_name(metadata.encrypted)
-        if not metadata.transfer_completed or metadata.checksum_result != "verified" or not payload.is_file():
+        self._safe_child_file(run_dir, self._payload_name(metadata.encrypted))
+        if not metadata.transfer_completed or metadata.checksum_result != "verified":
             raise ValueError("incomplete run")
         return metadata
 
@@ -483,12 +527,16 @@ class LocalFilesystemOffsiteTarget:
         return sorted(runs, key=lambda item: (item.run_time, item.run_id), reverse=True)
 
     def retrieve_run(self, run_id: str, destination: Path) -> Path:
-        metadata = self._read_completed(self._run_dir(run_id))
+        run_dir = self._run_dir(run_id)
+        metadata = self._read_completed(run_dir)
         destination = Path(destination).resolve()
         destination.mkdir(parents=True, exist_ok=True)
         output = destination / self._payload_name(metadata.encrypted)
         try:
-            with (self._run_dir(run_id) / output.name).open("rb") as source, output.open("xb") as target:
+            payload = self._safe_child_file(run_dir, output.name)
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(payload, flags)
+            with os.fdopen(descriptor, "rb") as source, output.open("xb") as target:
                 shutil.copyfileobj(source, target, length=1024 * 1024)
         except Exception as exc:
             output.unlink(missing_ok=True)
@@ -498,10 +546,12 @@ class LocalFilesystemOffsiteTarget:
     def delete_run(self, run_id: str) -> None:
         run_dir = self._run_dir(run_id)
         self._read_completed(run_dir)
-        if run_dir.is_symlink():
+        if self._is_linklike(run_dir):
             raise _TransferError("unsafe offsite run")
+        quarantine = self.root / f".deleting-{run_id}-{uuid.uuid4().hex}"
         try:
-            shutil.rmtree(run_dir)
+            run_dir.rename(quarantine)
+            shutil.rmtree(quarantine)
         except OSError as exc:
             raise _TransferError("offsite deletion failed") from exc
 
@@ -527,7 +577,9 @@ def copy_completed_run(
     except Exception:
         return _result("copy", False, OffsiteOutcome.LOCAL_BACKUP_FAILURE, run_id, started)
 
-    if encryption_required and (encryptor is None or not encryptor.available()):
+    if encryption_required and (
+        encryptor is None or not encryptor.can_encrypt() or not encryptor.can_decrypt()
+    ):
         return _result("copy", False, OffsiteOutcome.ENCRYPTION_FAILURE, run_id, started)
 
     try:
@@ -550,6 +602,16 @@ def copy_completed_run(
                 encrypted_path = scratch / "payload.age"
                 try:
                     encryptor.encrypt(tar_path, encrypted_path)
+                    decrypted_path = scratch / "round-trip.tar"
+                    encryptor.decrypt(encrypted_path, decrypted_path)
+                    encrypted_verification = scratch / "encrypted-verification"
+                    safe_extract_tar(decrypted_path, encrypted_verification)
+                    round_trip = _load_source_run(
+                        encrypted_verification,
+                        encrypted_verification / "runs" / source.source_backup_identifier,
+                    )
+                    if round_trip.run_id != source.run_id or round_trip.run_time != source.run_time:
+                        raise _EncryptionError("encrypted round-trip mismatch")
                 except Exception:
                     return _result("copy", False, OffsiteOutcome.ENCRYPTION_FAILURE, run_id, started)
                 if not encrypted_path.is_file():
@@ -589,7 +651,7 @@ def verify_offsite_run(
     except Exception:
         return _result("verify", False, OffsiteOutcome.VERIFICATION_FAILURE, run_id, started)
 
-    if metadata.encrypted and (encryptor is None or not encryptor.available()):
+    if metadata.encrypted and (encryptor is None or not encryptor.can_decrypt()):
         return _result("verify", False, OffsiteOutcome.ENCRYPTION_FAILURE, run_id, started)
 
     try:
@@ -634,22 +696,27 @@ def plan_retention(
     if min(daily, weekly, monthly) < 0:
         raise ValueError("retention counts must be nonnegative")
     local_zone = ZoneInfo(timezone_name)
-    valid: dict[str, OffsiteRunMetadata] = {}
+    grouped: dict[str, list[OffsiteRunMetadata]] = {}
     invalid: set[str] = set()
     for run in runs:
+        if not isinstance(run.run_id, str) or not _valid_identifier(run.run_id):
+            invalid.add(str(run.run_id))
+            continue
+        grouped.setdefault(run.run_id, []).append(run)
+
+    valid: dict[str, OffsiteRunMetadata] = {}
+    for run_id, observations in grouped.items():
+        run = observations[0]
         is_valid = (
-            _valid_identifier(run.run_id)
-            and run.run_time.tzinfo is not None
+            run.run_time.tzinfo is not None
             and run.run_time.utcoffset() is not None
             and run.transfer_completed
             and run.checksum_result == "verified"
         )
-        if not is_valid:
-            invalid.add(run.run_id)
+        if not is_valid or any(observation != run for observation in observations[1:]):
+            invalid.add(run_id)
             continue
-        previous = valid.get(run.run_id)
-        if previous is None or run.run_time > previous.run_time:
-            valid[run.run_id] = run
+        valid[run_id] = run
 
     ordered = sorted(valid.values(), key=lambda item: (item.run_time, item.run_id), reverse=True)
     keep: set[str] = set()
@@ -677,16 +744,24 @@ def plan_retention(
 
 @dataclass(frozen=True)
 class CleanupResult:
+    operation: str
     success: bool
     code: OffsiteOutcome
+    run_id: str | None
+    started_at: datetime
+    finished_at: datetime
     deleted: tuple[str, ...] = field(default_factory=tuple)
     would_delete: tuple[str, ...] = field(default_factory=tuple)
     failed: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "operation": self.operation,
             "success": self.success,
             "code": self.code.value,
+            "run_id": self.run_id,
+            "started_at": _iso(self.started_at),
+            "finished_at": _iso(self.finished_at),
             "deleted": list(self.deleted),
             "would_delete": list(self.would_delete),
             "failed": list(self.failed),
@@ -694,8 +769,12 @@ class CleanupResult:
 
 
 def cleanup_retention(target: OffsiteTarget, plan: RetentionPlan, *, dry_run: bool) -> CleanupResult:
+    started = _now()
     if dry_run:
-        return CleanupResult(True, OffsiteOutcome.SUCCESS, would_delete=plan.delete)
+        return CleanupResult(
+            "retention_cleanup", True, OffsiteOutcome.SUCCESS, None, started, _now(),
+            would_delete=plan.delete,
+        )
     deleted: list[str] = []
     failed: list[str] = []
     for run_id in plan.delete:
@@ -705,8 +784,9 @@ def cleanup_retention(target: OffsiteTarget, plan: RetentionPlan, *, dry_run: bo
         except Exception:
             failed.append(run_id)
     return CleanupResult(
-        not failed,
-        OffsiteOutcome.RETENTION_CLEANUP_FAILURE if failed else OffsiteOutcome.SUCCESS,
+        "retention_cleanup", not failed,
+        OffsiteOutcome.RETENTION_CLEANUP_FAILURE if failed else OffsiteOutcome.SUCCESS, None,
+        started, _now(),
         deleted=tuple(deleted),
         failed=tuple(failed),
     )
