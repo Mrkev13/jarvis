@@ -13,7 +13,6 @@ a navrhuje změny, které uživatel potvrzuje. Jediný uživatel, česky psané 
 - Next.js 16 se liší od tréninkových dat: [frontend/AGENTS.md](frontend/AGENTS.md).
 - Principy P1–P18: [docs/architecture-principles.md](docs/architecture-principles.md) ·
   nový modul: [docs/module-integration-checklist.md](docs/module-integration-checklist.md) ·
-  Platform 2.0: [docs/module-framework.md](docs/module-framework.md) ·
   UI: [docs/design-system.md](docs/design-system.md).
 - Roadmapa a úkoly: Linear, projekt **Standa Hub** (tým MRK). GitHub = zdroj pravdy pro kód.
 
@@ -25,18 +24,22 @@ scripts/setup-dev.sh --check    # jen zjistí stav; exit 2 = něco je zastaralé
 ```
 
 Instaluje jen když chybí závislosti nebo se změnil lockfile (jinak ~0,1 s). Cloudová prostředí
-ho mají jako setup skript. `.env` soubory nevytváří a nemění – nikdy je necommituj.
+(Claude, Codex) mají mít `bash scripts/setup-dev.sh` nastavený jako setup skript. Má fungovat i
+v Git Bash na Windows (lokální ověření zatím chybí). `--system-python` instaluje do aktuálního
+interpretu místo `.venv`. `.env` soubory nevytváří a nemění – nikdy je necommituj.
 
 ## Ověření (stejné jako CI – `.github/workflows/ci.yml`)
 
-Backend, z kořene repa (Windows: `.venv/Scripts/python`):
+Backend, z kořene repa. `PY` = Python prostředí: Linux/macOS venv `.venv/bin/python`,
+Windows venv `.venv/Scripts/python`, při `--system-python` jen `python`.
 
 ```bash
+PY=.venv/bin/python
 export DATABASE_URL='sqlite+pysqlite:///:memory:' GROQ_API_KEY=ci-placeholder-not-a-secret \
   GROQ_BASE_URL=http://127.0.0.1:9 SCHEDULER_ENABLED=false REMINDERS_CHECK_ENABLED=false \
   DAILY_BRIEFING_ENABLED=false WEEKLY_REVIEW_ENABLED=false EXTERNAL_DELIVERY_ENABLED=false
-.venv/bin/python -m pyflakes backend/*.py backend/scripts/*.py
-.venv/bin/python -m pytest backend/tests --disable-socket --allow-unix-socket -x -q
+"$PY" -m pyflakes backend/*.py backend/scripts/*.py
+"$PY" -m pytest backend/tests --disable-socket --allow-unix-socket -x -q
 ```
 
 Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm run build`
@@ -57,7 +60,10 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
   Nikdy `datetime.now()` / `date.today()` bez zóny.
 - **Kanonické moduly:** stavy `statuses.py`, env `env_config.py`, AI tooly `tool_registry.py`,
   frontend API `lib/api.ts`. Nic z toho nekopíruj lokálně.
-- **Nezvětšuj obří soubory** (`backend/main.py`, `ai.py`): co upravuješ, přesuň do vlastního modulu.
+- **Obří soubory** (`backend/main.py`, `backend/ai.py`): nepřidávej do nich podstatnou novou logiku.
+  Nová funkcionalita patří do vlastního modulu, pokud je to součástí issue. Malé opravy existujícího
+  kódu dělej na místě. Nesouvisející kód jen proto, že jsi soubor otevřel, nerefaktoruj ani
+  nepřesouvej – takové vyčlenění je samostatný issue (např. MRK-20).
 - **Testy:** nikdy reálné LLM ani síť (pytest-socket). Fake hodiny a `tests/fakes.py`. Bugfix = regresní test.
 - **Bezpečnost:** žádné secrets, klíče, `.env`, dumpy DB ani uživatelská média v repu, logu ani v Linearu.
 

@@ -3,9 +3,6 @@
 A checklist, **not a framework**. A new module is "well integrated" when it ticks the boxes that make sense for
 it; skip what does not apply and say why in the PR. Principles: [architecture-principles.md](architecture-principles.md).
 
-> **Platform 2.0:** this checklist is being replaced by a declarative `ModuleSpec`, module feature flags and domain
-> events – see [module-framework.md](module-framework.md) (proposal). Until a module is migrated, this checklist applies.
-
 ## 1. Data and domain
 - [ ] Model(s) in `backend/models.py` with an **additive** Alembic migration (upgrade/downgrade/re-upgrade test;
       PostgreSQL check for non-trivial changes).
