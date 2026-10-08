@@ -2463,8 +2463,15 @@ async def events_stream(request: Request, last_event_id: str | None = None, modu
     replay, `reset` při mezeře, keepalive. Kontrakt: docs/domain-events.md."""
     import event_stream as es
     cursor = es.parse_cursor(request.headers.get("last-event-id"), last_event_id)
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+
+    def still_authorized() -> bool:
+        info = validate_session_token(token)
+        return bool(info and info.get("is_authenticated"))
+
     return StreamingResponse(
-        es.stream_events(request.is_disconnected, cursor, modules=es.parse_filter(modules), types=es.parse_filter(types)),
+        es.stream_events(request.is_disconnected, cursor, modules=es.parse_filter(modules), types=es.parse_filter(types),
+                         authorized=still_authorized),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )

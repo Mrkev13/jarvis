@@ -258,9 +258,12 @@ def _after_commit(session: Session) -> None:
         _dispatch(pending)
 
 
-@sa_event.listens_for(Session, "after_rollback")
-def _after_rollback(session: Session) -> None:
-    session.info.pop(_PENDING_KEY, None)
+@sa_event.listens_for(Session, "after_transaction_end")
+def _after_transaction_end(session: Session, transaction) -> None:
+    # Jen konec kořenové transakce (rollback i close); rollback savepointu čekající události vnější transakce nezahodí.
+    # Po commitu už je seznam vyprázdněný v after_commit.
+    if transaction.parent is None:
+        session.info.pop(_PENDING_KEY, None)
 
 
 # ---------- čtení (SSE, replay) ----------

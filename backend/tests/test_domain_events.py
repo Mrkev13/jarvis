@@ -154,6 +154,19 @@ class HabitsEventsTestCase(_DbCase):
         rows = [a for a in self.activity("habits") if a[0] in ("check", "update")]
         self.assertEqual(len(rows), 2, "právě jeden viditelný řádek Aktivity na změnu")
 
+    def test_note_or_value_edit_without_state_change_is_history_not_a_new_fact(self):
+        today = date(2026, 10, 8)
+        with self.Session() as db:
+            hid = habits.create_habit(db, "Kroky").id
+            db.commit()
+        with self.Session() as db, patch.object(habits, "created_day", lambda _h: today):
+            habits.set_entry(db, hid, "done", day=today, today=today)
+            habits.set_entry(db, hid, "done", day=today, today=today, note="po obědě")
+            db.commit()
+        self.assertEqual([e[1] for e in self.events()], ["habits.entry.done"], "stejný stav = žádný další fakt")
+        rows = [a for a in self.activity("habits") if a[0] in ("check", "update")]
+        self.assertEqual(len(rows), 2, "úprava poznámky zůstává v historii (Aktivita)")
+
     def test_habit_rollback_drops_entry_and_event(self):
         today = date(2026, 10, 8)
         with self.Session() as db:
@@ -237,6 +250,38 @@ class AfterCommitTestCase(_DbCase):
             self.assertEqual(seen, ["school.assignment.completed"])
         finally:
             unregister()
+
+    def test_savepoint_rollback_keeps_outer_pending_and_close_discards(self):
+        seen = []
+        unregister = de.register_after_commit(lambda evs: seen.extend(e.type for e in evs))
+        try:
+            with self.Session() as db:
+                school_service.complete_assignment(db, 1, now=T0)
+                sp = db.begin_nested()
+                sp.rollback()
+                db.commit()
+            self.assertEqual(seen, ["school.assignment.completed"], "rollback savepointu nezahodí vnější událost")
+            db = self.Session()
+            school_service.reopen_assignment(db, 1)
+            db.close()  # bez commitu → transakce končí, čekající snapshot se zahodí
+            self.assertNotIn(de._PENDING_KEY, db.info)
+            db.commit()
+            db.close()
+            self.assertEqual(seen, ["school.assignment.completed"])
+        finally:
+            unregister()
+
+    def test_sqlite_ids_are_never_reused_after_retention_empties_the_table(self):
+        with self.Session() as db:
+            first = de.append_domain_event(db, event_type="system.module.enabled", aggregate_type="module",
+                                           aggregate_id="mff").id
+            db.commit()
+            db.query(DomainEvent).delete()
+            db.commit()
+            second = de.append_domain_event(db, event_type="system.module.enabled", aggregate_type="module",
+                                            aggregate_id="mff").id
+            db.commit()
+        self.assertGreater(second, first, "dedupe_key event:<id> nesmí kolidovat se starší projekcí")
 
     def test_failing_consumer_does_not_undo_committed_write_or_leak_payload(self):
         def broken(_events):
@@ -342,6 +387,34 @@ class SseStreamTestCase(_DbCase):
         self.assertEqual(streamed[:3], ids[1:], "více zmeškaných ve správném pořadí")
         self.assertEqual(len(streamed), len(set(streamed)), "žádná duplicita na předělu replay → živě")
         self.assertEqual(streamed[3], ids[3] + 1, "žádná mezera")
+
+    def test_ready_frame_carries_the_position_before_any_event(self):
+        frames = _collect(None, until=lambda f: bool(_events_of(f, "ready")))
+        self.assertEqual(_events_of(frames, "ready"), [(0, {"latest_id": 0})], "prázdná tabulka = pozice 0")
+        ids = self.seed(2)
+        frames = _collect(None, until=lambda f: bool(_events_of(f, "ready")))
+        self.assertEqual(_events_of(frames, "ready"), [(ids[-1], {"latest_id": ids[-1]})])
+        frames = _collect(ids[0], until=lambda f: len(_events_of(f)) >= 1)
+        self.assertEqual(_events_of(frames, "ready")[0][0], ids[0], "s kurzorem = kurzor")
+        frames = _collect(ids[-1] + 100, until=lambda f: bool(_events_of(f, "reset")))
+        self.assertEqual(_events_of(frames, "ready"), [], "reset místo ready")
+
+    def test_stream_ends_when_the_session_is_no_longer_valid(self):
+        checks = []
+
+        def authorized():
+            checks.append(1)
+            return len(checks) < 2
+
+        async def run():
+            out = []
+            async for chunk in es.stream_events(lambda: False, None, authorized=authorized):
+                out.append(chunk)
+            return out
+        with patch.object(es, "HEARTBEAT_SECONDS", 0.05):
+            frames = asyncio.run(asyncio.wait_for(run(), 5))
+        self.assertEqual(len(checks), 2, "druhá kontrola session stream ukončí sama")
+        self.assertTrue(frames[0].startswith("retry: "))
 
     def test_reconnect_resumes_without_duplicates(self):
         ids = self.seed(4)
@@ -455,7 +528,8 @@ class SseEndpointTestCase(_DbCase):
             body = "".join(resp.iter_text())
         self.assertIn(f"id: {first_id + 1}\nevent: domain_event", body)
         self.assertIn('"type":"system.module.enabled"', body)
-        self.assertNotIn(f"id: {first_id}\n", body)
+        self.assertIn(f"id: {first_id}\nevent: ready\n", body, "ready nese pozici klienta")
+        self.assertNotIn(f"id: {first_id}\nevent: domain_event", body)
         self.assertEqual(seen_cursor["value"], first_id)
         for secret in ("AUTH_PIN_HASH", self.PIN, "GROQ"):
             self.assertNotIn(secret, body)

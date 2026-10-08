@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+        sqlite_autoincrement=True,
     )
     op.create_index("ix_domain_events_event_type", "domain_events", ["event_type"])
     op.create_index("ix_domain_events_module_id", "domain_events", ["module_id"])

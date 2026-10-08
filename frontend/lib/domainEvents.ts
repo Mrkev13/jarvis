@@ -84,28 +84,47 @@ export function parseReset(data: string): StreamReset | null {
   }
 }
 
-/** Nejvýš jednou: přijme jen id větší než poslední zpracované. */
-export function createEventTracker(start = 0) {
-  let last = start;
+export function parseReady(data: string): number | null {
+  try {
+    const r = JSON.parse(data) as { latest_id?: unknown };
+    return typeof r?.latest_id === "number" && Number.isSafeInteger(r.latest_id) && r.latest_id >= 0 ? r.latest_id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Nejvýš jednou: přijme jen id větší než poslední zpracované. `lastId` je null, dokud pozice není známá. */
+export function createEventTracker(start: number | null = null) {
+  let last = start ?? 0;
+  let known = start !== null;
   return {
-    get lastId() {
-      return last;
+    get lastId(): number | null {
+      return known ? last : null;
     },
     accept(id: number): boolean {
       if (!Number.isSafeInteger(id) || id <= last) return false;
       last = id;
+      known = true;
       return true;
     },
-    /** Reset streamu: další události začínají za `latestId` (starší se už nepřehrají). */
+    /** `ready`: pozice streamu (jen dopředu – nic už zpracovaného se nepřehraje znovu). */
     jumpTo(latestId: number) {
-      if (Number.isSafeInteger(latestId) && latestId > last) last = latestId;
+      if (!Number.isSafeInteger(latestId) || latestId < 0) return;
+      if (latestId > last) last = latestId;
+      known = true;
+    },
+    /** `reset`: server je autorita – i pozice nižší než dosavadní (obnovená DB), jinak by nové události zahodil. */
+    resetTo(latestId: number) {
+      if (!Number.isSafeInteger(latestId) || latestId < 0) return;
+      last = latestId;
+      known = true;
     },
   };
 }
 
 export function streamUrl(base: string, lastId: number | null): string {
   const url = `${base.replace(/\/$/, "")}/events/stream`;
-  return lastId && lastId > 0 ? `${url}?last_event_id=${lastId}` : url;
+  return lastId !== null && Number.isSafeInteger(lastId) && lastId >= 0 ? `${url}?last_event_id=${lastId}` : url;
 }
 
 /** Jedna mapovací tabulka událost → reakce Jarvise (sdílí i budoucí Desktop Jarvis, MRK-17). */
@@ -165,8 +184,13 @@ export function createDomainEventClient(opts: DomainEventClientOptions) {
   const connect = () => {
     if (stopped) return;
     timer = null;
-    const es = opts.create(streamUrl(opts.baseUrl, tracker.lastId || null));
+    const es = opts.create(streamUrl(opts.baseUrl, tracker.lastId));
     source = es;
+    es.addEventListener("ready", (msg) => {
+      attempts = 0; // spojení stojí → další výpadek začne nejkratším čekáním
+      const r = parseReady(msg.data);
+      if (r !== null) tracker.jumpTo(r);
+    });
     es.addEventListener("domain_event", (msg) => {
       attempts = 0;
       const e = parseDomainEvent(msg.data);
@@ -176,7 +200,7 @@ export function createDomainEventClient(opts: DomainEventClientOptions) {
       attempts = 0;
       const r = parseReset(msg.data);
       if (!r) return;
-      tracker.jumpTo(r.latest_id);
+      tracker.resetTo(r.latest_id);
       opts.onReset?.(r);
     });
     es.onerror = () => {

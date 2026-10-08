@@ -255,13 +255,18 @@ def set_entry(db: Session, habit_id: int, state: str, *, day: date | None = None
              if (old or {}).get(k) != new[k]}
     if delta:
         when = "dnes" if day == today else format_date_cz(day)
-        # MRK-19: fakt habits.entry.done / .skipped; Aktivita je projekce (právě jeden řádek na změnu)
-        append_domain_event(
-            db, event_type=f"habits.entry.{state}", aggregate_type="entry", aggregate_id=entry.id,
-            payload={"habit_id": h.id, "entry_id": entry.id, "date": day.isoformat(), "state": state,
-                     "previous_state": (old or {}).get("state")},
-            activity=ActivityProjection(
-                AREA, "update" if old else "check", f"{h.name}: {STATE_LABELS[state]} ({when})",
-                entity_type="habit_entry", entity_id=entry.id, delta=delta, user_context=user_context),
-        )
+        action, summary = ("update" if old else "check"), f"{h.name}: {STATE_LABELS[state]} ({when})"
+        if "state" in delta:
+            # MRK-19: fakt habits.entry.done / .skipped; Aktivita je projekce (právě jeden řádek na změnu)
+            append_domain_event(
+                db, event_type=f"habits.entry.{state}", aggregate_type="entry", aggregate_id=entry.id,
+                payload={"habit_id": h.id, "entry_id": entry.id, "date": day.isoformat(), "state": state,
+                         "previous_state": (old or {}).get("state")},
+                activity=ActivityProjection(AREA, action, summary, entity_type="habit_entry", entity_id=entry.id,
+                                            delta=delta, user_context=user_context),
+            )
+        else:
+            # jen hodnota / doba / poznámka – žádný nový fakt, jen historie
+            log_activity(db, AREA, action, summary, entity_type="habit_entry", entity_id=entry.id, delta=delta,
+                         user_context=user_context)
     return entry

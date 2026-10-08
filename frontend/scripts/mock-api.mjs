@@ -60,6 +60,8 @@ function openEventStream(req, res, url) {
   res.write("retry: 1000\n\n");
   const raw = req.headers["last-event-id"] ?? url.searchParams.get("last_event_id");
   const cursor = /^\d+$/.test(String(raw ?? "")) ? Number(raw) : null;
+  const pos = cursor ?? mockEvents.length;
+  res.write(`id: ${pos}\nevent: ready\ndata: ${JSON.stringify({ latest_id: pos })}\n\n`);
   if (cursor !== null) for (const e of mockEvents.filter((x) => x.id > cursor)) res.write(sseFrame(e));
   sseClients.add(res);
   const beat = setInterval(() => res.write(": keepalive\n\n"), 15000);

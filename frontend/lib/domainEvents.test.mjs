@@ -161,3 +161,44 @@ test("client: unavailable stream does not throw and cleanup stops reconnects", (
   timers[0].fn();
   assert.equal(created.length, 1, "po close se už nepřipojuje");
 });
+
+test("client: ready gives the position before the first event, so a reconnect loses nothing", () => {
+  const { created, create } = fakeSources();
+  const timers = [];
+  createDomainEventClient({
+    baseUrl: "http://h", create, onEvent: () => {},
+    schedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, cancel: () => {},
+  });
+  created[0].emit("ready", '{"latest_id":0}', "0");
+  created[0].readyState = CLOSED;
+  created[0].onerror?.({});
+  timers[0].fn();
+  assert.equal(created[1].url, "http://h/events/stream?last_event_id=0", "i prázdná tabulka = známá pozice 0");
+  created[1].emit("ready", '{"latest_id":40}', "40");
+  created[1].readyState = CLOSED;
+  created[1].onerror?.({});
+  assert.equal(timers[1].ms, 1000, "ready vynuluje odstup – stojící spojení");
+  timers[1].fn();
+  assert.equal(created[2].url, "http://h/events/stream?last_event_id=40");
+});
+
+test("client: reset to a lower id (restored DB) is honoured, new events are not dropped", () => {
+  const { created, create } = fakeSources();
+  const got = [];
+  createDomainEventClient({ baseUrl: "http://h", create, onEvent: (e) => got.push(e.id) });
+  created[0].emit("domain_event", JSON.stringify(ev(120)), "120");
+  created[0].emit("reset", '{"reason":"unknown_cursor","latest_id":40}', "40");
+  created[0].emit("domain_event", JSON.stringify(ev(41)), "41");
+  assert.deepEqual(got, [120, 41]);
+});
+
+test("tracker: position unknown until ready/event; resetTo may go back", () => {
+  const t = createEventTracker();
+  assert.equal(t.lastId, null);
+  t.jumpTo(0);
+  assert.equal(t.lastId, 0);
+  t.accept(9);
+  t.resetTo(3);
+  assert.equal(t.lastId, 3);
+  assert.equal(streamUrl("http://h", 0), "http://h/events/stream?last_event_id=0");
+});

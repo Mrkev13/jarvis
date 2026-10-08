@@ -41,7 +41,8 @@ after_commit hook   → static after-commit consumers get immutable snapshots (S
 | `occurred_at` | timestamptz, indexed | UTC |
 | `payload` | JSON, default `{}` | small, privacy-safe |
 
-Append-only: application code never updates rows; only retention deletes old ones.
+Append-only: application code never updates rows; only retention deletes old ones. Ids are never reused (SQLite
+`AUTOINCREMENT`, PostgreSQL sequence), so the projection key `event:<id>` cannot collide after retention.
 
 ## Naming convention
 
@@ -56,7 +57,7 @@ declaration. Pilot types:
 |---|---|---|
 | `school.assignment.completed` / `.reopened` | `school_service` | `assignment_id`, `subject_id`, `completed_at` / `previous_completed_at` |
 | `school.exam.closed` / `.reopened` | `school_service` | `exam_id`, `subject_id`, `outcome`, `result_type`, `completed_at` / `previous_outcome` |
-| `habits.entry.done` / `.skipped` | `modules/habits/service.set_entry` (only on a real change) | `habit_id`, `entry_id`, `date`, `state`, `previous_state` |
+| `habits.entry.done` / `.skipped` | `modules/habits/service.set_entry` (only when the state changes; a note/value edit is Activity history only) | `habit_id`, `entry_id`, `date`, `state`, `previous_state` |
 | `system.module.enabled` / `.disabled` | `PUT /modules/{id}` | `module_id`, `enabled`, `previous` |
 
 **Payload rules:** a JSON object of ids, states, dates and ISO times only – at most 3 levels, 2 KB. No ORM objects,
@@ -73,6 +74,10 @@ Authenticated by the normal session cookie (global auth dependency); `EventSourc
 ```
 retry: 3000
 
+id: 41
+event: ready
+data: {"latest_id":41}
+
 id: 42
 event: domain_event
 data: {"id":42,"type":"habits.entry.done","module_id":"habits","aggregate_type":"entry",
@@ -85,8 +90,12 @@ data: {"reason":"retention","latest_id":57}
 : keepalive
 ```
 
+- The first frame after `retry` is `ready` (`id` = the stream position: the client's cursor, or the newest stored id
+  when there is none; `0` for an empty table) – or a `reset` instead. The browser therefore knows its position before
+  the first event, and a reconnect in that window replays instead of starting "from now".
 - Events are emitted in ascending `id` order; `id` = `domain_events.id`.
 - `: keepalive` comment after ~15 s without output; the connection ends when the client disconnects.
+- The session is re-validated about every 15 s; after logout, revocation or expiry the open stream ends.
 - Events of **disabled modules are never streamed** (the cursor still moves past them). Optional filters:
   `?modules=school,system&types=habits.entry.done`.
 - In-flight safety: if the next stored id is not `cursor + 1` and the newer event is younger than 5 s, the stream
@@ -105,7 +114,7 @@ Position = `Last-Event-ID` header (sent automatically by `EventSource` on reconn
 | position ahead of the newest event | one `reset` (`reason: unknown_cursor`) |
 
 A `reset` carries `id` = newest stored id; the client re-fetches its state through REST and continues live from
-there. (The retention check is conservative: a rolled-back id right after a pruned range can cause an extra,
+there. The client honours a reset even to a **lower** id (e.g. a restored database), so new events are not dropped. (The retention check is conservative: a rolled-back id right after a pruned range can cause an extra,
 harmless reset.)
 
 ## Retention
@@ -134,5 +143,9 @@ completion fields, goal history or any other business table.
 - Convert further flows one by one (reminders incl. time events with a dedupe key, goals, work/finance, WoT).
 - More realtime consumers (notifications, Desktop Jarvis MRK-17, Home Assistant) via `register_after_commit`
   or the SSE stream – never a second stream.
+- Pending snapshots are cleared at the end of the root transaction (rollback or `close()`); a savepoint rollback keeps
+  them. Today's only after-commit consumer (the SSE wake-up) reads from the DB, so the snapshot contents are advisory.
+- The 5 s in-flight grace is measured from `occurred_at` (set at flush): a transaction committing more than 5 s after
+  its append with a lower id than an already streamed event would be skipped. Pilot writers commit immediately.
 - The in-process dispatcher assumes the single uvicorn worker; multiple processes would rely on the SSE DB poll
   (≤ 1 s) for cross-process delivery.

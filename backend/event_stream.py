@@ -150,12 +150,17 @@ async def stream_events(
     modules: frozenset[str] | None = None,
     types: frozenset[str] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    authorized: Callable[[], bool] | None = None,
 ) -> AsyncIterator[str]:
     yield f"retry: {RETRY_MS}\n\n"
     position, reset_reason, latest = await run_in_threadpool(initial_position, cursor)
     if reset_reason:
         yield frame("reset", {"reason": reset_reason, "latest_id": latest}, latest)
+    else:
+        # pozice je známá hned (i bez události) → reconnect před první událostí nic neztratí (Last-Event-ID)
+        yield frame("ready", {"latest_id": position}, position)
     last_output = clock()
+    last_auth_check = clock()
     seen = broadcaster.generation
     while True:
         disconnected = is_disconnected()
@@ -181,6 +186,10 @@ async def stream_events(
             await asyncio.sleep(WAKE_STEP_SECONDS)
             waited += WAKE_STEP_SECONDS
         seen = broadcaster.generation
+        if authorized is not None and clock() - last_auth_check >= HEARTBEAT_SECONDS:
+            last_auth_check = clock()
+            if not await run_in_threadpool(authorized):
+                return  # odhlášení / vypršení session ukončí i otevřený stream
         if clock() - last_output >= HEARTBEAT_SECONDS:
             yield ": keepalive\n\n"
             last_output = clock()

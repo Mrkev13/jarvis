@@ -721,6 +721,7 @@ class DomainEvent(Base):
     (`domain_events.append_domain_event`). Append-only; aplikace řádky nemění. Konečná přenosová historie
     (retence 180 dní) – trvalá historie zůstává v Aktivitě a business tabulkách (docs/domain-events.md)."""
     __tablename__ = "domain_events"
+    __table_args__ = {"sqlite_autoincrement": True}  # id se po retenci nikdy nepoužije znovu (dedupe event:<id>)
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     event_type = Column(String(100), nullable=False, index=True)
