@@ -290,8 +290,8 @@ v pražském čase (den = pražská půlnoc → půlnoc převedená do UTC), nez
 
 - Zpracují jen dokončený schema-v1 run se `status="success"`; DB dump, manifest i všechna média musí projít kontrolou velikosti a SHA-256.
 - Zdroj zůstává read-only. Self-contained TAR vzniká ve scratch adresáři a zachovává relativní layout stávajícího backupu.
-- `LocalFilesystemOffsiteTarget`: immutable run directory, žádný overwrite existujícího run ID, completion marker jako poslední krok publikace.
-- `AgeEncryptor`: externí `age`; povinné šifrování bez dostupného adapteru selže uzavřeně. Klíč/secret ani cesta identity se neukládají do metadata/statusu.
+- `LocalFilesystemOffsiteTarget`: immutable run directory, žádný overwrite existujícího run ID, kontrola přenesených bytů a completion marker jako poslední krok publikace; provider child symlinky/junctions se odmítají.
+- `AgeEncryptor`: externí `age`; povinné šifrování vyžaduje encryption i decryption capability a před publikací musí projít decrypt + úplná checksum verifikace. Klíč/secret ani cesta identity se neukládají do metadata/statusu.
 - Retention je čistá provider-independent politika: nejnovější run v 14 daily, 8 ISO-weekly a 12 monthly bucketech (Europe/Prague), sjednocení bez duplicit; nejnovější validní run zůstává vždy. Invalid/incomplete run se automaticky nemaže. Dry-run je bez změn.
 - Restore verification vždy pracuje nad staženou kopií v temp: decrypt, bezpečná TAR extrakce, DB/manifest/media checksumy. Absolutní/`..` cesty, symlink, hardlink a speciální TAR členy jsou zakázané.
 - Výsledky mají jen allowlisted kategorie pro local backup, encryption, transfer, verification a cleanup. Žádné zapojení do scheduleru, notifikací nebo `/health`; integrační kontrakt je v `docs/offsite-backups.md`.
