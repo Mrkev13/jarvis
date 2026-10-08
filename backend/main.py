@@ -1813,7 +1813,13 @@ def delete_mff_character(item_id: int):
         if item is None:
             raise HTTPException(status_code=404, detail="MffCharacter not found")
 
-        tracked_fields = ["tier", "build_completeness", "status", "priority"]
+        # Keep the final build in the existing audit when its current row is deleted.
+        tracked_fields = [
+            "name", "tier", "level", "uniform", "ctp", "artifact", "priority", "status",
+            "notes", "role", "team", "uru_state", "iso8_set", "build_completeness",
+            "roles", "team_supports", "uru_slots_total", "uru_slots_filled",
+            "odin_blessings_count", "updated_at",
+        ]
         tier_str = item.tier or "?"
         bc = int(getattr(item, "build_completeness", 0) or 0)
         log_activity(
@@ -3089,7 +3095,7 @@ def delete_finance_transaction(item_id: int):
         log_activity(
             db, "finance", "delete", f"Smazáno: {summary}",
             entity_type="FinanceTransaction", entity_id=item.id,
-            delta=delta_dict(item, None, ["amount", "category", "description", "transaction_type"]),
+            delta=delta_dict(item, None, ["amount", "category", "description", "transaction_type", "created_at"]),
             user_context="manual"
         )
 
@@ -3114,7 +3120,7 @@ def delete_work_session(item_id: int):
         log_activity(
             db, "work", "delete", f"Smazáno: {work_summary}",
             entity_type="WorkSession", entity_id=item.id,
-            delta=delta_dict(item, None, ["date", "hours", "project", "description", "hourly_rate"]),
+            delta=delta_dict(item, None, ["date", "hours", "project", "description", "hourly_rate", "finance_transaction_id", "sync_to_finance"]),
             user_context="manual"
         )
 

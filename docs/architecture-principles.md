@@ -116,6 +116,12 @@ Test domain behaviour, boundaries (DST, week/year edges), failure handling and r
 trivia. Use fake clocks (`now=` parameters or patched `utc_now`) and fake providers (`tests/fakes.py`);
 **never** call a real LLM in tests. Every bug fix comes with a regression test that fails without the fix.
 
+## 19. Completed facts remain history
+Completed or closed facts are historical facts. They must not be silently destructively overwritten.
+Deletion of completed records should be soft or otherwise preserved in history/audit where appropriate.
+Corrections and reopening are allowed, but must retain the previous fact; a current-state row alone
+is not a historical record. Bounded inventory and follow-ups: [MRK-29 audit](mrk-29-history-audit.md).
+
 ---
 
 ## Product principles (short)
