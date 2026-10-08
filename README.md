@@ -15,6 +15,9 @@ Hub vlastní data a pravidla; AI akce mají potvrzení, audit a podporované zm�
 
 Frontend běží na portu 3000 a volá backend na portu 8000. Backend vlastní přihlášení,
 business pravidla a migrace. Scheduler vyžaduje jediný backend worker.
+Moduly deklaruje backendový registry; dostupnost řeší runtime konfigurace
+v pořadí prostředí > DB > výchozí hodnota. Frontend čte stav z API, backend
+vynucuje pravidla. Podrobnosti: [module feature flags](docs/module-feature-flags.md).
 
 ## Lokální backend
 
@@ -52,11 +55,20 @@ klíče nepatří do Gitu nebo CI konfigurace.
 ```bash
 cd backend
 python -m alembic upgrade head
-python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 API dokumentace: http://127.0.0.1:8000/docs. Startup standardně také provede
 `alembic upgrade head`; schéma spravuje Alembic, ne runtime `create_all`.
+Ruční kontrola migrací z `backend/`:
+
+```bash
+python -m alembic current
+python -m alembic upgrade head
+```
+
+Rollback `python -m alembic downgrade -1` používej jen vědomě se zálohou;
+CI ověřuje upgrade/downgrade/upgrade na jednorázové PostgreSQL DB.
 
 ## Lokální frontend
 
@@ -80,6 +92,16 @@ vyžaduje nový build.
 npm run build
 npm start
 ```
+
+Backend pro produkci spusť z `backend/` bez reloadu:
+
+```bash
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+Produkční konfigurace musí výslovně mířit na produkční PostgreSQL, mít
+nastavenou autentizaci a zálohy; vývojové `.env` nepřebírej automaticky.
+Výše uvedené příkazy samy neřeší autostart/restart služby.
 
 Geist a Geist Mono jsou lokálně přibalené pod OFL v `frontend/app/fonts/`;
 produkční build nepotřebuje stahovat Google Fonts.
@@ -135,6 +157,14 @@ Chyby kroků ukončí job; pytest končí při první chybě. Nový běh stejné
 zruší zastaralý běh. CI nepoužívá repository secrets; DB heslo i SDK placeholder
 jsou pouze testovací hodnoty. Pro povinné PR checks nastav tyto tři joby také
 v GitHub branch protection/rulesetu; samotný workflow merge pravidla nevynucuje.
+Doporučené přesné názvy required checks pro `main`:
+
+- `Backend tests and pyflakes`
+- `PostgreSQL migration round-trip`
+- `Frontend lint, types, tests and build`
+
+Nastavení branch protection zde není provedeno ani ověřeno. Výsledky lokálního
+ověření a jeho omezení jsou v [CI verification](docs/mrk-22-ci-verification.md).
 
 ## Dokumentace
 

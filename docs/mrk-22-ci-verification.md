@@ -4,7 +4,7 @@ Source: MRK-22 issue text supplied in the task (Linear connector unavailable).
 Baseline: `b386e86bf1219f0a50ba649dfa3508b4090e6202`, latest origin/main at start.
 No merge into main. No production secrets or real LLM calls were used.
 
-## Local results
+## Original implementation results (historical)
 
 - Backend requirements installed into a fresh Python 3.12 environment; pinned
   dev dependencies: pytest 9.1.1, pytest-socket 0.8.1, pyflakes 4.0.3.
@@ -63,8 +63,7 @@ frontend checks need only a local API URL. **Exact real Groq request count: 0.**
 
 ## Remaining hosted verification
 
-GitHub CLI/API calls are unavailable: the injected GH_TOKEN is invalid/API requests
-are forbidden. Git transport can push the branch, but hosted workflow runs and PR
+GitHub CLI/API calls were unavailable: API requests were forbidden. Git transport can push the branch, but hosted workflow runs and PR
 creation cannot be verified from this session. After push, inspect the three jobs
 on GitHub: Backend tests and pyflakes; PostgreSQL migration round-trip; Frontend
 lint, types, tests and build. Configure them as required checks in repository branch
@@ -75,3 +74,45 @@ pip downloads based on both requirements files and npm downloads based on the
 frontend lockfile. Third-party registries/actions/image downloads still require
 ordinary GitHub runner network access. Existing backend transitive dependencies
 are resolved by pip; the direct requirements and dev tools are pinned.
+
+## Refresh against current main — 2026-10-08
+
+Baseline: `56427fb` (existing MRK-22 implementation is already merged). Continue
+that workflow rather than add another workflow or duplicate its jobs. Dedicated
+branch: `mrk-22-ci-refresh`; changes are documentation only.
+
+Current-source verification:
+
+- `python -m pip install -r backend/requirements-dev.txt` and `pip check`: passed.
+- `python -m pyflakes backend/*.py backend/scripts/*.py`: passed.
+- Backend CI-equivalent command with the workflow's dummy environment:
+  **797 passed, 8 skipped, 382 subtests passed**. No new skip/xfail, production
+  behavior change or date-sensitive failure. Existing deprecation warnings remain.
+- Disposable PostgreSQL **16**, bound only to local port 55432: upgrade head,
+  downgrade one revision, upgrade head passed; final revision
+  **0016_module_settings**. PostgreSQL schema test: **1 passed**. No SQLite
+  substitution, production database, credential or data was involved.
+- Fresh `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm test`: passed;
+  **307 frontend tests passed**. Default `npm run build` passed directly in this
+  cloud environment (Next.js 16.3.4 / Turbopack; 21 route entries). Bundled local
+  Geist fonts already remove Google Fonts fetches. No build weakening or fallback
+  compiler was needed.
+- actionlint **1.7.7**, YAML structure/PostgreSQL configuration checks,
+  and `git diff --check`: passed.
+- An uncommitted temporary broken test using CI pytest options returned **exit 1**;
+  a temporary socket probe passed by confirming TCP creation is blocked. These
+  are local probes, not a deliberately broken hosted PR run.
+
+The workflow runs on all pushes (including main) and pull requests. It retains
+pip/npm download caches, read-only repository permissions, job timeouts and
+cancellation of superseded runs. Tests use fake providers/transports, dummy
+client initialization and the dead loopback URL; dependency/action downloads and
+PostgreSQL test traffic are the only required external/service networking.
+**Real Groq request count: 0.**
+
+README now distinguishes development reload from single-worker production start,
+links runtime module availability/configuration, documents migration commands,
+and lists exact required checks. No branch protection or repository secrets were
+changed. GitHub API is forbidden in this session and Linear is unavailable;
+hosted CI status, PR creation and issue state must be reported separately from
+these completed local checks.
