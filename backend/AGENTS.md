@@ -820,9 +820,11 @@ print(_hash_pin("123456"))
   - `env_config.py` – `env_bool/env_int/env_str` (ořez; prázdné = default; 1/true/yes/on). Žádné vlastní
     parsování `os.environ`. Patří sem i `WEEKLY_REVIEW_ENABLED` / `DAILY_BRIEFING_ENABLED` (scheduler i služby
     používají stejná pravidla).
-  - `module_registry.py` (Roadmap 6C) – feature flagy modulů `MODULE_<ID>_ENABLED` (přísné: nesmysl = výchozí,
-    `env_config.parse_flag`) a `current_access().allows(modul, schopnost)`; brány v search/Dnes/Quick Add/AI
-    kontextu/dashboardu a 404 pro REST vypnutého modulu (až po auth). Zrcadlo `frontend/lib/modules.ts`.
+  - `module_registry.py` (Roadmap 6C + MRK-18 A2) – zapnutí modulů jediným resolverem `resolve_states`:
+    prostředí `MODULE_<ID>_ENABLED` (platná hodnota = vynuceno, zamčeno) > uložená volba `module_settings`
+    (Nastavení, `PUT /modules/{id}`, 409 při vynucení) > výchozí manifest; nesmysl v env = ignorován.
+    `current_access().allows(modul, schopnost)`; brány v search/Dnes/Quick Add/AI kontextu/dashboardu a 404 pro
+    REST vypnutého modulu (až po auth). Frontend stav čte za běhu z GET /modules. Zrcadlo `frontend/lib/modules.ts`.
     Podrobnosti: `docs/module-feature-flags.md`.
   - `time_utils.py` – UTC úložiště, Europe/Prague pro „dnes" a plány; nikdy `date.today()`.
   - `text_utils.py` – `clip()` a české názvy dnů.

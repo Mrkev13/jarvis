@@ -218,6 +218,14 @@ class ModuleSettingsApiTestCase(unittest.TestCase):
         self.assertEqual(self.client.put("/modules/wot", json={"enabled": "yes please"}).status_code, 422)
         self.assertEqual(self.client.put("/modules/wot", json={}).status_code, 422)
 
+    def test_every_toggle_is_audited(self):
+        for enabled in (False, True, False, True):
+            self.assertEqual(self.client.put("/modules/wot", json={"enabled": enabled}).status_code, 200)
+        self.client.put("/modules/wot", json={"enabled": True})  # beze změny → žádný záznam
+        with self.Session() as db:
+            actions = [a.action_type for a in db.query(ActivityLog).filter_by(area="system").order_by(ActivityLog.id)]
+        self.assertEqual(actions, ["module.disabled", "module.enabled", "module.disabled", "module.enabled"])
+
     def test_reset_to_default_with_null(self):
         self.client.put("/modules/mff", json={"enabled": False})
         r = self.client.put("/modules/mff", json={"enabled": None})

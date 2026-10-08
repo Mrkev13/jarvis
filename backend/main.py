@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -2742,6 +2743,8 @@ def modules_put(module_id: str, request: ModuleSettingRequest):
                 f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
                 entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}},
                 user_context="manual",
+                # každá změna je samostatný fakt (výchozí klíč podle shrnutí by druhé vypnutí téhož modulu zahodil)
+                dedupe_key=f"module:{module_id}:{'on' if effective else 'off'}:{uuid.uuid4().hex}",
             )
         db.commit()
     except Exception:
