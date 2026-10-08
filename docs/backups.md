@@ -51,6 +51,10 @@ Soubory odstraněné ze živého `MEDIA_DIR` se z archivu automaticky nemažou. 
 
 Run metadata i manifest používají relativní cesty vůči `BACKUP_DIR`, takže lze celý záložní strom přenést na jiný stroj.
 
+## Off-machine kopie
+
+Provider-independent balení dokončeného běhu, filesystem target, volitelné fail-closed šifrování, GFS retention a scratch-only restore verification popisuje [offsite-backups.md](offsite-backups.md). Tato vrstva čte zdrojový backup strom pouze read-only a publikuje self-contained kopii; není automaticky zapojena do scheduleru, notifikací ani `/health`.
+
 ## Kapacita
 
 Každý unikátní obsah se archivuje jednou pro danou relativní cestu. Denní režie jsou jen komprimovaný DB dump a malé JSON soubory; nevzniká denní kopie všech replayů. Praktický odhad vypočíte jako `počet replayů × průměrná velikost replaye` plus screenshoty, změněné verze a 30 dní DB dumpů.

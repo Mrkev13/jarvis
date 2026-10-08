@@ -286,6 +286,16 @@ v pražském čase (den = pražská půlnoc → půlnoc převedená do UTC), nez
 - `POST /backup/run-now` – manuálně spusť zálohu.
 - `GET /backup/list?limit=20` – seznam BackupLog, poslední N záznamů.
 
+### 7.5 Off-machine kopie (`offsite_backup.py`)
+
+- Zpracují jen dokončený schema-v1 run se `status="success"`; DB dump, manifest i všechna média musí projít kontrolou velikosti a SHA-256.
+- Zdroj zůstává read-only. Self-contained TAR vzniká ve scratch adresáři a zachovává relativní layout stávajícího backupu.
+- `LocalFilesystemOffsiteTarget`: zapisuje a fsyncuje do unikátní `.staging-*` složky, completion marker zapíše poslední a teprve pak rename na immutable run ID; crash před rename neblokuje retry. Staré staging složky lze bezpečně prořezat přes dry-run `cleanup_abandoned_staging`. Žádný overwrite existujícího run ID; provider child symlinky/junctions se odmítají.
+- `AgeEncryptor`: externí `age`; povinné šifrování vyžaduje encryption i decryption capability a před publikací musí projít decrypt + úplná checksum verifikace. Klíč/secret ani cesta identity se neukládají do metadata/statusu.
+- Retention je provider-independent politika: nejnovější run v 14 daily, 8 ISO-weekly a 12 monthly bucketech (Europe/Prague), sjednocení bez duplicit; nejnovější validní run zůstává vždy. `cleanup_retention` je pouze dry-run. Reálně maže jen uzavřená operace `apply_verified_retention`: stáhne a ověří kandidáty, naplánuje, znovu ověří všechny `keep` runy a až potom maže. Invalid/incomplete/corrupt run se automaticky nemaže.
+- Restore verification vždy pracuje nad staženou kopií v temp: decrypt, bezpečná TAR extrakce, DB/manifest/media checksumy. Absolutní/`..` cesty, symlink, hardlink a speciální TAR členy jsou zakázané.
+- Výsledky mají jen allowlisted kategorie pro local backup, encryption, transfer, verification a cleanup. Žádné zapojení do scheduleru, notifikací nebo `/health`; integrační kontrakt je v `docs/offsite-backups.md`.
+
 ---
 
 ## 8. Auth/PIN systém – 2-vrstvá ochrana
