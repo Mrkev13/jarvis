@@ -24,6 +24,7 @@ Use these; never re-declare their content locally.
 | Grounding checks (numbers, dates, names) | `backend/planner_guard.py` |
 | Audit trail | `backend/activity_service.log_activity` |
 | Module availability (env override > `module_settings` DB > manifest default; env-forced = locked) | `backend/module_registry.py` (`resolve_states`, `current_access()`); frontend runtime: `frontend/hooks/useModules.ts` (`GET /modules`) – see [module-feature-flags.md](module-feature-flags.md) |
+| Module integrations (search, Today, dashboard, AI context, Quick Add, hourly steps) | `ModuleDef.integrations` from `backend/<module>_integrations.py`; frontend nav/search registries from `MODULE_UI` in `frontend/lib/modules.ts` – see [module-framework.md](module-framework.md) |
 | Notification → external delivery | `backend/delivery_service.py` (`deliverable_types`) |
 | Frontend API access | `frontend/lib/api.ts` (`apiFetch`) |
 | Motion tokens and reduced motion | `frontend/app/motion.css` + `frontend/lib/motion.ts` |

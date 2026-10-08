@@ -50,6 +50,51 @@ export const MODULES: ModuleDef[] = [
   planned("entertainment", "Zábava"),
 ];
 
+// ---------- frontendový manifest modulu (MRK-20) ----------
+
+/**
+ * Co modul dává sdíleným registrům frontendu: položku navigace (sidebar, mobilní menu i Ctrl+K), parametry
+ * odkazů z vyhledávání (`/school?exam=12` → zvýraznění řádku) a pořadí skupiny v Ctrl+K. Jádro (Řídicí centrum,
+ * Dnes, Připomínky, Paměť…) má své položky v navigation.ts / search.ts. Klíč = `ModuleDef.id`.
+ */
+export interface ModuleUi {
+  nav?: { href: string; label: string; keywords: string[]; order: number };
+  searchParams?: string[];
+  searchGroupOrder?: number;
+}
+
+export const MODULE_UI: Record<string, ModuleUi> = {
+  goals: {
+    nav: { href: "/goals", label: "Cíle", keywords: ["goals", "goal", "cíl", "progres"], order: 10 },
+    searchParams: ["goal"], searchGroupOrder: 50,
+  },
+  school: {
+    nav: { href: "/school", label: "Škola", keywords: ["school", "úkol", "úkoly", "zkouška", "zkoušky", "předmět", "předměty", "termín", "termíny"], order: 20 },
+    searchParams: ["subject", "assignment", "exam"], searchGroupOrder: 10,
+  },
+  work: {
+    nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },
+    searchParams: ["session"], searchGroupOrder: 30,
+  },
+  finance: {
+    nav: { href: "/finance", label: "Finance", keywords: ["peníze", "transakce", "výdaj", "výdaje", "příjem", "příjmy", "bilance"], order: 40 },
+    searchParams: ["transaction"], searchGroupOrder: 40,
+  },
+  wot: {
+    nav: { href: "/wot", label: "World of Tanks", keywords: ["wot", "tanky", "grind", "tank"], order: 50 },
+    searchParams: ["grind", "replay"], searchGroupOrder: 70,
+  },
+  mff: {
+    nav: { href: "/mff", label: "Marvel Future Fight", keywords: ["mff", "marvel", "future fight", "postava", "postavy"], order: 60 },
+    searchParams: ["character"], searchGroupOrder: 80,
+  },
+};
+
+/** Modul, kterému patří druh Rychlého přidání (null = jádro, např. připomínka). */
+export function quickAddOwner(kind: string, modules: ModuleDef[] = MODULES): ModuleDef | null {
+  return modules.find((m) => m.quickAddKinds.includes(kind)) ?? null;
+}
+
 export type ModuleFlags = Record<string, boolean>;
 
 /**

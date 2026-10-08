@@ -1,8 +1,21 @@
 """Sdílené drobnosti pro text zobrazovaný uživateli (Roadmap 3.5) – bez závislostí na DB i LLM."""
 from __future__ import annotations
 
+import unicodedata
+
 WEEKDAYS_CZ = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
 WEEKDAYS_CZ_SHORT = ("po", "út", "st", "čt", "pá", "so", "ne")
+
+
+def fold_text(text) -> str:
+    """Lowercase bez diakritiky – deterministické porovnávání českých slov (sdílí AI kontext, připomínky, undo)."""
+    nfkd = unicodedata.normalize("NFKD", (text or "").lower())
+    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+
+
+def join_parts(*parts, sep: str = " · ") -> str:
+    """Neprázdné části spojené „ · " (podtitulky vyhledávání, Dnes…)."""
+    return sep.join(p for p in parts if p)
 
 
 def clip(text, limit: int = 70) -> str:

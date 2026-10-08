@@ -10,7 +10,7 @@
  * navrženou hodnotu („Je to 820 Kč?" → „Ano"). Enter v poli jen znovu rozebere text, nikdy neukládá.
  */
 
-import type { ModuleAccess } from "./modules.ts";
+import { MODULE_UI, quickAddOwner, type ModuleAccess } from "./modules.ts";
 
 export type QuickAddKind = "reminder" | "finance" | "work" | "exam" | "assignment";
 export type ParsedKind = QuickAddKind | "unknown" | "empty";
@@ -61,21 +61,20 @@ export const KIND_LABELS: Record<QuickAddKind, string> = {
   assignment: "Úkol",
 };
 
-export const KIND_AREAS: Record<QuickAddKind, string> = {
-  reminder: "reminders",
-  finance: "finance",
-  work: "work",
-  exam: "school",
-  assignment: "school",
+/** Druhy jádra (bez modulu): oblast a stránka. Druhy modulů se odvodí z manifestu (MRK-20). */
+const CORE_KINDS: Record<string, { area: string; href: string }> = {
+  reminder: { area: "reminders", href: "/reminders" },
 };
 
-export const KIND_HREFS: Record<QuickAddKind, string> = {
-  reminder: "/reminders",
-  finance: "/finance",
-  work: "/work",
-  exam: "/school",
-  assignment: "/school",
-};
+function kindMeta(kind: QuickAddKind): { area: string; href: string } {
+  const owner = quickAddOwner(kind);
+  if (!owner) return CORE_KINDS[kind];
+  return { area: owner.id, href: MODULE_UI[owner.id]?.nav?.href ?? owner.routes[0] };
+}
+
+export const KIND_AREAS = Object.fromEntries(QUICK_ADD_KINDS.map((k) => [k, kindMeta(k).area])) as Record<QuickAddKind, string>;
+
+export const KIND_HREFS = Object.fromEntries(QUICK_ADD_KINDS.map((k) => [k, kindMeta(k).href])) as Record<QuickAddKind, string>;
 
 /** Jistota rozpoznání slovy – nikdy ne číselné skóre. */
 export const CONFIDENCE_META: Record<Confidence, { label: string; tone: "success" | "warning" | "danger" }> = {

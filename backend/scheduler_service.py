@@ -4,8 +4,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from database import SessionLocal
 from notifications_service import create_all_overdue_and_upcoming_notifications
-from goal_history_service import ensure_goal_progress_snapshot_for_all_active_automatic_goals
 from env_config import env_bool, env_int
+from module_registry import current_access
 
 _scheduler: BackgroundScheduler | None = None
 SCHEDULER_ENABLED = env_bool("SCHEDULER_ENABLED", False)
@@ -31,9 +31,17 @@ def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job started at {datetime.utcnow().isoformat()}")
     db = SessionLocal()
     try:
-        snapshots = ensure_goal_progress_snapshot_for_all_active_automatic_goals(db)
-        print(f"[scheduler] goal snapshots: {snapshots}")
-        db.commit()
+        # MRK-20: kroky, které patří modulům (např. snímky automatických cílů), z `ModuleIntegrations.hourly`
+        # dostupných modulů – stav modulů jednou za běh. Chyba jednoho kroku neblokuje ostatní ani notifikace.
+        for owner, step in current_access().contributions("hourly"):
+            try:
+                result = step.run(db)
+                print(f"[scheduler] {step.name}: {result}")
+                db.commit()
+            except Exception as _serr:  # noqa: BLE001 - modulový krok nesmí shodit hodinový job
+                db.rollback()
+                print(f"[scheduler] {step.name} ({owner}) failed: {type(_serr).__name__}: {_serr}")
+        # Infrastruktura (notifikace, zálohy) zůstává globální.
         try:
             notif_count = create_all_overdue_and_upcoming_notifications(db)
             print(f"[scheduler] notifications created: {notif_count}")

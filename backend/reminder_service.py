@@ -29,10 +29,9 @@ from sqlalchemy.orm import Session
 
 from activity_service import log_activity
 from statuses import REMINDER_ACTIVE_STATUSES
-from context_service import fold_text
 from models import Notification, Reminder
 from time_utils import local_to_utc, to_local, utc_now
-from text_utils import WEEKDAYS_CZ_SHORT
+from text_utils import WEEKDAYS_CZ_SHORT, fold_text
 
 STATUS_SCHEDULED, STATUS_FIRED, STATUS_DONE, STATUS_CANCELLED = "scheduled", "fired", "done", "cancelled"
 ACTIVE_STATUSES = REMINDER_ACTIVE_STATUSES  # (STATUS_SCHEDULED, STATUS_FIRED), statuses.py

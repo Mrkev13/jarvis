@@ -120,26 +120,16 @@ default to enabled, all eight future modules default to disabled and have no cap
 
 ## How to register a new module
 
-1. **Registry (both sides, one line each):**
-   - `backend/module_registry.py`: replace `_planned("food", "Jídlo")` with a full `ModuleDef(...)` –
-     `implemented=True`, `default_enabled` (usually `False` until ready), `capabilities`, `entity_types`
-     (search result types / ref prefixes), `context_areas`, `api_prefixes`, `quick_add_kinds`.
-   - `frontend/lib/modules.ts`: the same entry on one line (`routes` instead of `api_prefixes`).
-   - Brand-new id (not in the list yet): also add the commented `MODULE_<ID>_ENABLED` line to
-     `backend/.env.template`. The frontend needs nothing else – state arrives at runtime via `GET /modules`.
-2. **Navigation / search page:** add the page to `NAV_PAGES` with `module: "<id>"`.
-3. **Search records:** add the source to `search_service._candidates()` with a type listed in `entity_types` –
-   filtering is automatic.
-4. **Dashboard widget:** `WIDGETS` entry with `modules: ["<id>"]`; the `/dashboard` section guarded by
-   `shows("<id>")` in `main.dashboard_get`.
-5. **Today:** items with ref `"<entity_type>:<id>"` – gating is automatic.
-6. **Quick Add:** kind in `quick_add_kinds` (backend + frontend); parser per the integration checklist.
-7. **AI:** context area in `context_areas`; tools with that area in `tool_registry` – gating is automatic.
-8. **Routes:** page under `frontend/app/<route>/`, REST under the declared prefix – both gated automatically.
-9. **Tests:** `test_module_registry.py` parity passes; add the module to the browser check if it has a page.
+Since MRK-20 a module registers **once**: its `ModuleDef` (backend) / `MODULES` + `MODULE_UI` (frontend) entry and
+its providers in `backend/<id>_integrations.py`. Search, Today, `GET /dashboard`, AI context, Quick Add, the hourly
+job, navigation and Ctrl+K pick it up and gate it automatically. Step-by-step:
+[module-integration-checklist.md](module-integration-checklist.md). Contracts, the list of what stays global and the
+remaining legacy places: [module-framework.md](module-framework.md).
 
-Nothing else should need an `if (FOOD_ENABLED)` check. If a component needs one, ask
-`useModuleAccess().access.allows(id, cap)` (frontend) or `current_access().allows(id, cap)` (backend).
+- Brand-new id (not in the list yet): also add the commented `MODULE_<ID>_ENABLED` line to `backend/.env.template`.
+  The frontend needs nothing else – state arrives at runtime via `GET /modules`.
+- Nothing should need an `if (FOOD_ENABLED)` check. If a component needs one, ask
+  `useModuleAccess().access.allows(id, cap)` (frontend) or `current_access().allows(id, cap)` (backend).
 
 ## Future: user-level preferences (not implemented)
 

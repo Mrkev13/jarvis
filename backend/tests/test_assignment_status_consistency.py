@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import briefing_snapshot  # noqa: E402
-import context_service  # noqa: E402
+import school_integrations  # noqa: E402
 import main  # noqa: E402
 import mutation_service  # noqa: E402
 import notifications_service as ns  # noqa: E402
@@ -52,7 +52,7 @@ class AssignmentStatusConsistencyTestCase(unittest.TestCase):
 
     def test_single_canonical_definition(self):
         self.assertIs(briefing_snapshot._DONE, ASSIGNMENT_DONE_STATUSES)
-        self.assertIs(context_service._DONE_STATUSES, ASSIGNMENT_DONE_STATUSES)
+        self.assertIs(school_integrations.ASSIGNMENT_DONE_STATUSES, ASSIGNMENT_DONE_STATUSES)  # AI kontext (MRK-20)
         self.assertIs(mutation_service._ASSIGNMENT_DONE, ASSIGNMENT_DONE_STATUSES)
 
     def test_planner_skips_every_done_spelling_but_keeps_open(self):

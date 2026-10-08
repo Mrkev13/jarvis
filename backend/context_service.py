@@ -3,43 +3,44 @@
 Před LLM voláním sestaví kompaktní CURRENT STATE (živá data modulů) + RELEVANT MEMORY, aby častý dotaz
 („co mám zítra", „co mám dělat tento týden", „jak jsem na tom") nepotřeboval 4–6 sekvenčních read-tool
 kol. Výběr oblastí je deterministický (klíčová slova), bez LLM volání. Velikost hlídá rozpočet tokenů.
+
+MRK-20: klíčová slova oblastí, sekce CURRENT STATE, pokryté tooly a názvy záznamů dodávají moduly
+(`ModuleIntegrations.context`); tady zůstává globální politika – implikované oblasti (plán, přehled),
+pořadí a ořez podle rozpočtu, paměť, gating dostupností modulů a izolace chyb.
 """
 from __future__ import annotations
 
+import logging
 import re
-import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from goal_history_service import compute_goal_progress_and_value
+from context_format import short
 from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
-from models import Assignment, Exam, FinanceTransaction, Goal, Memory, Notification, WorkSession, WotGrind, WotResource
-from module_registry import ModuleAccess, current_access
-from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
-from time_utils import local_month_bounds_utc, now_local
-from text_utils import WEEKDAYS_CZ_SHORT, clip
+from models import Memory
+from module_contracts import ContextRequest
+from module_registry import MODULES, ModuleAccess, all_contributions, current_access
+from statuses import REMINDER_ACTIVE_STATUSES
+from time_utils import now_local
+from text_utils import WEEKDAYS_CZ_SHORT, fold_text
+
+log = logging.getLogger(__name__)
 
 CONTEXT_TARGET_TOKENS = DEFAULT_CONTEXT_TARGET_TOKENS
 CONTEXT_MAX_TOKENS = DEFAULT_MAX_CONTEXT_TOKENS
-WINDOW_DAYS = 7
-MAX_ITEMS = 3
 MAX_MEMORIES = 3
 MEMORY_CHARS = 140
 
+# Oblasti, na které se odkazují globální pravidla níže (implikované oblasti, ořez). Data a klíčová slova oblastí
+# dodávají moduly (MRK-20: `ModuleIntegrations.context` v <modul>_integrations.py, jádro v core_integrations.py).
 AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS = "school", "goals", "notifications"
 AREA_FINANCE, AREA_WORK, AREA_WOT, AREA_MEMORY = "finance", "work", "wot", "memory"
-# MFF nemá CURRENT STATE sekci; oblast slouží routingu toolů (A5) a řazení paměti.
 AREA_MFF = "mff"
-# Phase D: připomínky (časové dotazy je zahrnují stejně jako školu a cíle).
 AREA_REMINDERS = "reminders"
 
-_DONE_STATUSES = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
-_EXAM_OPEN_STATUSES = EXAM_OPEN_STATUSES
-_INACTIVE_GOAL_STATUSES = GOAL_INACTIVE_STATUSES
-_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 _WEEKDAYS = WEEKDAYS_CZ_SHORT
 
 # Klíčová slova (bez diakritiky, podřetězce) → oblasti.
@@ -49,29 +50,13 @@ _TIME_PLAN_WORDS = ("zitra", "dnes", "dneska", "tyden", "tydnu", "vikend", "pond
 # by si je model vždy dočítal extra tool kolem.
 _PLAN_INTENT_WORDS = ("delat", "plan", "priorit", "agenda", "program", "zamer", "soustred")
 _OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", " stav", "jak se mi dari", "co je noveho")
-_AREA_WORDS = {
-    AREA_SCHOOL: ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test"),
-    AREA_FINANCE: ("penez", "penize", "financ", "vydaj", "prijem", "prijm", "utrat", "bilanc", "uspor", "setr",
-                   "rozpoc", " kc", "korun", "money", "zustatek"),
-    AREA_WORK: ("prac", "odprac", "hodin", "smen", "vydelek", "vydelal", "sazb"),
-    AREA_WOT: ("wot", "tank", "kredit", "gold", "grind", "free xp", "bond"),
-    AREA_MFF: ("mff", "marvel", "future fight", "uniform", " ctp", " uru", "iso-8", "iso8"),
-    AREA_REMINDERS: ("pripom", "upomin", "reminder"),
-    AREA_GOALS: ("cil", "cile", "goal", "progres"),
-    AREA_NOTIFICATIONS: ("upozorn", "notifikac", "notifik"),
-}
-_AREA_SECTIONS_ORDER = (AREA_SCHOOL, AREA_REMINDERS, AREA_NOTIFICATIONS, AREA_GOALS, AREA_WORK, AREA_FINANCE,
-                        AREA_WOT)
+# Statické tabulky ze VŠECH registrovaných oblastí (routing toolů běží i bez DB a stavu modulů; vypnutý modul
+# zablokuje sekci i tooly později – `access.contributions` a tool_router).
+_AREA_WORDS: dict[str, tuple[str, ...]] = {sec.area: sec.keywords for _owner, sec in all_contributions("context")}
 # Read tooly, jejichž informaci daná sekce pokrývá (planner pravidla, metriky).
-_COVERED_TOOLS = {
-    AREA_SCHOOL: ("get_school_assignments", "get_school_exams"),
-    AREA_GOALS: ("get_goals", "get_goals_summary"),
-    AREA_NOTIFICATIONS: ("get_notification_summary",),
-    AREA_WORK: ("get_work_summary",),
-    AREA_FINANCE: ("get_finance_summary",),
-    AREA_WOT: ("get_wot_resources", "get_wot_grinds"),
+_COVERED_TOOLS: dict[str, tuple[str, ...]] = {
+    **{sec.area: sec.covered_tools for _owner, sec in all_contributions("context") if sec.covered_tools},
     AREA_MEMORY: ("get_memories",),
-    AREA_REMINDERS: ("get_reminders",),
 }
 _STOPWORDS = {"jsem", "mam", "mas", "jak", "kdy", "kde", "jaky", "jaka", "jake", "pro", "ktery", "ktera", "ten", "tento",
               "tohle", "neco", "nebo", "ale", "aby", "byl", "bude", "chci", "muj", "moje", "tom", "the", "and"}
@@ -95,18 +80,12 @@ def _split_memory(text: str) -> str:
 
 
 def _fold(text: str) -> str:
-    """Lowercase bez diakritiky – deterministické porovnávání českých slov."""
-    nfkd = unicodedata.normalize("NFKD", (text or "").lower())
-    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+    """Lowercase bez diakritiky – deterministické porovnávání českých slov (text_utils.fold_text)."""
+    return fold_text(text)
 
 
 def _has(text: str, words) -> bool:
     return any(w in text for w in words)
-
-
-def fold_text(text: str) -> str:
-    """Veřejný alias _fold pro sdílené deterministické klasifikátory (tool_router)."""
-    return _fold(text)
 
 
 def is_planner_like(message: str) -> bool:
@@ -116,17 +95,25 @@ def is_planner_like(message: str) -> bool:
     return _has(folded, _TIME_PLAN_WORDS) or _has(folded, _OVERVIEW_WORDS)
 
 
-def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bool = True) -> frozenset[str]:
-    """Oblasti dotazu. implied=False vrátí jen explicitně zmíněné oblasti (pro pořadí při ořezu)."""
+def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bool = True,
+                   hints: dict[str, list[str]] | None = None,
+                   words: dict[str, tuple[str, ...]] | None = None) -> frozenset[str]:
+    """Oblasti dotazu. implied=False vrátí jen explicitně zmíněné oblasti (pro pořadí při ořezu).
+
+    `hints` = názvy záznamů podle oblasti (`ContextSection.name_hints`); `project_names` / `tank_names` jsou
+    starší zkratky pro hints["work"] / hints["wot"].
+    """
     t = f" {_fold(message)} "
     areas: set[str] = set()
-    for area, words in _AREA_WORDS.items():
-        if _has(t, words):
+    for area, area_words in (_AREA_WORDS if words is None else words).items():
+        if _has(t, area_words):
             areas.add(area)
-    if _has(t, [_fold(p) for p in project_names if p and len(p) >= 3]):
-        areas.add(AREA_WORK)
-    if _has(t, [_fold(n) for n in tank_names if n and len(n) >= 3]):
-        areas.add(AREA_WOT)
+    named = {area: list(names) for area, names in (hints or {}).items()}
+    named.setdefault(AREA_WORK, []).extend(project_names)
+    named.setdefault(AREA_WOT, []).extend(tank_names)
+    for area, names in named.items():
+        if _has(t, [_fold(n) for n in names if n and len(n) >= 3]):
+            areas.add(area)
     if not implied:
         return frozenset(areas)
     if _has(t, _TIME_PLAN_WORDS):
@@ -140,135 +127,6 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     if AREA_FINANCE in areas:
         areas.add(AREA_GOALS)
     return frozenset(areas)
-
-
-def _fmt_num(value: float) -> str:
-    if float(value).is_integer():
-        return f"{int(value):,}".replace(",", " ")
-    return f"{value:,.1f}".replace(",", " ").replace(".", ",")
-
-
-def _short(text: str, limit: int = 60) -> str:
-    return clip(text, limit)
-
-
-def _list_or_none(items: list[str], total: int) -> str:
-    if not items:
-        return "žádné"
-    more = f" (+{total - len(items)} další)" if total > len(items) else ""
-    return "; ".join(items) + more
-
-
-def _school_lines(db: Session, today: date) -> list[str]:
-    window_end = today + timedelta(days=WINDOW_DAYS)
-    open_assignments = [
-        a for a in db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
-        if (a.status or "").strip().lower() not in _DONE_STATUSES
-    ]
-    overdue = sorted((a for a in open_assignments if a.due_date < today), key=lambda a: a.due_date)
-    upcoming = sorted((a for a in open_assignments if today <= a.due_date <= window_end), key=lambda a: a.due_date)
-    exams = sorted(
-        (e for e in db.query(Exam).filter(Exam.exam_date.is_not(None)).all()
-         if today <= e.exam_date <= window_end and (e.status or "").strip().lower() in _EXAM_OPEN_STATUSES),
-        key=lambda e: e.exam_date,
-    )
-
-    def fmt(title: str, subject, d: date) -> str:
-        subj = f", {_short(subject.name, 25)}" if subject is not None else ""
-        return f"{_short(title, 50)}{subj}, {d.isoformat()}"
-
-    return [
-        f"Škola po termínu: {_list_or_none([fmt(a.title, a.subject, a.due_date) for a in overdue[:MAX_ITEMS]], len(overdue))}",
-        f"Úkoly do {window_end.isoformat()}: {_list_or_none([fmt(a.title, a.subject, a.due_date) for a in upcoming[:MAX_ITEMS]], len(upcoming))}",
-        f"Zkoušky do {window_end.isoformat()}: {_list_or_none([fmt(e.title, e.subject, e.exam_date) for e in exams[:MAX_ITEMS]], len(exams))}",
-    ]
-
-
-def _notification_lines(db: Session) -> list[str]:
-    rows = (
-        db.query(Notification)
-        .filter(Notification.read.is_(False), Notification.resolved.is_(False), Notification.severity == "important")
-        .order_by(Notification.created_at.desc())
-        .all()
-    )
-    return [f"Důležitá nepřečtená upozornění: {_list_or_none([_short(n.title, 60) for n in rows[:MAX_ITEMS]], len(rows))}"]
-
-
-def _goal_lines(db: Session, today: date) -> list[str]:
-    goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in _INACTIVE_GOAL_STATUSES]
-    goals.sort(key=lambda g: (_PRIORITY_RANK.get((g.priority or "").lower(), 3), g.target_date or date.max))
-    items = []
-    for g in goals[:MAX_ITEMS]:
-        progress, current = compute_goal_progress_and_value(db, g, today=today)
-        value = ""
-        if current is not None and g.target_value:
-            value = f" ({_fmt_num(current)} / {_fmt_num(float(g.target_value))})"
-        deadline = f", do {g.target_date.isoformat()}" if g.target_date else ""
-        items.append(f"\"{_short(g.title, 50)}\" {progress} %{value}{deadline}")
-    return [f"Aktivní cíle: {_list_or_none(items, len(goals))}"]
-
-
-def _work_lines(db: Session, today: date) -> list[str]:
-    month_start = today.replace(day=1)
-    sessions = db.query(WorkSession).filter(WorkSession.date >= month_start, WorkSession.date <= today).all()
-    hours = sum(float(s.hours or 0) for s in sessions)
-    earnings = sum(float(s.hours or 0) * float(s.hourly_rate or 0) for s in sessions)
-    last = db.query(WorkSession).order_by(WorkSession.date.desc(), WorkSession.id.desc()).first()
-    last_txt = (
-        f"; poslední záznam {last.date.isoformat()} {_short(last.project or '-', 30)} {_fmt_num(float(last.hours or 0))} h"
-        if last else "; žádné záznamy"
-    )
-    return [f"Práce tento měsíc: {_fmt_num(hours)} h, {_fmt_num(earnings)} Kč{last_txt}"]
-
-
-def _finance_lines(db: Session, today: date) -> list[str]:
-    start_utc, end_utc = local_month_bounds_utc(today)
-    income = expenses = total_income = total_expenses = 0.0
-    for t in db.query(FinanceTransaction).all():
-        amount = float(t.amount or 0)
-        is_income = (t.transaction_type or "").lower() == "income"
-        in_month = t.created_at is not None and start_utc <= t.created_at < end_utc
-        if is_income:
-            total_income += amount
-            income += amount if in_month else 0
-        else:
-            total_expenses += amount
-            expenses += amount if in_month else 0
-    return [
-        f"Finance tento měsíc: příjmy {_fmt_num(income)} Kč, výdaje {_fmt_num(expenses)} Kč; "
-        f"celková bilance {_fmt_num(total_income - total_expenses)} Kč"
-    ]
-
-
-def _reminder_lines(db: Session, local_now: datetime) -> list[str]:
-    """Aktivní připomínky: zazněné + nejbližší do 48 h (pražský čas)."""
-    from models import Reminder
-    from time_utils import to_local
-
-    now_utc = local_now.astimezone(timezone.utc).replace(tzinfo=None)
-    horizon = now_utc + timedelta(hours=48)
-    rows = db.query(Reminder).filter(Reminder.status.in_(REMINDER_ACTIVE_STATUSES)).all()
-
-    def due(r):
-        return r.snoozed_until if r.snoozed_until is not None and r.snoozed_until < r.due_at else r.due_at
-
-    fired = [r for r in rows if r.status == "fired" or due(r) <= now_utc]
-    upcoming = sorted((r for r in rows if r not in fired and due(r) <= horizon), key=due)
-
-    def fmt(r):
-        t = to_local(due(r))
-        return f"{_short(r.title, 40)} {_WEEKDAYS[t.weekday()]} {t:%d.%m. %H:%M}"
-
-    return [f"Připomínky: zazněné {_list_or_none([_short(r.title, 40) for r in fired[:MAX_ITEMS]], len(fired))}; "
-            f"do 48 h {_list_or_none([fmt(r) for r in upcoming[:MAX_ITEMS]], len(upcoming))}"]
-
-
-def _wot_lines(db: Session) -> list[str]:
-    resources = ", ".join(f"{r.resource} {_fmt_num(float(r.amount or 0))}" for r in db.query(WotResource).all())
-    grinds = [g for g in db.query(WotGrind).all() if (g.status or "").lower() == "active"]
-    grinds.sort(key=lambda g: _PRIORITY_RANK.get((g.priority or "").lower(), 3))
-    grind_items = [f"{_short(g.tank, 25)} {_fmt_num(float(g.xp_remaining or 0))} XP ({g.priority})" for g in grinds[:MAX_ITEMS]]
-    return [f"WoT zdroje: {resources or 'žádné'}", f"WoT aktivní grindy: {_list_or_none(grind_items, len(grinds))}"]
 
 
 def _tokens(text: str) -> set[str]:
@@ -325,10 +183,13 @@ def build_current_context(
 ) -> CurrentContext:
     local = now_local(now_utc)
     today = local.date()
-    projects = [p for (p,) in db.query(WorkSession.project).distinct().all() if p]
-    tanks = [t for (t,) in db.query(WotGrind.tank).all() if t]
+    # Roadmap 6C / MRK-20: jen oblasti modulů, které smí do AI kontextu (vypnutý modul nedodá nic).
+    access = access or current_access()
+    sections_by_area = {sec.area: sec for _owner, sec in access.contributions("context")}
+    hints = {area: list(sec.name_hints(db)) for area, sec in sections_by_area.items() if sec.name_hints}
+    words = None if access.modules is MODULES else {s.area: s.keywords for _o, s in all_contributions("context", access.modules)}
     named = _named_reminder_areas(db, message)
-    areas = classify_areas(message, projects, tanks) | named
+    areas = classify_areas(message, hints=hints, words=words) | named
     planner_like = is_planner_like(message)
 
     tomorrow = today + timedelta(days=1)
@@ -337,25 +198,22 @@ def build_current_context(
         f"Dnes {today.isoformat()} ({_WEEKDAYS[today.weekday()]}) {local:%H:%M}; zítra {tomorrow.isoformat()} "
         f"({_WEEKDAYS[tomorrow.weekday()]}); tento týden {monday.isoformat()} až {(monday + timedelta(days=6)).isoformat()}"
     ]
-    builders = {
-        AREA_SCHOOL: lambda: _school_lines(db, today),
-        AREA_NOTIFICATIONS: lambda: _notification_lines(db),
-        AREA_GOALS: lambda: _goal_lines(db, today),
-        AREA_WORK: lambda: _work_lines(db, today),
-        AREA_FINANCE: lambda: _finance_lines(db, today),
-        AREA_WOT: lambda: _wot_lines(db),
-        AREA_REMINDERS: lambda: _reminder_lines(db, local),
-    }
+    req = ContextRequest(db=db, today=today, local_now=local)
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
-    explicit = classify_areas(message, projects, tanks, implied=False) | named
-    # Roadmap 6C: modul, který nesmí do AI kontextu (vypnutý flag), nedodá sekci CURRENT STATE.
-    access = access or current_access()
-    ordered = sorted((k for k in _AREA_SECTIONS_ORDER if k in areas and access.allows_context_area(k)),
-                     key=lambda k: k not in explicit)
-    sections = [(key, builders[key]()) for key in ordered]
+    explicit = classify_areas(message, implied=False, hints=hints, words=words) | named
+    with_section = sorted((sec for sec in sections_by_area.values() if sec.build and sec.order is not None and sec.area in areas),
+                          key=lambda sec: sec.order)
+    ordered = sorted(with_section, key=lambda sec: sec.area not in explicit)
+    sections = []
+    for sec in ordered:
+        try:
+            sections.append((sec.area, sec.build(req)))
+        except Exception:  # noqa: BLE001 – chyba jednoho modulu = jen chybějící sekce (tooly ji dočtou)
+            log.exception("context: section %s failed", sec.area)
+            db.rollback()
 
     memories = rank_memories(db.query(Memory).filter(Memory.active.is_(True)).all(), message, areas, planner=planner_like)
-    memory_lines = [f"- [{m.area}/{m.category}] {_short(m.content, MEMORY_CHARS)}" for m in memories]
+    memory_lines = [f"- [{m.area}/{m.category}] {short(m.content, MEMORY_CHARS)}" for m in memories]
     memory_checked = planner_like or bool(memory_lines)
 
     if not sections and not memory_lines:
@@ -376,7 +234,7 @@ def build_current_context(
         text = _render(header, sections, memory_lines)
 
     included = [key for key, _ in sections]
-    covered = {tool for key in included for tool in _COVERED_TOOLS[key]}
+    covered = {tool for key in included for tool in (sections_by_area[key].covered_tools if key in sections_by_area else ())}
     if memory_checked and (memory_lines or planner_like):
         covered |= set(_COVERED_TOOLS[AREA_MEMORY])
     section_names = ("date", *included, *(("memory",) if memory_lines else ()))
