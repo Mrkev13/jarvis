@@ -105,6 +105,12 @@ class BriefingTestBase(unittest.TestCase):
             ])
             db.commit()
             rs.create_from_spec(db, rs.build_spec("fyzio", due_local="2026-10-06T18:00", now=SEVEN))
+            # create_from_spec writes an audit row using the real wall clock.
+            # The seeded reminder predates the snapshot's 24-hour change window;
+            # its creation must not displace/count as the changes under test.
+            db.flush()
+            db.query(ActivityLog).filter_by(entity_type="Reminder").update(
+                {ActivityLog.timestamp: SEVEN - timedelta(days=2)})
             db.add(ActivityLog(timestamp=SEVEN - timedelta(hours=2), area="finance", action_type="create",
                                summary="-120 Kč Jídlo"))
             db.commit()
