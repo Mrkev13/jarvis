@@ -22,6 +22,7 @@ export const NAV_PAGES: NavPage[] = [
   { href: "/activity", label: "Aktivita", area: null, keywords: ["activity", "audit", "historie změn", "log"] },
   { href: "/memory", label: "Paměť", area: "memory", keywords: ["memory", "poznámka", "poznámky", "preference"] },
   { href: "/ai", label: "AI asistent", area: "ai", keywords: ["ai", "asistent", "chat", "jarvis", "standa ai"] },
+  { href: "/settings", label: "Nastavení", area: null, keywords: ["settings", "nastavení", "moduly", "modul", "zapnout", "vypnout"] },
 ];
 
 /** Stránky dostupných modulů (navigace, mobilní menu i Ctrl+K) – vypnutý modul nemá žádný odkaz. */

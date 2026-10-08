@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   availableWidgets,
   defaultLayout,
@@ -9,8 +9,9 @@ import {
   preserveUnavailable,
   serializeLayout,
   type DashboardLayout,
+  type WidgetDef,
 } from "@/lib/dashboardLayout";
-import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { useModuleAccess } from "@/hooks/useModules";
 
 /**
  * Rozložení Řídicího centra (Roadmap 4F) v localStorage (verzovaný klíč, ověřený obsah, poškozená data → výchozí).
@@ -20,11 +21,10 @@ import { MODULE_ACCESS } from "@/lib/moduleConfig";
  * Roadmap 6C: rozložení obsahuje jen widgety dostupných modulů; uložené záznamy vypnutých zůstávají (viz
  * preserveUnavailable), takže vypnutí modulu nic nesmaže a zapnutí vrátí widget, jak byl.
  */
-const AVAILABLE = availableWidgets(MODULE_ACCESS);
-const availableDefault = () => defaultLayout(AVAILABLE);
 const CHANGE_EVENT = "standa-hub:dashboard-layout";
 
-let cache: { raw: string | null; layout: DashboardLayout } | null = null;
+// MRK-18 A2: dostupné widgety závisí na runtime stavu modulů → cache i podle jejich sady (key).
+let cache: { raw: string | null; key: string; layout: DashboardLayout } | null = null;
 /** Když úložiště nejde použít, změny platí v paměti do obnovení stránky. */
 let memoryRaw: string | null = null;
 
@@ -36,9 +36,9 @@ function readRaw(): string | null {
   }
 }
 
-function getSnapshot(): DashboardLayout {
+function snapshotFor(available: WidgetDef[], key: string): DashboardLayout {
   const raw = readRaw();
-  if (!cache || cache.raw !== raw) cache = { raw, layout: parseStoredLayout(raw, AVAILABLE) };
+  if (!cache || cache.raw !== raw || cache.key !== key) cache = { raw, key, layout: parseStoredLayout(raw, available) };
   return cache.layout;
 }
 
@@ -58,8 +58,8 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
-function write(layout: DashboardLayout | null) {
-  const raw = layout ? serializeLayout(preserveUnavailable(layout, readRaw(), AVAILABLE)) : null;
+function write(layout: DashboardLayout | null, available: WidgetDef[]) {
+  const raw = layout ? serializeLayout(preserveUnavailable(layout, readRaw(), available)) : null;
   try {
     if (raw) window.localStorage.setItem(LAYOUT_STORAGE_KEY, raw);
     else window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
@@ -70,13 +70,18 @@ function write(layout: DashboardLayout | null) {
 }
 
 export function useDashboardLayout() {
+  const { access } = useModuleAccess();
+  const available = useMemo(() => availableWidgets(access), [access]);
+  const key = available.map((d) => d.id).join(",");
+  const getSnapshot = useCallback(() => snapshotFor(available, key), [available, key]);
   const layout = useSyncExternalStore<DashboardLayout | null>(subscribe, getSnapshot, getServerSnapshot);
   const update = useCallback((fn: (current: DashboardLayout) => DashboardLayout) => {
-    const current = getSnapshot();
+    const current = snapshotFor(available, key);
     const next = fn(current);
-    if (next !== current) write(next);
-  }, []);
+    if (next !== current) write(next, available);
+  }, [available, key]);
   /** Výchozí rozložení = smazaný klíč (budoucí změny výchozího se tak projeví i u resetovaných uživatelů). */
-  const reset = useCallback(() => write(null), []);
-  return { layout, update, reset, defaults: availableDefault, available: AVAILABLE };
+  const reset = useCallback(() => write(null, available), [available]);
+  const defaults = useCallback(() => defaultLayout(available), [available]);
+  return { layout, update, reset, defaults, available };
 }

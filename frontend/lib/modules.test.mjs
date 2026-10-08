@@ -1,7 +1,6 @@
 // Roadmap 6C: feature flagy modulů – parsování, registr, navigace, vyhledávání, dashboard, Rychlé přidání, Dnes, AI.
 // Budoucí moduly zatím nemají kód → brány dokazují testovací moduly (FIXTURES) a vypnutí existujících modulů.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -14,8 +13,7 @@ import {
   setWidgetVisible,
   WIDGETS,
 } from "./dashboardLayout.ts";
-import { MODULE_ACCESS, MODULE_FLAGS } from "./moduleConfig.ts";
-import { allowsHref, CAPABILITIES, createModuleAccess, flagEnvName, MODULES, parseFlag, resolveModuleFlags } from "./modules.ts";
+import { allowsHref, CAPABILITIES, createModuleAccess, manifestFlags, MODULES } from "./modules.ts";
 import { NAV_PAGES, navPagesFor } from "./navigation.ts";
 import { availableKinds, examplesFor, gateParse, kindsHint, promptHint, QUICK_ADD_EXAMPLES, QUICK_ADD_KINDS } from "./quickAdd.ts";
 import { filterAvailable, searchNavigation } from "./search.ts";
@@ -28,40 +26,14 @@ const FIXTURES = [
 ];
 const EXISTING = ["school", "work", "finance", "goals", "wot", "mff"];
 const FUTURE = ["food", "fitness", "habits", "projects", "knowledge", "car", "travel", "entertainment"];
-const DEFAULTS = createModuleAccess(resolveModuleFlags({}));
-const off = (...ids) => createModuleAccess(resolveModuleFlags(Object.fromEntries(ids.map((id) => [flagEnvName(id), "false"]))));
+const DEFAULTS = createModuleAccess(manifestFlags());
+const off = (...ids) => createModuleAccess({ ...manifestFlags(), ...Object.fromEntries(ids.map((id) => [id, false])) });
 
-test("default flags: existing modules on, future modules off", () => {
-  const flags = resolveModuleFlags({});
+test("manifest defaults: existing modules on, future modules off", () => {
+  const flags = manifestFlags();
   for (const id of EXISTING) assert.equal(flags[id], true, id);
   for (const id of FUTURE) assert.equal(flags[id], false, id);
   assert.deepEqual(Object.keys(flags), MODULES.map((m) => m.id));
-});
-
-test("explicit on/off values", () => {
-  for (const [raw, expected] of [["1", true], ["true", true], [" ON ", true], ["yes", true], ["0", false], ["false", false], ["Off", false], ["no", false]]) {
-    assert.equal(resolveModuleFlags({ NEXT_PUBLIC_MODULE_WOT_ENABLED: raw }).wot, expected, raw);
-    assert.equal(resolveModuleFlags({ NEXT_PUBLIC_MODULE_FOOD_ENABLED: raw }).food, expected, raw);
-  }
-});
-
-test("invalid or blank env values keep the safe default", () => {
-  for (const raw of ["ture", "maybe", "2", "   ", undefined]) {
-    assert.equal(parseFlag(raw, true), true, String(raw));
-    assert.equal(parseFlag(raw, false), false, String(raw));
-  }
-  const flags = resolveModuleFlags({ NEXT_PUBLIC_MODULE_SCHOOL_ENABLED: "nope", NEXT_PUBLIC_MODULE_FOOD_ENABLED: "nope" });
-  assert.equal(flags.school, true);
-  assert.equal(flags.food, false);
-});
-
-test("app config: without env equals defaults; every module has a literal env read", () => {
-  // `next build` vkládá jen doslovné process.env.NEXT_PUBLIC_… – chybějící řádek by flag tiše ignoroval
-  assert.deepEqual(MODULE_FLAGS, resolveModuleFlags({}));
-  const src = readFileSync(new URL("./moduleConfig.ts", import.meta.url), "utf8");
-  for (const m of MODULES) assert.ok(src.includes(`${flagEnvName(m.id)}: process.env.${flagEnvName(m.id)},`), m.id);
-  // do klienta jde jen booleovský přepínač na modul
-  assert.ok(Object.values(MODULE_FLAGS).every((v) => typeof v === "boolean"));
 });
 
 test("registry: unique ids and ownership, known capabilities", () => {
@@ -90,7 +62,7 @@ test("capabilities: enabled fixture allowed, disabled denied, flag alone never r
   assert.equal(access.allows("unknown", "nav"), false);
   assert.equal(createModuleAccess({ beta: true }, FIXTURES).allows("beta", "today"), true);
   // budoucí moduly s flagem true zůstávají nedostupné
-  const allOn = createModuleAccess(resolveModuleFlags(Object.fromEntries(FUTURE.map((id) => [flagEnvName(id), "true"]))));
+  const allOn = createModuleAccess(Object.fromEntries(FUTURE.map((id) => [id, true])));
   for (const id of FUTURE) assert.equal(allOn.isAvailable(id), false, id);
 });
 
@@ -109,7 +81,7 @@ test("routes: disabled module path is not allowed, core paths always are", () =>
 
 test("navigation: default app unchanged, disabled module disappears", () => {
   assert.deepEqual(navPagesFor(DEFAULTS), NAV_PAGES);
-  assert.deepEqual(navPagesFor(MODULE_ACCESS), NAV_PAGES, "výchozí build bez env");
+  assert.deepEqual(navPagesFor(DEFAULTS), NAV_PAGES, "výchozí stav manifestu");
   const hrefs = navPagesFor(off("wot", "finance")).map((p) => p.href);
   assert.ok(!hrefs.includes("/wot") && !hrefs.includes("/finance"));
   assert.equal(hrefs.length, NAV_PAGES.length - 2);
@@ -149,7 +121,7 @@ test("search: availability is a filter, ranking unchanged", () => {
 
 test("dashboard: disabled module widgets are absent, fetch skipped, storage preserved", () => {
   assert.deepEqual(availableWidgets(DEFAULTS), WIDGETS, "výchozí stav beze změny");
-  assert.deepEqual(availableWidgets(MODULE_ACCESS), WIDGETS);
+  assert.deepEqual(availableWidgets(DEFAULTS), WIDGETS);
   const wotMffOff = availableWidgets(off("wot", "mff")).map((d) => d.id);
   assert.ok(!wotMffOff.includes("games"));
   assert.ok(availableWidgets(off("wot")).some((d) => d.id === "games"), "Hry zůstanou s MFF");

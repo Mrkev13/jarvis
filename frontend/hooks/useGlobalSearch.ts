@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useApiResource } from "@/hooks/useApiResource";
-import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { useModuleAccess } from "@/hooks/useModules";
 import { navPagesFor } from "@/lib/navigation";
 import {
   filterAvailable,
@@ -19,8 +19,7 @@ export const SEARCH_DEBOUNCE_MS = 180;
 
 type RemoteResponse = { query: string; results: SearchResult[]; total: number };
 
-/** Roadmap 6C: Ctrl+K hledá jen stránky dostupných modulů (stejný seznam jako navigace). */
-const PAGES = navPagesFor(MODULE_ACCESS);
+/** Roadmap 6C / MRK-18 A2: Ctrl+K hledá jen stránky dostupných modulů (runtime, stejný seznam jako navigace). */
 
 /**
  * Výsledky globálního vyhledávání: navigace hned (lokálně), záznamy z GET /search s debounce.
@@ -28,6 +27,8 @@ const PAGES = navPagesFor(MODULE_ACCESS);
  * se nezobrazí (kontrola `query`), takže výsledky nikdy „neskočí" na předchozí dotaz.
  */
 export function useGlobalSearch(query: string, { enabled, recent }: { enabled: boolean; recent: SearchResult[] }) {
+  const { access } = useModuleAccess();
+  const pages = useMemo(() => navPagesFor(access), [access]);
   const q = query.trim();
   const nq = normalize(q).slice(0, 100);
   const remotePath = enabled && nq.length >= MIN_REMOTE_QUERY ? `/search?q=${encodeURIComponent(q)}&limit=30` : null;
@@ -38,15 +39,15 @@ export function useGlobalSearch(query: string, { enabled, recent }: { enabled: b
 
   const groups: SearchGroup[] = useMemo(() => {
     if (!nq) {
-      const nav = searchNavigation("", PAGES);
-      const recentAvailable = filterAvailable(recent, MODULE_ACCESS);
+      const nav = searchNavigation("", pages);
+      const recentAvailable = filterAvailable(recent, access);
       return [
         ...(recentAvailable.length ? [{ key: "recent", label: "Nedávno otevřené", results: recentAvailable }] : []),
         { key: "page", label: "Navigace", results: nav },
       ];
     }
-    return groupResults([...searchNavigation(q, PAGES), ...filterAvailable(fresh?.results ?? [], MODULE_ACCESS)]);
-  }, [nq, q, fresh, recent]);
+    return groupResults([...searchNavigation(q, pages), ...filterAvailable(fresh?.results ?? [], access)]);
+  }, [nq, q, fresh, recent, access, pages]);
 
   return {
     groups,

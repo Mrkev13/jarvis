@@ -2,8 +2,9 @@
  * Moduly a jejich feature flagy (Roadmap 6C) – čistá logika bez Reactu a bez `process.env` (testy: modules.test.mjs).
  *
  * Zrcadlo `backend/module_registry.py` (paritu hlídá backend test test_module_registry.py): stejná id, výchozí
- * stav, implementace, schopnosti, typy záznamů a druhy Rychlého přidání. Hodnoty flagů čte JEDINĚ
- * `lib/moduleConfig.ts`; komponenty se ptají přes `ModuleAccess`, nikdy přímo na prostředí.
+ * stav, implementace, schopnosti, typy záznamů a druhy Rychlého přidání. MRK-18 A2: zapnutí modulů přichází za
+ * běhu z GET /modules (`lib/moduleRuntime.ts`, `hooks/useModules.ts`) – žádné build-time flagy z prostředí;
+ * komponenty se ptají přes `ModuleAccess`.
  *
  * Modul je DOSTUPNÝ = `implemented` && flag. Flag neimplementovaného modulu nic neodkryje.
  * Co nepatří žádnému modulu (Řídicí centrum, Dnes, Plánovač, Připomínky, Paměť, AI…), je jádro → vždy dostupné.
@@ -50,26 +51,13 @@ export const MODULES: ModuleDef[] = [
 ];
 
 export type ModuleFlags = Record<string, boolean>;
-export type FlagEnv = Record<string, string | undefined>;
 
-/** Název proměnné prostředí frontendu (build-time, viditelná v prohlížeči – flagy nejsou tajemství). */
-export function flagEnvName(id: string): string {
-  return `NEXT_PUBLIC_MODULE_${id.toUpperCase()}_ENABLED`;
-}
-
-const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
-const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
-
-/** Stejná pravidla jako backend env_config.parse_flag: prázdné / nesmysl = výchozí hodnota. */
-export function parseFlag(raw: string | undefined | null, fallback: boolean): boolean {
-  const value = String(raw ?? "").trim().toLowerCase();
-  if (TRUE_VALUES.has(value)) return true;
-  if (FALSE_VALUES.has(value)) return false;
-  return fallback;
-}
-
-export function resolveModuleFlags(env: FlagEnv, modules: ModuleDef[] = MODULES): ModuleFlags {
-  return Object.fromEntries(modules.map((m) => [m.id, parseFlag(env[flagEnvName(m.id)], m.defaultEnabled)]));
+/**
+ * Výchozí stav podle manifestu (bez prostředí i uložených voleb). MRK-18 A2: aplikace ho NEPOUŽÍVÁ jako runtime
+ * zdroj – skutečný stav jde z GET /modules (`lib/moduleRuntime.ts`); slouží testům a dokumentaci výchozího stavu.
+ */
+export function manifestFlags(modules: ModuleDef[] = MODULES): ModuleFlags {
+  return Object.fromEntries(modules.map((m) => [m.id, m.defaultEnabled]));
 }
 
 function underRoute(pathname: string, route: string): boolean {

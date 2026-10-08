@@ -13,7 +13,7 @@ import {
   KIND_AREAS, KIND_HREFS, KIND_LABELS, kindsHint, normalizeParse, prepareErrors, promptHint, readiness, type FieldDef, type FormValues,
   type QuickAddIssue, type QuickAddKind, type QuickAddParse,
 } from "@/lib/quickAdd";
-import { MODULE_ACCESS } from "@/lib/moduleConfig";
+import { useModuleAccess } from "@/hooks/useModules";
 import { cx } from "@/lib/ui";
 
 const PARSE_DEBOUNCE_MS = 180;
@@ -41,6 +41,7 @@ export function QuickAddDialog({ open, onClose }: { open: boolean; onClose: () =
 }
 
 function Dialog({ onClose }: { onClose: () => void }) {
+  const { access: moduleAccess } = useModuleAccess();
   const ids = { title: useId(), input: useId(), status: useId(), hint: useId() };
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -87,7 +88,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
     try {
       const res = await apiFetch("/quick-add/parse", { ...jsonBody("POST", { text: value }), signal: controller.signal });
       if (!res.ok) throw new Error(await readErrorDetail(res));
-      const result = gateParse(normalizeParse(await res.json()), MODULE_ACCESS);
+      const result = gateParse(normalizeParse(await res.json()), moduleAccess);
       if (seq !== seqRef.current) return;
       setParse({ status: "done", result });
       setForm(isQuickAddKind(result.kind) ? fieldsToForm(result.kind, result.fields) : {});
@@ -98,7 +99,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
       if (isAbortError(error) || seq !== seqRef.current) return;
       setParse({ status: "error", message: errorMessage(error, "Rozbor textu se nepodařil.") });
     }
-  }, []);
+  }, [moduleAccess]);
 
   // rozbor s krátkým zpožděním při psaní
   useEffect(() => {
@@ -293,7 +294,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
               <p className="text-sm text-ink" data-testid="quick-add-unknown">
                 Tomu zatím nerozumím.
               </p>
-              <p className="text-xs text-ink-muted">{kindsHint(MODULE_ACCESS)} Třeba:</p>
+              <p className="text-xs text-ink-muted">{kindsHint(moduleAccess)} Třeba:</p>
               <Examples onPick={setText} />
             </div>
           ) : kind && shown ? (
@@ -310,7 +311,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
             <p className="text-sm text-ink-muted">Rozebírám…</p>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-ink-2">{promptHint(MODULE_ACCESS)}</p>
+              <p className="text-sm text-ink-2">{promptHint(moduleAccess)}</p>
               <Examples onPick={setText} />
             </div>
           )}
@@ -356,9 +357,10 @@ function summaryTitle(kind: QuickAddKind, form: FormValues): string {
 }
 
 function Examples({ onPick }: { onPick: (text: string) => void }) {
+  const { access: moduleAccess } = useModuleAccess();
   return (
     <ul className="flex flex-wrap gap-2" aria-label="Příklady">
-      {examplesFor(MODULE_ACCESS).map((ex) => (
+      {examplesFor(moduleAccess).map((ex) => (
         <li key={ex.text}>
           <button
             type="button"

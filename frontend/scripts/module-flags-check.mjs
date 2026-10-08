@@ -1,9 +1,8 @@
-// Prohlížečová kontrola feature flagů modulů (Roadmap 6C) – doplněk ui-check.mjs.
+// Prohlížečová kontrola feature flagů modulů (Roadmap 6C, MRK-18 A2) – doplněk ui-check.mjs.
 //
-// Flagy frontendu se vkládají při buildu, proto se kontrola pouští proti dvěma buildům:
-//   výchozí:     npm run build                                   → node scripts/module-flags-check.mjs
-//   s vypnutými: NEXT_PUBLIC_MODULE_WOT_ENABLED=false NEXT_PUBLIC_MODULE_FINANCE_ENABLED=false npm run build
-//                → UI_FLAGS_DISABLED=wot,finance node scripts/module-flags-check.mjs
+// A2: stav modulů je runtime (GET /modules) – JEDEN build pro všechny scénáře, vypnutí nastaví mock za běhu:
+//   výchozí:     node scripts/module-flags-check.mjs                (+ přepínání v Nastavení bez rebuildu, zámek)
+//   s vypnutými: UI_FLAGS_DISABLED=wot,finance node scripts/module-flags-check.mjs
 // Předpoklady jako ui-check: node scripts/mock-api.mjs + npx next start -p 3000 -H 127.0.0.1 (žádný Groq).
 // Mock API vrací data všech modulů – kontrola tak dokazuje i pojistku frontendu (filtr výsledků a rozboru).
 import { mkdirSync } from "node:fs";
@@ -26,7 +25,11 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const NAV_TOTAL = 14;
+const NAV_TOTAL = 15; // + Nastavení (MRK-18 A2, jádro)
+
+// Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
+await fetch(`${MOCK_API}/__mock/modules/reset`);
+if (DISABLED.size) await fetch(`${MOCK_API}/__mock/modules?disabled=${[...DISABLED].join(",")}`);
 
 async function open(path, { width = 1366, height = 900, setup } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: "dark", hasTouch: width < 500 });
@@ -239,6 +242,75 @@ for (const path of ["/wot/replays", "/wot/replays?replay=1"]) {
   check("dnes: bez chyb JS", errors.length === 0, errors.join(" | "));
   await ctx.close();
 }
+
+// MRK-18 A2: Nastavení → Moduly za běhu (bez rebuildu i bez obnovení stránky) + zámek vynucený prostředím.
+if (!DISABLED.size) {
+  const { ctx, page, errors } = await open("/settings");
+  const puts = [];
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().startsWith(`${MOCK_API}/modules/`)) puts.push(new URL(r.url()).pathname);
+  });
+  const toggle = page.getByTestId("module-toggle-wot");
+  check("nastavení: sekce Moduly a přepínač WoT zapnutý", (await page.getByTestId("module-settings").count()) === 1 && (await toggle.getAttribute("aria-checked")) === "true");
+  check("nastavení: plánované moduly se nenabízejí", (await page.getByTestId("module-toggle-food").count()) === 0);
+  await toggle.click();
+  await page.waitForTimeout(500);
+  const asideAfterOff = await navHrefs(page, "aside");
+  check("nastavení: vypnutí WoT → přepínač vypnutý, navigace bez /wot hned", (await toggle.getAttribute("aria-checked")) === "false" && !asideAfterOff.includes("/wot"), asideAfterOff.join(","));
+  const state = await (await fetch(`${MOCK_API}/modules`)).json();
+  const wotState = state.modules.find((m) => m.id === "wot");
+  check("nastavení: uložená volba (source=db), žádný rebuild", wotState.enabled === false && wotState.source === "db");
+  await page.goto(`${BASE}/wot/replays`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  check("runtime vypnuto: /wot/replays ukáže „Modul není dostupný“", (await page.getByTestId("module-unavailable").count()) === 1);
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  const wotLinks = await page.locator('main a[href^="/wot"]').count();
+  check("runtime vypnuto: dashboard bez odkazů na WoT", wotLinks === 0, String(wotLinks));
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
+  await search.getByRole("combobox", { name: "Hledat stránku nebo záznam" }).fill("tvp");
+  await page.waitForTimeout(700);
+  check("runtime vypnuto: Ctrl+K nenajde WoT", (await search.getByRole("group", { name: "World of Tanks" }).getByRole("option").count()) === 0);
+  await page.keyboard.press("Escape");
+  await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  await page.getByTestId("module-toggle-wot").click();
+  await page.waitForTimeout(500);
+  check("nastavení: znovu zapnuto → /wot zpět v navigaci", (await navHrefs(page, "aside")).includes("/wot"));
+  await page.goto(`${BASE}/wot`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  check("runtime zapnuto: /wot se otevře s daty", (await page.getByTestId("module-unavailable").count()) === 0 && (await page.locator("h1").innerText()) === "World of Tanks");
+  // zámek: prostředí vynutí WoT zapnuto → přepínač nejde použít, PUT se nepošle
+  await fetch(`${MOCK_API}/__mock/modules?locked=wot`);
+  await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  const locked = page.getByTestId("module-toggle-wot");
+  check("zámek: přepínač WoT zakázaný + „Vynuceno konfigurací serveru“", (await locked.isDisabled()) && (await page.getByTestId("module-locked-wot").innerText()).includes("Vynuceno konfigurací serveru"));
+  const before = puts.length;
+  await locked.click({ force: true }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("zámek: kliknutí nic neodešle", puts.length === before, String(puts.length - before));
+  const lockedPut = await fetch(`${MOCK_API}/modules/wot`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+  check("zámek: API vrací 409", lockedPut.status === 409, String(lockedPut.status));
+  await page.screenshot({ path: `${OUT}module-settings-locked.png`, fullPage: true });
+  check("nastavení: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+// Načítání bez cache a nedostupné /modules: stránka modulu se nevykreslí, jádro ano.
+{
+  const { ctx, page, errors } = await open("/", {
+    setup: (p) => p.route(`${MOCK_API}/modules`, (route) => route.fulfill({ status: 503, body: "{}" })),
+  });
+  const hrefs = await navHrefs(page, "aside");
+  check("bez /modules: navigace jen jádro", Object.values(MODULE_PAGES).every((h) => !hrefs.includes(h)) && hrefs.includes("/today"), hrefs.join(","));
+  await page.goto(`${BASE}/wot`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  check("bez /modules: /wot ukáže chybu, ne obsah", (await page.getByTestId("module-error").count()) === 1 && (await page.locator("h1", { hasText: "World of Tanks" }).count()) === 0);
+  check("bez /modules: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+}
+await fetch(`${MOCK_API}/__mock/modules/reset`);
 
 await browser.close();
 const failed = results.filter((r) => !r.ok);
