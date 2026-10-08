@@ -54,10 +54,10 @@ test("MRK-12: actual WoT page renders both records from the API list", () => {
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;
-  const module = { exports: {} };
+  const compiledModule = { exports: {} };
   new Function("require", "module", "exports", compiled)(
-    (name) => Object.hasOwn(modules, name) ? modules[name] : require(name), module, module.exports);
-  const html = renderToStaticMarkup(React.createElement(module.exports.default));
+    (name) => Object.hasOwn(modules, name) ? modules[name] : require(name), compiledModule, compiledModule.exports);
+  const html = renderToStaticMarkup(React.createElement(compiledModule.exports.default));
   assert.equal((html.match(/data-milestone=/g) ?? []).length, 2);
   assert.match(html, /data-milestone="1"/);
   assert.match(html, /data-milestone="2"/);
