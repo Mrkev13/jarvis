@@ -159,6 +159,9 @@ class ModuleIntegrations:
     quick_add_rules: tuple[QuickAddRule, ...] = ()
     quick_add_kinds: tuple[QuickAddKind, ...] = ()
     hourly: tuple[ScheduledStep, ...] = ()
+    # REST modulu (fastapi.APIRouter). main.py připojí routery VŠECH modulů; vypnutý modul hlídá
+    # main.require_module_available (404 podle `api_prefixes`) a auth platí stejně jako pro ostatní cesty.
+    routers: tuple[Any, ...] = ()
     notes: dict[str, str] = field(default_factory=dict)  # volitelný popis pro docs/testy, nic nespouští
 
 
@@ -175,4 +178,5 @@ CONTRIBUTION_CAPABILITY: dict[str, str | None] = {
     "quick_add_rules": "quick_add",
     "quick_add_kinds": "quick_add",
     "hourly": None,
+    "routers": None,
 }

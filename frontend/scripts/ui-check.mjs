@@ -9,6 +9,8 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { stubPng } from "./stub-png.mjs";
 import { fileURLToPath } from "node:url";
+// MRK-21: počet stránek navigace z registru (nový modul ui-check neupravuje); mock /modules = výchozí stav manifestu
+const { NAV_PAGES } = await import("../lib/navigation.ts");
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
 const OUT = fileURLToPath(new URL("./.ui-check/", import.meta.url));  // .pathname dává na Windows /C:/…
@@ -835,7 +837,7 @@ async function searchCalls() {
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   await page.waitForTimeout(80);
   check("hledání: fokus v poli (combobox s popiskem)", await input.evaluate((el) => el === document.activeElement));
-  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 15); // + Nastavení (MRK-18 A2)
+  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === NAV_PAGES.length); // jádro + moduly z manifestu
   await page.screenshot({ path: `${OUT}search-empty.png` });
 
   const first = async () => (await dialog.getByRole("option").first().innerText()).split("\n")[0];

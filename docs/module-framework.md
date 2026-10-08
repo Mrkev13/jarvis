@@ -1,7 +1,7 @@
 # Module Framework (Platform 2.0)
 
-Status: **phases A1/A2 (MRK-7, MRK-18) and C (MRK-20) implemented on `main`**. Phase B (domain events, MRK-19) and
-the Habits pilot (MRK-21) are separate. This document describes what the code does **today**. The original
+Status: **phases A1/A2 (MRK-7, MRK-18) and C (MRK-20) implemented on `main`. The Habits pilot (MRK-21, phase D)
+is the acceptance test, recorded in §10.** Phase B (domain events, MRK-19) is separate. This document describes what the code does **today**. The original
 proposal (MRK-8 branch, `docs/module-framework.md` there) is kept as history. Where the two differ, this file wins.
 
 Related: [module-feature-flags.md](module-feature-flags.md) (flags, runtime state, per-surface behaviour),
@@ -30,6 +30,7 @@ Related: [module-feature-flags.md](module-feature-flags.md) (flags, runtime stat
 | `backend/<module>_integrations.py` | The module's providers: `INTEGRATIONS = ModuleIntegrations(...)`. Code moved unchanged from the aggregators. |
 | `backend/core_integrations.py` | Contributions of **core** (reminders, memory, notifications). Always on, not a `ModuleDef`. |
 | `backend/module_registry.py` | `ModuleDef(..., integrations=<module>_integrations.INTEGRATIONS)`, `ModuleAccess.contributions(kind)`, `all_contributions(kind)`. |
+| `backend/modules/<id>/` | **New modules (MRK-21+)** live in one package: `models.py`, `service.py`, `router.py`, `integrations.py` (`INTEGRATIONS`). Legacy modules keep their root `<id>_integrations.py`. |
 | Shared leaf helpers | `today_types.py` (`TodayItem`, `TodayContext`), `context_format.py` (CURRENT STATE line helpers), `quick_add_text.py` (Quick Add text/number/date/time core), `text_utils.fold_text` / `join_parts`. |
 | `frontend/lib/modules.ts` | `MODULES` (mirror of the backend registry, parity-tested) and `MODULE_UI` (nav entry, search link params, Ctrl+K group order). |
 
@@ -52,6 +53,7 @@ cycles.
 | `quick_add_rules: (QuickAddRule(priority, kind, detect(text) -> confidence \| None),)` | one classification rule; lower priority wins, first match | rules are static (see below) | rule ordering, "disabled kind → unknown", confidence policy |
 | `quick_add_kinds: (QuickAddKind(kind, parse, to_tool_call, display, context=, output=),)` | parse into a `Draft`; validate → `(WRITE tool, args)`; Czech preview; optional extra data (`context(db)`) and response keys (`output(ctx)`) | `quick_add` | response shape, pending-action prepare/confirm, `QuickAddInvalid` |
 | `hourly: (ScheduledStep(name, run(db)),)` | idempotent, bounded step of the hourly job | module available | scheduling, commit/rollback per step, infrastructure steps |
+| `routers: (APIRouter,)` (MRK-21) | the module's REST routes under its `api_prefixes` | always mounted; disabled → 404 via `require_module_available` | `main.py` mounts every registered router; app-level auth + module gate apply (tested) |
 
 Static vs gated tables. Classification inputs are built from **all** registered modules (`all_contributions`):
 AI area keywords and Quick Add rules. A text that only matches a disabled module therefore becomes "unknown"
@@ -90,7 +92,15 @@ The orders reproduce the old hard-coded sequences exactly. A golden comparison a
 - `MODULES`: id, label, default, implemented, capabilities, entity types, routes, Quick Add kinds. One line per
   module. The backend parity test reads it.
 - `MODULE_UI[id]`: `nav { href, label, keywords, order }`, `searchParams` (record params of the module's hrefs),
-  `searchGroupOrder`.
+  `searchGroupOrder`. Added in MRK-21, all pure data:
+  - `area` (badge colour classes)
+  - `typeLabels` (Today row type)
+  - `todayActions` (entity type → action → `{button, ariaLabel, success, path, body}`). The Today page runs these
+    through one generic path in `useTodayActions`.
+  - `widgets` (widget defs; `WIDGETS = CORE_WIDGETS + MODULE_WIDGETS`). The React components go in
+    `frontend/modules/registry.tsx` under the same id.
+- New modules keep their manifest in `frontend/modules/<id>/manifest.ts` and their page and components in the same
+  folder. `app/<route>/page.tsx` is a one-line wrapper.
 
 Derived from the manifest (core entries stay local):
 - `NAV_PAGES` (`lib/navigation.ts`): core pages before and after, module pages sorted by `nav.order`. Used by the
@@ -130,49 +140,47 @@ line of defence.
 
 | Place | Modules referenced | Why still manual | Suggested next step |
 |---|---|---|---|
-| `backend/main.py` REST routes | all | Router split (issue step 7) is a large move with no behaviour change. Kept out of this PR to keep the diff reviewable. | per-module `APIRouter` (start with WoT), `ModuleDef.router` |
+| `backend/main.py` REST routes of **legacy** modules | school, work, finance, goals, wot, mff | Router split (MRK-20 step 7) is a large move with no behaviour change. **New modules already use `ModuleIntegrations.routers`** (MRK-21). | move each legacy module's routes into `routers` (start with WoT) |
 | `tool_registry.py`, `tools.py`, `read_queries.py` | all | AI tool specs/executors; already **gated** through `ToolSpec.areas` → `context_areas` (`tool_router._ordered`) | `ModuleIntegrations.tools` once tool specs move per module |
 | `briefing_snapshot.py`, `weekly_snapshot.py` (+ `_strip_refs` lists in `briefing_service` / `weekly_review_service`) | school, reminders, goals, finance, work | One monolithic snapshot with cross-module caps, grounding and forecasts. No clean, low-risk provider contract yet. **Not gated by module state** (pre-existing, same as on `main` before MRK-20). | `briefing_sources` / `weekly_sources` with refs; gate by `today` / new `briefing` capability |
 | `planner_service.py`, `notifications_service.py` | school, goals, work, finance | Deterministic candidate rules per type, used by planner, Today, dashboard and notifications | `planner_sources`, `notification_types` |
-| `POST /today/actions/prepare` | school (assignment complete) | Only one action and one entity. Declared as `EntityRef.planner_actions` for the row, but the endpoint mapping is still explicit. | `today_actions` contribution |
+| `POST /today/actions/prepare` + reminder/assignment branches in `useTodayActions` | school, reminders | Legacy pending-action flows. **New modules declare `MODULE_UI.todayActions`** and call their own endpoint (MRK-21). | migrate when those flows are touched |
 | `mutation_service` EntityDefs | school, finance, work, goals, wot, mff | AI modify/undo definitions | contribute EntityDefs per module |
 | `ai.py` system prompt | names modules | static prompt text | generate the module list from available modules |
-| Frontend `lib/areas.ts` (`AREA_STYLES`) | all + memory labels | area colours/labels also label memories and goals | `MODULE_UI.area` tone token (Visual Refresh) |
-| Frontend `dashboardLayout.ts` `WIDGETS` + `components/dashboard/widgets.tsx` | goals, school, work, finance, wot, mff | React components and persisted widget ids. Already tagged `modules:` and gated. | `MODULE_UI.widgets` |
+| Frontend `lib/areas.ts` (`AREA_STYLES`) | all + memory labels | area colours/labels also label memories and goals. **New modules: `MODULE_UI.area` + module label fallback** (MRK-21). | tone tokens (Visual Refresh) |
+| Frontend `CORE_WIDGETS` + `components/dashboard/widgets.tsx` | goals, school, work, finance, wot, mff | Legacy widgets with persisted ids. **New modules use `MODULE_UI.widgets` + `modules/registry.tsx`** (MRK-21). | move legacy widgets when touched |
 | Frontend `quickAdd.ts` `QuickAddKind` union, `KIND_LABELS`, `FIELD_DEFS`, examples | kinds | typed form definitions | `MODULE_UI.quickAdd` |
 | Frontend `today.ts`, `labels.ts`, `activity.ts`, `aiActions.ts` | various | display labels | per-module label maps |
 | `models.py` + Alembic | all | one declarative Base, one migration chain | keep (models may move next to modules later) |
 
-## 8. Adding a module (e.g. Habits) – files touched
+## 8. Adding a module – files touched (as proven by Habits, MRK-21)
 
-**Module-local, new files:** `backend/habits_service.py` (writes), `backend/habits_integrations.py` (providers),
-`frontend/app/habits/page.tsx` (+ components/lib), tests.
+**Module-local, new files:**
+- `backend/modules/<id>/` with `models.py`, `service.py`, `router.py` and `integrations.py`
+- `frontend/modules/<id>/` with `manifest.ts`, `lib.ts` + `lib.test.mjs`, the page and the widget components
+- `frontend/app/<route>/page.tsx` (one-line wrapper)
+- `backend/tests/test_<id>.py`
 
-**Registry / shared, edited:**
+**Registry / shared, edited (one line or one entry each):**
 
 | File | Change | Needed when |
 |---|---|---|
-| `backend/module_registry.py` | replace `_planned("habits", …)` with a full `ModuleDef(..., integrations=habits_integrations.INTEGRATIONS)` + one import | always |
-| `frontend/lib/modules.ts` | the `MODULES` line + `MODULE_UI.habits` | always |
-| `backend/models.py` + `backend/alembic/versions/…` | model + additive migration | when it stores data |
-| `backend/main.py` | REST routes | until the router split |
-| `backend/tool_registry.py` (+ `tools.py`/`read_queries.py`) | AI tools | only if it has AI tools |
-| `frontend/lib/quickAdd.ts` | kind union, label, `FIELD_DEFS`, example | only if it has Quick Add |
-| `frontend/lib/dashboardLayout.ts` + `components/dashboard/widgets.tsx` | widget def + component | only if it has a widget |
-| `frontend/lib/areas.ts` | area style | for a new colour |
+| `backend/module_registry.py` | full `ModuleDef(..., integrations=<id>_integrations.INTEGRATIONS)` + one import | always |
+| `frontend/lib/modules.ts` | the `MODULES` line + `MODULE_UI.<id>` (imported from the manifest) | always |
+| `backend/models.py` | one import line + `MODULE_MODELS` (registers tables for Alembic, `create_all`, drift test) | when it stores data |
+| `backend/alembic/versions/…` + `test_alembic_migration.py` table set | additive migration and its round-trip case | when it stores data |
+| `frontend/modules/registry.tsx` | one entry per widget component | only with a dashboard widget |
+| `backend/tool_registry.py` (+ `tools.py`/`read_queries.py`) | AI tools | only with AI tools |
+| `frontend/lib/quickAdd.ts` | kind union, label, `FIELD_DEFS`, example | only with Quick Add (still central, see §7) |
 
-**No edits needed** in `search_service`, `today_service`, `context_service`, `quick_add_service`,
-`scheduler_service`, `main.dashboard_get`, `lib/navigation.ts`, `lib/search.ts`. A test-only module (`alpha` in
-`backend/tests/test_module_framework.py`) goes through all of them unchanged.
+**No edits needed** (verified by Habits):
+- **Aggregators:** `search_service`, `today_service`, `context_service`, `quick_add_service`, `scheduler_service`,
+  `main.py` (routes and `dashboard_get`).
+- **Frontend shared lists:** `lib/navigation.ts`, `lib/search.ts`, `lib/today.ts`, `hooks/useTodayActions.ts`,
+  `app/today/page.tsx`, `lib/dashboardLayout.ts`, `app/page.tsx`, `lib/areas.ts`.
 
-**Count for a Habits-shaped module** (search + Today + dashboard + AI context + Quick Add + nav + hourly job; models,
-REST, AI tools, widget):
-- before MRK-20: about **17 central files**: registry ×2, `models.py`, `main.py` (routes and dashboard),
-  `search_service`, `today_service`, `context_service`, `quick_add_service`, `scheduler_service`, `tool_registry`,
-  `navigation.ts`, `search.ts`, `quickAdd.ts`, `dashboardLayout.ts`, `widgets.tsx`, `areas.ts`, plus `tools.py`.
-- after MRK-20: **2 always** (the two registries), plus `models.py`/migration and `main.py` routes. The rest are
-  only conditional and none is an aggregator: `tool_registry`/`tools`, `quickAdd.ts`, `dashboardLayout.ts` +
-  `widgets.tsx`, `areas.ts`.
+One snapshot test lists the visible navigation on purpose (`lib/moduleFramework.test.mjs`) and is updated when
+navigation changes.
 
 ## 9. Tests that keep it honest
 
@@ -192,3 +200,34 @@ REST, AI tools, widget):
   - derived registries equal the previous lists
   - search params match the backend hrefs
   - a new module appears in navigation from its manifest alone
+
+## 10. Acceptance test: Habits pilot (MRK-21)
+
+Habits ([habits.md](habits.md)) uses search, Today with row actions, a dashboard section and widget, AI context,
+REST and the runtime flag. Quick Add is left out: its frontend form definitions are still central.
+
+**Framework gaps found and fixed generically (one-time, not per module):**
+1. No router slot → `ModuleIntegrations.routers`, mounted by `main.py` from the registry.
+2. Today row actions hard-coded per type → `MODULE_UI.todayActions` and one generic path in `lib/today.ts`,
+   `useTodayActions` and the Today page.
+3. Dashboard widgets and components central → `MODULE_UI.widgets` + `modules/registry.tsx`, and
+   `WIDGETS = CORE_WIDGETS + MODULE_WIDGETS`. Module widgets that are hidden by default keep the 4B.1 layout.
+4. Area and type labels central → `MODULE_UI.area` / `typeLabels`, with a fallback in `areaMeta` / `TYPE_LABELS`.
+5. Tooling only covered root files → `npm test` and CI pyflakes include `modules/**`. The architecture tests cover
+   module packages, including models and import isolation.
+
+**Central files touched by the Habits PR outside the module folders:**
+- **Required for every future module:** `module_registry.py`, `lib/modules.ts`.
+- **Required when the module stores data:** `models.py` (one line) and the migration with its table-set pin.
+- **Required when the module has a widget:** `frontend/modules/registry.tsx`.
+- **One-time framework fixes** (not needed again): `main.py`, `module_contracts.py`, `lib/today.ts`,
+  `hooks/useTodayActions.ts`, `app/today/page.tsx`, `lib/dashboardLayout.ts`, `app/page.tsx`, `lib/areas.ts`,
+  `package.json`, `.github/workflows/ci.yml`, `backend/modules/__init__.py`.
+- **Test pins updated once:** the habits entry moved from planned to implemented (`test_module_registry`,
+  `modules.test`), the dashboard default-layout tests separate core from module widgets, and the navigation counts
+  now derive from `NAV_PAGES`.
+
+**Verdict:** accepted. No aggregator has Habits-specific code (AST purity test). Search, Today, dashboard, AI context
+and REST picked Habits up from its `ModuleDef`; disabling it in Settings removes it everywhere, and re-enabling
+restores its data.
+

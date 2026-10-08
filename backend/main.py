@@ -285,6 +285,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# MRK-21: REST modulů z `ModuleIntegrations.routers` (modules/<id>/router.py). Globální dependencies výše (auth,
+# brána vypnutého modulu) platí i pro ně – nový modul do main.py nic nepřidává.
+for _owner, _module_router in all_contributions("routers"):
+    app.include_router(_module_router)
+
 
 def _get_client_ip(request: Request) -> str:
     xff = request.headers.get("x-forwarded-for")

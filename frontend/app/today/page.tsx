@@ -27,6 +27,7 @@ import {
   groupTimeline,
   isEmptyDay,
   itemsLabel,
+  moduleAction,
   normalizeToday,
   SEVERITY_META,
   shortDate,
@@ -39,6 +40,8 @@ import {
   type TodayPayload,
 } from "@/lib/today";
 import { cx } from "@/lib/ui";
+
+const CORE_ACTIONS: TodayActionId[] = ["complete", "snooze", "record_result"];
 
 type ActionsCtx = {
   busyKey: string | null;
@@ -316,9 +319,30 @@ function RowActions({ item, ctx, snoozeOpen, onToggleSnooze }: { item: TodayItem
           disabled={locked}
           onClick={() => void ctx.run(item, "complete")}
         >
-          <span aria-hidden="true">✓</span> Hotovo
+          <span aria-hidden="true">✓</span> {moduleAction(item, "complete")?.button ?? "Hotovo"}
         </Button>
       ) : null}
+      {/* MRK-21: další akce modulů z manifestu (např. „Přeskočit" u návyku) – jedna obecná cesta */}
+      {item.actions
+        .filter((a) => !CORE_ACTIONS.includes(a))
+        .map((a) => {
+          const declared = moduleAction(item, a);
+          return declared ? (
+            <Button
+              key={a}
+              size="sm"
+              variant={declared.primary ? "secondary" : "ghost"}
+              data-action-primary={declared.primary ? "" : undefined}
+              aria-label={actionLabel(item, a)}
+              busy={ctx.busyKey === `${item.id}:${a}`}
+              busyLabel="Ukládám…"
+              disabled={locked}
+              onClick={() => void ctx.run(item, a)}
+            >
+              {declared.button}
+            </Button>
+          ) : null;
+        })}
       {item.actions.includes("snooze") && ctx.snoozeOptions.length ? (
         <Button
           size="sm"

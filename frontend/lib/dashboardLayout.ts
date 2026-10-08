@@ -9,7 +9,7 @@
  * (nevykreslí se, nic nenačte, není ani mezi „Skrytými"), ale jeho uložený záznam zůstane v úložišti beze změny
  * (`preserveUnavailable`) – po opětovném zapnutí se vrátí na své místo s uloženou viditelností a velikostí.
  */
-import type { ModuleAccess } from "./modules.ts";
+import { MODULE_UI, MODULES, type ModuleAccess } from "./modules.ts";
 
 export type WidgetSize = "small" | "medium" | "large" | "full";
 
@@ -28,7 +28,8 @@ export const DESKTOP_COLUMNS = 6;
 /** Tablet: 2 sloupce – malý a střední = 1, velký a celá šířka = 2. */
 export const TABLET_SPAN: Record<WidgetSize, 1 | 2> = { small: 1, medium: 1, large: 2, full: 2 };
 
-/** Id widgetů v registru (stabilní, ukládají se natrvalo). Komponenty: components/dashboard/widgets.tsx. */
+/** Id widgetů JÁDRA a starších modulů (stabilní, ukládají se natrvalo). Komponenty: components/dashboard/widgets.tsx.
+ * Widgety modulů z balíčků modules/<id>/ dodává `MODULE_UI.<id>.widgets` (komponenty v modules/registry.tsx). */
 export const WIDGET_IDS = [
   "daily_briefing",
   "weekly_review",
@@ -59,7 +60,7 @@ export interface WidgetDef {
   modules?: string[];
 }
 
-export const WIDGETS: WidgetDef[] = [
+export const CORE_WIDGETS: WidgetDef[] = [
   { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 10, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
   { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 20, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
   { id: "today", title: "Dnes", area: null, defaultVisible: true, defaultOrder: 30, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
@@ -72,6 +73,12 @@ export const WIDGETS: WidgetDef[] = [
   { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
   { id: "quick_actions", title: "Rychlé akce", area: null, defaultVisible: true, defaultOrder: 110, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: false },
 ];
+
+/** MRK-21: widgety z manifestů modulů (jen implementované moduly). */
+export const MODULE_WIDGETS: WidgetDef[] = MODULES.filter((m) => m.implemented).flatMap((m) => MODULE_UI[m.id]?.widgets ?? []);
+
+/** Celý registr: jádro + moduly (výchozí pořadí řeší `defaultOrder`). */
+export const WIDGETS: WidgetDef[] = [...CORE_WIDGETS, ...MODULE_WIDGETS];
 
 /** Widgety, které smí aktuální moduly ukázat (pořadí registru). */
 export function availableWidgets(access: ModuleAccess, defs: WidgetDef[] = WIDGETS): WidgetDef[] {

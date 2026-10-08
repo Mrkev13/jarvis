@@ -11,6 +11,9 @@
  * Flagy řídí dostupnost, ne oprávnění (auth řeší proxy.ts + backend).
  */
 
+import type { WidgetDef } from "./dashboardLayout.ts";
+import { HABITS_UI } from "../modules/habits/manifest.ts";
+
 export const CAPABILITIES = ["nav", "search", "quick_add", "today", "dashboard", "ai_context"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -42,7 +45,7 @@ export const MODULES: ModuleDef[] = [
   { id: "mff", label: "Marvel Future Fight", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["mff_character"], routes: ["/mff"], quickAddKinds: [] },
   planned("food", "Jídlo"),
   planned("fitness", "Fitness"),
-  planned("habits", "Návyky"),
+  { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),
@@ -61,9 +64,35 @@ export interface ModuleUi {
   nav?: { href: string; label: string; keywords: string[]; order: number };
   searchParams?: string[];
   searchGroupOrder?: number;
+  /** MRK-21: barva oblasti (celé názvy tříd doslova, ať je Tailwind najde) – štítky, skupiny vyhledávání. */
+  area?: { bg: string; border: string; text: string };
+  /** Český název typu záznamu (řádky Dnes pro čtečku: „Návyk: Rehab"). */
+  typeLabels?: Record<string, string>;
+  /**
+   * Akce řádku Dnes pro typy záznamů modulu (`TodayItem.actions` z backendu). Jen data: endpoint modulu
+   * (`{id}` = id záznamu z refu) a texty – Dnes je provede jednou obecnou cestou (useTodayActions).
+   */
+  todayActions?: Record<string, Record<string, ModuleTodayAction>>;
+  /** Widgety Řídicího centra (komponenty v modules/registry.tsx pod stejným id). */
+  widgets?: WidgetDef[];
+}
+
+export interface ModuleTodayAction {
+  /** Text tlačítka („Splněno"). */
+  button: string;
+  /** Přístupný název s názvem záznamu – `{title}` se nahradí („Splnit návyk: {title}"). */
+  ariaLabel: string;
+  /** Hláška po úspěchu – `{title}` se nahradí. */
+  success: string;
+  /** POST endpoint modulu, `{id}` = id záznamu („/habits/{id}/entries?source=today"). */
+  path: string;
+  body?: Record<string, unknown>;
+  /** Hlavní akce řádku (fokus po obnovení); jinak vedlejší. */
+  primary?: boolean;
 }
 
 export const MODULE_UI: Record<string, ModuleUi> = {
+  habits: HABITS_UI,
   goals: {
     nav: { href: "/goals", label: "Cíle", keywords: ["goals", "goal", "cíl", "progres"], order: 10 },
     searchParams: ["goal"], searchGroupOrder: 50,
@@ -91,6 +120,20 @@ export const MODULE_UI: Record<string, ModuleUi> = {
 };
 
 /** Modul, kterému patří druh Rychlého přidání (null = jádro, např. připomínka). */
+/** Deklarace akce Dnes pro typ záznamu (null = akce jádra nebo neznámá). */
+export function moduleTodayAction(entityType: string, action: string, ui: Record<string, ModuleUi> = MODULE_UI): ModuleTodayAction | null {
+  for (const m of Object.values(ui)) {
+    const found = m.todayActions?.[entityType]?.[action];
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Akce, které modul pro daný typ záznamu deklaruje (pro převzetí `TodayItem.actions`). */
+export function moduleTodayActionIds(entityType: string, ui: Record<string, ModuleUi> = MODULE_UI): string[] {
+  return Object.values(ui).flatMap((m) => Object.keys(m.todayActions?.[entityType] ?? {}));
+}
+
 export function quickAddOwner(kind: string, modules: ModuleDef[] = MODULES): ModuleDef | null {
   return modules.find((m) => m.quickAddKinds.includes(kind)) ?? null;
 }
