@@ -14,6 +14,7 @@ import reminder_service as rs
 from context_format import MAX_ITEMS, WEEKDAYS, list_or_none, short
 from models import Memory, Notification, Reminder
 from module_contracts import (
+    ChangeSource, activity_changes,
     ContextRequest, ContextSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
     TodaySource,
 )
@@ -256,6 +257,13 @@ def reminder_display(f: dict, ctx: dict, today) -> dict:
 
 
 CORE_INTEGRATIONS = ModuleIntegrations(
+    # MRK-28: změny jádra (system.* je provoz, ne změna pro člověka – ten change_feed vyřadí jako šum)
+    changes=(
+        ChangeSource("reminders", areas=frozenset({"reminders"}),
+                     from_activity=activity_changes({"reminder": "/reminders?reminder={id}"}, "/reminders")),
+        ChangeSource("memory", areas=frozenset({"memory"}),
+                     from_activity=activity_changes({"memory": "/memory?memory={id}"}, "/memory")),
+    ),
     search=(
         SearchSource("reminders", 40, search_reminders),
         SearchSource("memory", 80, search_memories),

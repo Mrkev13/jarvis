@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from context_format import list_or_none, short
 from module_contracts import (
+    ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, SearchSource, TodaySource,
 )
 from modules.habits import service
@@ -80,6 +81,12 @@ def habit_names(db):
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource(
+        "habits", areas=frozenset({"habits"}),
+        from_event=event_changes({"entry": "/habits"}, {"habits.entry.done": "Návyk splněn",
+                                                        "habits.entry.skipped": "Návyk přeskočen"}),
+        from_activity=activity_changes({"habit": "/habits?habit={id}"}, "/habits"),
+    ),),
     search=(SearchSource("habits", 75, search_habits),),
     today=(TodaySource("habits", 30, timeline=today_habits),),
     entity_refs=(EntityRef("habit", "/habits?habit={id}"),),

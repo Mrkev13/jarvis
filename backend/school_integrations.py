@@ -13,6 +13,7 @@ import quick_add_text as qt
 from context_format import MAX_ITEMS, WINDOW_DAYS, list_or_none, short
 from models import Assignment, Exam, Goal, Subject
 from module_contracts import (
+    ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule,
     SearchSource, TodaySource,
 )
@@ -359,6 +360,14 @@ def quick_add_output(ctx: dict) -> dict:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    # MRK-28: dokončení/znovuotevření = doménové události, ostatní změny školy z Aktivity
+    changes=(ChangeSource(
+        "school", areas=frozenset({"school"}),
+        from_event=event_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}"},
+                                 {"school.assignment.completed": "Úkol splněn", "school.assignment.reopened": "Úkol znovu otevřen",
+                                  "school.exam.closed": "Zkouška uzavřena", "school.exam.reopened": "Zkouška znovu otevřena"}),
+        from_activity=activity_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}"}, "/school"),
+    ),),
     search=(SearchSource("school", 10, search_school),),
     today=(
         TodaySource("school", 20, timeline=today_school_timeline, overdue=today_school_overdue,

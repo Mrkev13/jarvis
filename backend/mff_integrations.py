@@ -3,7 +3,7 @@ search_service, main (GET /dashboard „mff") a context_service (oblast jen pro 
 from __future__ import annotations
 
 from models import MffCharacter
-from module_contracts import ContextSection, DashboardSection, ModuleIntegrations, SearchSource
+from module_contracts import ChangeSource, activity_changes, ContextSection, DashboardSection, ModuleIntegrations, SearchSource
 from text_utils import join_parts
 
 ROW_LIMIT = 500
@@ -64,6 +64,8 @@ def get_mff_quick_status(db):
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource("mff", areas=frozenset({"mff"}),
+                          from_activity=activity_changes({"mff_character": "/mff?character={id}"}, "/mff")),),
     search=(SearchSource("mff", 100, search_mff),),
     dashboard=(DashboardSection("mff", lambda db, access: get_mff_quick_status(db)),),
     # MFF nemá CURRENT STATE sekci; oblast slouží routingu toolů (A5) a řazení paměti.

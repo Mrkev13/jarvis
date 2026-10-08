@@ -146,6 +146,94 @@ class ScheduledStep:
     run: Callable[[Any], Any]
 
 
+# ---------- „Co se změnilo" (change_feed, MRK-28) ----------
+
+@dataclass(frozen=True)
+class ChangeItem:
+    """Jedna změna v přehledu „Co se změnilo" – stabilní tvar odpovědi GET /changes (docs/what-changed.md).
+    `id` = „event:<id>" / „activity:<id>", `module_id` None = jádro, `source` = „event" | „activity"."""
+    id: str
+    occurred_at: str
+    module_id: str | None
+    entity_type: str | None
+    entity_id: str | None
+    kind: str
+    title: str
+    summary: str
+    href: str | None
+    source: str
+
+
+@dataclass(frozen=True)
+class ChangeDraft:
+    """Co modul řekne o jedné změně; id, vlastníka, čas a zdroj doplní change_feed."""
+    kind: str
+    title: str
+    entity_type: str | None = None
+    entity_id: str | None = None
+    summary: str = ""
+    href: str | None = None
+
+
+@dataclass(frozen=True)
+class ChangeSource:
+    """Změny modulu pro „Co se změnilo". Doménové události modulu (vlastník = `module_id` události) mapuje
+    `from_event(event, title)`, kde `title` je shrnutí jeho projekce do Aktivity (payload události jména nenese);
+    záznamy Aktivity oblastí `areas` (legacy toky bez události) mapuje `from_activity(row)`. None = položku
+    nezobrazit. Řazení, dedupe, šum, filtry a limity drží change_feed."""
+    name: str
+    areas: frozenset[str] = frozenset()
+    from_event: Callable[[Any, str | None], ChangeDraft | None] | None = None
+    from_activity: Callable[[Any], ChangeDraft | None] | None = None
+
+
+# Akce Aktivity → druh změny (stabilní slovník pro frontend); neznámá akce projde beze změny.
+ACTIVITY_KINDS = {"create": "created", "update": "updated", "delete": "deleted", "complete": "completed",
+                  "archive": "archived", "restore": "restored", "check": "updated", "snooze": "snoozed",
+                  "cancel": "cancelled"}
+
+
+def entity_slug(entity_type: str | None) -> str | None:
+    """„WotGrind" → „wot_grind", „habit_entry" zůstane – Aktivita historicky míchá oba zápisy."""
+    if not entity_type:
+        return None
+    out = []
+    for i, ch in enumerate(entity_type):
+        if ch.isupper() and i and entity_type[i - 1] != "_":
+            out.append("_")
+        out.append(ch.lower())
+    return "".join(out)
+
+
+def activity_changes(hrefs: dict[str, str], default_href: str | None = None) -> Callable[[Any], ChangeDraft | None]:
+    """Běžné mapování řádku Aktivity: druh z akce, titulek = shrnutí, odkaz podle typu záznamu (`{id}` v šabloně).
+    Smazaný záznam už otevřít nejde → bez odkazu."""
+    def build(row) -> ChangeDraft | None:
+        slug = entity_slug(row.entity_type)
+        kind = ACTIVITY_KINDS.get(row.action_type, row.action_type)
+        template = hrefs.get(slug or "", default_href)
+        href = None
+        if kind != "deleted" and template:
+            href = template.format(id=row.entity_id) if "{id}" in template and row.entity_id is not None else (
+                template.split("?")[0] if "{id}" in template else template)
+        return ChangeDraft(kind=kind, title=row.summary, entity_type=slug,
+                           entity_id=None if row.entity_id is None else str(row.entity_id), href=href)
+    return build
+
+
+def event_changes(hrefs: dict[str, str], fallback_titles: dict[str, str]) -> Callable[[Any, str | None], ChangeDraft | None]:
+    """Běžné mapování doménové události `<modul>.<agregát>.<akce>`: druh = akce, odkaz podle agregátu."""
+    def build(event, title: str | None) -> ChangeDraft | None:
+        kind = event.type.rsplit(".", 1)[-1]
+        template = hrefs.get(event.aggregate_type)
+        href = None
+        if template:
+            href = template.format(id=event.aggregate_id) if "{id}" in template and event.aggregate_id else template
+        return ChangeDraft(kind=kind, title=title or fallback_titles.get(event.type, event.type),
+                           entity_type=event.aggregate_type, entity_id=event.aggregate_id, href=href)
+    return build
+
+
 # ---------- souhrn příspěvků modulu ----------
 
 
@@ -159,6 +247,7 @@ class ModuleIntegrations:
     quick_add_rules: tuple[QuickAddRule, ...] = ()
     quick_add_kinds: tuple[QuickAddKind, ...] = ()
     hourly: tuple[ScheduledStep, ...] = ()
+    changes: tuple[ChangeSource, ...] = ()
     # REST modulu (fastapi.APIRouter). main.py připojí routery VŠECH modulů; vypnutý modul hlídá
     # main.require_module_available (404 podle `api_prefixes`) a auth platí stejně jako pro ostatní cesty.
     routers: tuple[Any, ...] = ()
@@ -178,5 +267,6 @@ CONTRIBUTION_CAPABILITY: dict[str, str | None] = {
     "quick_add_rules": "quick_add",
     "quick_add_kinds": "quick_add",
     "hourly": None,
+    "changes": None,
     "routers": None,
 }

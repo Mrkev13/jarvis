@@ -2612,6 +2612,24 @@ def _parse_iso_dt(s: str | None) -> datetime | None:
     return parsed
 
 
+@app.get("/changes")
+def changes_get(since: str | None = None, module: str | None = None, limit: int = 50):
+    """MRK-28: „Co se změnilo" – změny za období z doménových událostí a Aktivity (bez LLM).
+    Kontrakt: docs/what-changed.md."""
+    import change_feed as cf
+    from domain_events import now_utc
+    try:
+        since_dt = cf.parse_since(since, now_utc())
+        modules = cf.parse_modules(module)
+    except cf.ChangeFeedError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    db = SessionLocal()
+    try:
+        return cf.build(db, current_access(), since=since_dt, modules=modules, limit=cf.clamp_limit(limit))
+    finally:
+        db.close()
+
+
 @app.get("/activity")
 def activity_list(
     area: str | None = None,

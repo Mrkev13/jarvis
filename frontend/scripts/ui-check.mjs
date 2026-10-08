@@ -54,6 +54,8 @@ const PAGES = [
   ["/finance", "finance"],
   ["/goals", "goals"],
   ["/activity", "activity"],
+  // MRK-28
+  ["/changes", "changes"],
   ["/memory", "memory"],
   ["/wot", "wot"],
   ["/mff", "mff"],

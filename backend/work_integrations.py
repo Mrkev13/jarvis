@@ -10,6 +10,7 @@ from context_format import fmt_num, short
 from goal_history_service import compute_goal_progress_and_value
 from models import Goal, WorkSession
 from module_contracts import (
+    ChangeSource, activity_changes,
     ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
 )
 from text_utils import format_czk_cz, format_date_cz, format_hours_cz, join_parts
@@ -198,6 +199,8 @@ def work_display(f: dict, ctx: dict, today) -> dict:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource("work", areas=frozenset({"work"}),
+                          from_activity=activity_changes({"work_session": "/work?session={id}"}, "/work")),),
     search=(SearchSource("work", 50, search_work),),
     dashboard=(DashboardSection("work", lambda db, access: get_work_with_goal(db)),),
     context=(
