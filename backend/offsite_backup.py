@@ -31,6 +31,7 @@ DEFAULT_RETENTION_TIMEZONE = "Europe/Prague"
 
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _CHECKSUM = re.compile(r"[a-f0-9]{64}\Z")
+_STAGING_NAME = re.compile(r"\.staging-([A-Za-z0-9][A-Za-z0-9._-]{0,127})-([a-f0-9]{32})\Z")
 _WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{number}" for number in range(1, 10)),
@@ -96,6 +97,26 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _flush_file(handle) -> None:
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
+def _flush_directory(path: Path) -> None:
+    """Best-effort directory durability; Windows does not expose portable directory fsync."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def _is_checksum(value: object) -> bool:
@@ -456,25 +477,65 @@ class LocalFilesystemOffsiteTarget:
             raise _TransferError("invalid publication metadata")
         self.root.mkdir(parents=True, exist_ok=True)
         final = self._run_dir(metadata.run_id)
-        reserved = False
+        staging = self.root / f".staging-{metadata.run_id}-{uuid.uuid4().hex}"
+        published = False
         try:
-            final.mkdir(exist_ok=False)
-            reserved = True
-            payload_target = final / self._payload_name(metadata.encrypted)
+            if final.exists() or final.is_symlink():
+                raise FileExistsError(metadata.run_id)
+            staging.mkdir(exist_ok=False)
+            payload_target = staging / self._payload_name(metadata.encrypted)
             source_checksum = _sha256(payload)
             with payload.open("rb") as source, payload_target.open("xb") as output:
                 shutil.copyfileobj(source, output, length=1024 * 1024)
+                _flush_file(output)
             if _sha256(payload_target) != source_checksum:
                 raise _TransferError("offsite payload verification failed")
-            with (final / "metadata.json").open("x", encoding="utf-8", newline="\n") as handle:
+            with (staging / "metadata.json").open("x", encoding="utf-8", newline="\n") as handle:
                 json.dump(metadata.to_dict(), handle, ensure_ascii=True, sort_keys=True, indent=2)
                 handle.write("\n")
-            with (final / "complete").open("xb"):
-                pass
+                _flush_file(handle)
+            with (staging / "complete").open("xb") as marker:
+                _flush_file(marker)
+            _flush_directory(staging)
+            staging.rename(final)
+            published = True
+            _flush_directory(self.root)
         except Exception as exc:
-            if reserved:
-                shutil.rmtree(final, ignore_errors=True)
+            if not published and staging.exists() and not self._is_linklike(staging):
+                shutil.rmtree(staging, ignore_errors=True)
             raise _TransferError("offsite publication failed") from exc
+
+    def cleanup_abandoned_staging(self, *, older_than: datetime, dry_run: bool) -> int:
+        """Remove only old provider-owned staging directories; completed runs are never candidates."""
+        if older_than.tzinfo is None or older_than.utcoffset() is None:
+            raise ValueError("older_than must be timezone-aware")
+        if not self.root.is_dir():
+            return 0
+        cutoff = older_than.astimezone(timezone.utc)
+        candidates: list[Path] = []
+        for entry in sorted(self.root.iterdir(), key=lambda item: item.name):
+            match = _STAGING_NAME.fullmatch(entry.name)
+            if not match or not _valid_identifier(match.group(1)):
+                continue
+            if self._is_linklike(entry) or not entry.is_dir():
+                continue
+            modified = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc)
+            if modified < cutoff:
+                candidates.append(entry)
+        if dry_run:
+            return len(candidates)
+        removed = 0
+        for entry in candidates:
+            quarantine = self.root / f".deleting-stage-{uuid.uuid4().hex}"
+            try:
+                entry.rename(quarantine)
+                shutil.rmtree(quarantine)
+                removed += 1
+            except OSError:
+                continue
+        if removed:
+            _flush_directory(self.root)
+        return removed
 
     @staticmethod
     def _is_linklike(path: Path) -> bool:
@@ -683,6 +744,7 @@ class RetentionPlan:
     keep: tuple[str, ...]
     delete: tuple[str, ...]
     invalid: tuple[str, ...]
+    verification_fresh: bool = False
 
 
 def plan_retention(
@@ -692,6 +754,27 @@ def plan_retention(
     weekly: int = DEFAULT_WEEKLY_RETENTION,
     monthly: int = DEFAULT_MONTHLY_RETENTION,
     timezone_name: str = DEFAULT_RETENTION_TIMEZONE,
+) -> RetentionPlan:
+    return _plan_retention(
+        runs,
+        daily=daily,
+        weekly=weekly,
+        monthly=monthly,
+        timezone_name=timezone_name,
+        verified_run_ids=None,
+        verification_fresh=False,
+    )
+
+
+def _plan_retention(
+    runs: list[OffsiteRunMetadata],
+    *,
+    daily: int,
+    weekly: int,
+    monthly: int,
+    timezone_name: str,
+    verified_run_ids: set[str] | None,
+    verification_fresh: bool,
 ) -> RetentionPlan:
     if min(daily, weekly, monthly) < 0:
         raise ValueError("retention counts must be nonnegative")
@@ -712,6 +795,7 @@ def plan_retention(
             and run.run_time.utcoffset() is not None
             and run.transfer_completed
             and run.checksum_result == "verified"
+            and (verified_run_ids is None or run_id in verified_run_ids)
         )
         if not is_valid or any(observation != run for observation in observations[1:]):
             invalid.add(run_id)
@@ -739,7 +823,45 @@ def plan_retention(
     select(monthly, lambda value: (value.year, value.month))
     keep_ordered = tuple(run.run_id for run in ordered if run.run_id in keep)
     delete_ordered = tuple(run.run_id for run in ordered if run.run_id not in keep)
-    return RetentionPlan(keep_ordered, delete_ordered, tuple(sorted(invalid)))
+    return RetentionPlan(
+        keep_ordered,
+        delete_ordered,
+        tuple(sorted(invalid)),
+        verification_fresh=verification_fresh,
+    )
+
+
+def plan_verified_retention(
+    target: OffsiteTarget,
+    *,
+    encryptor: Encryptor | None = None,
+    daily: int = DEFAULT_DAILY_RETENTION,
+    weekly: int = DEFAULT_WEEKLY_RETENTION,
+    monthly: int = DEFAULT_MONTHLY_RETENTION,
+    timezone_name: str = DEFAULT_RETENTION_TIMEZONE,
+    scratch_root: Path | None = None,
+) -> RetentionPlan:
+    """Build an executable plan only from runs verified from a freshly retrieved copy."""
+    runs = target.list_runs()
+    verified_run_ids = {
+        run.run_id
+        for run in runs
+        if verify_offsite_run(
+            target,
+            run.run_id,
+            encryptor=encryptor,
+            scratch_root=scratch_root,
+        ).success
+    }
+    return _plan_retention(
+        runs,
+        daily=daily,
+        weekly=weekly,
+        monthly=monthly,
+        timezone_name=timezone_name,
+        verified_run_ids=verified_run_ids,
+        verification_fresh=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -774,6 +896,11 @@ def cleanup_retention(target: OffsiteTarget, plan: RetentionPlan, *, dry_run: bo
         return CleanupResult(
             "retention_cleanup", True, OffsiteOutcome.SUCCESS, None, started, _now(),
             would_delete=plan.delete,
+        )
+    if not plan.verification_fresh:
+        return CleanupResult(
+            "retention_cleanup", False, OffsiteOutcome.RETENTION_CLEANUP_FAILURE,
+            None, started, _now(), failed=plan.delete,
         )
     deleted: list[str] = []
     failed: list[str] = []

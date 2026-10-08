@@ -23,7 +23,7 @@ An offsite target implements:
 - `retrieve_run(run_id, destination)` — copy the opaque artifact to caller-owned scratch space;
 - `delete_run(run_id)` — remove one explicitly selected expired run.
 
-`LocalFilesystemOffsiteTarget` is the first implementation. Its root contains one directory per validated portable run ID, `payload.tar` or `payload.age`, `metadata.json`, and an empty `complete` marker. It reserves a new run directory exclusively, writes without overwrite, verifies the transferred payload bytes, and makes the run visible only after the marker exists. Reusing a run ID fails; it never replaces the existing artifact. Provider-controlled run directories and child files may not be symlinks or Windows junctions/reparse directories. Delete is restricted to a validated completed run below the provider root and first atomically renames it to a unique provider-owned quarantine name.
+`LocalFilesystemOffsiteTarget` is the first implementation. Its root contains one directory per validated portable run ID, `payload.tar` or `payload.age`, `metadata.json`, and an empty `complete` marker. It writes and fsyncs files under a unique `.staging-<run-id>-<uuid>` directory, writes/fsyncs the marker last, then renames the complete staging directory to the final run ID. A crash before publication therefore cannot reserve the final run ID; retry uses a new staging directory. `cleanup_abandoned_staging` removes only validated, old provider-owned staging directories and supports dry-run. The provider verifies transferred payload bytes before publication. Reusing a completed run ID fails and never replaces the existing artifact. Provider-controlled run directories and child files may not be symlinks or Windows junctions/reparse directories. Delete is restricted to a validated completed run below the provider root and first atomically renames it to a unique provider-owned quarantine name.
 
 S3, Backblaze B2, Google Drive and OneDrive adapters should implement the same opaque-object operations. Cloud credentials, SDKs, retries and multipart uploads are intentionally not part of MRK-25. A future provider must preserve immutable create semantics and publish a completion boundary equivalent to the filesystem marker.
 
@@ -59,7 +59,9 @@ Structured outcomes are allowlisted: `success`, `local_backup_failure`, `encrypt
 
 ## Retention
 
-`plan_retention` is provider-independent and defaults to the `Europe/Prague` calendar while storing/comparing aware UTC instants. It keeps the newest valid completed run in each of:
+The pure `plan_retention` helper is provider-independent and useful for deterministic dry-runs. An executable cleanup plan must come from `plan_verified_retention`, which retrieves and fully verifies every candidate immediately before planning; `cleanup_retention` refuses a non-fresh plan. A corrupt newest artifact is marked invalid and cannot displace an older recoverable backup.
+
+Retention defaults to the `Europe/Prague` calendar while storing/comparing aware UTC instants. It keeps the newest freshly verified completed run in each of:
 
 - the 14 newest distinct local days;
 - the 8 newest distinct local ISO weeks;
@@ -67,7 +69,7 @@ Structured outcomes are allowlisted: `success`, `local_backup_failure`, `encrypt
 
 The three sets are unioned by run ID. The newest valid completed run is always retained, even if all tier counts are zero. Within every bucket only its newest run qualifies. Invalid/incomplete metadata is reported separately and is never automatically deleted.
 
-`cleanup_retention(..., dry_run=True)` returns the deterministic delete set without calling the provider. Real cleanup records individual successes/failures and returns `retention_cleanup_failure` if any deletion fails; it does not hide partial cleanup.
+`cleanup_retention(..., dry_run=True)` returns the deterministic delete set without calling the provider. Real cleanup requires `plan.verification_fresh`, records individual successes/failures and returns `retention_cleanup_failure` if any deletion fails; it does not hide partial cleanup.
 
 ## Scratch restore drill and TAR safety
 

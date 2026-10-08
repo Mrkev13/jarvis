@@ -1,11 +1,12 @@
 import hashlib
 import io
 import json
+import os
 import shutil
 import sys
 import tarfile
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from offsite_backup import (
     cleanup_retention,
     copy_completed_run,
     plan_retention,
+    plan_verified_retention,
     safe_extract_tar,
     verify_offsite_run,
 )
@@ -309,6 +311,30 @@ def test_existing_run_is_never_overwritten(tmp_path: Path):
     assert _tree_digest(tmp_path / "offsite" / first.run_id) == original
 
 
+def test_filesystem_provider_publishes_complete_staging_directory_atomically(tmp_path: Path, monkeypatch):
+    source = tmp_path / "source"
+    run_path = _write_backup(source)
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+    original_rename = Path.rename
+    observed = []
+
+    def inspect_rename(staging: Path, final: Path):
+        if staging.name.startswith(".staging-"):
+            observed.append(staging.name)
+            assert not final.exists()
+            assert (staging / "payload.tar").is_file()
+            assert (staging / "metadata.json").is_file()
+            assert (staging / "complete").is_file()
+        return original_rename(staging, final)
+
+    monkeypatch.setattr(Path, "rename", inspect_rename)
+    result = copy_completed_run(source, run_path, target)
+
+    assert result.success
+    assert len(observed) == 1
+    assert [run.run_id for run in target.list_runs()] == [result.run_id]
+
+
 def test_filesystem_provider_verifies_transferred_payload(tmp_path: Path, monkeypatch):
     payload = tmp_path / "payload.tar"
     payload.write_bytes(b"expected payload")
@@ -437,7 +463,7 @@ def test_retention_cleanup_deletes_only_expired_completed_run(tmp_path: Path):
     assert copy_completed_run(source, old_path, target).success
     new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
     assert copy_completed_run(source, new_path, target).success
-    plan = plan_retention(target.list_runs(), daily=0, weekly=0, monthly=0)
+    plan = plan_verified_retention(target, daily=0, weekly=0, monthly=0)
 
     dry_run = cleanup_retention(target, plan, dry_run=True)
     assert dry_run.would_delete == ("20261007_120000_000001",)
@@ -447,6 +473,67 @@ def test_retention_cleanup_deletes_only_expired_completed_run(tmp_path: Path):
     assert cleanup.success
     assert cleanup.deleted == ("20261007_120000_000001",)
     assert [run.run_id for run in target.list_runs()] == ["20261008_120000_000001"]
+
+
+def test_retention_freshly_verifies_runs_before_deleting_older_copy(tmp_path: Path):
+    source = tmp_path / "source"
+    old_path = _write_backup(source, run_id="20261007_120000_000001", started_at="2026-10-07T12:00:00Z")
+    target_root = tmp_path / "offsite"
+    target = LocalFilesystemOffsiteTarget(target_root)
+    assert copy_completed_run(source, old_path, target).success
+    new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
+    assert copy_completed_run(source, new_path, target).success
+    newest_payload = target_root / "20261008_120000_000001" / "payload.tar"
+    newest_payload.write_bytes(b"corrupt after publication")
+
+    plan = plan_verified_retention(target, daily=0, weekly=0, monthly=0)
+
+    assert plan.keep == ("20261007_120000_000001",)
+    assert plan.delete == ()
+    assert plan.invalid == ("20261008_120000_000001",)
+    assert plan.verification_fresh is True
+
+
+def test_cleanup_refuses_non_fresh_retention_plan(tmp_path: Path):
+    source = tmp_path / "source"
+    old_path = _write_backup(source, run_id="20261007_120000_000001", started_at="2026-10-07T12:00:00Z")
+    target = LocalFilesystemOffsiteTarget(tmp_path / "offsite")
+    assert copy_completed_run(source, old_path, target).success
+    new_path = _write_backup(source, run_id="20261008_120000_000001", started_at="2026-10-08T12:00:00Z")
+    assert copy_completed_run(source, new_path, target).success
+    unverified = plan_retention(target.list_runs(), daily=0, weekly=0, monthly=0)
+
+    result = cleanup_retention(target, unverified, dry_run=False)
+
+    assert result.code is OffsiteOutcome.RETENTION_CLEANUP_FAILURE
+    assert result.deleted == ()
+    assert len(target.list_runs()) == 2
+
+
+def test_abandoned_unique_staging_does_not_block_retry_and_can_be_cleaned(tmp_path: Path):
+    source = tmp_path / "source"
+    run_path = _write_backup(source)
+    target_root = tmp_path / "offsite"
+    target = LocalFilesystemOffsiteTarget(target_root)
+    target_root.mkdir()
+    abandoned = target_root / ".staging-20261008_120000_000001-00000000000000000000000000000000"
+    abandoned.mkdir()
+    (abandoned / "partial").write_bytes(b"partial")
+    old = (datetime.now(timezone.utc) - timedelta(days=2)).timestamp()
+    os.utime(abandoned, (old, old))
+
+    result = copy_completed_run(source, run_path, target)
+
+    assert result.success
+    assert abandoned.is_dir()
+    assert target.cleanup_abandoned_staging(
+        older_than=datetime.now(timezone.utc) - timedelta(days=1), dry_run=True
+    ) == 1
+    assert abandoned.is_dir()
+    assert target.cleanup_abandoned_staging(
+        older_than=datetime.now(timezone.utc) - timedelta(days=1), dry_run=False
+    ) == 1
+    assert not abandoned.exists()
 
 
 def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: Path):
@@ -462,7 +549,7 @@ def test_invalid_runs_are_preserved_and_cleanup_failure_is_structured(tmp_path: 
         def delete_run(self, run_id: str) -> None:
             raise OSError("secret cleanup path")
 
-    forced = replace(plan, delete=("expired",))
+    forced = replace(plan, delete=("expired",), verification_fresh=True)
     dry = cleanup_retention(CleanupFailureTarget(), forced, dry_run=True)
     failed = cleanup_retention(CleanupFailureTarget(), forced, dry_run=False)
     assert dry.success and dry.deleted == () and dry.would_delete == ("expired",)
