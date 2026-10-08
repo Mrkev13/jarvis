@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 import domain_events as de
-from briefing_snapshot import meaningful_activity
+from briefing_snapshot import _NOISE_ACTIONS, _NOISE_AREAS, meaningful_activity
 from models import ActivityLog, DomainEvent
 from module_contracts import ChangeItem
 
@@ -48,9 +48,9 @@ def parse_since(raw: str | None, now: datetime) -> datetime:
         return now - SINCE_DEFAULT
     try:
         dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
-    except ValueError as exc:
+        dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
         raise ChangeFeedError("Parametr since musí být čas ve formátu ISO 8601.") from exc
-    dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
     if dt > now:
         raise ChangeFeedError("Parametr since nesmí být v budoucnosti.")
     return max(dt, now - SINCE_MAX)
@@ -66,7 +66,7 @@ def parse_modules(raw: str | None) -> frozenset[str] | None:
 
 
 def clamp_limit(limit: int | None) -> int:
-    return max(1, min(int(limit or LIMIT_DEFAULT), LIMIT_MAX))
+    return max(1, min(int(LIMIT_DEFAULT if limit is None else limit), LIMIT_MAX))
 
 
 def _safe(fn, *args):
@@ -78,8 +78,8 @@ def _safe(fn, *args):
         return None
 
 
-def _item(draft, *, item_id: str, occurred: datetime, owner: str | None, source: str) -> ChangeItem:
-    return ChangeItem(id=item_id, occurred_at=de.iso(occurred), module_id=owner, entity_type=draft.entity_type,
+def _item(draft, *, item_id: str, occurred: datetime, owner: str | None, source: str) -> tuple[datetime, ChangeItem]:
+    return occurred, ChangeItem(id=item_id, occurred_at=de.iso(occurred), module_id=owner, entity_type=draft.entity_type,
                       entity_id=draft.entity_id, kind=draft.kind, title=draft.title, summary=draft.summary,
                       href=draft.href, source=source)
 
@@ -93,32 +93,40 @@ def collect(db: Session, access, *, since: datetime) -> tuple[list[ChangeItem], 
     events = (db.query(DomainEvent).filter(DomainEvent.occurred_at >= since)
               .order_by(DomainEvent.id.desc()).limit(SCAN_MAX).all())
     since_naive = since.astimezone(timezone.utc).replace(tzinfo=None)  # Aktivita ukládá naivní UTC
-    rows = (db.query(ActivityLog).filter(ActivityLog.timestamp >= since_naive)
+    # provozní šum se vyřadí už v SQL, aby nespotřeboval limit skenu (zbytek politiky níže)
+    rows = (db.query(ActivityLog)
+            .filter(ActivityLog.timestamp >= since_naive, ActivityLog.area.notin_(_NOISE_AREAS),
+                    ActivityLog.action_type.notin_(_NOISE_ACTIONS))
             .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc()).limit(SCAN_MAX).all())
     truncated = len(events) >= SCAN_MAX or len(rows) >= SCAN_MAX
 
-    event_ids = {e.id for e in events}
-    projections: dict[int, str] = {}
+    # Šum a „vytvořeno i smazáno v okně" platí pro VŠECHNY řádky – i pro projekce událostí (jinak by se
+    # splnění smazaného úkolu ukázalo, dokud událost nesmaže retence).
+    kept_ids = {r.id for r in meaningful_activity(rows)}
+    # Projekci spotřebuje jen událost, kterou umí zobrazit vlastník (zdroj s from_event); jinak zůstane
+    # řádek Aktivity jako záloha (vypnutý modul / system.* ho pak vyřadí stejně jako jeho Aktivitu).
+    shown_events = {e.id: e for e in events
+                    if not e.event_type.startswith(NOISE_EVENT_PREFIXES) and e.module_id in event_sources}
+    projections: dict[int, ActivityLog] = {}
     legacy: list[ActivityLog] = []
     for row in rows:
         m = _PROJECTION_KEY.match(row.dedupe_key or "")
-        if m and int(m.group(1)) in event_ids:
-            projections[int(m.group(1))] = row.summary  # spotřebováno událostí
-        else:
+        if m and int(m.group(1)) in shown_events:
+            projections[int(m.group(1))] = row  # spotřebováno událostí
+        elif row.id in kept_ids:
             legacy.append(row)
 
-    items: list[ChangeItem] = []
-    for row in events:
-        if row.event_type.startswith(NOISE_EVENT_PREFIXES):
-            continue
-        source = event_sources.get(row.module_id)
-        if source is None or not access.is_available(row.module_id):
-            continue
-        draft = _safe(source.from_event, de.snapshot(row), projections.get(row.id))
+    items: list[tuple[datetime, ChangeItem]] = []
+    for row in shown_events.values():
+        projection = projections.get(row.id)
+        if projection is not None and projection.id not in kept_ids:
+            continue  # projekce je šum / patří k záznamu vytvořenému i smazanému v okně
+        draft = _safe(event_sources[row.module_id].from_event, de.snapshot(row),
+                      projection.summary if projection is not None else None)
         if draft:
             items.append(_item(draft, item_id=f"event:{row.id}", occurred=de.as_utc(row.occurred_at),
                                owner=row.module_id, source="event"))
-    for row in meaningful_activity(legacy):
+    for row in legacy:
         owner_source = area_sources.get(row.area)
         if owner_source is None:
             continue
@@ -127,8 +135,8 @@ def collect(db: Session, access, *, since: datetime) -> tuple[list[ChangeItem], 
         if draft:
             items.append(_item(draft, item_id=f"activity:{row.id}", occurred=de.as_utc(row.timestamp),
                                owner=owner, source="activity"))
-    items.sort(key=lambda i: (i.occurred_at, i.id), reverse=True)
-    return items, truncated
+    items.sort(key=lambda x: (x[0], x[1].id), reverse=True)  # podle času, ne podle ISO textu
+    return [item for _at, item in items], truncated
 
 
 def filters_for(items: list[ChangeItem], access) -> list[dict]:

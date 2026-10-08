@@ -64,8 +64,14 @@ await fetch(`${MOCK_API}/__mock/changes/reset`);
   check("období 30 dní: 6 změn včetně smazané směny", t30.length === 6 && t30.includes("Směna smazána"), String(t30.length));
   const deleted = page.getByTestId("change-item").filter({ hasText: "Směna smazána" });
   check("smazaný záznam bez odkazu", (await deleted.locator("a").count()) === 0);
-  await page.getByLabel("Období").selectOption("7d");
+  // výběr modulu, který v kratším období nic nemá, se odebere (žádné falešné „nic se nezměnilo")
+  await page.getByRole("group", { name: "Modul" }).getByRole("button", { name: /^Práce/ }).click();
   await page.waitForTimeout(700);
+  check("filtr Práce (30 dní): jen smazaná směna", (await titles(page)).join("|") === "Směna smazána");
+  await page.getByLabel("Období").selectOption("7d");
+  await page.waitForTimeout(1500);
+  const afterSwitch = await titles(page);
+  check("změna období: neplatný výběr modulu se zruší, změny se ukážou", afterSwitch.length === 5, String(afterSwitch.length));
 
   // jiné zařízení splní úkol → doménová událost → stránka se obnoví sama
   const before = await calls();

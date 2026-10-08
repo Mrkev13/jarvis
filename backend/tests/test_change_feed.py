@@ -150,6 +150,23 @@ class PolicyTestCase(_FeedCase):
         self.activity("work", "delete", "Směna smazána", entity_type="WorkSession", entity_id=4)
         self.assertEqual(self.feed()["items"], [], "provoz, test a vytvořeno+smazáno v okně = žádná změna")
 
+    def test_event_of_a_record_created_and_deleted_in_the_window_is_noise_too(self):
+        self.activity("school", "create", "Nový úkol", entity_type="Assignment", entity_id=1, ago=timedelta(minutes=9))
+        with self.Session() as db:
+            school_service.complete_assignment(db, 1)
+            db.commit()
+        self.activity("school", "delete", "Úkol smazán", entity_type="Assignment", entity_id=1, ago=timedelta(0))
+        self.assertEqual(self.feed()["items"], [], "stejně jako ranní přehled – i když událost ještě existuje")
+
+    def test_event_projection_with_test_context_is_noise(self):
+        with self.Session() as db:
+            hid = habits.create_habit(db, "Voda", user_context="test").id
+            db.commit()
+        with self.Session() as db:
+            habits.set_entry(db, hid, "done", user_context="test")
+            db.commit()
+        self.assertEqual(self.feed()["items"], [])
+
     def test_disabled_module_contributes_nothing(self):
         with self.Session() as db:
             school_service.complete_assignment(db, 1)
@@ -216,7 +233,15 @@ class ParsingTestCase(unittest.TestCase):
         for bad in ("School", "a;b", ","):
             with self.subTest(bad=bad), self.assertRaises(cf.ChangeFeedError):
                 cf.parse_modules(bad)
-        self.assertEqual([cf.clamp_limit(v) for v in (None, 0, 5, 500)], [50, 50, 5, 200])
+        self.assertEqual([cf.clamp_limit(v) for v in (None, 0, 5, 500)], [50, 1, 5, 200])
+        with self.assertRaises(cf.ChangeFeedError):
+            cf.parse_since("0001-01-01T00:00:00+01:00", self.NOW)
+
+    def test_every_module_with_events_can_show_them(self):
+        for m in mr.MODULES:
+            if m.event_types:
+                self.assertTrue(any(s.from_event for s in m.integrations.changes),
+                                f"{m.id}: deklaruje události, ale ChangeSource.from_event chybí (projekce by zmizely)")
 
     def test_central_service_has_no_per_module_branches(self):
         src = open(os.path.join(BACKEND_DIR, "change_feed.py"), encoding="utf-8").read()

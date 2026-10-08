@@ -92,6 +92,12 @@ export default function ChangesPage() {
   useDomainEvents({ onEvent: () => schedulerRef.current?.trigger(), onReset: () => schedulerRef.current?.trigger() });
 
   const filters = useMemo(() => res.data?.filters ?? [], [res.data]);
+  // Vybraný modul, který v nových datech nemá žádnou změnu (jiné období, smazání), se z výběru odebere – jinak by
+  // dotaz dál filtroval a stránka tvrdila „nic se nezměnilo" bez možnosti filtr zrušit. Filtry na `module`
+  // nezávisí, takže stačí porovnat s poslední odpovědí (úprava stavu při vykreslení, ne v efektu).
+  if (res.data && selected.some((id) => !filters.some((f) => f.id === id))) {
+    setSelected(keepKnownFilters(selected, filters));
+  }
   const chipOptions = useMemo(() => filters.map((f) => ({ value: f.id, label: `${f.label} (${formatNumber(f.count)})` })), [filters]);
   const visibleSelected = keepKnownFilters(selected, filters);
   const items = useMemo(() => res.data?.items ?? [], [res.data]);
@@ -99,6 +105,7 @@ export default function ChangesPage() {
   const todayKey = pragueDayKey(new Date());
   const total = res.data?.total ?? 0;
   const hidden = Math.max(0, total - items.length);
+  const scanCapped = Boolean(res.data?.truncated) && hidden === 0;
 
   const choosePeriod = (value: string) => {
     setPeriod(value as ChangePeriod);
@@ -124,7 +131,7 @@ export default function ChangesPage() {
         result={res.data ? `${formatNumber(total)} ${plural(total, "změna", "změny", "změn")}` : null}
       >
         <FilterSelect label="Období" value={period} onChange={choosePeriod} options={PERIOD_OPTIONS} />
-        {chipOptions.length > 1 ? (
+        {chipOptions.length > 1 || visibleSelected.length ? (
           <FilterChips
             label="Modul"
             options={chipOptions}
@@ -175,6 +182,12 @@ export default function ChangesPage() {
                 … a {plural(hidden, "další", "další", "dalších")} {formatNumber(hidden)} {plural(hidden, "změna", "změny", "změn")} – zužte
                 období nebo modul,{" "}
                 nebo otevřete <Link href="/activity" className="underline">Aktivitu</Link>.
+              </p>
+            ) : null}
+            {scanCapped ? (
+              <p data-testid="changes-more" className="text-center text-xs text-ink-muted">
+                Za toto období je změn příliš mnoho, starší se nenačetly – zužte období nebo otevřete{" "}
+                <Link href="/activity" className="underline">Aktivitu</Link>.
               </p>
             ) : null}
           </>

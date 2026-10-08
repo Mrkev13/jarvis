@@ -38,7 +38,13 @@ The same as the morning briefing (`briefing_snapshot.meaningful_activity`):
 - test/verification contexts and `[test]` summaries;
 - a record created **and** deleted within the window (no net effect).
 
-Core `system.*` events (module toggles) are operations, not changes for people.
+The policy applies to the Activity projections of events too. An event whose projection is noise, or which belongs
+to a record created and deleted in the window, is not shown. Operational areas and actions are excluded already in
+SQL, so they never use up the scan cap. Core `system.*` events (module toggles) are operations, not changes for
+people.
+
+A projection is consumed only by an event that its owner can show (a `ChangeSource.from_event`). A test requires
+every module that declares `event_types` to provide one. Otherwise its changes would vanish.
 
 ## `GET /changes`
 
@@ -46,7 +52,7 @@ Core `system.*` events (module toggles) are operations, not changes for people.
 |---|---|---|
 | `since` | now − 7 days | ISO 8601 (`Z` or offset); older than 90 days is clamped to 90; future or invalid → 422 |
 | `module` | all | comma list of module ids, `core` for reminders/memory; invalid token → 422 |
-| `limit` | 50 | clamped to 1–200 |
+| `limit` | 50 | clamped to 1–200 (non-number → 422) |
 
 ```json
 {
@@ -71,7 +77,8 @@ Core `system.*` events (module toggles) are operations, not changes for people.
 - `filters` are derived from the whole window. They are independent of `module`, so a selected filter can always be
   turned off again.
 - `truncated` is set when more than `limit` items match, or when the scan cap of 2000 events / Activity rows per
-  request was reached. That happens after a very long absence; the page then says "… a dalších N změn".
+  request was reached. That happens after a very long absence. The page then says "… a dalších N změn", or, when only the scan cap was hit,
+that older changes were not loaded.
 - The endpoint uses the global session auth. It never calls an LLM.
 
 ## Page
