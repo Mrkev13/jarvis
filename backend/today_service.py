@@ -15,26 +15,23 @@ ostatní sekce se vrátí normálně.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-import reminder_service as rs
-from models import Assignment, Exam, Reminder, Subject
 from module_registry import ModuleAccess, current_access
 from notifications_service import list_notifications
 from planner_service import generate_plan
-from statuses import is_assignment_done, is_exam_open, norm
+from statuses import norm
 from text_utils import format_date_cz
-from time_utils import local_day_bounds_utc, now_local, to_local, utc_now
+from time_utils import now_local, utc_now
+from today_types import UPCOMING_DAYS, TodayContext, TodayItem
 
 log = logging.getLogger(__name__)
 
 WEEKDAYS_CZ = ("pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle")
 MAX_ATTENTION = 8
 MAX_UPCOMING = 3
-UPCOMING_DAYS = 7
 SEVERITY_RANK = {"important": 0, "warning": 1, "info": 2}
 
 SECTION_ERRORS = {
@@ -45,63 +42,43 @@ SECTION_ERRORS = {
 }
 
 
-@dataclass
-class TodayItem:
-    """Normalizovaná položka (jen pro režim Dnes – žádný univerzální model entit)."""
-    id: str                      # ref záznamu „reminder:5" / u upozornění bez záznamu „notification:9"
-    type: str                    # reminder | exam | assignment | planner | notification
-    title: str
-    subtitle: str = ""
-    area: str | None = None
-    date: str | None = None      # pražské datum (ISO)
-    time: str | None = None      # pražský čas „HH:MM" nebo None (celý den)
-    status: str = "open"         # upcoming | due | past | done | overdue | open
-    priority: int | None = None  # pořadí z denního plánu
-    severity: str | None = None  # important | warning | info (upozornění)
-    href: str | None = None
-    source_id: int | None = None
-    # Roadmap 4H: co jde udělat přímo z řádku (jen id akcí, žádné URL ani příkazy):
-    # complete (připomínka / úkol), snooze (připomínka), record_result (zkouška → otevřít záznam).
-    actions: list[str] = field(default_factory=list)
-
-    def as_dict(self) -> dict:
-        return asdict(self)
+# MRK-20: TodayItem a kontext jsou v today_types (sdílí je poskytovatelé modulů); _Ctx = starý název.
+_Ctx = TodayContext
+__all__ = ["TodayItem", "TodayContext", "UPCOMING_DAYS", "build_today", "dedupe", "gate_items", "snooze_options"]
 
 
-@dataclass
-class _Ctx:
-    db: Session
-    now_utc: datetime
-    today: date
-    now_local_naive: datetime
-    subjects: dict[int, str] = field(default_factory=dict)
+# ---------- zdroje modulů (MRK-20: ModuleIntegrations.today) ----------
+
+class SourceFailed(Exception):
+    """Sekce se sestavila jen částečně (selhal zdroj některého modulu); `partial` = to, co se podařilo."""
+
+    def __init__(self, partial):
+        super().__init__("source failed")
+        self.partial = partial
 
 
-def _subject_names(db: Session) -> dict[int, str]:
-    return {s.id: s.name for s in db.query(Subject).all()}
+def _collect(c: TodayContext, access: ModuleAccess, part: str, errors: list[str]) -> list:
+    """Spojí část `part` (timeline / overdue / upcoming / closed_refs) od jádra a dostupných modulů v pořadí zdrojů.
+    Zdroj, který selže, se vynechá a jeho název přidá do `errors` – ostatní moduly se ukážou dál."""
+    out: list = []
+    for src in sorted((s for _owner, s in access.contributions("today")), key=lambda s: s.order):
+        fn = getattr(src, part)
+        if fn is None:
+            continue
+        try:
+            out.extend(fn(c))
+        except Exception:  # noqa: BLE001 – jeden modul nesmí shodit sekci
+            log.exception("today: source %s.%s failed", src.name, part)
+            c.db.rollback()
+            errors.append(src.name)
+    return out
 
 
-def _school_subtitle(kind: str, subject: str | None, extra: str | None = None) -> str:
-    return " · ".join(x for x in (kind, subject, extra) if x)
-
-
-def _exam_kind(exam_type: str | None) -> str:
-    return {"test": "Test", "quiz": "Kvíz", "colloquium": "Kolokvium", "midterm": "Průběžný test", "oral": "Ústní zkouška"}.get(
-        norm(exam_type), "Zkouška")
+def _entity_refs(access: ModuleAccess) -> dict:
+    return {ref.type: ref for _owner, ref in access.contributions("entity_refs")}
 
 
 # ---------- akce (Roadmap 4H) ----------
-
-def _reminder_actions(r: Reminder, rung: bool) -> list[str]:
-    """Hotovo / odložit jen u aktivní JEDNORÁZOVÉ připomínky: u opakované „hotovo" výskyt neposune
-    (reminder_service.complete) a odložení mění jen jeden výskyt – to patří na stránku Připomínky.
-
-    Odložit jen u připomínky, která už zazněla (`rung`): snooze_target počítá „+N min" od TEĎ, takže
-    u budoucí připomínky (21:00, klik v 10:39, +1 h → 11:39) by „odložení" termín naopak přiblížilo."""
-    if r.status not in ("scheduled", "fired") or r.recurrence != "none":
-        return []
-    return ["complete", "snooze"] if rung else ["complete"]
-
 
 def snooze_options(today: date) -> list[dict]:
     """Pevné volby odložení; „zítra" = další pražský kalendářní den v 08:00 (i těsně po půlnoci)."""
@@ -115,129 +92,43 @@ def snooze_options(today: date) -> list[dict]:
 
 # ---------- časová osa ----------
 
-def _reminder_items_today(c: _Ctx) -> list[TodayItem]:
-    start, end = local_day_bounds_utc(c.today)
-    items: list[TodayItem] = []
-    rows = c.db.query(Reminder).filter(Reminder.status.in_(("scheduled", "fired", "done"))).all()
-    for r in rows:
-        when = rs.effective_due(r) if r.status in ("scheduled", "fired") else r.due_at
-        if start <= when < end:
-            local = to_local(when)
-            if r.status == "done":
-                status = "done"
-            elif r.status == "fired" or when <= c.now_utc:
-                status = "due"  # zaznělo, čeká na vyřízení
-            else:
-                status = "upcoming"
-            items.append(TodayItem(
-                id=f"reminder:{r.id}", type="reminder", title=r.title,
-                subtitle="Připomínka" + (f" · {rs.describe_recurrence(r)}" if r.recurrence != "none" else ""),
-                area="reminders", date=local.date().isoformat(), time=f"{local:%H:%M}", status=status,
-                href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r, rung=status == "due"),
-            ))
-        elif r.recurrence != "none" and r.last_fired_at is not None and start <= r.last_fired_at < end:
-            # opakovaná připomínka dnes už zazněla (due_at se posunul na další výskyt) – proběhlo
-            local = to_local(r.last_fired_at)
-            items.append(TodayItem(
-                id=f"reminder:{r.id}", type="reminder", title=r.title,
-                subtitle=f"Připomínka · {rs.describe_recurrence(r)}", area="reminders",
-                date=local.date().isoformat(), time=f"{local:%H:%M}", status="past",
-                href=f"/reminders?reminder={r.id}", source_id=r.id,
-            ))
-    return items
-
-
-def _school_items_today(c: _Ctx) -> list[TodayItem]:
-    items: list[TodayItem] = []
-    for e in c.db.query(Exam).filter(Exam.exam_date == c.today).all():
-        items.append(TodayItem(
-            id=f"exam:{e.id}", type="exam", title=e.title,
-            subtitle=_school_subtitle(_exam_kind(e.exam_type), c.subjects.get(e.subject_id)),
-            area="school", date=c.today.isoformat(), status="open" if is_exam_open(e.status) else "done",
-            href=f"/school?exam={e.id}", source_id=e.id,
-        ))
-    for a in c.db.query(Assignment).filter(Assignment.due_date == c.today).all():
-        items.append(TodayItem(
-            id=f"assignment:{a.id}", type="assignment", title=a.title,
-            subtitle=_school_subtitle("Úkol · termín dnes", c.subjects.get(a.subject_id)),
-            area="school", date=c.today.isoformat(), status="done" if is_assignment_done(a.status) else "open",
-            href=f"/school?assignment={a.id}", source_id=a.id, actions=[] if is_assignment_done(a.status) else ["complete"],
-        ))
-    return items
-
-
 def timeline_sort_key(item: TodayItem) -> tuple:
     """Hotové dospod; s časem chronologicky; bez času („Během dne") za nimi; pak název."""
     return (item.status == "done", item.time is None, item.time or "", item.title.lower())
 
 
-def build_timeline(c: _Ctx) -> list[TodayItem]:
-    items = _reminder_items_today(c) + _school_items_today(c)
+def build_timeline(c: TodayContext, access: ModuleAccess) -> list[TodayItem]:
+    errors: list[str] = []
+    items = _collect(c, access, "timeline", errors)
+    if errors:
+        raise SourceFailed(sorted(items, key=timeline_sort_key))
     return sorted(items, key=timeline_sort_key)
 
 
 # ---------- pozornost ----------
 
-def _overdue_items(c: _Ctx) -> list[TodayItem]:
-    start, _ = local_day_bounds_utc(c.today)
-    items: list[TodayItem] = []
-    for a in c.db.query(Assignment).filter(Assignment.due_date.is_not(None), Assignment.due_date < c.today).all():
-        if is_assignment_done(a.status):
-            continue
-        items.append(TodayItem(
-            id=f"assignment:{a.id}", type="assignment", title=a.title,
-            subtitle=_school_subtitle("Úkol po termínu", c.subjects.get(a.subject_id), f"termín {format_date_cz(a.due_date)}"),
-            area="school", date=a.due_date.isoformat(), status="overdue", severity="important",
-            href=f"/school?assignment={a.id}", source_id=a.id, actions=["complete"],
-        ))
-    for e in c.db.query(Exam).filter(Exam.exam_date.is_not(None), Exam.exam_date < c.today).all():
-        if not is_exam_open(e.status):
-            continue
-        items.append(TodayItem(
-            id=f"exam:{e.id}", type="exam", title=e.title,
-            subtitle=_school_subtitle(f"{_exam_kind(e.exam_type)} proběhla – zapiš výsledek", c.subjects.get(e.subject_id),
-                                      format_date_cz(e.exam_date)),
-            area="school", date=e.exam_date.isoformat(), status="overdue", severity="warning",
-            href=f"/school?exam={e.id}", source_id=e.id, actions=["record_result"],
-        ))
-    for r in c.db.query(Reminder).filter(Reminder.status == "fired").all():
-        if r.due_at >= start:
-            continue  # dnešní je na časové ose
-        local = to_local(r.due_at)
-        items.append(TodayItem(
-            id=f"reminder:{r.id}", type="reminder", title=r.title,
-            subtitle=f"Nevyřízená připomínka · {format_date_cz(local.date())} {local:%H:%M}", area="reminders",
-            date=local.date().isoformat(), time=f"{local:%H:%M}", status="overdue", severity="warning",
-            href=f"/reminders?reminder={r.id}", source_id=r.id, actions=_reminder_actions(r, rung=True),
-        ))
-    return items
-
-
-def _closed_refs(c: _Ctx) -> set[str]:
-    """Ref záznamů, které už nic nepotřebují: hotové úkoly, uzavřené zkoušky, neaktivní připomínky."""
-    refs = {f"assignment:{a.id}" for a in c.db.query(Assignment.id, Assignment.status).all() if is_assignment_done(a.status)}
-    refs |= {f"exam:{e.id}" for e in c.db.query(Exam.id, Exam.status).all() if not is_exam_open(e.status)}
-    refs |= {f"reminder:{r.id}" for r in c.db.query(Reminder.id).filter(Reminder.status.in_(("done", "cancelled"))).all()}
-    return refs
-
-
-def _notification_ref(n: dict) -> str | None:
+def _notification_ref(n: dict, refs: dict) -> str | None:
+    """Upozornění k záznamu (source_type typu, který modul hlásí jako `notification_source`) → ref záznamu."""
     st, sid = n.get("source_type"), n.get("source_id")
-    return f"{st}:{sid}" if st in ("assignment", "exam", "reminder", "goal") and sid is not None else None
+    ref = refs.get(st)
+    return f"{st}:{sid}" if ref is not None and ref.notification_source and sid is not None else None
 
 
 def _safe_href(url) -> str | None:
     return url if isinstance(url, str) and url.startswith("/") and not url.startswith("//") else None
 
 
-def build_attention(c: _Ctx) -> tuple[list[TodayItem], dict[str, str]]:
+def build_attention(c: TodayContext, access: ModuleAccess) -> tuple[list[TodayItem], dict[str, str]]:
     """(položky, závažnost podle ref z upozornění) – upozornění k záznamu se spojí s jeho položkou."""
-    items = {it.id: it for it in _overdue_items(c)}
+    errors: list[str] = []
+    items = {it.id: it for it in _collect(c, access, "overdue", errors)}
     severity_by_ref: dict[str, str] = {}
-    closed = _closed_refs(c)
+    # Ref záznamů, které už nic nepotřebují (hotové úkoly, uzavřené zkoušky, neaktivní připomínky).
+    closed = set(_collect(c, access, "closed_refs", errors))
+    refs = _entity_refs(access)
     for n in list_notifications(c.db, unread_only=True, include_resolved=False, now=c.now_utc):
         sev = norm(n.get("severity")) or "info"
-        ref = _notification_ref(n)
+        ref = _notification_ref(n, refs)
         if ref in closed:
             # Roadmap 4H: záznam je už vyřízený (např. právě dokončený z Dnes) – upozornění by do dalšího běhu
             # generate_notifications jen strašilo. Stejné pravidlo jako _resolve_if_no_longer_relevant, jen čtením.
@@ -259,61 +150,36 @@ def build_attention(c: _Ctx) -> tuple[list[TodayItem], dict[str, str]]:
         if ref in items and SEVERITY_RANK.get(sev, 3) < SEVERITY_RANK.get(items[ref].severity or "", 3):
             items[ref].severity = sev
     ordered = sorted(items.values(), key=lambda it: (SEVERITY_RANK.get(it.severity or "", 3), it.date or "9999", it.title.lower()))
+    if errors:
+        raise SourceFailed((ordered, severity_by_ref))
     return ordered, severity_by_ref
 
 
 # ---------- plán, potom ----------
 
-def _ref_href(ref: str | None) -> str | None:
-    if not ref:
-        return None
-    kind, _, rid = ref.partition(":")
-    return {"assignment": f"/school?assignment={rid}", "exam": f"/school?exam={rid}", "goal": f"/goals?goal={rid}"}.get(kind)
-
-
-def build_priorities(c: _Ctx) -> list[TodayItem]:
+def build_priorities(c: TodayContext, access: ModuleAccess) -> list[TodayItem]:
     plan = generate_plan(c.db, mode="daily", today=c.today)
+    refs = _entity_refs(access)
     items = []
     for a in plan.get("actions") or []:
         ref = a.get("ref")
+        kind, _, rid = (ref or "").partition(":")
+        entity = refs.get(kind) if ref else None
         items.append(TodayItem(
             id=ref or f"planner:{a.get('priority')}", type="planner", title=a.get("title") or "",
             subtitle=a.get("reason") or "", area=a.get("area"), status="open", priority=int(a.get("priority") or 0) or None,
-            href=_ref_href(ref) or "/planner", source_id=int(ref.split(":")[1]) if ref else None,
-            actions=["complete"] if ref and ref.startswith("assignment:") else [],
+            href=entity.href.format(id=rid) if entity else "/planner", source_id=int(ref.split(":")[1]) if ref else None,
+            actions=list(entity.planner_actions) if entity else [],
         ))
     return items
 
 
-def build_upcoming(c: _Ctx) -> list[TodayItem]:
-    first, last = c.today + timedelta(days=1), c.today + timedelta(days=UPCOMING_DAYS)
-    items: list[TodayItem] = []
-    for e in c.db.query(Exam).filter(Exam.exam_date >= first, Exam.exam_date <= last).all():
-        if is_exam_open(e.status):
-            items.append(TodayItem(
-                id=f"exam:{e.id}", type="exam", title=e.title,
-                subtitle=_school_subtitle(_exam_kind(e.exam_type), c.subjects.get(e.subject_id)), area="school",
-                date=e.exam_date.isoformat(), status="upcoming", href=f"/school?exam={e.id}", source_id=e.id,
-            ))
-    for a in c.db.query(Assignment).filter(Assignment.due_date >= first, Assignment.due_date <= last).all():
-        if not is_assignment_done(a.status):
-            items.append(TodayItem(
-                id=f"assignment:{a.id}", type="assignment", title=a.title,
-                subtitle=_school_subtitle("Úkol", c.subjects.get(a.subject_id)), area="school",
-                date=a.due_date.isoformat(), status="upcoming", href=f"/school?assignment={a.id}", source_id=a.id,
-            ))
-    _, end_today = local_day_bounds_utc(c.today)
-    _, end_last = local_day_bounds_utc(last)
-    for r in c.db.query(Reminder).filter(Reminder.status == "scheduled").all():
-        when = rs.effective_due(r)
-        if end_today <= when < end_last:
-            local = to_local(when)
-            items.append(TodayItem(
-                id=f"reminder:{r.id}", type="reminder", title=r.title, subtitle="Připomínka", area="reminders",
-                date=local.date().isoformat(), time=f"{local:%H:%M}", status="upcoming",
-                href=f"/reminders?reminder={r.id}", source_id=r.id,
-            ))
-    return sorted(items, key=lambda it: (it.date or "", it.time or "99:99", it.title.lower()))
+def build_upcoming(c: TodayContext, access: ModuleAccess) -> list[TodayItem]:
+    errors: list[str] = []
+    items = sorted(_collect(c, access, "upcoming", errors), key=lambda it: (it.date or "", it.time or "99:99", it.title.lower()))
+    if errors:
+        raise SourceFailed(items)
+    return items
 
 
 # ---------- skladba ----------
@@ -365,27 +231,27 @@ def gate_items(items: list[TodayItem], access: ModuleAccess) -> list[TodayItem]:
 def build_today(db: Session, now_utc: datetime | None = None, *, access: ModuleAccess | None = None) -> dict:
     now_utc = now_utc or utc_now()
     local_now = now_local(now_utc)
-    c = _Ctx(db=db, now_utc=now_utc, today=local_now.date(), now_local_naive=local_now.replace(tzinfo=None))
+    c = TodayContext(db=db, now_utc=now_utc, today=local_now.date(), now_local_naive=local_now.replace(tzinfo=None))
+    access = access or current_access()
     errors: dict[str, str] = {}
-    try:
-        c.subjects = _subject_names(db)
-    except Exception:  # noqa: BLE001 – bez názvů předmětů se dá pokračovat
-        log.exception("today: subjects")
 
     def section(name, fn, default):
         try:
             return fn()
+        except SourceFailed as partial:
+            # MRK-20: selhal jen některý modul – sekce ukáže zbytek a hlášku chyby
+            errors[name] = SECTION_ERRORS[name]
+            return partial.partial
         except Exception:  # noqa: BLE001 – jeden zdroj nesmí shodit celou stránku
             log.exception("today: section %s failed", name)
             db.rollback()
             errors[name] = SECTION_ERRORS[name]
             return default
 
-    timeline = section("timeline", lambda: build_timeline(c), [])
-    attention, severity_by_ref = section("attention", lambda: build_attention(c), ([], {}))
-    priorities = section("priorities", lambda: build_priorities(c), [])
-    upcoming = section("upcoming", lambda: build_upcoming(c), [])
-    access = access or current_access()
+    timeline = section("timeline", lambda: build_timeline(c, access), [])
+    attention, severity_by_ref = section("attention", lambda: build_attention(c, access), ([], {}))
+    priorities = section("priorities", lambda: build_priorities(c, access), [])
+    upcoming = section("upcoming", lambda: build_upcoming(c, access), [])
     timeline, attention, priorities, upcoming = (gate_items(s, access) for s in (timeline, attention, priorities, upcoming))
     sections = dedupe(timeline, attention, priorities, upcoming, severity_by_ref)
 
