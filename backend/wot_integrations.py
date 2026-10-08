@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, short
 from models import WotGrind, WotReplay, WotResource
-from module_contracts import ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, SearchSource
+from module_contracts import ChangeSource, activity_changes, ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, SearchSource
 from text_utils import format_date_cz, format_num_cz, join_parts
 from time_utils import to_local
 
@@ -80,6 +80,9 @@ def tank_names(db):
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource("wot", areas=frozenset({"wot"}),
+                          from_activity=activity_changes({"wot_grind": "/wot?grind={id}",
+                                                          "wot_replay": "/wot/replays?replay={id}"}, "/wot")),),
     search=(SearchSource("wot", 90, search_wot),),
     dashboard=(DashboardSection("wot", lambda db, access: get_wot_quick_status(db, limit=2)),),
     context=(

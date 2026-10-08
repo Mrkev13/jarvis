@@ -10,6 +10,7 @@ from context_format import fmt_num
 from goal_history_service import compute_goal_progress_and_value
 from models import FinanceTransaction, Goal
 from module_contracts import (
+    ChangeSource, activity_changes,
     ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
 )
 from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_num_cz, join_parts
@@ -218,6 +219,8 @@ def finance_display(f: dict, ctx: dict, today) -> dict:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource("finance", areas=frozenset({"finance"}),
+                          from_activity=activity_changes({"finance_transaction": "/finance?transaction={id}"}, "/finance")),),
     search=(SearchSource("finance", 60, search_finance),),
     dashboard=(DashboardSection("finance", lambda db, access: get_finance_with_goal(db)),),
     context=(

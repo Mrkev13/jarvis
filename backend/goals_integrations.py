@@ -8,6 +8,7 @@ from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, shor
 from goal_history_service import compute_goal_progress_and_value, ensure_goal_progress_snapshot_for_all_active_automatic_goals
 from models import Goal
 from module_contracts import (
+    ChangeSource, activity_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, ScheduledStep, SearchSource,
 )
 from statuses import GOAL_INACTIVE_STATUSES
@@ -103,6 +104,8 @@ def context_goals(req: ContextRequest) -> list[str]:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    changes=(ChangeSource("goals", areas=frozenset({"goals"}),
+                          from_activity=activity_changes({"goal": "/goals?goal={id}"}, "/goals")),),
     search=(SearchSource("goals", 70, search_goals),),
     entity_refs=(EntityRef("goal", "/goals?goal={id}", notification_source=True),),
     dashboard=(DashboardSection("goals", dashboard_goals),),

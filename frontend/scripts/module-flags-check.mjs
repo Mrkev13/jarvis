@@ -25,7 +25,7 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const NAV_TOTAL = 16; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích)
+const NAV_TOTAL = 17; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28)
 
 // Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
 await fetch(`${MOCK_API}/__mock/modules/reset`);

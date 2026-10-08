@@ -18,6 +18,7 @@ const CORE_BEFORE: NavPage[] = [
 
 /** Stránky jádra za stránkami modulů. */
 const CORE_AFTER: NavPage[] = [
+  { href: "/changes", label: "Co se změnilo", area: null, keywords: ["what changed", "změny", "novinky", "od minule", "přehled změn"] },
   { href: "/activity", label: "Aktivita", area: null, keywords: ["activity", "audit", "historie změn", "log"] },
   { href: "/memory", label: "Paměť", area: "memory", keywords: ["memory", "poznámka", "poznámky", "preference"] },
   { href: "/ai", label: "AI asistent", area: "ai", keywords: ["ai", "asistent", "chat", "jarvis", "standa ai"] },
