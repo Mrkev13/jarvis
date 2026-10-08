@@ -58,6 +58,7 @@ STEP_0012_EXTRA = {"weekly_reviews"}
 STEP_0013_EXTRA = {"wot_grind_completions", "wot_milestones", "wot_milestone_screenshots"}
 STEP_0014_EXTRA = {"wot_replays"}
 STEP_0016_EXTRA = {"module_settings"}  # MRK-18 A2
+STEP_0017_EXTRA = {"habits", "habit_entries"}  # MRK-21 Návyky
 
 
 def _sqlite_tables(conn):
@@ -166,7 +167,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -345,6 +346,26 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertTrue(STEP_0016_EXTRA <= _sqlite_tables(self.conn))
 
+    def test_0017_adds_habits_and_downgrades_cleanly(self):
+        alembic_cmd.upgrade(self.cfg, "0016_module_settings")
+        self.conn.execute(text("INSERT INTO module_settings (module_id, enabled, updated_at) VALUES ('wot', 0, CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0017_habits")
+        self.assertTrue(STEP_0017_EXTRA <= _sqlite_tables(self.conn))
+        self.conn.execute(text("INSERT INTO habits (name, kind, active, created_at) VALUES ('Rehab', 'check', 1, CURRENT_TIMESTAMP)"))
+        self.conn.execute(text("INSERT INTO habit_entries (habit_id, date, state, created_at, updated_at) "
+                               "VALUES (1, '2026-10-07', 'done', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        with self.assertRaises(Exception):  # jeden záznam na návyk a den
+            self.conn.execute(text("INSERT INTO habit_entries (habit_id, date, state, created_at, updated_at) "
+                                   "VALUES (1, '2026-10-07', 'skipped', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        self.conn.rollback()
+        alembic_cmd.downgrade(self.cfg, "0016_module_settings")
+        self.assertFalse(STEP_0017_EXTRA & _sqlite_tables(self.conn))
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM module_settings")).scalar(), 1, "jiná data nedotčena")
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertTrue(STEP_0017_EXTRA <= _sqlite_tables(self.conn))
+
     def test_0014_adds_wot_replays_and_keeps_milestones(self):
         from sqlalchemy import inspect
 
@@ -490,7 +511,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA)
 
             db = main.SessionLocal()
             try:

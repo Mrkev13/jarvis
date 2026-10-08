@@ -46,6 +46,7 @@ import mff_integrations
 import school_integrations
 import work_integrations
 import wot_integrations
+from modules.habits import integrations as habits_integrations
 from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
 from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
@@ -115,7 +116,11 @@ MODULES: tuple[ModuleDef, ...] = (
               api_prefixes=("/mff",), integrations=mff_integrations.INTEGRATIONS),
     _planned("food", "Jídlo"),
     _planned("fitness", "Fitness"),
-    _planned("habits", "Návyky"),
+    # MRK-21: první modul postavený celý v balíčku modules/habits/ (pilot rámce, docs/habits.md).
+    ModuleDef("habits", "Návyky", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "search", "today", "dashboard", "ai_context"}),
+              entity_types=frozenset({"habit"}), context_areas=frozenset({"habits"}), api_prefixes=("/habits",),
+              integrations=habits_integrations.INTEGRATIONS),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),

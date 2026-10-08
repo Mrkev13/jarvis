@@ -186,8 +186,10 @@ class RegistryContractTestCase(unittest.TestCase):
 class AggregatorPurityTestCase(unittest.TestCase):
     """Agregátory migrovaných ploch nesmí obsahovat modulový kód (modely ani id modulů)."""
 
+    # modely starších modulů + modely balíčků modules/<id>/ (models.MODULE_MODELS) – nový modul se přidá sám
+    import models as _models
     MODULE_MODELS = ("Assignment", "Exam", "Subject", "WorkSession", "FinanceTransaction", "Goal", "WotGrind",
-                     "WotResource", "WotReplay", "MffCharacter")
+                     "WotResource", "WotReplay", "MffCharacter", *(m.__name__ for m in _models.MODULE_MODELS))
     MODULE_IDS = tuple(m.id for m in mr.MODULES)
 
     def _assert_pure(self, name, source, *, allow_ids=()):
@@ -221,14 +223,41 @@ class AggregatorPurityTestCase(unittest.TestCase):
         """Poskytovatelé neimportují agregátory ani registr (jinak cyklus a skrytá závislost na pořadí importů)."""
         forbidden = {"main", "module_registry", "search_service", "today_service", "context_service",
                      "quick_add_service", "scheduler_service", "tool_router", "ai", "briefing_snapshot", "weekly_snapshot"}
-        files = [*Path(BACKEND_DIR).glob("*_integrations.py"), *(Path(BACKEND_DIR) / f for f in (
-            "module_contracts.py", "quick_add_text.py", "context_format.py", "today_types.py"))]
-        self.assertGreaterEqual(len(files), 11)
+        files = [*Path(BACKEND_DIR).glob("*_integrations.py"), *Path(BACKEND_DIR).glob("modules/*/*.py"),
+                 *(Path(BACKEND_DIR) / f for f in ("module_contracts.py", "quick_add_text.py", "context_format.py",
+                                                    "today_types.py"))]
+        self.assertGreaterEqual(len(files), 15)
         for path in files:
             tree = ast.parse(path.read_text(encoding="utf-8"))
             mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
             mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
             self.assertFalse(mods & forbidden, f"{path.name}: {mods & forbidden}")
+
+    def test_module_packages_are_self_contained(self):
+        """MRK-21: modul v balíčku modules/<id>/ importuje jen sám sebe, sdílené listy a infrastrukturu – nikdy
+        jiný modul (ani starší `<id>_integrations.py`)."""
+        others = {p.stem for p in Path(BACKEND_DIR).glob("*_integrations.py")}
+        for pkg in Path(BACKEND_DIR).glob("modules/*/"):
+            if not pkg.is_dir() or pkg.name.startswith("_"):
+                continue
+            for path in pkg.glob("*.py"):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+                mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+                foreign = {m for m in mods if m.startswith("modules.") and not m.startswith(f"modules.{pkg.name}")}
+                self.assertFalse(foreign | (mods & others), f"{path}: {foreign | (mods & others)}")
+
+    def test_routers_come_from_the_registry(self):
+        """REST modulů připojuje main.py z `ModuleIntegrations.routers` – žádný import routeru v main.py."""
+        src = (Path(BACKEND_DIR) / "main.py").read_text(encoding="utf-8")
+        self.assertNotIn("modules.", src.split('all_contributions("routers")')[0].split("app = FastAPI(")[-1])
+        paths = {getattr(r, "path", "") for r in main.app.routes}
+        for _owner, router in mr.all_contributions("routers"):
+            for route in router.routes:
+                self.assertIn(route.path, paths)
+                full = next(r for r in main.app.routes if getattr(r, "path", "") == route.path)
+                deps = {d.call for d in full.dependant.dependencies}
+                self.assertTrue({main.require_auth, main.require_module_available} <= deps, route.path)
 
     def test_every_aggregator_imports_first_without_cycles(self):
         env = {**os.environ, "DATABASE_URL": "sqlite+pysqlite:///:memory:", "GROQ_API_KEY": "x"}

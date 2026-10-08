@@ -707,3 +707,10 @@ class ModuleSetting(Base):
     module_id = Column(String(50), primary_key=True)
     enabled = Column(Boolean, nullable=False)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ---------- modely modulů v balíčcích modules/<id>/ (Platform 2.0) ----------
+# Jeden řádek na modul: registrace tabulek do Base pro Alembic, create_all v testech a kontrolu driftu schématu.
+from modules.habits.models import Habit, HabitEntry  # noqa: E402
+
+MODULE_MODELS = (Habit, HabitEntry)
