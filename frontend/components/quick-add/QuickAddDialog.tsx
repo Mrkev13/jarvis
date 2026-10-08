@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AreaBadge, Button, ErrorState, FormField, StatusBadge, StatusPulse, fieldClass } from "@/components/ui";
 import { useModal } from "@/components/ui/useModal";
 import { apiFetch, errorMessage, isAbortError, jsonBody, readErrorDetail } from "@/lib/api";
+import { pulseJarvis } from "@/lib/jarvisSignals";
 import { confirmActionBody, rejectActionPath, type PendingAction } from "@/lib/pendingActions";
 import {
   canAcknowledge, CONFIDENCE_META, FIELD_DEFS, fieldsToForm, formToFields, isQuickAddKind, KIND_AREAS, KIND_HREFS,
@@ -177,8 +178,10 @@ function Dialog({ onClose }: { onClose: () => void }) {
       await confirm(action);
       setPending(null);
       setSave({ status: "saved", kind, title: summaryTitle(kind, form), subtitle: KIND_LABELS[kind] });
+      pulseJarvis("success");
     } catch (error) {
       setSave({ status: "failed", message: errorMessage(error, "Uložení se nepodařilo.") });
+      pulseJarvis("error");
     }
   }
 
