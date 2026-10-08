@@ -18,6 +18,9 @@ business pravidla a migrace. Scheduler vyžaduje jediný backend worker.
 
 ## Lokální backend
 
+Rychlá cesta pro závislosti obou částí: `scripts/setup-dev.sh` (idempotentní, viz
+[AGENTS.md](AGENTS.md)). Ruční postup:
+
 Potřebuješ Python 3.12, Node.js 24, npm a PostgreSQL 16. Příkazy spouštěj z kořene
 repozitáře, pokud není uvedeno jinak. Vytvoř databázi a uživatele pro lokální Hub.
 
@@ -138,6 +141,7 @@ v GitHub branch protection/rulesetu; samotný workflow merge pravidla nevynucuje
 
 ## Dokumentace
 
+- [`AGENTS.md`](AGENTS.md) — pravidla pro agenty: setup, ověření, PR workflow, handoff.
 - [`docs/`](docs/) — architektonické principy, roadmapy a modulová dokumentace.
 - [`backend/AGENTS.md`](backend/AGENTS.md) — podrobná reference backendu,
   autentizace, migrací, scheduleru, záloh a bezpečných AI akcí.

@@ -48,3 +48,6 @@ frontend/scripts/.ui-check/
 
 # Game Enrichment B: nahrané screenshoty (MEDIA_DIR, výchozí backend/media)
 media/
+
+# idempotent dev bootstrap stamps (scripts/setup-dev.sh)
+.dev-setup/
