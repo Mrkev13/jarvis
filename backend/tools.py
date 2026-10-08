@@ -144,6 +144,7 @@ def get_school_assignments():
                 "due_date": item.due_date.isoformat() if item.due_date else None,
                 "priority": item.priority,
                 "status": item.status,
+                "completed_at": item.completed_at.isoformat() + "Z" if item.completed_at else None,
                 "subject_id": item.subject_id,
                 "subject_name": subject.name if subject else "",
             })
@@ -172,6 +173,9 @@ def get_school_exams():
                 "exam_date": item.exam_date.isoformat() if item.exam_date else None,
                 "status": item.status,
                 "notes": item.notes,
+                "completed_at": item.completed_at.isoformat() + "Z" if item.completed_at else None,
+                "result_type": item.result_type,
+                "result_value": item.result_value,
                 "subject_id": item.subject_id,
                 "subject_name": subject.name if subject else "",
             })

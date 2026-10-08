@@ -1,5 +1,7 @@
 import { staggerStyle } from "@/lib/motion";
+import { isIconName, type IconName } from "@/lib/icons";
 import { CARD_TONE, cx, type Tone } from "@/lib/ui";
+import { IconTile } from "./Icon";
 
 type CardProps = {
   children: React.ReactNode;
@@ -34,7 +36,10 @@ export function Card({ children, tone = "neutral", inset, flush, index, as: Tag 
   );
 }
 
-/** Hlavička karty: ikona/štítek, titulek (h2/h3), akce vpravo. */
+/**
+ * Hlavička karty: ikona, titulek (h2/h3), akce vpravo. `icon` = název ze sady ikon (MRK-15, doporučeno →
+ * jednotný „duotone" rámeček) nebo vlastní uzel (zpětná kompatibilita).
+ */
 export function CardHeader({
   title,
   icon,
@@ -43,7 +48,7 @@ export function CardHeader({
   as: Heading = "h2",
 }: {
   title: React.ReactNode;
-  icon?: React.ReactNode;
+  icon?: IconName | React.ReactNode;
   actions?: React.ReactNode;
   description?: React.ReactNode;
   as?: "h2" | "h3";
@@ -52,7 +57,9 @@ export function CardHeader({
     <div className="mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <div className="min-w-0">
         <Heading className="flex items-center gap-2 text-base md:text-lg font-semibold text-ink">
-          {icon ? (
+          {isIconName(icon) ? (
+            <IconTile name={icon} />
+          ) : icon ? (
             <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line bg-surface-2 text-sm">
               {icon}
             </span>

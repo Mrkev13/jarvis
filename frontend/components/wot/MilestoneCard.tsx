@@ -1,7 +1,7 @@
 "use client";
 
 import { GameImage } from "@/components/games/GameImage";
-import { Button, Card, StatusBadge, TextLink } from "@/components/ui";
+import { Button, Card, Icon, StatusBadge, TextLink } from "@/components/ui";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cx } from "@/lib/ui";
 import { masteryLabel, milestoneStats, type WotMilestone } from "@/lib/wot";
@@ -39,8 +39,8 @@ export function MilestoneCard({
             {mastery ? <StatusBadge tone="accent">{mastery}</StatusBadge> : null}
             {m.favorite ? (
               <span data-testid="favorite-marker">
-                <StatusBadge tone="warning">
-                  <span aria-hidden="true">★</span> Legendární
+                <StatusBadge tone="warning" icon="star">
+                  Legendární
                 </StatusBadge>
               </span>
             ) : null}
@@ -89,7 +89,7 @@ export function MilestoneCard({
           aria-pressed={m.favorite}
           aria-label={m.favorite ? `Zrušit legendární: ${m.tank}` : `Označit jako legendární: ${m.tank}`}
         >
-          <span aria-hidden="true">{m.favorite ? "★" : "☆"}</span> {m.favorite ? "Legendární" : "Oblíbit"}
+          <Icon name="star" filled={m.favorite} /> {m.favorite ? "Legendární" : "Oblíbit"}
         </Button>
         <Button size="sm" variant="ghost" onClick={onDelete} disabled={busy} aria-label={`Smazat milník ${m.tank}`}>
           Smazat

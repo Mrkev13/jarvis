@@ -299,7 +299,7 @@ ENTITIES: dict[str, EntityDef] = {
             "title": FieldDef("title", "Název", _v_str(required=True, max_len=255)),
             "exam_type": FieldDef("exam_type", "Typ", _v_enum("exam", "test", "quiz", "paper", "other")),
             "exam_date": FieldDef("exam_date", "Datum", _v_date(), _d),
-            "status": FieldDef("status", "Stav", _v_enum("upcoming", "scheduled", "passed", "failed")),
+            "status": FieldDef("status", "Stav", _v_enum("upcoming", "scheduled", "passed", "failed", "closed")),
             "notes": FieldDef("notes", "Poznámka", _v_str(max_len=1000)),
         },
         actions=frozenset({ACTION_UPDATE, ACTION_DELETE}),
@@ -661,6 +661,8 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
 
     for key, value in changes.items():
         setattr(obj, ent.fields[key].attr, _coerce(ent, key, value))
+    if ent.name == "school_assignment" and action == ACTION_COMPLETE:
+        obj.completed_at = utc_now()  # MRK-14: stejný čas dokončení jako tlačítko „Splnit" na stránce Škola
     if ent.name == "goal" and action == ACTION_COMPLETE and (obj.tracking_type or "manual").lower() == "manual":
         old_values.setdefault("progress", _plain(obj.progress))
         obj.progress = 100
@@ -859,6 +861,8 @@ def _undo_item(db: Session, ent: EntityDef, action: str, item: dict, *, apply: b
                      "old": (fd.fmt if fd else _short)(cur), "new": (fd.fmt if fd else _short)(old_val)})
         if apply:
             setattr(obj, attr, old_val)
+    if apply and ent.name == "school_assignment" and (obj.status or "").strip().lower() not in _ASSIGNMENT_DONE:
+        obj.completed_at = None  # vrácené splnění (MRK-14)
     if linked:
         diff.append({"label": "Příjem z práce", "old": _fmt_money(linked["after"]), "new": _fmt_money(linked["before"])})
         if apply:

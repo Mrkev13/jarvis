@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { IconName } from "@/lib/icons";
 import Link from "next/link";
 import { JarvisAvatar } from "@/components/jarvis/JarvisAvatar";
 import { useOpenQuickAdd } from "@/components/quick-add/QuickAddProvider";
@@ -97,7 +98,7 @@ export default function TodayPage() {
         <ActionsContext.Provider value={{ busyKey: actions.busyKey, rowErrors: actions.rowErrors, snoozeOptions: data.snooze_options, run: actions.run }}>
           {resource.error ? <ErrorState message={`Obnovení selhalo: ${resource.error}`} /> : null}
           <DaySummary data={data} />
-          <Section id="attention" title="Vyžaduje pozornost" icon="⚠️" error={data.errors.attention}>
+          <Section id="attention" title="Vyžaduje pozornost" icon="alert" error={data.errors.attention}>
             {data.attention.length ? (
               <ItemList label="Vyžaduje pozornost" items={data.attention} />
             ) : (
@@ -107,7 +108,7 @@ export default function TodayPage() {
           <Section
             id="plan"
             title="Dnešní plán"
-            icon="🎯"
+            icon="target"
             error={data.errors.priorities}
             actions={<TextLink href="/planner">Plánovač →</TextLink>}
             description="Priority z denního plánovače (co není v časové ose ani v pozornosti)."
@@ -118,7 +119,7 @@ export default function TodayPage() {
               <EmptyState compact>Plánovač dnes nic dalšího nenavrhuje.</EmptyState>
             )}
           </Section>
-          <Section id="timeline" title="Časová osa" icon="🕒" error={data.errors.timeline}>
+          <Section id="timeline" title="Časová osa" icon="clock" error={data.errors.timeline}>
             <Timeline data={data} />
           </Section>
           <Upcoming data={data} />
@@ -196,7 +197,7 @@ function Section({
 }: {
   id: string;
   title: string;
-  icon: string;
+  icon: IconName;
   description?: string;
   actions?: React.ReactNode;
   error?: string;
@@ -455,11 +456,11 @@ function Timeline({ data }: { data: TodayPayload }) {
 }
 
 function Upcoming({ data, compact }: { data: TodayPayload; compact?: boolean }) {
-  if (data.errors.upcoming) return <Section id="upcoming" title="Potom" icon="📅" error={data.errors.upcoming}>{null}</Section>;
+  if (data.errors.upcoming) return <Section id="upcoming" title="Potom" icon="calendar" error={data.errors.upcoming}>{null}</Section>;
   if (!data.upcoming.length) return null;
   return (
     <Card aria-labelledby="today-upcoming-title" data-section="upcoming" className={compact ? "text-left" : undefined}>
-      <CardHeader title={<span id="today-upcoming-title">Potom</span>} icon="📅" description="Nejbližší termíny v dalších dnech." />
+      <CardHeader title={<span id="today-upcoming-title">Potom</span>} icon="calendar" description="Nejbližší termíny v dalších dnech." />
       <ul aria-label="Potom" className="space-y-2">
         {data.upcoming.map((it) => (
           <li key={it.id} data-item={it.id}>

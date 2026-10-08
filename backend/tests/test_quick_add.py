@@ -294,6 +294,72 @@ class UnknownAndLimitsTestCase(unittest.TestCase):
         self.assertLess(per_call_ms, 50)
 
 
+class ClockTimeVsDurationTestCase(unittest.TestCase):
+    """MRK-11: „od 14 hodin" / „ve 14" = čas začátku (připomínka), „4 h" / „4 hodiny" = délka práce."""
+
+    def test_reported_bug_fyzio_od_14_hodin(self):
+        r = p("21.10.2026 fyzio od 14 hodin")
+        self.assertEqual(r["kind"], "reminder")
+        self.assertEqual(r["confidence"], "high")
+        self.assertEqual(r["fields"], {"title": "Fyzio", "due_local": "2026-10-21T14:00"})
+        self.assertTrue(r["ready"])
+        self.assertEqual(r["display"], {"title": "Fyzio", "subtitle": "st 21. 10. 2026 v 14:00", "area": "reminders"})
+        self.assertIn("Začátek v 14:00 – uloží se jako připomínka na tento čas.", r["warnings"])
+        self.assertNotIn("hours", r["fields"])
+
+    def test_czech_clock_forms(self):
+        cases = {
+            "zítra fyzio od 14 hodin": ("Fyzio", "2026-10-04T14:00"),
+            "zítra fyzio ve 14": ("Fyzio", "2026-10-04T14:00"),
+            "zítra fyzio v 14": ("Fyzio", "2026-10-04T14:00"),
+            "zítra kontrola v 10:30": ("Kontrola", "2026-10-04T10:30"),
+            "zítra přednáška od 9": ("Přednáška", "2026-10-04T09:00"),
+            "zítra doktor ve 13:15": ("Doktor", "2026-10-04T13:15"),
+            "pondělí kontrola o 8": ("Kontrola", "2026-10-05T08:00"),
+            "zítra fyzio od 14 h": ("Fyzio", "2026-10-04T14:00"),
+            "zítra fyzio ve 14 hod": ("Fyzio", "2026-10-04T14:00"),
+        }
+        for text, (title, due) in cases.items():
+            r = p(text)
+            self.assertEqual((r["kind"], r["fields"]), ("reminder", {"title": title, "due_local": due}), text)
+            self.assertTrue(r["ready"], text)
+
+    def test_undated_appointment_is_not_work(self):
+        for text in ("fyzio od 14 hodin", "fyzio ve 14", "fyzio v 14", "kontrola v 10:30", "přednáška od 9", "doktor ve 13:15"):
+            r = p(text)
+            self.assertEqual(r["kind"], "reminder", text)
+            self.assertNotEqual(r["display"]["area"], "work", text)
+            self.assertRegex(r["fields"]["due_local"], r"T\d\d:\d\d$", text)
+
+    def test_durations_still_mean_work(self):
+        cases = {
+            "práce 4 h": (4.0, ""), "práce 4 hodiny": (4.0, ""), "Servind 6h": (6.0, "Servind"),
+            "dělal jsem 3 hodiny": (3.0, "Dělal jsem"), "14 hodin práce": (14.0, ""), "práce 14 h": (14.0, ""),
+            "práce na 4 hodiny": (4.0, ""), "6,5 h Workshop za 375 Kč/h": (6.5, "Workshop"),
+        }
+        for text, (hours, project) in cases.items():
+            r = p(text)
+            self.assertEqual(r["kind"], "work", text)
+            self.assertEqual((r["fields"]["hours"], r["fields"]["project"]), (hours, project), text)
+
+    def test_date_plus_time_and_relative_unchanged(self):
+        self.assertEqual(p("18.10. doktor ve 13:15")["fields"], {"title": "Doktor", "due_local": "2026-10-18T13:15"})
+        self.assertEqual(p("za 2 hodiny prádlo")["fields"]["due_local"], "2026-10-03T14:00", "relativní čas zůstává")
+        self.assertEqual(p("zítra fyzio v 17:00")["warnings"], [], "bez „od“ žádná poznámka o začátku")
+
+    def test_work_with_clock_time_does_not_take_hour_as_duration(self):
+        r = p("práce od 8 hodin")
+        self.assertEqual(r["kind"], "work", "výslovná práce zůstává prací")
+        self.assertIsNone(r["fields"]["hours"], "8 je čas začátku, ne délka – parser se zeptá")
+        self.assertIn("hours", fields_of(r["needs_input"]))
+
+    def test_invalid_clock_hour(self):
+        r = p("fyzio od 25 hodin")
+        self.assertEqual(r["kind"], "reminder")
+        self.assertIn("time", fields_of(r["errors"]))
+        self.assertFalse(r["ready"])
+
+
 class ToolCallValidationTestCase(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False},

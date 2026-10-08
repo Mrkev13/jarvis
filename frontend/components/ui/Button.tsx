@@ -1,5 +1,7 @@
 import Link from "next/link";
+import type { IconName } from "@/lib/icons";
 import { cx } from "@/lib/ui";
+import { Icon } from "./Icon";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "success";
 export type ButtonSize = "sm" | "md";
@@ -18,14 +20,19 @@ const SIZE: Record<ButtonSize, string> = {
   sm: "min-h-9 px-3 text-sm pointer-coarse:min-h-11",
   md: "min-h-10 px-4 text-sm pointer-coarse:min-h-11",
 };
+// Čtvercové tlačítko jen s ikonou (IconButton) – stejná výška jako textové tlačítko téže velikosti.
+const SQUARE: Record<ButtonSize, string> = {
+  sm: "h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11",
+  md: "h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11",
+};
 
-export function buttonClass(variant: ButtonVariant = "secondary", size: ButtonSize = "md", className?: string) {
+export function buttonClass(variant: ButtonVariant = "secondary", size: ButtonSize = "md", className?: string, square = false) {
   return cx(
     "motion-press inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] font-medium",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-app",
     "disabled:cursor-not-allowed disabled:opacity-50",
     VARIANT[variant],
-    SIZE[size],
+    square ? SQUARE[size] : SIZE[size],
     className,
   );
 }
@@ -36,10 +43,12 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   /** Probíhající akce: tlačítko je zakázané a ukáže `busyLabel`. */
   busy?: boolean;
   busyLabel?: React.ReactNode;
+  /** Volitelná ikona před textem (MRK-15) – text zůstává. */
+  icon?: IconName;
   ref?: React.Ref<HTMLButtonElement>;
 };
 
-export function Button({ variant, size, busy, busyLabel, disabled, className, children, type = "button", ref, ...rest }: ButtonProps) {
+export function Button({ variant, size, busy, busyLabel, icon, disabled, className, children, type = "button", ref, ...rest }: ButtonProps) {
   return (
     <button
       {...rest}
@@ -49,7 +58,47 @@ export function Button({ variant, size, busy, busyLabel, disabled, className, ch
       aria-busy={busy || undefined}
       className={buttonClass(variant, size, className)}
     >
+      {icon && !(busy && busyLabel) ? <Icon name={icon} size="sm" /> : null}
       {busy && busyLabel ? busyLabel : children}
+    </button>
+  );
+}
+
+/**
+ * Tlačítko jen s ikonou (MRK-15, varianta „subtle"): čtverec se stejnou výškou jako Button téže velikosti,
+ * na dotyk ≥ 44 px. `label` je povinný – stane se přístupným názvem (a tooltipem).
+ */
+export function IconButton({
+  icon,
+  label,
+  variant = "ghost",
+  size = "sm",
+  pressed,
+  filled,
+  className,
+  ref,
+  ...rest
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
+  icon: IconName;
+  label: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  /** Přepínač (aria-pressed), např. oblíbené. */
+  pressed?: boolean;
+  filled?: boolean;
+  ref?: React.Ref<HTMLButtonElement>;
+}) {
+  return (
+    <button
+      {...rest}
+      ref={ref}
+      type={rest.type ?? "button"}
+      aria-label={label}
+      title={label}
+      aria-pressed={pressed}
+      className={buttonClass(variant, size, className, true)}
+    >
+      <Icon name={icon} size={size === "sm" ? "sm" : "md"} filled={filled} />
     </button>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -115,7 +116,7 @@ export function MobileHeader() {
             onClick={() => setOpen(true)}
             className="grid h-10 w-10 place-items-center rounded-lg text-xl text-ink-2 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
-            ☰
+            <Icon name="menu" size="md" />
           </button>
         </div>
       </header>

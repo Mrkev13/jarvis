@@ -396,7 +396,13 @@ hours without a work word (work, *medium*) > relative time "za 2 hodiny" or a cl
 expense words > a bare number (finance, asks). Dates and times use the Prague calendar (`time_utils`): dnes /
 zítra / pozítří, weekdays ("v pátek" = nearest, "příští pátek" = next calendar week), "18. 10." (rolls to next year
 if already past), ISO dates; reminders without a time get 09:00 (shown as a warning); a time that already passed
-today moves to tomorrow (warning). Finance categories only from explicit words (Albert/Lidl → Potraviny,
+today moves to tomorrow (warning). **Clock time vs. duration (MRK-11):** a preposition + hour is a *clock time*
+– "od 14 hodin", "ve 14", "v 14", "v 10:30", "o 8", "kolem 9", "od 9" (only after od/v/ve/o/kolem may "hodin/hod/h"
+follow; "na 4 hodiny" stays a duration). An hour without a preposition is a *duration* – "4 h", "práce 4 hodiny",
+"Servind 6h", "14 hodin práce". Hours inside a clock phrase or a relative phrase never count as work hours, so an
+appointment ("21.10.2026 fyzio od 14 hodin") is a **reminder at the start time** (with the hint "Začátek v 14:00 –
+uloží se jako připomínka na tento čas"; there is no calendar/event entity yet), never 14 hours of work. An explicit
+work word with only a start time ("práce od 8 hodin") stays work and asks for the hours. Finance categories only from explicit words (Albert/Lidl → Potraviny,
 oběd/káva → Jídlo, MHD/benzín → Doprava, …); otherwise "Ostatní" with a visible warning. Subjects match by full
 name or code first, then by the stem of the first word ("z práva" → Právo); more candidates = no choice made.
 
@@ -638,3 +644,45 @@ images to small stat rows or turn modules into galleries.
 - Upload → review drawer immediately; it states that the replay is already saved ("Doplnit později"). Parser status
   is a badge + one plain sentence; raw warnings only for partial/unsupported replays.
 
+
+## 22. Icons, status and actions (MRK-15 visual foundation)
+
+**Icons** – one set of line icons, `lib/icons.ts` (data) and `components/ui/Icon` (render). Rules:
+- Grid 24 × 24, `currentColor` stroke 1.75, round caps/joins.
+- Size tokens: `xs` 12 (in a badge), `sm` 16 (button/row), `md` 20 (card header), `lg` 24.
+- Without `label` an icon is decorative (`aria-hidden`), so it must sit next to text. With `label` it becomes `role="img"`.
+- `filled` exists only for toggle states (star = favorite).
+- No icon library dependency; add new shapes to `lib/icons.ts` only, kebab-case names.
+- **No emoji as functional icons** – an icon only where it carries information (section type, state, an action without room for text). The icon test guards the migrated screens.
+
+**Primitives**
+- `IconTile` – the restrained duotone frame (cyan 10 %) used by `CardHeader icon="calendar"` and the quick actions. A tone is used only when the icon carries a state.
+- `CardHeader icon` – accepts an icon name (preferred) or a legacy node.
+- `StatusBadge icon` – small state icon before the text. Tones keep their semantics:
+  - success = done;
+  - warning = soon / attention;
+  - danger = error / overdue;
+  - info = in progress / informational;
+  - neutral = category;
+  - accent = brand mark.
+- `Button icon` – leading icon; the text stays.
+- `IconButton` – icon-only "subtle" action. `label` is required (aria-label + title), the square matches the Button height, it is ≥ 44 px on touch, and `pressed` → `aria-pressed` for toggles.
+- Action hierarchy is unchanged: primary (one per view), secondary, success (outline), danger (outline), ghost/IconButton (subtle).
+
+**Applied so far**
+- Dashboard: all widget headers and quick actions, plus the hidden-widgets card.
+- Weekly review card and Today section headers.
+- School: deadline badges (alert = overdue, clock = due soon).
+- WoT: favorite star on milestone cards and replay rows; completed-grind check.
+- Shell: notification bell and mobile menu icon.
+
+**Migration backlog** (next passes, module by module):
+- AI assistant controls: 🎤 🔊 ✎ 🗑 ✕, and `⚠️/❌/✅` prefixes in `lib/aiChat.ts` / `aiActions.ts` (coordinate with Jarvis / MRK-16).
+- Today "✓ Hotovo" buttons → `Button icon="check"`.
+- Text arrows "Všechny →" → `chevron-right`.
+- Emoji inside backend notification titles (⏰).
+- `StreakFlame` 🔥 – Motion System, keep until a motion review.
+- Replay/milestone form "★" labels.
+- MotionPreview.
+- Empty-state icons.
+- Work / Finance / Goals / MFF / Activity / Quick Add / Search adoption.

@@ -1045,6 +1045,16 @@ async function qaType(page, text) {
   check("quick add: připomínka zítra v 17:00", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-12T17:00" && (await preview.getByText("zítra v 17:00").count()) === 1);
   await page.screenshot({ path: `${OUT}quick-add-reminder.png` });
 
+  // MRK-11: „od 14 hodin" = čas začátku → připomínka, ne 14 hodin práce; „práce 4 h" zůstává délkou
+  await qaType(page, "21.10.2026 fyzio od 14 hodin");
+  check("quick add: „fyzio od 14 hodin“ = připomínka ve 14:00, ne práce", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-21T14:00" && (await preview.getByText("st 21. 10. 2026 v 14:00").count()) === 1 && (await dialog.getByLabel(/^Hodiny/).count()) === 0);
+  check("quick add: čas začátku vysvětlený v náhledu", (await dialog.getByText("Začátek v 14:00 – uloží se jako připomínka na tento čas.").count()) === 1 && (await save.isEnabled()));
+  await page.screenshot({ path: `${OUT}quick-add-appointment.png` });
+  await qaType(page, "přednáška od 9");
+  check("quick add: „přednáška od 9“ = čas 09:00", (await preview.getAttribute("data-kind")) === "reminder" && (await dialog.getByLabel(/^Kdy/).inputValue()) === "2026-10-12T09:00");
+  await qaType(page, "práce 4 h");
+  check("quick add: „práce 4 h“ zůstává délkou práce", (await preview.getAttribute("data-kind")) === "work" && (await dialog.getByLabel(/^Hodiny/).inputValue()) === "4");
+
   // škola: předmět + datum; neznámý předmět = otázka, výběr ze seznamu povolí uložení
   await qaType(page, "test z fyziky 18. 10.");
   check("quick add: škola – předmět a termín", (await preview.getAttribute("data-kind")) === "exam" && (await dialog.getByLabel(/^Předmět/).inputValue()) === "2" && (await dialog.getByLabel(/^Termín/).inputValue()) === "2026-10-18");
@@ -2267,6 +2277,76 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
 }
 await wotReset();
 
+// 24) MRK-14 – Škola: Splnit / Uzavřít (volitelný výsledek) / Znovu otevřít (stavový mock).
+{
+  const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  await schoolReset();
+  const { ctx, page, errors } = await open("/school");
+  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  const closedList = page.getByRole("list", { name: "Hotové úkoly a uzavřené zkoušky" });
+  const inOpen = async (t) => (await openList.locator(`[data-search-target="${t}"]`).count()) === 1;
+  const inClosed = async (t) => (await closedList.locator(`[data-search-target="${t}"]`).count()) === 1;
+  check("škola: otevřený úkol má Splnit i Smazat", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Smazat úkol Sada" }).count()) === 1);
+  check("škola: otevřená zkouška má Uzavřít", (await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).count()) === 1);
+  check("škola: hotová položka má Znovu otevřít", (await closedList.getByRole("button", { name: "Znovu otevřít úkol Esej" }).count()) === 1);
+
+  // úkol po termínu → Splnit → potvrzení → Hotové a uzavřené
+  check("škola: úkol po termínu je v otevřených", (await inOpen("assignment-1")) && (await openList.locator('[data-search-target="assignment-1"]').innerText()).includes("Po termínu"));
+  await openList.getByRole("button", { name: "Splnit úkol Sada" }).click();
+  const confirmDone = page.getByRole("dialog", { name: "Splnit úkol Sada?" });
+  check("škola: Splnit chce lehké potvrzení", (await confirmDone.count()) === 1 && (await confirmDone.innerText()).includes("znovu otevřít"));
+  await confirmDone.getByRole("button", { name: "Splnit", exact: true }).click();
+  await page.getByTestId("school-notice").waitFor({ timeout: 3000 }).catch(() => undefined);
+  await page.waitForTimeout(300);
+  check("škola: splněný úkol přejde do Hotové a uzavřené", (await inClosed("assignment-1")) && !(await inOpen("assignment-1")));
+  const doneRow = closedList.locator('[data-search-target="assignment-1"]');
+  check("škola: přechod zvýrazněný (Motion System) + datum splnění", ((await doneRow.getAttribute("class")) || "").includes("motion-highlight-row") && (await doneRow.innerText()).includes("splněno"));
+  check("škola: oznámení pro čtečky", (await page.getByTestId("school-notice").getAttribute("role")) === "status" && (await page.getByTestId("school-notice").innerText()).includes("Sada"));
+  await page.screenshot({ path: `${OUT}school-completed.png`, fullPage: true });
+
+  // zkouška → Uzavřít s výsledkem (nejdřív neplatný)
+  await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).click();
+  const closeDlg = page.getByRole("dialog", { name: "Uzavřít zkoušku test?" });
+  check("škola: Uzavřít = dialog s nepovinným výsledkem", (await closeDlg.count()) === 1 && (await closeDlg.getByLabel("Výsledek zkoušky").inputValue()) === "passed" && (await closeDlg.getByLabel("Hodnocení").inputValue()) === "");
+  await closeDlg.getByLabel("Hodnocení").selectOption("percent");
+  await closeDlg.getByLabel("Hodnota").fill("120");
+  await closeDlg.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  check("škola: neplatný výsledek = chyba, dialog zůstane", (await closeDlg.getByRole("alert").innerText()).includes("0–100") && (await inOpen("exam-3")));
+  await closeDlg.getByLabel("Hodnota").fill("87,5");
+  await page.screenshot({ path: `${OUT}school-close-exam.png` });
+  await closeDlg.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  await page.waitForTimeout(800);
+  const examRow = closedList.locator('[data-search-target="exam-3"]');
+  check("škola: uzavřená zkouška s výsledkem v Hotové", (await inClosed("exam-3")) && (await examRow.innerText()).includes("87,5 %") && (await examRow.innerText()).includes("Splněno"));
+
+  // zkouška bez hodnocení
+  await openList.getByRole("button", { name: "Uzavřít zkoušku Zkouška fyzika" }).click();
+  const closeDlg2 = page.getByRole("dialog", { name: "Uzavřít zkoušku Zkouška fyzika?" });
+  await closeDlg2.getByLabel("Výsledek zkoušky").selectOption("closed");
+  await closeDlg2.getByRole("button", { name: "Uzavřít", exact: true }).click();
+  await page.waitForTimeout(800);
+  check("škola: uzavření bez hodnocení → Uzavřeno", (await inClosed("exam-1")) && (await closedList.locator('[data-search-target="exam-1"]').innerText()).includes("Uzavřeno"));
+
+  // znovu otevřít
+  await closedList.getByRole("button", { name: "Znovu otevřít zkoušku test" }).click();
+  await page.waitForTimeout(800);
+  check("škola: znovu otevřená zkouška zpět v otevřených, bez výsledku", (await inOpen("exam-3")) && !(await openList.locator('[data-search-target="exam-3"]').innerText()).includes("87,5"));
+  await closedList.getByRole("button", { name: "Znovu otevřít úkol Sada" }).click();
+  await page.waitForTimeout(800);
+  check("škola: znovu otevřený úkol zpět v otevřených", (await inOpen("assignment-1")) && (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1);
+  check("škola: mazání zůstává samostatná akce", (await page.getByRole("button", { name: /^Smazat (úkol|zkoušku) / }).count()) === 10);
+  check("škola akce: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await schoolReset();
+}
+{
+  const { ctx, page, errors } = await open("/school", { width: 390, height: 844 });
+  check("škola mobil: akce bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const b = await page.getByRole("button", { name: "Splnit úkol Sada" }).boundingBox();
+  check("škola mobil: Splnit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));
+  check("škola mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
 // 30) MRK-16 – Jarvis companion: volné kotvy (nezakrývá obsah), scroll, stavy, chůze, klik, bubliny,
 //     reduced motion, vypnutí, mobil, záloha obrázku, jediný Jarvis na /ai.
 {
@@ -2606,6 +2686,31 @@ await wotReset();
     check("companion: když obrázek selže, ukáže zálohu", mode === "fallback" && (await figure.getByTestId("jarvis-fallback").count()) === 1, mode);
     await page.screenshot({ path: `${OUT}companion-fallback.png` });
     check("companion záloha: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+
+// 25) MRK-15 – vizuální základ: jednotné čárové ikony místo emoji (Řídicí centrum, Dnes, Škola, WoT).
+{
+  const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}]/u;
+  for (const [path, name] of [["/", "dashboard"], ["/today", "dnes"], ["/school", "škola"], ["/wot", "wot"]]) {
+    const { ctx, page, errors } = await open(path);
+    await page.waitForTimeout(500);
+    const mainText = await page.locator("main").innerText();
+    check(`ikony ${name}: žádná funkční emoji v obsahu`, !EMOJI.test(mainText), (mainText.match(EMOJI) || []).join(""));
+    const svgs = await page.locator("main svg[data-icon]").evaluateAll((els) => els.map((e) => ({ w: e.getBoundingClientRect().width, sw: e.getAttribute("stroke-width"), hidden: e.getAttribute("aria-hidden") })));
+    if (path === "/" || path === "/today") {
+      const tiles = await page.locator("main [data-icon-tile]").count();
+      check(`ikony ${name}: hlavičky karet s ikonou v rámečku`, tiles >= 3, String(tiles));
+    }
+    check(`ikony ${name}: jednotný tah a dekorativní (aria-hidden)`, svgs.length > 0 && svgs.every((x) => x.sw === "1.75" && x.hidden === "true"), JSON.stringify(svgs.slice(0, 3)));
+    check(`ikony ${name}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    if (path === "/") {
+      const bell = page.locator('button[aria-label^="Notifikace"] svg[data-icon="bell"]');
+      check("ikony shell: zvonek = SVG ikona", (await bell.count()) >= 1);
+      await page.screenshot({ path: `${OUT}icons-dashboard.png`, fullPage: true });
+    }
+    if (path === "/school") await page.screenshot({ path: `${OUT}icons-school.png`, fullPage: true });
     await ctx.close();
   }
 }
