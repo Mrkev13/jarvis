@@ -14,7 +14,7 @@ export default function WeeklyReviewCard({ index, resource }: { index?: number; 
     <Card index={index} aria-labelledby="weekly-card-title">
       <CardHeader
         title={<span id="weekly-card-title">Týdenní přehled</span>}
-        icon="📅"
+        icon="calendar"
         actions={<TextLink href="/review">Otevřít →</TextLink>}
       />
       {loading ? (

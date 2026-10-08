@@ -109,7 +109,7 @@ function DeadlineBadge({ date, kind, closed }: { date: string | null; kind: "ass
   const meta = deadlineMeta(days, kind, closed);
   const rel = formatRelativeDays(days);
   return (
-    <StatusBadge tone={meta.tone} dot={meta.overdue}>
+    <StatusBadge tone={meta.tone} icon={meta.overdue ? "alert" : meta.tone === "warning" ? "clock" : undefined}>
       {meta.prefix ? `${meta.prefix} · ${rel}` : capitalize(rel)}
     </StatusBadge>
   );

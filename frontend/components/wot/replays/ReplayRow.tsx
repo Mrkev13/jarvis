@@ -1,7 +1,7 @@
 "use client";
 
 import { GameImage } from "@/components/games/GameImage";
-import { Button, EntityRow, StatusBadge } from "@/components/ui";
+import { Button, EntityRow, Icon, StatusBadge } from "@/components/ui";
 import { useTankNameForTag } from "@/hooks/useGameAssets";
 import { formatDate, formatNumber } from "@/lib/format";
 import { masteryLabel } from "@/lib/wot";
@@ -21,12 +21,12 @@ export function ReplayTags({ tags }: { tags: string[] }) {
   );
 }
 
-/** Oblíbený = značka ★ s textem (žádné pořadí ani skóre). */
+/** Oblíbený = značka s hvězdou a textem (žádné pořadí ani skóre). */
 export function FavoriteMarker() {
   return (
     <span data-testid="replay-favorite">
-      <StatusBadge tone="warning">
-        <span aria-hidden="true">★</span> Oblíbený
+      <StatusBadge tone="warning" icon="star">
+        Oblíbený
       </StatusBadge>
     </span>
   );
@@ -106,7 +106,7 @@ export function ReplayRow({
             aria-label={r.favorite ? `Zrušit oblíbení: ${title}` : `Oblíbit replay: ${title}`}
             className="pointer-coarse:min-w-11"
           >
-            <span aria-hidden="true">{r.favorite ? "★" : "☆"}</span>
+            <Icon name="star" filled={r.favorite} />
           </Button>
         </>
       }

@@ -16,6 +16,7 @@ import {
   EmptyState,
   EntityList,
   EntityRow,
+  IconTile,
   LoadingState,
   MetricCard,
   Progress,
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui";
 import type { ApiResource } from "@/hooks/useApiResource";
 import type { BriefingPayload } from "@/lib/briefing";
+import type { IconName } from "@/lib/icons";
 import { formatDate, formatDays, formatNumber, formatRelativeDays } from "@/lib/format";
 import { staggerStyle } from "@/lib/motion";
 import type { WidgetId } from "@/lib/dashboardLayout";
@@ -223,11 +225,11 @@ function GoalProgressBlock({
 }
 
 const QUICK_ACTIONS = [
-  { href: "/work", icon: "💼", title: "Zapsat práci", hint: "Odpracované hodiny" },
-  { href: "/finance", icon: "💰", title: "Přidat výdaj", hint: "Finance" },
-  { href: "/goals", icon: "🎯", title: "Nový cíl", hint: "Cíle" },
-  { href: "/ai", icon: "🤖", title: "AI asistent", hint: "Chat" },
-  { href: "/planner", icon: "📋", title: "Plánovač", hint: "Den / týden" },
+  { href: "/work", icon: "briefcase" as IconName, title: "Zapsat práci", hint: "Odpracované hodiny" },
+  { href: "/finance", icon: "wallet" as IconName, title: "Přidat výdaj", hint: "Finance" },
+  { href: "/goals", icon: "target" as IconName, title: "Nový cíl", hint: "Cíle" },
+  { href: "/ai", icon: "bot" as IconName, title: "AI asistent", hint: "Chat" },
+  { href: "/planner", icon: "clipboard" as IconName, title: "Plánovač", hint: "Den / týden" },
 ];
 
 export type WidgetProps = {
@@ -253,7 +255,7 @@ function AttentionWidget({ data, loading, index }: WidgetProps) {
     <Card index={index} aria-labelledby="attention-title">
       <CardHeader
         title={<span id="attention-title">Vyžaduje pozornost</span>}
-        icon="🔔"
+        icon="bell"
         actions={
           notifications && notifications.unread > 0 ? (
             <StatusBadge tone={notifications.important > 0 ? "danger" : "warning"}>{notifications.unread} nepřečtených</StatusBadge>
@@ -348,7 +350,7 @@ function TodayWidget({ data, loading, index }: WidgetProps) {
     <Card index={index} aria-labelledby="today-title">
       <CardHeader
         title={<span id="today-title">Dnes</span>}
-        icon="☀️"
+        icon="sun"
         description={today?.summary}
         actions={<TextLink href="/planner">Plánovač →</TextLink>}
       />
@@ -372,7 +374,7 @@ function GoalsWidget({ data, loading, index }: WidgetProps) {
 
   return (
     <Card index={index} aria-labelledby="goals-title">
-      <CardHeader title={<span id="goals-title">Cíle</span>} icon="🎯" actions={<TextLink href="/goals">Všechny →</TextLink>} />
+      <CardHeader title={<span id="goals-title">Cíle</span>} icon="target" actions={<TextLink href="/goals">Všechny →</TextLink>} />
       {loading ? (
         <LoadingState lines={2} />
       ) : goals?.top?.length ? (
@@ -393,7 +395,7 @@ function UpcomingWidget({ data, loading, index }: WidgetProps) {
 
   return (
     <Card index={index} aria-labelledby="upcoming-title">
-      <CardHeader title={<span id="upcoming-title">Nadcházející</span>} icon="📅" actions={<TextLink href="/school">Škola →</TextLink>} />
+      <CardHeader title={<span id="upcoming-title">Nadcházející</span>} icon="calendar" actions={<TextLink href="/school">Škola →</TextLink>} />
       {loading ? (
         <LoadingState lines={3} />
       ) : upcoming.length ? (
@@ -430,7 +432,7 @@ function WorkWidget({ data, loading, index }: WidgetProps) {
 
   return (
     <Card index={index} aria-labelledby="work-title">
-      <CardHeader title={<span id="work-title">Práce</span>} icon="💼" actions={<TextLink href="/work">Práce →</TextLink>} />
+      <CardHeader title={<span id="work-title">Práce</span>} icon="briefcase" actions={<TextLink href="/work">Práce →</TextLink>} />
       {loading ? (
         <LoadingState lines={2} />
       ) : work ? (
@@ -457,7 +459,7 @@ function FinanceWidget({ data, loading, index }: WidgetProps) {
 
   return (
     <Card index={index} aria-labelledby="finance-title">
-      <CardHeader title={<span id="finance-title">Finance</span>} icon="💰" actions={<TextLink href="/finance">Finance →</TextLink>} />
+      <CardHeader title={<span id="finance-title">Finance</span>} icon="wallet" actions={<TextLink href="/finance">Finance →</TextLink>} />
       {loading ? (
         <LoadingState lines={2} />
       ) : finance ? (
@@ -486,7 +488,7 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
     <Card index={index} aria-labelledby="games-title">
       <CardHeader
         title={<span id="games-title">Hry</span>}
-        icon="🎮"
+        icon="gamepad"
         actions={
           <>
             <TextLink href="/wot">WoT →</TextLink>
@@ -554,7 +556,7 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
 function QuickActionsWidget({ index }: WidgetProps) {
   return (
     <Card index={index} aria-labelledby="quick-title">
-      <CardHeader title={<span id="quick-title">Rychlé akce</span>} icon="⚡" />
+      <CardHeader title={<span id="quick-title">Rychlé akce</span>} icon="zap" />
       <nav aria-label="Rychlé akce" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {QUICK_ACTIONS.map((q) => (
           <Link
@@ -562,9 +564,7 @@ function QuickActionsWidget({ index }: WidgetProps) {
             href={q.href}
             className="motion-hover-lift flex min-h-[72px] items-center gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3 transition-colors hover:border-accent/40 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
-            <span aria-hidden="true" className="text-lg">
-              {q.icon}
-            </span>
+            <IconTile name={q.icon} />
             <span className="min-w-0">
               <span className="block text-sm font-medium text-ink">{q.title}</span>
               <span className="block text-xs text-ink-muted">{q.hint}</span>

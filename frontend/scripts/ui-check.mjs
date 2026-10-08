@@ -2690,6 +2690,31 @@ await wotReset();
   }
 }
 
+// 25) MRK-15 – vizuální základ: jednotné čárové ikony místo emoji (Řídicí centrum, Dnes, Škola, WoT).
+{
+  const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}]/u;
+  for (const [path, name] of [["/", "dashboard"], ["/today", "dnes"], ["/school", "škola"], ["/wot", "wot"]]) {
+    const { ctx, page, errors } = await open(path);
+    await page.waitForTimeout(500);
+    const mainText = await page.locator("main").innerText();
+    check(`ikony ${name}: žádná funkční emoji v obsahu`, !EMOJI.test(mainText), (mainText.match(EMOJI) || []).join(""));
+    const svgs = await page.locator("main svg[data-icon]").evaluateAll((els) => els.map((e) => ({ w: e.getBoundingClientRect().width, sw: e.getAttribute("stroke-width"), hidden: e.getAttribute("aria-hidden") })));
+    if (path === "/" || path === "/today") {
+      const tiles = await page.locator("main [data-icon-tile]").count();
+      check(`ikony ${name}: hlavičky karet s ikonou v rámečku`, tiles >= 3, String(tiles));
+    }
+    check(`ikony ${name}: jednotný tah a dekorativní (aria-hidden)`, svgs.length > 0 && svgs.every((x) => x.sw === "1.75" && x.hidden === "true"), JSON.stringify(svgs.slice(0, 3)));
+    check(`ikony ${name}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    if (path === "/") {
+      const bell = page.locator('button[aria-label^="Notifikace"] svg[data-icon="bell"]');
+      check("ikony shell: zvonek = SVG ikona", (await bell.count()) >= 1);
+      await page.screenshot({ path: `${OUT}icons-dashboard.png`, fullPage: true });
+    }
+    if (path === "/school") await page.screenshot({ path: `${OUT}icons-school.png`, fullPage: true });
+    await ctx.close();
+  }
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

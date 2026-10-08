@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
-import { Button, Card, CardHeader, EmptyState } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, Icon } from "@/components/ui";
 import { formatDate, formatNumber } from "@/lib/format";
 import { durationLabel, sortCompletions, type CompletedGrind } from "@/lib/wot";
 
@@ -38,9 +38,7 @@ export function CompletedGrinds({ items, highlightId }: { items: CompletedGrind[
                         {c.xp_start ? ` · ${formatNumber(c.xp_start)} XP` : ""}
                       </div>
                     </div>
-                    <span aria-hidden="true" className="font-mono text-xs text-success">
-                      ✓
-                    </span>
+                    <Icon name="check" size="sm" className="text-success" />
                   </div>
                 </li>
               );
