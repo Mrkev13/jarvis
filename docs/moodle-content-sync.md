@@ -37,8 +37,13 @@ text): the token, the base URL with any secret, signed or private file URLs, ups
 
 - The token travels only in POST bodies; file URLs are reduced to `scheme://host/path` (any returned query with a
   signature/token is dropped) and accepted only on the configured origin under `/webservice/pluginfile.php/`.
-- Redirects are refused; TLS is verified; responses are size-capped.
-- Every transport/JSON exception is discarded and replaced with an allowlisted category
+- File URLs must match the configured origin exactly (scheme, case-insensitive host, effective port – an explicit
+  `:443` equals the default) and lie under that install's own `…/webservice/pluginfile.php/` (a Moodle in a
+  sub-path is supported). Userinfo, backslashes, control/space characters and encoded `.`/`/` (`%2e`, `%2f`) are
+  rejected; the request is rebuilt from the configured origin, never the upstream host. No user-supplied URL exists.
+- Redirects are refused; TLS is verified; every read is bounded to `limit + 1` bytes whatever Content-Length says.
+- Every transport/JSON exception is discarded (raised fresh outside the `except` block, so no `__context__` chain
+  carries the upstream error) and replaced with an allowlisted category
   (`not_configured`, `unavailable`, `auth_failed`, `ws_error`, `response_invalid`, …). The module never logs.
 - Tests plant canary token/URL values and assert they appear in none of the persisted rows, API responses,
   `/changes`, `/activity`, logs or rendered exceptions (`backend/tests/test_study_materials.py`).
@@ -69,19 +74,26 @@ text): the token, the base URL with any secret, signed or private file URLs, ups
 Allowlist PDF, PPTX, DOCX, TXT (by extension) **and** a byte-signature check (`%PDF-`, OOXML zip with the right main
 part, UTF-8 text without NUL). Size cap before and during download. Anything else is metadata-only. Files live in
 `MEDIA_DIR/study-materials/<sha256>.<ext>`; names come from the content only (no upstream name ever reaches the
-filesystem). The download endpoint serves only that regex-validated name with `Content-Disposition: attachment`,
+filesystem). Writes go to a unique temp file and are renamed atomically. Macro-enabled OOXML (`vbaProject.bin`) is
+rejected.
+
+**Blob lifecycle:** a changed file updates the same row and points it at a new blob; the previous blob stays on disk
+(it may still be referenced by an identical file elsewhere, and history is never deleted). A blob written in a
+course transaction that later rolls back is likewise left unreferenced. There is no blob garbage collection yet –
+unreferenced files are harmless and can be removed by a future maintenance task. The download endpoint serves only that regex-validated name with `Content-Disposition: attachment`,
 `nosniff` and `no-store`. Nothing is executed or rendered.
 
 ## Extraction
 
-Local and bounded: pypdf (≤ 300 pages), PPTX/DOCX XML parts read in memory (DOCTYPE/entities refused, part sizes
-capped), TXT as UTF-8; max 200 000 characters. Failure → `extraction_status = failed`, the binary stays.
+Local and bounded: pypdf 6.19 (≤ 300 pages; 6.x carries the decompression/DoS fixes missing in 5.x), PPTX/DOCX XML parts read in memory (DOCTYPE/entities refused, part sizes
+capped, any DTD/entity declaration refused by an encoding-independent expat pre-scan), TXT as UTF-8; max 200 000 characters. Failure → `extraction_status = failed`, the binary stays.
 Documents are **never sent to Groq** or any other service.
 
 ## Integrations (Module Framework, owner = School)
 
 - Search: `SearchSource('school_materials')` – title, file name, section, course and a bounded text excerpt.
 - AI context: `ContextSection('school_materials')` – counts by type, missing count and recent titles; never text.
+  Targeted retrieval of document passages for Jarvis is future work.
 - Domain events `school.material.{created,updated,source_missing,restored}` (payload: ids, type, download status,
   changed field names – no titles or text), each with one Activity row; What Changed via the School `ChangeSource`.
 - REST: `GET /school/materials` (filters `subject_id`, `course_id`, `type`, `state=active|missing|all`),
@@ -93,6 +105,8 @@ Course→subject suggestion: only when exactly one subject's code (≥ 3 chars) 
 short/full name. Never by name similarity, never applied automatically.
 
 Future RAG boundary: `extracted_text` is the derived, rebuildable input for later chunking/embedding; no vector DB yet.
+
+Status split: **the code foundation is merged; the real ČZU connector is NOT verified** – tracked separately.
 
 ## Needs real verification (not done – cloud session, synthetic fixtures only)
 

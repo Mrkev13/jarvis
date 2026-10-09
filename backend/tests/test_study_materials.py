@@ -599,3 +599,106 @@ def test_parse_contents_rejects_non_list_and_path_like_names():
         {'id': 8, 'modname': 'url', 'name': 'Link', 'contents': [{'type': 'url', 'fileurl': 'https://x.invalid'}]},
     ]}])
     assert snap.files == [] and snap.uncertain_modules == {'5', '6'} and snap.complete
+
+
+# ---------- finalize review (MRK-42): hardening regressions ----------
+
+def test_errors_carry_no_chained_upstream_exception(db, moodle):
+    transport = MoodleWsClient(config(), opener=FakeOpener(OSError(f'{BASE}?wstoken={TOKEN}')))
+    with pytest.raises(MoodleSyncError) as caught:
+        transport.courses()
+    assert caught.value.__context__ is None and caught.value.__cause__ is None
+    bad_json = MoodleWsClient(config(), opener=FakeOpener(b'{not json ' + TOKEN.encode()))
+    with pytest.raises(MoodleSyncError) as caught:
+        bad_json.course_contents('101')
+    assert caught.value.__context__ is None
+
+    class Exploding(FakeMoodle):
+        def courses(self):
+            raise RuntimeError(f'leak {TOKEN}')
+    with pytest.raises(MoodleSyncError) as caught:
+        service.sync_materials(db, client=Exploding(), now=NOW)
+    assert caught.value.__context__ is None and caught.value.category == 'unavailable'
+    assert_no_canary(_rendered(caught.value))
+
+
+def test_download_origin_comparison_is_robust():
+    path = '/webservice/pluginfile.php/7/mod_resource/content/1/a.pdf'
+    ok = FakeOpener(*[b'%PDF-1.4'] * 3)
+    client = MoodleWsClient(config(), opener=ok)
+    for allowed in (f'https://MOODLE.Example.INVALID{path}', f'https://moodle.example.invalid:443{path}',
+                    f'{BASE}{path}?token={SIGNED}#frag'):
+        assert client.download(allowed, 1024) == b'%PDF-1.4'
+    assert [r.full_url for r in ok.requests] == [BASE + path] * 3, 'always rebuilt from the configured origin'
+    for rejected in (f'https://moodle.example.invalid:8443{path}', f'https://moodle.example.invalid.evil.invalid{path}',
+                     f'https://evilmoodle.example.invalid{path}', f'https://evil.invalid\\@moodle.example.invalid{path}',
+                     f'https://moodle.example.invalid@evil.invalid{path}', f'HTTP://moodle.example.invalid{path}',
+                     f'https://moodle.example.invalid:99999{path}', f'https://localhost{path}', f'https://127.0.0.1{path}',
+                     f'{BASE}/webservice/pluginfile.php/%2e%2e/%2E%2E/login/token.php',
+                     f'{BASE}/webservice/pluginfile.php/1/a%2fb.pdf', f'{BASE}/webservice/pluginfile.php/1/a b.pdf',
+                     f'//moodle.example.invalid{path}', path):
+        with pytest.raises(MoodleSyncError, match='file_url_rejected'):
+            client.download(rejected, 1024)
+    assert len(ok.requests) == 3
+
+
+def test_moodle_in_a_sub_path():
+    opener = FakeOpener(b'{"userid": 3}', b'%PDF-1.4')
+    client = MoodleWsClient(MoodleConfig(f'{BASE}/moodle', TOKEN, 1024), opener=opener)
+    client.user_id()
+    assert opener.requests[0].full_url == f'{BASE}/moodle/webservice/rest/server.php'
+    assert client.download(f'{BASE}/moodle/webservice/pluginfile.php/1/x.pdf', 1024) == b'%PDF-1.4'
+    with pytest.raises(MoodleSyncError, match='file_url_rejected'):
+        client.download(f'{BASE}/webservice/pluginfile.php/1/x.pdf', 1024)
+
+
+def test_disabled_ws_function_fails_only_that_course(db, moodle):
+    service.sync_materials(db, client=moodle, now=NOW)
+    ws = MoodleWsClient(config(), opener=FakeOpener(json.dumps(
+        {'exception': 'webservice_access_exception', 'errorcode': 'accessexception', 'message': 'Access control exception'}).encode()))
+    moodle.course_contents = ws.course_contents
+    stats = service.sync_materials(db, client=moodle, now=LATER)
+    assert stats['courses_failed'] == 1 and stats['missing'] == 0
+    assert all(m.source_missing_at is None for m in db.query(StudyMaterial))
+
+
+def test_unconfigured_connector_leaves_school_untouched(db, api):
+    db.add(models.Subject(name='Biologie', code='BIO101'))
+    db.commit()
+    listing = api.get('/school/materials').json()
+    assert listing['configured'] is False and listing['materials'] == [] and listing['subjects'][0]['name'] == 'Biologie'
+    assert api.post('/school/materials/sync').status_code == 503
+    assert db.query(models.ActivityLog).count() == 0 and db.query(models.DomainEvent).count() == 0
+
+
+def test_utf16_dtd_and_macro_packages_are_refused():
+    ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    doc = f'<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE d [<!ENTITY a "aaaa">]><w:document {ns}>&a;</w:document>'
+    evil = _zip({'word/document.xml': doc.encode('utf-16')})
+    assert extract.extract_text(evil, 'docx').status == 'failed'
+    macro = _zip({'word/document.xml': '<w:document/>', 'word/vbaProject.bin': b'\x00macro'})
+    assert not storage.sniff(macro, 'docx')
+    assert storage.sniff(make_docx('ok'), 'docx')
+
+
+def test_raised_size_limit_retries_previously_too_large(db, moodle, monkeypatch):
+    moodle.module(23)['contents'] = [file_entry('huge.pdf', b'', size=7 * 1024 * 1024)]
+    moodle.files[url('huge.pdf')] = make_pdf('Big scan')
+    service.sync_materials(db, client=moodle, now=NOW)
+    assert by_file(db)['huge.pdf'].download_status == 'too_large'
+    assert service.sync_materials(db, client=moodle, now=LATER)['unchanged'] == 7
+    monkeypatch.setenv('MOODLE_MAX_FILE_MB', '10')
+    stats = service.sync_materials(db, client=moodle, now=LATER)
+    assert stats['updated'] == 1 and by_file(db)['huge.pdf'].download_status == 'stored'
+
+
+def test_concurrent_identical_store_never_tears(tmp_path, monkeypatch):
+    import threading
+    monkeypatch.setenv('MEDIA_DIR', str(tmp_path))
+    data = make_pdf('same bytes') * 50
+    names = []
+    threads = [threading.Thread(target=lambda: names.append(storage.store(data, 'pdf')[0])) for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(set(names)) == 1 and storage.read(names[0]) == data
+    assert sorted(p.name for p in (tmp_path / 'study-materials').iterdir()) == [names[0]], 'no temp files left'

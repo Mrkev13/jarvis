@@ -11,6 +11,7 @@ import hashlib
 import io
 import os
 import re
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -60,8 +61,9 @@ def sniff(data: bytes, expected: str) -> bool:
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 names = archive.namelist()
+                # macro-enabled packages (vbaProject.bin) are never stored, whatever their extension says
                 return (len(names) <= MAX_ZIP_ENTRIES and '[Content_Types].xml' in names
-                        and _OOXML_MAIN[expected] in names)
+                        and _OOXML_MAIN[expected] in names and not any(n.lower().endswith('vbaproject.bin') for n in names))
         except Exception:  # noqa: BLE001 - a broken archive is simply not this type
             return False
     if expected == 'txt':
@@ -83,10 +85,16 @@ def store(data: bytes, material_type: str) -> tuple[str, str]:
     name = f'{checksum}.{material_type}'
     path = path_for(name)
     if not path.exists():
-        tmp = path.with_name(f'.{name}.{os.getpid()}.tmp')
-        with open(tmp, 'wb') as handle:
-            handle.write(data)
-        os.replace(tmp, path)
+        # unique temp file in the same folder, then atomic rename: concurrent writers of the same content each
+        # write their own temp and the last rename wins with identical bytes – never a torn file
+        fd, tmp = tempfile.mkstemp(prefix='.upload-', suffix='.tmp', dir=path.parent)
+        try:
+            with os.fdopen(fd, 'wb') as handle:
+                handle.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
     return name, checksum
 
 

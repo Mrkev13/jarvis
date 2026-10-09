@@ -227,13 +227,15 @@ def _fetch_binary(client, remote: RemoteFile, limit: int) -> tuple[str, bytes | 
     return 'stored', data
 
 
-def _needs_download(row, remote: RemoteFile) -> bool:
+def _needs_download(row, remote: RemoteFile, limit: int) -> bool:
     if remote.material_type not in STORABLE:
         return False
     if row is None or row.size_bytes != remote.size_bytes or row.source_modified_at != remote.source_modified_at:
         return True
     if row.download_status == 'failed' or row.material_type != remote.material_type:
         return True
+    if row.download_status == 'too_large' and remote.size_bytes is not None and remote.size_bytes <= limit:
+        return True  # MOODLE_MAX_FILE_MB was raised since
     return row.download_status == 'stored' and not storage.exists(row.stored_name)
 
 
@@ -244,7 +246,7 @@ def _apply_file(db, course: StudyCourse, remote: RemoteFile, client, limit: int,
     values = {name: getattr(remote, name) for name in META_FIELDS}
     cleared = dict(stored_name=None, checksum=None, stored_size=None, extraction_status=None, extracted_text=None,
                    extracted_at=None)
-    if _needs_download(row, remote):
+    if _needs_download(row, remote, limit):
         status, data = _fetch_binary(client, remote, limit)
         values['download_status'] = status
         if data is not None:
@@ -341,12 +343,15 @@ def sync_materials(db, *, client=None, now=None) -> dict:
         limit = max_file_bytes()
     now = now or utc_now()
     stats = _new_stats()
+    raw_courses, failure = None, None
     try:
         raw_courses = client.courses()
-    except MoodleSyncError:
-        raise
+    except MoodleSyncError as error:
+        failure = error.category
     except Exception:  # noqa: BLE001
-        raise MoodleSyncError('unavailable') from None
+        failure = 'unavailable'
+    if failure is not None:
+        raise MoodleSyncError(failure)  # outside the except block: no chained upstream exception
     if not isinstance(raw_courses, list):
         raise MoodleSyncError('response_invalid')
     for external_id, name, short_name in _remote_courses(raw_courses, stats):

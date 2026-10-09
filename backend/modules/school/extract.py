@@ -12,6 +12,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from xml.etree import ElementTree
+from xml.parsers import expat
 
 MAX_TEXT_CHARS = 200_000
 MAX_PDF_PAGES = 300
@@ -65,7 +66,19 @@ def _xml(archive: zipfile.ZipFile, name: str, budget: list[int]):
     raw = archive.read(name)
     if b'<!DOCTYPE' in raw or b'<!ENTITY' in raw:
         raise ValueError('doctype refused')
+    _refuse_dtd(raw)
     return ElementTree.fromstring(raw)
+
+
+def _refuse_dtd(raw: bytes) -> None:
+    """Encoding-independent pre-scan (also UTF-16 parts): any DTD or entity declaration aborts. ElementTree
+    never resolves external entities and expat keeps its amplification limits; this refuses DTDs outright."""
+    def refuse(*_args):
+        raise ValueError('DTD refused')
+    scanner = expat.ParserCreate()
+    scanner.StartDoctypeDeclHandler = refuse
+    scanner.EntityDeclHandler = refuse
+    scanner.Parse(raw, True)
 
 
 def _pptx(data: bytes) -> Extraction:

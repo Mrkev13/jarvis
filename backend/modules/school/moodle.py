@@ -61,14 +61,22 @@ def is_configured() -> bool:
     return load_config() is not None
 
 
+_INVALID = object()
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise MoodleSyncError('redirect_rejected')
 
 
 def _origin(url: str):
+    """(scheme, lower-case host, effective port) – an explicit :443 equals the default; anything else differs."""
     parts = urlsplit(url)
-    return parts.scheme, (parts.hostname or '').lower(), parts.port
+    try:
+        port = parts.port
+    except ValueError:  # non-numeric / out-of-range port
+        return None
+    return parts.scheme.lower(), (parts.hostname or '').lower(), port or (443 if parts.scheme.lower() == 'https' else None)
 
 
 class MoodleWsClient:
@@ -78,24 +86,31 @@ class MoodleWsClient:
     def __init__(self, config: MoodleConfig, *, opener=None):
         parts = urlsplit(config.base_url)
         if (parts.scheme != 'https' or not parts.hostname or parts.username or parts.password or parts.query
-                or parts.fragment):
+                or parts.fragment or _origin(config.base_url) is None):
             raise MoodleSyncError('invalid_configuration')
         self._config = config
+        # files must live under this install's own pluginfile endpoint (supports a Moodle in a sub-path)
+        self._file_prefix = parts.path.rstrip('/') + FILE_PATH_PREFIX
+        self._origin_url = f'{parts.scheme}://{parts.netloc}'  # validated above: https, no userinfo
         self._opener = opener or build_opener(_NoRedirect(), HTTPSHandler(debuglevel=0))
         self._user_id = None
 
     def _post(self, url: str, fields: dict, limit: int) -> bytes:
+        data, failure = b'', None
         try:
             body = urlencode(fields).encode('ascii')
             request = Request(url, data=body, method='POST',
                               headers={'Content-Type': 'application/x-www-form-urlencoded'})
             with self._opener.open(request, timeout=TIMEOUT_S) as response:
+                # bounded read: never more than limit + 1 bytes, whatever Content-Length claims
                 data = response.read(limit + 1)
-        except MoodleSyncError:
-            raise
-        except Exception:
-            # urllib errors may contain the request; never re-raise or chain them
-            raise MoodleSyncError('unavailable') from None
+        except MoodleSyncError as error:
+            failure = error.category
+        except Exception:  # noqa: BLE001
+            failure = 'unavailable'
+        if failure is not None:
+            # raised outside the except block: no __context__ chain can carry an upstream error/request
+            raise MoodleSyncError(failure)
         if len(data) > limit:
             raise MoodleSyncError('response_too_large')
         return data
@@ -106,8 +121,10 @@ class MoodleWsClient:
                            **params}, MAX_JSON_BYTES)
         try:
             result = json.loads(data.decode('utf-8'))
-        except Exception:
-            raise MoodleSyncError('response_invalid') from None
+        except Exception:  # noqa: BLE001
+            result = _INVALID
+        if result is _INVALID:
+            raise MoodleSyncError('response_invalid')
         if isinstance(result, dict) and ('exception' in result or 'errorcode' in result):
             code = result.get('errorcode')
             raise MoodleSyncError('auth_failed' if isinstance(code, str) and code in AUTH_ERRORS else 'ws_error')
@@ -139,16 +156,19 @@ class MoodleWsClient:
         if not isinstance(file_url, str):
             raise MoodleSyncError('file_url_rejected')
         parts = urlsplit(file_url)
-        if (_origin(file_url) != _origin(self._config.base_url) or parts.username or parts.password
-                or not parts.path.startswith(FILE_PATH_PREFIX) or '..' in parts.path.split('/')):
+        origin = _origin(file_url)
+        if (origin is None or origin != _origin(self._config.base_url) or parts.username or parts.password
+                or not parts.path.startswith(self._file_prefix) or '..' in parts.path.split('/')
+                or '%2e' in parts.path.lower() or '%2f' in parts.path.lower()
+                or '\\' in file_url or any(ord(ch) < 33 for ch in file_url)):
             raise MoodleSyncError('file_url_rejected')
-        # drop any query (a returned URL may already carry a token/signature); token goes in the body
-        clean = f'{parts.scheme}://{parts.netloc}{parts.path}'
+        # rebuilt from the configured origin, never the upstream netloc; any query (a returned URL may carry a
+        # token/signature) is dropped and the token goes in the POST body
+        clean = self._origin_url + parts.path
+        category = None
         try:
             return self._post(clean, {'token': self._config.token}, max_bytes)
         except MoodleSyncError as error:
-            if error.category == 'response_too_large':
-                raise MoodleSyncError('file_too_large') from None
-            if error.category in ('unavailable', 'redirect_rejected'):
-                raise MoodleSyncError('file_unavailable') from None
-            raise
+            category = {'response_too_large': 'file_too_large', 'unavailable': 'file_unavailable',
+                        'redirect_rejected': 'file_unavailable'}.get(error.category, error.category)
+        raise MoodleSyncError(category)
