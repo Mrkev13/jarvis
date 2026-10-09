@@ -231,3 +231,18 @@ REST and the runtime flag. Quick Add is left out: its frontend form definitions 
 and REST picked Habits up from its `ModuleDef`; disabling it in Settings removes it everywhere, and re-enabling
 restores its data.
 
+
+## 11. Guardrails: explicitly out of scope
+
+Carried over from the original MRK-8 design (PR #2), the only decisions not covered elsewhere:
+
+- No runtime plugin loading, third-party modules or marketplace (§1).
+- No generic CRUD or admin generator: each module still writes its own service and UI.
+- Single user: no multi-user permissions or roles. "Permissions" means what a module allows non-UI actors to do:
+  AI tools are READ or WRITE (WRITE always goes through pending actions), and Today offers only declared actions.
+- No external message broker (Redis, MQTT) for the app's own events. The transactional outbox and SSE
+  ([domain-events.md](domain-events.md)) are the bus. MQTT arrives with Home Assistant as a *consumer* of domain
+  events.
+- Home Assistant (future): a module may declare allowlisted device actions only, and irreversible ones (locks,
+  valves) are always confirm-only. Jarvis never talks to devices directly: `Jarvis → validated action → HA`.
+- No rewriting existing modules just to match the package layout. Legacy modules move when they are touched.
