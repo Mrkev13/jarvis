@@ -8,12 +8,13 @@ import {
 } from '@/components/ui';
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiJson, apiUrl, errorMessage, jsonBody } from '@/lib/api';
+import { MaterialReader } from './MaterialReader';
 import {
   STATE_OPTIONS, TYPE_OPTIONS, activeFilterCount, fileState, materialMeta, materialsPath, parseFilters, syncSummary,
-  typeLabel, type MaterialFilters, type MaterialsPayload, type StudyCourse, type StudyMaterial,
+  textStatusLabel, typeLabel, type MaterialFilters, type MaterialsPayload, type StudyCourse, type StudyMaterial,
 } from './materialsLib';
 
-type MaterialDetail = StudyMaterial & { extracted_chars: number; text_excerpt: string | null };
+type MaterialDetail = StudyMaterial & { extracted_chars: number };
 
 function MaterialRow({ m }: { m: StudyMaterial }) {
   const state = fileState(m);
@@ -109,12 +110,8 @@ export default function MaterialsPage() {
       {selectedDetail ? <Card>
         <CardHeader title="Vybraný materiál" />
         <EntityList label="Vybraný materiál"><MaterialRow m={selectedDetail} /></EntityList>
-        {selectedDetail.text_excerpt
-          ? <details className="mt-3 text-sm text-ink-2">
-              <summary className="cursor-pointer text-ink-muted">Ukázka textu ({selectedDetail.extracted_chars} znaků)</summary>
-              <p className="mt-2 whitespace-pre-line break-words">{selectedDetail.text_excerpt.slice(0, 1200)}</p>
-            </details>
-          : <p className="mt-3 text-xs text-ink-muted">Text zatím není k dispozici.</p>}
+        <p className="mt-2 text-xs text-ink-muted">Text: {textStatusLabel(selectedDetail.extraction_status, selectedDetail.has_file)}</p>
+        <MaterialReader key={selectedDetail.id} materialId={selectedDetail.id} initialQuery={params.get('find')} />
       </Card> : null}
       <FilterBar label="Filtry materiálů" activeCount={activeFilterCount(filters)}
         onReset={() => router.replace(pathname, { scroll: false })}

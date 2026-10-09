@@ -55,7 +55,9 @@ class TokenEstimatorTestCase(unittest.TestCase):
 # requesty posílají jen routovanou podmnožinu (A5, test_tool_router.py hlídá AI_MAX_FIXED_TOKENS pro ni).
 # Phase B (modify_records + pravidlo v promptu) posunula plnou sadu na ~4 300 → strop 4 500.
 # Phase D (3 tooly připomínek + pravidlo) ~4 960 → strop 5 000; běžné routované requesty jsou ~1 400–2 800.
-FULL_TOOL_SET_MAX_FIXED_TOKENS = 5000
+# MRK-44 (2 read tooly studijních materiálů, zkrácené popisy) ~5 110 → strop 5 150; routované requesty je dostanou
+# jen u studijních dotazů (oblast school_materials).
+FULL_TOOL_SET_MAX_FIXED_TOKENS = 5150
 
 
 class FixedOverheadBudgetTestCase(unittest.TestCase):

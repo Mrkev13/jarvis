@@ -2,15 +2,18 @@
 `school_integrations.py`, so the global aggregators stay module-free (Search, AI context, What Changed, REST)."""
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from context_format import short
+from modules.school.extract import PAGE_MARK_CLOSE, PAGE_MARK_OPEN
 from module_contracts import ContextRequest, ContextSection, EntityRef, SearchSource
 from modules.school.models import StudyCourse, StudyMaterial
 from modules.school.router import router
 from time_utils import utc_now
 
 SEARCH_LIMIT = 500
+_PAGE_LINE = re.compile(rf'{PAGE_MARK_OPEN}\d+{PAGE_MARK_CLOSE}')
 SEARCH_TEXT_CHARS = 5000  # bounded excerpt of derived text joins the haystack; full documents never do
 MATERIAL_HREF = '/school/materials?material={id}'
 TYPE_LABELS = {'pdf': 'PDF', 'pptx': 'Prezentace', 'docx': 'Dokument', 'txt': 'Text', 'other': 'Soubor'}
@@ -23,6 +26,11 @@ CHANGE_TITLES = {'school.material.created': 'Nový studijní materiál', 'school
 EVENT_TYPES = frozenset(CHANGE_TITLES)
 
 
+def _plain(text: str | None) -> str:
+    """Bounded excerpt for the haystack, without PDF page-marker lines."""
+    return _PAGE_LINE.sub(' ', (text or '')[:SEARCH_TEXT_CHARS])
+
+
 def search_materials(db, q):
     courses = {c.id: c for c in db.query(StudyCourse).all()}
     rows = (db.query(StudyMaterial).order_by(StudyMaterial.updated_at.desc(), StudyMaterial.id.desc())
@@ -33,7 +41,7 @@ def search_materials(db, q):
                                             course.name if course else None,
                                             'zmizelo z Moodlu' if m.source_missing_at else None]))
         haystack = ' '.join(filter(None, ['material podklady studijni', m.file_name, m.section_name,
-                                          course.short_name if course else None, (m.extracted_text or '')[:SEARCH_TEXT_CHARS]]))
+                                          course.short_name if course else None, _plain(m.extracted_text)]))
         yield 'study_material', m.id, m.title, subtitle, haystack, 'school', MATERIAL_HREF.format(id=m.id)
 
 
@@ -54,14 +62,14 @@ def context_materials(req: ContextRequest) -> list[str]:
     types = ', '.join(f'{TYPE_LABELS.get(k, k)} {n}' for k, n in sorted(by_type.items()))
     lines = [f'Studijní materiály: {total} aktivních ({types}); {missing} zmizelo z Moodlu.']
     if recent:
-        items = '; '.join(f'{short(m.title, 50)} ({TYPE_LABELS.get(m.material_type)}, '
+        items = '; '.join(f'{short(m.title, 50)} (id {m.id}, {TYPE_LABELS.get(m.material_type)}, '
                           f'{short(courses[m.course_id].name, 30) if m.course_id in courses else "?"})' for m in recent)
         lines.append(f'Nové materiály za 14 dní: {items}')
     return lines
 
 
 SEARCH = (SearchSource('school_materials', 11, search_materials),)
-CONTEXT = (ContextSection('school_materials', ('materia', 'prezentac', 'skripta', 'podklad', 'studijni', 'moodle', 'slajd'),
+CONTEXT = (ContextSection('school_materials', ('materia', 'prezentac', 'skripta', 'podklad', 'studijni', 'moodle', 'slajd', 'pdf', 'kapitol', 'ucit'),
                           order=11, build=context_materials),)
 ENTITY_REFS = (EntityRef('study_material', MATERIAL_HREF),)
 ROUTERS = (router,)

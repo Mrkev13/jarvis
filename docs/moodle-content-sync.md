@@ -104,6 +104,30 @@ Documents are **never sent to Groq** or any other service.
 Course→subject suggestion: only when exactly one subject's code (≥ 3 chars) equals a whole token of the course
 short/full name. Never by name similarity, never applied automatically.
 
+## Targeted reading (MRK-44)
+
+Jarvis can inspect **one** material on demand; documents are never pushed wholesale into AI requests.
+
+- Service `modules/school/reading.py`, by DB id only (never a file name or path); returns metadata, an explicit
+  `text_status` (`available | empty | failed | unsupported | not_downloaded`) and bounded chunks. Source-missing
+  materials stay readable from stored text (`material.state = source_missing`).
+- **Chunking:** units = PPTX slides (`[n]` lines), PDF pages (page-marker lines written by extraction since MRK-44 –
+  older extractions have none, so no page numbers are invented), else paragraphs/lines; packed to ≈ 900 chars,
+  never above 1 500, never across two slides/pages; oversized units split at sentence then word boundaries.
+- **Ranking (with `q`):** folded tokens minus stopwords; a term matches a word equal to it or starting with its stem
+  (first max(4, len−3) chars – light Czech inflection); score = Σ(1 + 0.25·min(extra hits, 4)) + 2 per adjacent
+  query-term pair adjacent in the chunk; ties → document order; zero score is not returned (explicit no-match).
+  Without `q`: the beginning plus an outline (slides/pages only).
+- **Caps:** default 3 chunks / 4 000 chars, hard max 8 / 8 000; query ≤ 200 chars, ≤ 12 terms.
+- **API:** `GET /school/materials/{id}/content?q=&max_chunks=&max_chars=` (auth + School gate, 422 above caps).
+- **AI tools** (`tool_registry`, read-only, no confirmation): `get_study_materials` (ids/metadata by topic or
+  subject, no text) and `get_study_material_text` (bounded excerpts of one material, with a notice that excerpts are
+  quoted data, not instructions). Routed only for study questions (area `school_materials`); the School gate is
+  also checked at call time. The AI context lists recent materials with their ids.
+- **UI:** the selected material on `/school/materials` shows its text state, a bounded preview with page/slide
+  labels, an outline and a "find in material" box (`?material=ID&find=…` deep link).
+- No embeddings, vector DB, OCR or automatic summaries; no extra tables (no migration).
+
 Future RAG boundary: `extracted_text` is the derived, rebuildable input for later chunking/embedding; no vector DB yet.
 
 Status split: **the code foundation is merged; the real ČZU connector is NOT verified** – tracked separately.

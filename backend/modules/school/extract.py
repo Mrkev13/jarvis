@@ -19,6 +19,8 @@ MAX_PDF_PAGES = 300
 MAX_XML_PART_BYTES = 20 * 1024 * 1024
 MAX_XML_TOTAL_BYTES = 100 * 1024 * 1024
 MAX_SLIDES = 500
+# PDF page boundary marker line (U+27E6/U+27E7 – not expected in study texts)
+PAGE_MARK_OPEN, PAGE_MARK_CLOSE = '\u27e6', '\u27e7'
 
 _A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
 _W = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
@@ -43,19 +45,29 @@ def _finish(parts) -> Extraction:
     return Extraction('ok', text)
 
 
+def page_marker(number: int) -> str:
+    """Line marking the start of PDF page `number` in extracted text (MRK-44 reading uses it for locations).
+    Text extracted before MRK-44 has no markers; readers then report no page numbers rather than guess."""
+    return f'{PAGE_MARK_OPEN}{number}{PAGE_MARK_CLOSE}'
+
+
 def _pdf(data: bytes) -> Extraction:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
-    parts, total = [], 0
+    parts, total, truncated = [], 0, False
     for index, page in enumerate(reader.pages):
         if index >= MAX_PDF_PAGES or total > MAX_TEXT_CHARS:
-            result = _finish(parts)
-            return Extraction('truncated', result.text) if result.text else result
-        chunk = page.extract_text() or ''
-        parts.append(chunk)
-        total += len(chunk)
-    return _finish(parts)
+            truncated = True
+            break
+        chunk = (page.extract_text() or '').strip()
+        if chunk:  # pages without a text layer (scans) get no marker either
+            parts += [page_marker(index + 1), chunk]
+            total += len(chunk)
+    if not parts:
+        return Extraction('empty', None)  # e.g. a scanned PDF: no text layer, no OCR
+    result = _finish(parts)
+    return Extraction('truncated', result.text) if truncated and result.text else result
 
 
 def _xml(archive: zipfile.ZipFile, name: str, budget: list[int]):
