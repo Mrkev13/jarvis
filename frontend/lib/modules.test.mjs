@@ -24,8 +24,8 @@ const FIXTURES = [
   { id: "beta", label: "Beta", defaultEnabled: false, implemented: true, capabilities: ALL, entityTypes: ["beta_item"], routes: ["/beta"], quickAddKinds: ["beta_meal"] },
   { id: "gamma", label: "Gama", defaultEnabled: false, implemented: false, capabilities: [], entityTypes: [], routes: [], quickAddKinds: [] },
 ];
-const EXISTING = ["school", "work", "finance", "goals", "wot", "mff", "habits"]; // habits = MRK-21 pilot
-const FUTURE = ["food", "fitness", "projects", "knowledge", "car", "travel", "entertainment"];
+const EXISTING = ["school", "work", "finance", "goals", "wot", "mff", "habits", "calendar", "fitness"]; // habits = MRK-21 pilot
+const FUTURE = ["food", "projects", "knowledge", "car", "travel", "entertainment"];
 const DEFAULTS = createModuleAccess(manifestFlags());
 const off = (...ids) => createModuleAccess({ ...manifestFlags(), ...Object.fromEntries(ids.map((id) => [id, false])) });
 
