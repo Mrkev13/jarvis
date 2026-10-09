@@ -75,3 +75,6 @@ class CalendarEvent(Base):
     created_at = Column(UTCDateTime(), nullable=False, default=now_utc)
     updated_at = Column(UTCDateTime(), nullable=False, default=now_utc)
     cancelled_at = Column(UTCDateTime(), nullable=True)
+    # MRK-40: NULL = present in the source's latest complete snapshot. Set when a complete snapshot no longer
+    # contains the identity (never a deletion); cleared when it reappears. Distinct from STATUS:CANCELLED.
+    source_missing_at = Column(UTCDateTime(), nullable=True)

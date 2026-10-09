@@ -63,7 +63,7 @@ def test_parser_timezone_date_text_and_duplicates():
 def test_import_idempotent_changed_cancelled_missing_retained(db, source):
     first = service.import_ics(db, source, feed('basic.ics'), now=NOW)
     db.commit()
-    assert first == {'created': 3, 'updated': 0, 'unchanged': 0, 'cancelled': 0, 'errors': 0}
+    assert first == {'created': 3, 'updated': 0, 'unchanged': 0, 'cancelled': 0, 'errors': 0, 'missing': 0, 'restored': 0}
     before = db.query(CalendarEvent).filter_by(external_uid='lecture-1@test.invalid').one()
     identity = before.id
     stamp = before.updated_at
@@ -83,7 +83,11 @@ def test_import_idempotent_changed_cancelled_missing_retained(db, source):
     assert service.import_ics(db, source, feed('cancelled.ics'), now=NOW)['unchanged'] == 1
     db.commit()
     facts = db.query(models.DomainEvent).filter_by(module_id='calendar').all()
-    assert len(facts) == 5 and facts[-1].event_type == 'calendar.event.cancelled'
+    # MRK-40: changed.ics/cancelled.ics are complete snapshots holding only lecture-1 → the other two records go
+    # source-missing once (retained, never deleted); repeating the same snapshot adds nothing.
+    assert [f.event_type for f in facts].count('calendar.event.source_missing') == 2
+    assert len(facts) == 7 and facts[-1].event_type == 'calendar.event.cancelled'
+    assert db.query(CalendarEvent).filter(CalendarEvent.source_missing_at.isnot(None)).count() == 2
     assert all('Synthetic' not in json.dumps(f.payload) for f in facts)
 
 
@@ -269,13 +273,17 @@ def test_calendar_sqlite_migration_roundtrip_and_parity(tmp_path, monkeypatch):
     config = Config(str(backend / 'alembic.ini'))
     config.set_main_option('script_location', str(backend / 'alembic'))
     config.set_main_option('version_locations', str(backend / 'alembic/versions'))
-    assert ScriptDirectory.from_config(config).get_heads() == ['0019_calendar']
+    assert ScriptDirectory.from_config(config).get_heads() == ['0020_calendar_source_presence']
     command.upgrade(config, 'head')
     engine = create_engine(url)
     with engine.connect() as connection:
         assert {'calendar_events', 'calendar_sources'} <= set(inspect(connection).get_table_names())
         assert not compare_metadata(MigrationContext.configure(connection), Base.metadata)
-    command.downgrade(config, '-1')
+    command.downgrade(config, '-1')  # 0020: only the presence column goes, every row stays
+    with engine.connect() as connection:
+        columns = {c['name'] for c in inspect(connection).get_columns('calendar_events')}
+        assert 'source_missing_at' not in columns and 'external_uid' in columns
+    command.downgrade(config, '-1')  # 0019
     with engine.connect() as connection:
         assert 'calendar_events' not in inspect(connection).get_table_names()
     command.upgrade(config, 'head')
@@ -342,7 +350,8 @@ def test_historical_query_target_and_source_disabled(db, source):
     db.commit()
     event = db.query(CalendarEvent).filter_by(external_uid='lecture-1@test.invalid').one()
     assert service.list_calendar(db, today=date(2027, 10, 9))['events'] == []
-    assert any(e['id'] == event.id for e in service.list_calendar(db, today=date(2027, 10, 9), event_id=event.id)['events'])
+    # out-of-window search target: returned as `selected`, never mixed into the active occurrence list
+    assert service.list_calendar(db, today=date(2027, 10, 9), event_id=event.id)['selected']['id'] == event.id
     source.enabled = False
     db.commit()
     with pytest.raises(service.CalendarSyncError, match='source_disabled'):

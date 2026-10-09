@@ -69,6 +69,7 @@ const KIND_LABELS: Record<string, string> = {
   restored: "Obnoveno",
   snoozed: "Odloženo",
   cancelled: "Zrušeno",
+  source_missing: "Zmizelo ze zdroje",
 };
 
 export function changeKindLabel(kind: string): string {
@@ -79,7 +80,7 @@ export type ChangeTone = "success" | "warning" | "neutral";
 
 export function changeKindTone(kind: string): ChangeTone {
   if (kind === "completed" || kind === "done" || kind === "closed") return "success";
-  if (kind === "deleted" || kind === "cancelled") return "warning";
+  if (kind === "deleted" || kind === "cancelled" || kind === "source_missing") return "warning";
   return "neutral";
 }
 

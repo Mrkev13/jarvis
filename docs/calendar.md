@@ -61,22 +61,76 @@ No URL, UID, content excerpt or raw error is included in those stats.
 Cancellation preserves the record, original schedule and the first timestamp of
 that cancellation episode. An identity-only CANCELLED message can cancel an
 existing record; without a known schedule, an unknown cancelled identity is
-counted as an error. Missing-from-feed never deletes or cancels anything. A
+counted as an error. A cancellation without SUMMARY keeps the known title. A
 later active update can reactivate the identity; prior cancellation remains in
 Activity/domain history. Activity deltas retain previous title/location/schedule/
 status facts. Descriptions are business content, not put into domain payloads or
 change-feed summaries; no separate full event version table is introduced.
 
-## Recurrence boundary
+## Source presence: cancelled vs. disappeared (MRK-40)
 
-RRULE, RECURRENCE-ID, RDATE and EXDATE metadata are preserved. Explicit recurrence
-overrides are separate identities. **Rules are not expanded**: the master/first
-stored instance and explicitly supplied exceptions are the only listed events.
-The list labels a master with a rule as its first occurrence. RANGE overrides
-are rejected; no automatic master cancellation propagation or free-block
-availability is inferred. Recurrence expansion, exceptions reconciliation and a
-complete timetable are later work, before relying on Calendar for recurring
-reminders/planning.
+Two different facts, both kept as history:
+
+- **Cancelled** – the source says `STATUS:CANCELLED` (`status = 'cancelled'`).
+- **Source-missing** – the identity is absent from a later *complete* snapshot of
+  its source (`source_missing_at` set, migration `0020_calendar_source_presence`).
+  Status is unchanged; nothing is deleted.
+
+After each import, a complete snapshot reconciles presence in the same transaction
+(under the PostgreSQL source row lock): present identities of that source absent
+from it become source-missing (`calendar.event.source_missing` + one Activity row).
+When the identity reappears, the **same row** is restored
+(`calendar.event.restored`; content changes in the same import ride on that one
+fact). Repeating a snapshot emits nothing.
+
+A snapshot is complete only when the whole calendar parses, it contains at least
+one VEVENT and every component has a readable UID. A malformed component with a
+readable UID (or conflicting duplicates) protects that UID: it is never marked
+missing. A failed download, an unreadable feed, an empty calendar or a rollback
+never changes presence. Active views (occurrences, Today, AI context, page list)
+exclude both cancelled and source-missing records; Search and the page history
+still show them, labelled.
+
+## Events vs. occurrences (MRK-40)
+
+`calendar_events` rows are the durable imported facts: a single event, a recurring
+master (RRULE and/or RDATE) or a RECURRENCE-ID override. **Occurrences** are what
+actually happens in a window. They are computed at query time by
+`modules.calendar.occurrences.get_calendar_occurrences(db, start, end)` and never
+stored:
+
+- A window is mandatory: aware bounds, end after start, at most 366 days (the API
+  allows 92), plus an occurrence cap. An infinite rule only iterates up to the
+  window end.
+- Recurring masters expand with `python-dateutil` (`rrule`; no hand-written RRULE
+  parsing): FREQ DAILY/WEEKLY/MONTHLY/YEARLY with COUNT, UNTIL (UTC, local or
+  DATE form), INTERVAL, BYDAY etc. DTSTART is always the first instance. RDATE
+  adds instances, EXDATE removes them (stored as normalized UTC instants/dates so
+  their TZID is not lost; older raw values are still understood). Sub-daily rules
+  are not expanded: only the stored first instance is shown.
+- A present override replaces the generated instance with the same
+  RECURRENCE-ID (moved occurrence); a cancelled override removes it. An override
+  that went source-missing no longer applies, so the generated instance returns.
+  A cancelled or source-missing master hides the whole series.
+- **DST:** expansion runs in the event's own timezone (its TZID), so a weekly
+  10:00 Europe/Prague lecture stays 10:00 local across CET/CEST (08:00 UTC in
+  summer, 09:00 UTC in winter), never "+7 days in UTC". Per RFC 5545 §3.3.5,
+  a generated wall time inside the spring gap uses the offset before the gap
+  (02:30 → 03:30 CEST), and an ambiguous autumn time is its first occurrence
+  (CEST). An imported DTSTART inside a gap is still rejected as before. A rule
+  written in UTC (`Z`) recurs in UTC, as the RFC requires.
+- All-day instances are dates: they keep `starts_on` and an exclusive `ends_on`,
+  and overlap windows by Prague days, never shifting across DST or source zones.
+- Timed instance duration is the master's exact elapsed duration.
+
+`GET /calendar/occurrences?start=YYYY-MM-DD&end=YYYY-MM-DD` returns active
+occurrences for local days `[start, end)` (max 92 days; invalid or too large
+window → 422; normal auth and module gate). Each item has the event `id`, a
+stable per-instance `key`, times/dates, title, location and a `recurring` flag.
+No rule text or internal recurrence key is exposed in page payloads.
+
+Not covered: RANGE=THISANDFUTURE overrides (rejected at import), VTODO/VJOURNAL,
+sub-daily expansion, per-occurrence editing.
 
 ## Framework and UI
 
@@ -84,17 +138,25 @@ Backend and frontend manifests register only implemented capabilities: nav,
 Search, Today and AI context. Routers, refs and change providers are module
 contributions. No Calendar branch is added to global aggregators.
 
-- Today: active overlapping events today (all-day has no time); new events in
-  the next seven days contribute to upcoming. Global limits/order/dedupe apply.
-- Search: title/location through existing global matching and Czech normalization.
-  Results use `/calendar?event=<id>`; selected historical/out-of-window records
-  are also loaded and shown, so links do not point to fake detail routes.
-- AI context: a small today/near-term schedule snapshot, no descriptions or tools.
+- Today: active **occurrences** today (all-day has no time) and occurrences
+  starting in the next seven days (upcoming). A generated instance has the ref
+  `calendar_event:<id>@<instance>` so global dedupe keeps each instance; links go
+  to `/calendar?event=<id>`. Global limits/order/dedupe apply.
+- Search: event definitions (not generated instances), title/location through
+  existing global matching and Czech normalization; recurring, cancelled and
+  source-missing records are labelled. Results use `/calendar?event=<id>`; an
+  out-of-window target is returned as `selected`, never mixed into active lists.
+- AI context: a small snapshot of actual occurrences for today and the next
+  seven days, no descriptions or tools.
   All context generation is deterministic, no LLM calls.
-- What Changed: created, updated and cancelled via module change provider. Domain
-  types: `calendar.event.created`, `.updated`, `.cancelled`; payload has only IDs,
-  status, schedule and all-day flag. Activity is the same-transaction projection.
-- `/calendar`: Today/upcoming/recent/cancelled lists, source/status badges, empty/
+- What Changed: created, updated, cancelled, source-missing and restored via the
+  module change provider. Domain types: `calendar.event.created`, `.updated`,
+  `.cancelled`, `.source_missing`, `.restored`; payload has only IDs, status,
+  schedule and all-day flag. Activity is the same-transaction projection (one
+  visible item per fact).
+- `/calendar`: today/upcoming/recent occurrences (each recurring instance on its
+  own date, labelled), a selected out-of-window record, and a history list of
+  cancelled/source-missing records; source/status badges, empty/
   loading/error states and manual sync. Shared route guard and backend module
   gate hide the disabled module, preserving its stored data. A source disabled
   for sync retains its events for reading.
@@ -145,8 +207,8 @@ Migration checks require a **scratch** PostgreSQL DB: upgrade head, downgrade -1
 upgrade head, then opt-in `tests/test_migration_postgres.py` schema comparison.
 Never use the production DB for a downgrade drill. No real Groq request is needed.
 
-Next: validate the real feed locally without sharing its secret; then recurrence/
-timetable completeness and free-block integration. Full calendar UI, editing,
+Next: validate the real feed locally without sharing its secret; then free-block
+integration (MRK-32) on top of `get_calendar_occurrences`. Full calendar UI, editing,
 background sync, Calendar AI actions and planner behavior remain separate work.
 
 Cloud evidence (2026-10-09): focused Calendar **24 passed**; full backend
@@ -161,3 +223,15 @@ revision was rejected. Independent read-only review found no remaining blocker.
 Latest main advanced to `068705b` during verification only in browser-check
 scripts, with no model/migration change; the branch is rebased onto that baseline.
 No real feed or production DB was used; **real Groq request count: 0**.
+
+MRK-40 cloud evidence (2026-10-09, base main `36e933c`): recurrence/presence tests
+**17 passed** (`test_calendar_occurrences.py`) plus Calendar **25**; full backend
+**938 passed, 8 skipped**; frontend **344 passed**; lint, TypeScript, pyflakes and
+production build passed. PostgreSQL 16 scratch: upgrade/downgrade -1/upgrade and
+schema parity passed (head `0020_calendar_source_presence`). PostgreSQL
+concurrency drill with injected synthetic fetches: 6 simultaneous first syncs →
+1 source/2 events; 6 simultaneous "event dropped" syncs → exactly 1
+`source_missing`; 6 simultaneous "event back" syncs → exactly 1 `restored`, same
+row; 12 interleaved syncs → presence facts strictly alternate, Activity rows =
+domain events, no errors, no secret-canary leak. Synthetic feeds only; **real
+Groq request count: 0**.

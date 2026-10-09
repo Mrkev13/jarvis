@@ -1,4 +1,6 @@
 """Calendar inherits application auth and module gating. No URL is accepted from clients."""
+import datetime as dt
+
 from fastapi import APIRouter, HTTPException, Query
 
 import database
@@ -26,6 +28,18 @@ def _run(fn):
 @router.get('')
 def calendar_list(event: int | None = Query(default=None, ge=1)):
     return _run(lambda db: service.list_calendar(db, event_id=event))
+
+
+@router.get('/occurrences')
+def calendar_occurrences(start: dt.date, end: dt.date):
+    """MRK-40: bounded active occurrences for local days [start, end), max 92 days."""
+    db = database.SessionLocal()
+    try:
+        return service.occurrences_between(db, start, end)
+    except service.CalendarWindowError:
+        raise HTTPException(status_code=422, detail={'category': 'invalid_window'}) from None
+    finally:
+        db.close()
 
 
 @router.post('/sync')

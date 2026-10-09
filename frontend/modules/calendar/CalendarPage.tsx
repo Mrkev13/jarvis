@@ -27,6 +27,8 @@ export default function CalendarPage() {
   }
   const data = calendar.data;
   const groups = groupEvents(data?.events ?? [], data?.today ?? '');
+  const history = data?.history ?? [];
+  const selectedEvent = data?.selected && !history.some(h => h.id === data.selected!.id) ? data.selected : null;
   const sources = Object.fromEntries((data?.sources ?? []).map(source => [source.id, source.name]));
   return <ContentContainer>
     <PageHeader title="Kalendář" subtitle="Události dnes a v příštích týdnech."
@@ -39,8 +41,9 @@ export default function CalendarPage() {
       {!data.moodle_configured ? <EmptyState>Zdroj ještě není připojený. Uložené události můžeš dál prohlížet.</EmptyState> : null}
       <Card><CardHeader title="Dnes" icon="calendar" /><CalendarList events={groups.today} sources={sources} empty="Dnes nemáš žádné události." /></Card>
       <Card><CardHeader title="Nadcházející" /><CalendarList events={groups.upcoming} sources={sources} empty="Žádné nadcházející události." /></Card>
-      {groups.cancelled.length ? <Card><CardHeader title="Zrušené" /><CalendarList events={groups.cancelled} sources={sources} empty="" /></Card> : null}
-      {groups.past.length ? <Card><CardHeader title="Nedávné a vybrané události" /><CalendarList events={groups.past} sources={sources} empty="" /></Card> : null}
+      {groups.past.length ? <Card><CardHeader title="Nedávné události" /><CalendarList events={groups.past} sources={sources} empty="" /></Card> : null}
+      {selectedEvent ? <Card><CardHeader title="Vybraná událost" /><CalendarList events={[selectedEvent]} sources={sources} empty="" /></Card> : null}
+      {history.length ? <Card><CardHeader title="Zrušené a zmizelé ze zdroje" /><CalendarList events={history} sources={sources} empty="" /></Card> : null}
     </> : null}
   </ContentContainer>;
 }

@@ -1,6 +1,9 @@
 import { pragueDayKey } from '../../lib/format.ts';
 
+/** Active occurrence (MRK-40: recurring masters expanded by the backend) or a historical record. */
 export interface CalendarEvent {
+  /** Stable per-instance key; several occurrences of one recurring event share `id`. */
+  key?: string;
   id: number;
   source_id: number;
   title: string;
@@ -11,11 +14,15 @@ export interface CalendarEvent {
   starts_on: string | null;
   ends_on: string | null;
   status: 'active' | 'cancelled';
-  rrule: string | null;
+  /** `source_missing` = no longer in the source's latest complete feed (kept as history, not cancelled). */
+  state?: 'active' | 'cancelled' | 'source_missing';
+  recurring?: boolean;
 }
 export interface CalendarPayload {
   today: string;
   events: CalendarEvent[];
+  history?: CalendarEvent[];
+  selected?: CalendarEvent | null;
   sources: { id: number; name: string; enabled: boolean; configured: boolean }[];
   moodle_configured: boolean;
 }
@@ -29,7 +36,7 @@ export function groupEvents(events: CalendarEvent[], today: string) {
     const end = new Date(event.ends_at).getTime();
     const start = new Date(event.starts_at).getTime();
     const lastDay = event.all_day ? event.ends_on! : pragueDayKey(new Date(end > start ? end - 1 : end));
-    if (event.status === 'cancelled') groups.cancelled.push(event);
+    if (!isActive(event)) groups.cancelled.push(event);
     else if (day <= today && (event.all_day ? today < lastDay : today <= lastDay)) groups.today.push(event);
     else if (day > today) groups.upcoming.push(event);
     else groups.past.push(event);
@@ -56,6 +63,11 @@ export function eventTime(event: CalendarEvent): string {
   return `${day.format(start)} · ${clock.format(start)}${finish}`;
 }
 
+export function isActive(event: CalendarEvent) {
+  return event.status !== 'cancelled' && (event.state ?? 'active') === 'active';
+}
+
 export function eventState(event: CalendarEvent) {
-  return event.status === 'cancelled' ? 'Zrušeno' : 'Událost';
+  if (event.status === 'cancelled' || event.state === 'cancelled') return 'Zrušeno';
+  return event.state === 'source_missing' ? 'Zmizelo ze zdroje' : 'Událost';
 }

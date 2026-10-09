@@ -18,3 +18,5 @@ tzdata==2025.3
 
 # Calendar ICS decoding (MRK-30/MRK-31); no custom RFC parser.
 icalendar==6.3.2
+# Calendar RRULE expansion (MRK-40); already an icalendar dependency, pinned because we import it directly.
+python-dateutil==2.9.0.post0

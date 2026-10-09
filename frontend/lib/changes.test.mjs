@@ -66,3 +66,9 @@ test("refetch scheduler debounces bursts and cancels cleanly", () => {
   assert.equal(timers[3].cleared, true);
   assert.equal(runs, 1);
 });
+
+test("MRK-40: calendar source presence kinds have labels", () => {
+  assert.equal(changeKindLabel("source_missing"), "Zmizelo ze zdroje");
+  assert.equal(changeKindTone("source_missing"), "warning");
+  assert.equal(changeKindLabel("restored"), "Obnoveno");
+});
