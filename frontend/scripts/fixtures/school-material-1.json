@@ -1,0 +1,30 @@
+{
+ "id": 1,
+ "title": "Přednáška 1 – stavba buňky",
+ "file_name": "prednaska-01.pdf",
+ "material_type": "pdf",
+ "mime_type": null,
+ "size_bytes": 2480000,
+ "section_name": "Týden 1",
+ "source_modified_at": "2026-10-08T08:00:00",
+ "created_at": "2026-10-01T08:00:00",
+ "updated_at": "2026-10-08T08:00:00",
+ "source_missing_at": null,
+ "state": "active",
+ "download_status": "stored",
+ "has_file": true,
+ "extraction_status": "ok",
+ "course": {
+  "id": 1,
+  "name": "Biologie buňky (BIO101)"
+ },
+ "subject": {
+  "id": 1,
+  "name": "Biologie"
+ },
+ "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+ "stored_size": 2480000,
+ "extracted_at": "2026-10-08T08:00:00",
+ "extracted_chars": 1820,
+ "text_excerpt": "Stavba buňky\nBuňka je základní stavební a funkční jednotka organismů. Prokaryotní a eukaryotní buňky…"
+}
