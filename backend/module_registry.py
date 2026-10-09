@@ -47,6 +47,7 @@ import school_integrations
 import work_integrations
 import wot_integrations
 from modules.habits import integrations as habits_integrations
+from modules.calendar import integrations as calendar_integrations
 from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
 from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
@@ -126,6 +127,11 @@ MODULES: tuple[ModuleDef, ...] = (
               entity_types=frozenset({"habit"}), context_areas=frozenset({"habits"}), api_prefixes=("/habits",),
               integrations=habits_integrations.INTEGRATIONS,
               event_types=frozenset({"habits.entry.done", "habits.entry.skipped"})),
+    ModuleDef("calendar", "Kalendář", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "search", "today", "ai_context"}),
+              entity_types=frozenset({"calendar_event"}), context_areas=frozenset({"calendar"}), api_prefixes=("/calendar",),
+              integrations=calendar_integrations.INTEGRATIONS,
+              event_types=frozenset({"calendar.event.created", "calendar.event.updated", "calendar.event.cancelled"})),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),

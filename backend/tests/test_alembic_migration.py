@@ -60,6 +60,7 @@ STEP_0014_EXTRA = {"wot_replays"}
 STEP_0016_EXTRA = {"module_settings"}  # MRK-18 A2
 STEP_0017_EXTRA = {"habits", "habit_entries"}  # MRK-21 Návyky
 STEP_0018_EXTRA = {"domain_events"}  # MRK-19
+STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
 
 
 def _sqlite_tables(conn):
@@ -168,7 +169,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -534,7 +535,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA)
 
             db = main.SessionLocal()
             try:
