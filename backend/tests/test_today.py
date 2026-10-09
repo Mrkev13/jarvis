@@ -23,6 +23,7 @@ import main  # noqa: E402
 import planner_service  # noqa: E402
 import today_service as ts  # noqa: E402
 from database import Base  # noqa: E402
+from module_registry import ModuleAccess  # noqa: E402
 from models import Assignment, Exam, Notification, Reminder, Subject  # noqa: E402
 from time_utils import local_to_utc  # noqa: E402
 
@@ -53,7 +54,7 @@ class TodayBase(unittest.TestCase):
         self.db.commit()
 
     def build(self, now=NOW):
-        return ts.build_today(self.db, now_utc=now)
+        return ts.build_today(self.db, now_utc=now, access=ModuleAccess({"calendar": False}))  # These cases isolate core/School semantics.
 
     @staticmethod
     def ids(items):

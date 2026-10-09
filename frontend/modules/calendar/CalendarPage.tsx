@@ -8,6 +8,7 @@ import { apiJson, jsonBody } from '@/lib/api';
 import { CalendarList } from './CalendarList';
 import { DayTimelineCard } from './DayTimelineCard';
 import { FreeBlocksCard } from './FreeBlocksCard';
+import { WeekView } from './WeekView';
 import { groupEvents, type CalendarPayload } from './lib';
 
 export default function CalendarPage() {
@@ -15,6 +16,7 @@ export default function CalendarPage() {
   const eventId = selected && /^[1-9][0-9]*$/.test(selected) ? selected : null;
   const calendar = useApiResource<CalendarPayload>(`/calendar${eventId ? `?event=${eventId}` : ''}`);
   const [syncing, setSyncing] = useState(false);
+  const [weekRefresh, setWeekRefresh] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   async function sync() {
@@ -23,6 +25,7 @@ export default function CalendarPage() {
       const result = await apiJson<{ created: number; updated: number; cancelled: number; errors: number }>('/calendar/sync', jsonBody('POST', {}));
       setNotice(`Přidáno ${result.created}, změněno ${result.updated}, zrušeno ${result.cancelled}.${result.errors ? ` ${result.errors} položek se nepodařilo načíst.` : ''}`);
       await calendar.reload();
+      setWeekRefresh(value => value + 1);
     } catch {
       setSyncError('Synchronizace se nepovedla. Uložené události zůstaly zachované.');
     } finally { setSyncing(false); }
@@ -42,6 +45,7 @@ export default function CalendarPage() {
     {data ? <>
       {!data.moodle_configured ? <EmptyState>Zdroj ještě není připojený. Uložené události můžeš dál prohlížet.</EmptyState> : null}
       <Card><CardHeader title="Dnes" icon="calendar" /><CalendarList events={groups.today} sources={sources} empty="Dnes nemáš žádné události." /></Card>
+      <WeekView today={data.today} refresh={weekRefresh} />
       <DayTimelineCard today={data.today} />
       <FreeBlocksCard today={data.today} />
       <Card><CardHeader title="Nadcházející" /><CalendarList events={groups.upcoming} sources={sources} empty="Žádné nadcházející události." /></Card>
