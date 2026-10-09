@@ -58,9 +58,9 @@ def _clean_env():
 class FlagParsingTestCase(unittest.TestCase):
     def test_defaults(self):
         flags = mr.resolve_flags(env={})
-        for mid in ("school", "work", "finance", "goals", "wot", "mff", "habits"):
+        for mid in ("school", "work", "finance", "goals", "wot", "mff", "habits", "fitness"):
             self.assertIs(flags[mid], True, mid)
-        for mid in ("food", "fitness", "projects", "knowledge", "car", "travel", "entertainment"):
+        for mid in ("food", "projects", "knowledge", "car", "travel", "entertainment"):
             self.assertIs(flags[mid], False, mid)
 
     def test_explicit_on_off(self):
@@ -110,7 +110,7 @@ class RegistryTestCase(unittest.TestCase):
     def test_planned_modules_stay_unavailable_even_when_flag_is_on(self):
         on = {m.env_name: "true" for m in mr.MODULES}
         access = ModuleAccess(mr.resolve_flags(env=on))
-        for mid in ("food", "fitness", "projects", "knowledge", "car", "travel", "entertainment"):
+        for mid in ("food", "projects", "knowledge", "car", "travel", "entertainment"):
             self.assertFalse(access.is_available(mid), mid)
             self.assertFalse(any(access.allows(mid, c) for c in mr.CAPABILITIES), mid)
 
