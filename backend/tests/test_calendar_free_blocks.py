@@ -173,6 +173,28 @@ def test_max_range_of_local_days_is_accepted_across_dst(db, source):
         free_blocks.free_blocks_between(db, date(2026, 10, 12), date(2026, 11, 13))
 
 
+def test_multi_day_all_day_event_blocks_its_dates_only_when_busy(db, source):
+    # 24.–26.10. (exclusive end 27.10.) spans the autumn DST switch on 25.10.
+    load(db, source, 'UID:trip@test.invalid\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261027\nSUMMARY:Trip')
+    window = blocks(db, day=date(2026, 10, 23), days=5)
+    assert [b[0] for b in window] == ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27']
+    busy = blocks(db, day=date(2026, 10, 23), days=5, all_day_busy=True)
+    assert busy == [('2026-10-23', '07:00', '22:00', 900), ('2026-10-27', '07:00', '22:00', 900)]
+
+
+def test_block_cap_marks_result_truncated(db, source, monkeypatch):
+    monkeypatch.setattr(free_blocks, 'MAX_BLOCKS', 2)
+    lo, hi = local_window(DAY, DAY + timedelta(days=5))
+    result = get_free_blocks(db, start=lo, end=hi)
+    assert len(result.blocks) == 2 and result.truncated is True
+
+
+def test_ai_context_marks_truncated_free_time_as_uncertain(db, source, monkeypatch):
+    monkeypatch.setattr(free_blocks, 'MAX_OCCURRENCES', 0)
+    lines = integrations.context_events(ContextRequest(db, DAY, datetime(2026, 10, 12, 8, 0)))
+    assert all('neúplné' in line for line in lines if 'volno' in line)
+
+
 def test_occurrence_cap_marks_result_truncated(db, source, monkeypatch):
     load(db, source, event('a', '20261012T090000', '20261012T100000'))
     monkeypatch.setattr(free_blocks, 'MAX_OCCURRENCES', 1)

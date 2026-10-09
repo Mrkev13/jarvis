@@ -79,12 +79,15 @@ def _free_block_lines(req) -> list[str]:
     upper = local_window(req.today, req.today + timedelta(days=2))[1]
     if upper <= lower:
         return []
-    blocks = get_free_blocks(req.db, start=lower, end=upper).blocks
+    result = get_free_blocks(req.db, start=lower, end=upper)
+    blocks = result.blocks
+    # partial busy data must never read as an authoritative schedule
+    caveat = ' – neúplné (příliš mnoho událostí), neber jako jisté' if result.truncated else ''
     lines = []
     for label, day in (('dnes', req.today), ('zítra', req.today + timedelta(days=1))):
         chosen = [b.as_dict() for b in blocks if b.starts_at.astimezone(APP_TZ).date() == day][:3]
         text = ', '.join(f"{b['local_start']}–{b['local_end']} ({_duration(b['duration_minutes'])})" for b in chosen)
-        lines.append(f'Kalendář – volno {label} (07–22, min. 30 min): {text or "žádné"}')
+        lines.append(f'Kalendář – volno {label} (07–22, min. 30 min): {text or "žádné"}{caveat}')
     return lines
 
 
