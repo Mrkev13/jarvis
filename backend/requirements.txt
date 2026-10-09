@@ -20,3 +20,5 @@ tzdata==2025.3
 icalendar==6.3.2
 # Calendar RRULE expansion (MRK-40); already an icalendar dependency, pinned because we import it directly.
 python-dateutil==2.9.0.post0
+# Study-material text extraction (MRK-42): pure Python PDF reader, no native code or external service.
+pypdf==5.1.0

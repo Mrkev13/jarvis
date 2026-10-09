@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  ButtonLink,
   Card,
   CardHeader,
   ConfirmDialog,
@@ -619,6 +620,7 @@ export default function SchoolPage() {
         eyebrow={<HudLabel>Modul · škola</HudLabel>}
         title="Škola"
         subtitle="Termíny úkolů a zkoušek, předměty a jejich stav."
+        actions={<ButtonLink href="/school/materials" variant="secondary">Studijní materiály</ButtonLink>}
       />
 
       {loadState === "loading" ? (

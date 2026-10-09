@@ -32,6 +32,9 @@ const GET_ROUTES = {
   "/school/subjects": () => fixture("school-subjects"),
   "/school/assignments": () => schoolState.assignments,
   "/school/exams": () => schoolState.exams,
+  // MRK-42: studijní materiály (syntetické, žádná URL Moodlu ani token)
+  "/school/materials": () => fixture("school-materials"),
+  "/school/materials/1": () => fixture("school-material-1"),
   "/work/sessions": () => fixture("work-sessions"),
   "/work/summary": () => fixture("work-summary"),
   "/wot/grinds": () => wotState.grinds,

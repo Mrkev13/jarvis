@@ -94,11 +94,14 @@ def _planned(module_id: str, label: str) -> ModuleDef:
 
 MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("school", "Škola", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
-              entity_types=frozenset({"subject", "assignment", "exam"}), context_areas=frozenset({"school"}),
+              entity_types=frozenset({"subject", "assignment", "exam", "study_material", "study_course"}),
+              context_areas=frozenset({"school", "school_materials"}),
               api_prefixes=("/school",), quick_add_kinds=("exam", "assignment"),
               integrations=school_integrations.INTEGRATIONS,
               event_types=frozenset({"school.assignment.completed", "school.assignment.reopened",
-                                     "school.exam.closed", "school.exam.reopened"})),
+                                     "school.exam.closed", "school.exam.reopened",
+                                     "school.material.created", "school.material.updated",
+                                     "school.material.source_missing", "school.material.restored"})),
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
               api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
