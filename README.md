@@ -17,7 +17,8 @@ Frontend běží na portu 3000 a volá backend na portu 8000. Backend vlastní p
 business pravidla a migrace. Scheduler vyžaduje jediný backend worker.
 Moduly deklaruje backendový registry; dostupnost řeší runtime konfigurace
 v pořadí prostředí > DB > výchozí hodnota. Frontend čte stav z API, backend
-vynucuje pravidla. Podrobnosti: [module feature flags](docs/module-feature-flags.md).
+vynucuje pravidla. Podrobnosti: [module feature flags](docs/module-feature-flags.md),
+[module framework](docs/module-framework.md).
 
 ## Lokální backend
 
@@ -174,3 +175,8 @@ ověření a jeho omezení jsou v [CI verification](docs/mrk-22-ci-verification.
 - [`frontend/AGENTS.md`](frontend/AGENTS.md) — pravidla pro aktuální Next.js.
 - [`docs/wot-milestones.md`](docs/wot-milestones.md),
   [`docs/wot-replays.md`](docs/wot-replays.md) — WoT historie a média.
+- [`docs/module-framework.md`](docs/module-framework.md),
+  [`docs/module-integration-checklist.md`](docs/module-integration-checklist.md) — rámec modulů a postup
+  přidání modulu (pilot: [`docs/habits.md`](docs/habits.md)).
+- [`docs/domain-events.md`](docs/domain-events.md) — doménové události, outbox a SSE stream;
+  [`docs/what-changed.md`](docs/what-changed.md) — přehled „Co se změnilo".

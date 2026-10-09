@@ -116,3 +116,12 @@ and lists exact required checks. No branch protection or repository secrets were
 changed. GitHub API is forbidden in this session and Linear is unavailable;
 hosted CI status, PR creation and issue state must be reported separately from
 these completed local checks.
+
+## Hosted CI status — 2026-10-09
+
+The "remaining hosted verification" above is resolved: all three jobs (Backend tests and pyflakes; PostgreSQL
+migration round-trip; Frontend lint, types, tests and build) run on GitHub for pushes and pull requests and are
+green on main (`068705b`). Counts in the dated sections above are historical; since then the migration head is
+`0018_domain_events` and the suites have grown. Branch protection / required checks are still not configured
+or verified from this repository. CI does not run the Playwright browser checks (`ui-check`,
+`module-flags-check`, `changes-check`); those stay local/cloud manual checks.
