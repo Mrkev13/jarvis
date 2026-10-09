@@ -4,7 +4,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta, timezone
@@ -2626,6 +2626,19 @@ def changes_get(since: str | None = None, module: str | None = None, limit: int 
     db = SessionLocal()
     try:
         return cf.build(db, current_access(), since=since_dt, modules=modules, limit=cf.clamp_limit(limit))
+    finally:
+        db.close()
+
+
+@app.get("/timeline/day")
+def timeline_day(day: date = Query(alias="date"), free_blocks: bool = True,
+                 min_minutes: int = Query(default=30, ge=5, le=720)):
+    """MRK-13: denní osa – termíny/celodenní, časové položky a odvozené volné bloky (bez LLM, nic neukládá).
+    Kontrakt: docs/calendar.md (Day timeline)."""
+    from timeline_service import get_day_timeline
+    db = SessionLocal()
+    try:
+        return get_day_timeline(db, current_access(), day=day, include_free_blocks=free_blocks, min_minutes=min_minutes)
     finally:
         db.close()
 

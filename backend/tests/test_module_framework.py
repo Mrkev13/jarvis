@@ -205,7 +205,8 @@ class AggregatorPurityTestCase(unittest.TestCase):
         return (Path(BACKEND_DIR) / name).read_text(encoding="utf-8")
 
     def test_search_today_quick_add_scheduler_are_module_free(self):
-        for name in ("search_service.py", "today_service.py", "quick_add_service.py", "scheduler_service.py"):
+        for name in ("search_service.py", "today_service.py", "quick_add_service.py", "scheduler_service.py",
+                     "timeline_service.py"):
             self._assert_pure(name, self._file(name))
 
     def test_dashboard_endpoint_is_module_free(self):
@@ -222,7 +223,8 @@ class AggregatorPurityTestCase(unittest.TestCase):
     def test_provider_files_are_import_leaves(self):
         """Poskytovatelé neimportují agregátory ani registr (jinak cyklus a skrytá závislost na pořadí importů)."""
         forbidden = {"main", "module_registry", "search_service", "today_service", "context_service",
-                     "quick_add_service", "scheduler_service", "tool_router", "ai", "briefing_snapshot", "weekly_snapshot"}
+                     "quick_add_service", "scheduler_service", "tool_router", "ai", "briefing_snapshot", "weekly_snapshot",
+                     "timeline_service"}
         files = [*Path(BACKEND_DIR).glob("*_integrations.py"), *Path(BACKEND_DIR).glob("modules/*/*.py"),
                  *(Path(BACKEND_DIR) / f for f in ("module_contracts.py", "quick_add_text.py", "context_format.py",
                                                     "today_types.py"))]

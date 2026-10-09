@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from module_contracts import ContextRequest
 from module_registry import MODULES, ModuleAccess, all_contributions, current_access
 from statuses import REMINDER_ACTIVE_STATUSES
 from time_utils import now_local
+from timeline_service import get_day_timeline
 from text_utils import WEEKDAYS_CZ_SHORT, fold_text
 
 log = logging.getLogger(__name__)
@@ -198,7 +199,8 @@ def build_current_context(
         f"Dnes {today.isoformat()} ({_WEEKDAYS[today.weekday()]}) {local:%H:%M}; zítra {tomorrow.isoformat()} "
         f"({_WEEKDAYS[tomorrow.weekday()]}); tento týden {monday.isoformat()} až {(monday + timedelta(days=6)).isoformat()}"
     ]
-    req = ContextRequest(db=db, today=today, local_now=local)
+    req = ContextRequest(db=db, today=today, local_now=local,
+                         day_timeline=lambda: get_day_timeline(db, access, day=today, now=local.astimezone(timezone.utc)))
     # Explicitně zmíněné oblasti první → při ořezu rozpočtu se odebírají až nakonec.
     explicit = classify_areas(message, implied=False, hints=hints, words=words) | named
     with_section = sorted((sec for sec in sections_by_area.values() if sec.build and sec.order is not None and sec.area in areas),

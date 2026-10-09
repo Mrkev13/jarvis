@@ -86,6 +86,9 @@ class ContextRequest:
     db: Any
     today: date
     local_now: datetime
+    # MRK-13: denní osa dodaná agregátorem (poskytovatel nesmí importovat timeline_service ani registr);
+    # volá se líně, jen když se sekce opravdu staví. None = osa není k dispozici.
+    day_timeline: Callable[[], dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +237,48 @@ def event_changes(hrefs: dict[str, str], fallback_titles: dict[str, str]) -> Cal
     return build
 
 
+# ---------- denní časová osa (timeline_service, MRK-13) ----------
+
+@dataclass(frozen=True)
+class TimelineItem:
+    """Jedna položka denní osy – prezentační tvar (žádné ORM objekty). Odvozené, nikdy se neukládá.
+    `starts_at` None nebo `all_day` = denní sekce (termín, celodenní); jinak časová položka (`ends_at` None = okamžik).
+    `busy` = zdroj skutečně obsazuje čas (volné bloky dnes počítá jen Kalendář – docs/calendar.md)."""
+    id: str
+    kind: str                      # calendar_event | reminder | exam | assignment …
+    title: str
+    date: str                      # pražské datum dne osy (ISO)
+    status: str                    # upcoming | now | past | due | done | open
+    module_id: str | None = None   # None = jádro (doplní timeline_service podle vlastníka příspěvku)
+    subtitle: str = ""
+    starts_at: Any = None          # aware UTC datetime nebo None
+    ends_at: Any = None
+    all_day: bool = False
+    href: str | None = None
+    busy: bool = False
+
+
+@dataclass
+class TimelineRequest:
+    db: Any
+    day: date
+    start: Any      # aware UTC začátek pražského dne
+    end: Any        # aware UTC konec (23/24/25 h)
+    now: Any        # aware UTC
+    cache: dict[str, Any] = field(default_factory=dict)  # sdílená data v rámci jednoho požadavku
+    truncated: bool = False  # poskytovatel narazil na vlastní limit → osa není úplná (nastaví True, nikdy zpět)
+
+
+@dataclass(frozen=True)
+class TimelineSource:
+    """Položky modulu pro denní osu. `build(req)` → TimelineItem; `free_blocks(req, min_minutes)` → volitelně
+    odvozené volné bloky (dnes jen Kalendář). Řazení, sekce, limity a vkládání volna drží timeline_service."""
+    name: str
+    order: int
+    build: Callable[[TimelineRequest], list[TimelineItem]]
+    free_blocks: Callable[[TimelineRequest, int], Any] | None = None
+
+
 # ---------- souhrn příspěvků modulu ----------
 
 
@@ -248,6 +293,7 @@ class ModuleIntegrations:
     quick_add_kinds: tuple[QuickAddKind, ...] = ()
     hourly: tuple[ScheduledStep, ...] = ()
     changes: tuple[ChangeSource, ...] = ()
+    timeline: tuple[TimelineSource, ...] = ()
     # REST modulu (fastapi.APIRouter). main.py připojí routery VŠECH modulů; vypnutý modul hlídá
     # main.require_module_available (404 podle `api_prefixes`) a auth platí stejně jako pro ostatní cesty.
     routers: tuple[Any, ...] = ()
@@ -268,5 +314,6 @@ CONTRIBUTION_CAPABILITY: dict[str, str | None] = {
     "quick_add_kinds": "quick_add",
     "hourly": None,
     "changes": None,
+    "timeline": "today",
     "routers": None,
 }
