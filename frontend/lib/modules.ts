@@ -13,6 +13,7 @@
 
 import type { WidgetDef } from "./dashboardLayout.ts";
 import { HABITS_UI } from "../modules/habits/manifest.ts";
+import { CALENDAR_UI } from "../modules/calendar/manifest.ts";
 
 export const CAPABILITIES = ["nav", "search", "quick_add", "today", "dashboard", "ai_context"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
@@ -46,6 +47,7 @@ export const MODULES: ModuleDef[] = [
   planned("food", "Jídlo"),
   planned("fitness", "Fitness"),
   { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
+  { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),
@@ -93,6 +95,7 @@ export interface ModuleTodayAction {
 
 export const MODULE_UI: Record<string, ModuleUi> = {
   habits: HABITS_UI,
+  calendar: CALENDAR_UI,
   goals: {
     nav: { href: "/goals", label: "Cíle", keywords: ["goals", "goal", "cíl", "progres"], order: 10 },
     searchParams: ["goal"], searchGroupOrder: 50,

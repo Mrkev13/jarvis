@@ -713,7 +713,9 @@ class ModuleSetting(Base):
 # Jeden řádek na modul: registrace tabulek do Base pro Alembic, create_all v testech a kontrolu driftu schématu.
 from modules.habits.models import Habit, HabitEntry  # noqa: E402
 
-MODULE_MODELS = (Habit, HabitEntry)
+from modules.calendar.models import CalendarSource, CalendarEvent  # noqa: E402
+
+MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent)
 
 
 class DomainEvent(Base):
