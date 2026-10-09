@@ -11,6 +11,9 @@
  * Flagy řídí dostupnost, ne oprávnění (auth řeší proxy.ts + backend).
  */
 
+import type { WidgetDef } from "./dashboardLayout.ts";
+import { HABITS_UI } from "../modules/habits/manifest.ts";
+
 export const CAPABILITIES = ["nav", "search", "quick_add", "today", "dashboard", "ai_context"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -42,13 +45,98 @@ export const MODULES: ModuleDef[] = [
   { id: "mff", label: "Marvel Future Fight", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["mff_character"], routes: ["/mff"], quickAddKinds: [] },
   planned("food", "Jídlo"),
   planned("fitness", "Fitness"),
-  planned("habits", "Návyky"),
+  { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),
   planned("travel", "Cestování"),
   planned("entertainment", "Zábava"),
 ];
+
+// ---------- frontendový manifest modulu (MRK-20) ----------
+
+/**
+ * Co modul dává sdíleným registrům frontendu: položku navigace (sidebar, mobilní menu i Ctrl+K), parametry
+ * odkazů z vyhledávání (`/school?exam=12` → zvýraznění řádku) a pořadí skupiny v Ctrl+K. Jádro (Řídicí centrum,
+ * Dnes, Připomínky, Paměť…) má své položky v navigation.ts / search.ts. Klíč = `ModuleDef.id`.
+ */
+export interface ModuleUi {
+  nav?: { href: string; label: string; keywords: string[]; order: number };
+  searchParams?: string[];
+  searchGroupOrder?: number;
+  /** MRK-21: barva oblasti (celé názvy tříd doslova, ať je Tailwind najde) – štítky, skupiny vyhledávání. */
+  area?: { bg: string; border: string; text: string };
+  /** Český název typu záznamu (řádky Dnes pro čtečku: „Návyk: Rehab"). */
+  typeLabels?: Record<string, string>;
+  /**
+   * Akce řádku Dnes pro typy záznamů modulu (`TodayItem.actions` z backendu). Jen data: endpoint modulu
+   * (`{id}` = id záznamu z refu) a texty – Dnes je provede jednou obecnou cestou (useTodayActions).
+   */
+  todayActions?: Record<string, Record<string, ModuleTodayAction>>;
+  /** Widgety Řídicího centra (komponenty v modules/registry.tsx pod stejným id). */
+  widgets?: WidgetDef[];
+}
+
+export interface ModuleTodayAction {
+  /** Text tlačítka („Splněno"). */
+  button: string;
+  /** Přístupný název s názvem záznamu – `{title}` se nahradí („Splnit návyk: {title}"). */
+  ariaLabel: string;
+  /** Hláška po úspěchu – `{title}` se nahradí. */
+  success: string;
+  /** POST endpoint modulu, `{id}` = id záznamu („/habits/{id}/entries?source=today"). */
+  path: string;
+  body?: Record<string, unknown>;
+  /** Hlavní akce řádku (fokus po obnovení); jinak vedlejší. */
+  primary?: boolean;
+}
+
+export const MODULE_UI: Record<string, ModuleUi> = {
+  habits: HABITS_UI,
+  goals: {
+    nav: { href: "/goals", label: "Cíle", keywords: ["goals", "goal", "cíl", "progres"], order: 10 },
+    searchParams: ["goal"], searchGroupOrder: 50,
+  },
+  school: {
+    nav: { href: "/school", label: "Škola", keywords: ["school", "úkol", "úkoly", "zkouška", "zkoušky", "předmět", "předměty", "termín", "termíny"], order: 20 },
+    searchParams: ["subject", "assignment", "exam"], searchGroupOrder: 10,
+  },
+  work: {
+    nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },
+    searchParams: ["session"], searchGroupOrder: 30,
+  },
+  finance: {
+    nav: { href: "/finance", label: "Finance", keywords: ["peníze", "transakce", "výdaj", "výdaje", "příjem", "příjmy", "bilance"], order: 40 },
+    searchParams: ["transaction"], searchGroupOrder: 40,
+  },
+  wot: {
+    nav: { href: "/wot", label: "World of Tanks", keywords: ["wot", "tanky", "grind", "tank"], order: 50 },
+    searchParams: ["grind", "replay"], searchGroupOrder: 70,
+  },
+  mff: {
+    nav: { href: "/mff", label: "Marvel Future Fight", keywords: ["mff", "marvel", "future fight", "postava", "postavy"], order: 60 },
+    searchParams: ["character"], searchGroupOrder: 80,
+  },
+};
+
+/** Modul, kterému patří druh Rychlého přidání (null = jádro, např. připomínka). */
+/** Deklarace akce Dnes pro typ záznamu (null = akce jádra nebo neznámá). */
+export function moduleTodayAction(entityType: string, action: string, ui: Record<string, ModuleUi> = MODULE_UI): ModuleTodayAction | null {
+  for (const m of Object.values(ui)) {
+    const found = m.todayActions?.[entityType]?.[action];
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Akce, které modul pro daný typ záznamu deklaruje (pro převzetí `TodayItem.actions`). */
+export function moduleTodayActionIds(entityType: string, ui: Record<string, ModuleUi> = MODULE_UI): string[] {
+  return Object.values(ui).flatMap((m) => Object.keys(m.todayActions?.[entityType] ?? {}));
+}
+
+export function quickAddOwner(kind: string, modules: ModuleDef[] = MODULES): ModuleDef | null {
+  return modules.find((m) => m.quickAddKinds.includes(kind)) ?? null;
+}
 
 export type ModuleFlags = Record<string, boolean>;
 

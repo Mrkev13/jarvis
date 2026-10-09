@@ -1,17 +1,16 @@
+import logging
 import os
 import re
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from datetime import date, datetime, timedelta, timezone
 
 from database import SessionLocal
 from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
-from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -50,9 +49,9 @@ import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
 from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz, planner_action_line
-from time_utils import local_month_bounds_utc, today_local, utc_now
+from time_utils import utc_now
 from env_config import env_bool
-from module_registry import current_access
+from module_registry import all_contributions, current_access
 
 
 PLANNER_MODE_DAILY = "daily"
@@ -284,6 +283,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# MRK-21: REST modulů z `ModuleIntegrations.routers` (modules/<id>/router.py). Globální dependencies výše (auth,
+# brána vypnutého modulu) platí i pro ně – nový modul do main.py nic nepřidává.
+for _owner, _module_router in all_contributions("routers"):
+    app.include_router(_module_router)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -2380,205 +2384,21 @@ def planner_generate(mode: str = "weekly"):
 
 
 # ===== DASHBOARD 2.0 =====
+# MRK-20: sekce modulů (goals, work, finance, upcoming, wot, mff) dodávají moduly přes
+# `ModuleIntegrations.dashboard` (<modul>_integrations.py). Staré názvy zůstávají kvůli testům a skriptům.
+import finance_integrations  # noqa: E402
+import goals_integrations  # noqa: E402
+import mff_integrations  # noqa: E402
+import school_integrations  # noqa: E402
+import work_integrations  # noqa: E402
+import wot_integrations  # noqa: E402
 
-
-def _top_active_goals(db, limit: int = 3):
-
-    today = today_local()
-    rows = db.query(Goal).all()
-    enriched: list[dict] = []
-    for g in rows:
-        status = (g.status or "").lower()
-        if status in GOAL_INACTIVE_STATUSES:
-            continue
-        progress, current_value = compute_goal_progress_and_value(db, g, today=today)
-        enriched.append({
-            "id": g.id,
-            "title": g.title,
-            "area": g.area or "general",
-            "priority": g.priority or "medium",
-            "progress": progress,
-            "current_value": float(current_value) if current_value is not None else None,
-            "target_value": float(g.target_value) if g.target_value is not None else None,
-            "target_date": g.target_date.isoformat() if g.target_date else None,
-            "tracking_type": (g.tracking_type or "manual").lower(),
-            "source": g.source,
-        })
-
-    priority_order = {"high": 0, "medium": 1, "low": 2}
-
-    def sort_key(g):
-        td = g.get("target_date")
-        td_delta = 999_999 if not td else 0
-        try:
-            if td:
-                from datetime import date as _d
-                delta = (_d.fromisoformat(td) - today).days
-                td_delta = delta
-        except Exception:
-            pass
-        return (
-            priority_order.get((g["priority"] or "").lower(), 3),
-            td_delta,
-            int(g.get("progress") or 0),
-        )
-
-    enriched.sort(key=sort_key)
-    return enriched[:max(0, int(limit))]
-
-
-def _get_work_with_goal(db, today: date | None = None):
-    today = today or today_local()
-    this_month = (today.year, today.month)
-    items = db.query(WorkSession).all()
-    this_month_hours = 0.0
-    this_month_earnings = 0.0
-    total_hours = 0.0
-    total_earnings = 0.0
-    for it in items:
-        earn = float(it.hours or 0.0) * float(it.hourly_rate or 0.0)
-        total_hours += float(it.hours or 0.0)
-        total_earnings += earn
-        if (it.date.year, it.date.month) == this_month:
-            this_month_hours += float(it.hours or 0.0)
-            this_month_earnings += earn
-    goal_row = (
-        db.query(Goal)
-        .filter(Goal.source == "work_month_hours")
-        .all()
-    )
-    active_goal = None
-    for g in goal_row:
-        s = (g.status or "").lower()
-        if s in ("completed", "cancelled", "paused"):
-            continue
-        progress, current_value = compute_goal_progress_and_value(db, g, today=today)
-        active_goal = {
-            "id": g.id,
-            "title": g.title,
-            "current_value": float(current_value) if current_value is not None else float(this_month_hours),
-            "target_value": float(g.target_value) if g.target_value is not None else None,
-            "progress": progress,
-            "target_date": g.target_date.isoformat() if g.target_date else None,
-        }
-        break
-    return {
-        "total_hours": round(total_hours, 2),
-        "total_earnings": round(total_earnings, 2),
-        "this_month_hours": round(this_month_hours, 2),
-        "this_month_earnings": round(this_month_earnings, 2),
-        "goal": active_goal,
-    }
-
-
-def _get_finance_with_goal(db, today: date | None = None):
-    transactions = db.query(FinanceTransaction).all()
-    income = 0.0
-    expenses = 0.0
-    today = today or today_local()
-    # created_at je naive UTC → porovnání s pražským měsícem převedeným do UTC.
-    month_start_utc, month_end_utc = local_month_bounds_utc(today)
-    this_month_income = 0.0
-    this_month_expenses = 0.0
-    for t in transactions:
-        amt = float(t.amount or 0.0)
-        in_this_month = t.created_at is not None and month_start_utc <= t.created_at < month_end_utc
-        if (t.transaction_type or "").lower() == "income":
-            income += amt
-            if in_this_month:
-                this_month_income += amt
-        else:
-            expenses += amt
-            if in_this_month:
-                this_month_expenses += amt
-    goal_row = (
-        db.query(Goal)
-        .filter(Goal.source == "finance_balance")
-        .all()
-    )
-    active_goal = None
-    balance = income - expenses
-    for g in goal_row:
-        s = (g.status or "").lower()
-        if s in ("completed", "cancelled", "paused"):
-            continue
-        progress, current_value = compute_goal_progress_and_value(db, g, today=today)
-        active_goal = {
-            "id": g.id,
-            "title": g.title,
-            "current_value": float(current_value) if current_value is not None else float(balance),
-            "target_value": float(g.target_value) if g.target_value is not None else None,
-            "progress": progress,
-            "target_date": g.target_date.isoformat() if g.target_date else None,
-        }
-        break
-    return {
-        "balance": round(balance, 2),
-        "income": round(income, 2),
-        "expenses": round(expenses, 2),
-        "this_month_income": round(this_month_income, 2),
-        "this_month_expenses": round(this_month_expenses, 2),
-        "transactions_count": len(transactions),
-        "goal": active_goal,
-    }
-
-
-def _get_upcoming(db, limit: int = 5, today: date | None = None):
-
-    today_use: date = today or today_local()
-    entries: list[dict] = []
-    assignments = db.query(Assignment).filter(Assignment.due_date.is_not(None)).all()
-    for it in assignments:
-        if (it.status or "").strip().lower() in ASSIGNMENT_DONE_STATUSES:
-            continue
-        days = (it.due_date - today_use).days
-        entries.append({
-            "type": "assignment",
-            "id": it.id,
-            "title": it.title,
-            "area": "school",
-            "date": it.due_date.isoformat(),
-            "days_left": days,
-            "overdue": days < 0,
-        })
-    exams = db.query(Exam).filter(Exam.exam_date.is_not(None)).all()
-    for it in exams:
-        if (it.status or "").strip().lower() not in EXAM_OPEN_STATUSES:
-            continue
-        days = (it.exam_date - today_use).days
-        entries.append({
-            "type": "exam",
-            "id": it.id,
-            "title": it.title,
-            "area": "school",
-            "date": it.exam_date.isoformat(),
-            "days_left": days,
-            "overdue": days < 0,
-        })
-    goals = db.query(Goal).filter(Goal.target_date.is_not(None)).all()
-    for g in goals:
-        st = (g.status or "").lower()
-        if st in GOAL_INACTIVE_STATUSES:
-            continue
-        days = (g.target_date - today_use).days
-        entries.append({
-            "type": "goal_target",
-            "id": g.id,
-            "title": g.title,
-            "area": g.area or "general",
-            "date": g.target_date.isoformat(),
-            "days_left": days,
-            "overdue": days < 0,
-        })
-
-    def sort_key(e):
-        overdue_rank = 0 if e["overdue"] else 1
-        if e["overdue"]:
-            return (overdue_rank, int(e["days_left"] or 0), e["type"], e["title"])
-        return (overdue_rank, int(e["days_left"] or 0), e["type"], e["title"])
-
-    entries.sort(key=sort_key)
-    return entries[:max(0, int(limit))]
+_top_active_goals = goals_integrations.top_active_goals
+_get_work_with_goal = work_integrations.get_work_with_goal
+_get_finance_with_goal = finance_integrations.get_finance_with_goal
+_get_upcoming = school_integrations.get_upcoming
+_get_wot_quick_status = wot_integrations.get_wot_quick_status
+_get_mff_quick_status = mff_integrations.get_mff_quick_status
 
 
 def _get_notifications_preview(db, limit: int = 3, now: datetime | None = None):
@@ -2589,78 +2409,6 @@ def _get_notifications_preview(db, limit: int = 3, now: datetime | None = None):
         -(n.get("created_at_ts") or 0),
     ))
     return rows[:max(0, int(limit))]
-
-
-def _get_wot_quick_status(db, limit: int = 2):
-    grinds = db.query(WotGrind).all()
-    pr_rank = {"high": 0, "medium": 1, "low": 2}
-    status_rank = {"active": 0, "in_progress": 1, "paused": 2}
-    active_grinds = []
-    for g in grinds:
-        s = (g.status or "").lower()
-        if s in ("completed", "done", "cancelled"):
-            continue
-        active_grinds.append({
-            "id": g.id,
-            "tank": g.tank,
-            "xp_remaining": float(g.xp_remaining or 0.0),
-            "priority": g.priority or "medium",
-            "status": g.status or "active",
-        })
-    active_grinds.sort(key=lambda g: (
-        pr_rank.get((g["priority"] or "").lower(), 3),
-        status_rank.get((g["status"] or "").lower(), 4),
-        float(g["xp_remaining"] or 0.0),
-    ))
-    resources = {r.resource: float(r.amount or 0.0) for r in db.query(WotResource).all()}
-    return {
-        "top_grinds": active_grinds[:max(0, int(limit))],
-        "credits": resources.get("credits"),
-        "free_xp": resources.get("free_xp"),
-        "bonds": resources.get("bonds"),
-    }
-
-
-def _get_mff_quick_status(db):
-    items = db.query(MffCharacter).all()
-    tracked = len(items)
-    t4_count = 0
-    priority_high_count = 0
-    bc_sum = 0.0
-    from models import compute_mff_build_completeness, parse_legacy_uru_state, legacy_role_string_to_list
-    for it in items:
-        t = (it.tier or "").strip().lower().replace(" ", "")
-        if t in ("t4", "tier4", "transcendent"):
-            t4_count += 1
-        if (it.priority or "").lower() == "high":
-            priority_high_count += 1
-        roles_list = getattr(it, "roles", None)
-        if roles_list is None or isinstance(roles_list, str):
-            roles_list = legacy_role_string_to_list(
-                roles_list if isinstance(roles_list, str) else (getattr(it, "role", "") or "")
-            )
-        ut = int(getattr(it, "uru_slots_total", 0) or 0)
-        uf = int(getattr(it, "uru_slots_filled", 0) or 0)
-        ob = int(getattr(it, "odin_blessings_count", 0) or 0)
-        if ut <= 0:
-            _ut2, _uf2, _ob2 = parse_legacy_uru_state(getattr(it, "uru_state", "") or "")
-            if ut <= 0:
-                ut = _ut2 or 20
-            if uf <= 0 and _uf2:
-                uf = _uf2
-            if ob <= 0 and _ob2:
-                ob = _ob2
-        ts = (getattr(it, "team_supports", None) or "") or (getattr(it, "team", "") or "")
-        bc = compute_mff_build_completeness(
-            it.tier, it.level, it.uniform, it.ctp, it.artifact, ut, uf, it.iso8_set, ts,
-        )
-        bc_sum += float(bc)
-    return {
-        "tracked_characters": tracked,
-        "t4_count": t4_count,
-        "priority_count": priority_high_count,
-        "average_build_completeness": 0 if tracked == 0 else int(round(bc_sum / tracked)),
-    }
 
 
 @app.get("/today")
@@ -2708,6 +2456,27 @@ def today_action_prepare(request: TodayActionRequest):
         db.close()
 
 
+@app.get("/events/stream")
+async def events_stream(request: Request, last_event_id: str | None = None, modules: str | None = None,
+                        types: str | None = None):
+    """MRK-19: SSE doménových událostí (session auth jako celé API). id = domain_events.id, Last-Event-ID
+    replay, `reset` při mezeře, keepalive. Kontrakt: docs/domain-events.md."""
+    import event_stream as es
+    cursor = es.parse_cursor(request.headers.get("last-event-id"), last_event_id)
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+
+    def still_authorized() -> bool:
+        info = validate_session_token(token)
+        return bool(info and info.get("is_authenticated"))
+
+    return StreamingResponse(
+        es.stream_events(request.is_disconnected, cursor, modules=es.parse_filter(modules), types=es.parse_filter(types),
+                         authorized=still_authorized),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/modules")
 def modules_get():
     """Roadmap 6C / MRK-18 A2: runtime stav modulů pro frontend (id, název, stav, zdroj, zámek, schopnosti).
@@ -2738,13 +2507,15 @@ def modules_put(module_id: str, request: ModuleSettingRequest):
         mr.save_override(db, module_id, request.enabled)
         effective = module.default_enabled if request.enabled is None else request.enabled
         if effective != before.enabled:
-            log_activity(
-                db, "system", "module.enabled" if effective else "module.disabled",
-                f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
-                entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}},
-                user_context="manual",
-                # každá změna je samostatný fakt (výchozí klíč podle shrnutí by druhé vypnutí téhož modulu zahodil)
-                dedupe_key=f"module:{module_id}:{'on' if effective else 'off'}:{uuid.uuid4().hex}",
+            # MRK-19: fakt system.module.enabled/disabled; Aktivita je projekce s klíčem podle id události
+            from domain_events import ActivityProjection, append_domain_event
+            action = "module.enabled" if effective else "module.disabled"
+            append_domain_event(
+                db, event_type=f"system.{action}", aggregate_type="module", aggregate_id=module_id,
+                payload={"module_id": module_id, "enabled": effective, "previous": before.enabled},
+                activity=ActivityProjection(
+                    "system", action, f"Modul {module.label} {'zapnut' if effective else 'vypnut'}",
+                    entity_type="Module", delta={"enabled": {"old": before.enabled, "new": effective}}),
             )
         db.commit()
     except Exception:
@@ -2757,19 +2528,14 @@ def modules_put(module_id: str, request: ModuleSettingRequest):
     return next(entry for entry in access.public_config() if entry["id"] == module_id)
 
 
-# Typy položek GET /dashboard → typ záznamu modulu (ref), pokud se liší.
-_DASHBOARD_ENTITY = {"goal_target": "goal"}
-
-
 @app.get("/dashboard")
 def dashboard_get():
     access = current_access()
-    shows = lambda module_id: access.allows(module_id, "dashboard")  # noqa: E731
     db = SessionLocal()
     try:
         today_plan = generate_plan(db, mode="daily")
         db.commit()
-        # Roadmap 6C: sekce vypnutého modulu se nepočítají (None) a jeho položky se vynechají.
+        # Roadmap 6C: položky vypnutého modulu se vynechají.
         today_actions = [a for a in (today_plan.get("actions") or []) if access.allows_ref(a.get("ref"), "dashboard")]
         summary_text = today_plan.get("summary") or ""
 
@@ -2797,22 +2563,14 @@ def dashboard_get():
             "preview": notif_preview,
         }
 
-        goals = None
-        if shows("goals"):
-            goals_list = _top_active_goals(db, limit=3)
-            goals = {
-                "top": goals_list,
-                "count": len(goals_list),
-            }
-
-        work = _get_work_with_goal(db) if shows("work") else None
-        finance = _get_finance_with_goal(db) if shows("finance") else None
-        upcoming = [
-            u for u in (_get_upcoming(db, limit=5) if shows("school") else [])
-            if access.allows_entity(_DASHBOARD_ENTITY.get(u.get("type"), u.get("type")), "dashboard")
-        ]
-        wot = _get_wot_quick_status(db, limit=2) if shows("wot") else None
-        mff = _get_mff_quick_status(db) if shows("mff") else None
+        # MRK-20: sekce modulů. Klíč je v odpovědi vždy (tvar stálý); vypnutý modul = `empty` a nic se nepočítá.
+        sections = {sec.key: sec.empty for _owner, sec in all_contributions("dashboard", access.modules)}
+        for owner, sec in access.contributions("dashboard"):
+            try:
+                sections[sec.key] = sec.build(db, access)
+            except Exception:  # noqa: BLE001 – jeden modul nesmí shodit Řídicí centrum (widget ukáže prázdný stav)
+                logging.getLogger(__name__).exception("dashboard: section %s (%s) failed", sec.key, owner)
+                db.rollback()
 
         recent_activity_rows = (
             db.query(ActivityLog)
@@ -2833,12 +2591,7 @@ def dashboard_get():
         return {
             "today": today,
             "notifications": notifications,
-            "goals": goals,
-            "work": work,
-            "finance": finance,
-            "upcoming": upcoming,
-            "wot": wot,
-            "mff": mff,
+            **sections,
             "recent_activity": recent_activity,
         }
     finally:
@@ -2857,6 +2610,24 @@ def _parse_iso_dt(s: str | None) -> datetime | None:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
+
+
+@app.get("/changes")
+def changes_get(since: str | None = None, module: str | None = None, limit: int = 50):
+    """MRK-28: „Co se změnilo" – změny za období z doménových událostí a Aktivity (bez LLM).
+    Kontrakt: docs/what-changed.md."""
+    import change_feed as cf
+    from domain_events import now_utc
+    try:
+        since_dt = cf.parse_since(since, now_utc())
+        modules = cf.parse_modules(module)
+    except cf.ChangeFeedError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    db = SessionLocal()
+    try:
+        return cf.build(db, current_access(), since=since_dt, modules=modules, limit=cf.clamp_limit(limit))
+    finally:
+        db.close()
 
 
 @app.get("/activity")

@@ -40,7 +40,16 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping
 
+import finance_integrations
+import goals_integrations
+import mff_integrations
+import school_integrations
+import work_integrations
+import wot_integrations
+from modules.habits import integrations as habits_integrations
+from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
+from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +73,13 @@ class ModuleDef:
     quick_add_kinds: tuple[str, ...] = ()
     # Moduly, bez kterých tento nedává smysl (zatím žádné; GET /modules je jen hlásí).
     depends_on: tuple[str, ...] = ()
+    # MRK-20: co modul dodává globálním agregátorům (search, Dnes, dashboard, AI kontext, Rychlé přidání,
+    # hodinový job) – `module_contracts.ModuleIntegrations` z `<modul>_integrations.py`. Agregátory se ptají
+    # přes `ModuleAccess.contributions(...)`, takže vypnutý modul nepřispívá nikam a nový modul nevyžaduje
+    # úpravu agregátorů.
+    integrations: ModuleIntegrations = NO_INTEGRATIONS
+    # MRK-19: doménové události modulu `<modul>.<agregát>.<akce>`; nedeklarovaný typ `append_domain_event` odmítne.
+    event_types: frozenset[str] = frozenset()
 
     @property
     def env_name(self) -> str:
@@ -78,30 +94,38 @@ def _planned(module_id: str, label: str) -> ModuleDef:
 MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("school", "Škola", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"subject", "assignment", "exam"}), context_areas=frozenset({"school"}),
-              api_prefixes=("/school",), quick_add_kinds=("exam", "assignment")),
+              api_prefixes=("/school",), quick_add_kinds=("exam", "assignment"),
+              integrations=school_integrations.INTEGRATIONS,
+              event_types=frozenset({"school.assignment.completed", "school.assignment.reopened",
+                                     "school.exam.closed", "school.exam.reopened"})),
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
-              api_prefixes=("/work",), quick_add_kinds=("work",)),
+              api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
     ModuleDef("finance", "Finance", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"transaction"}), context_areas=frozenset({"finance"}),
-              api_prefixes=("/finance",), quick_add_kinds=("finance",)),
+              api_prefixes=("/finance",), quick_add_kinds=("finance",), integrations=finance_integrations.INTEGRATIONS),
     ModuleDef("goals", "Cíle", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add"},
               entity_types=frozenset({"goal"}), context_areas=frozenset({"goals"}),
-              api_prefixes=("/goals", "/goal")),
+              api_prefixes=("/goals", "/goal"), integrations=goals_integrations.INTEGRATIONS),
     ModuleDef("wot", "World of Tanks", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},
               # wot_replay = Replay Library (Game Enrichment C) ve vyhledávání; /wot pokrývá i /wot/replays,
               # /wot/milestones a /wot/screenshots (milníky ani splnění se nevyhledávají – nemají vlastní typ výsledku).
               entity_types=frozenset({"wot_grind", "wot_resource", "wot_replay"}), context_areas=frozenset({"wot"}),
-              api_prefixes=("/wot",)),
+              api_prefixes=("/wot",), integrations=wot_integrations.INTEGRATIONS),
     ModuleDef("mff", "Marvel Future Fight", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},
               entity_types=frozenset({"mff_character"}), context_areas=frozenset({"mff"}),
-              api_prefixes=("/mff",)),
+              api_prefixes=("/mff",), integrations=mff_integrations.INTEGRATIONS),
     _planned("food", "Jídlo"),
     _planned("fitness", "Fitness"),
-    _planned("habits", "Návyky"),
+    # MRK-21: první modul postavený celý v balíčku modules/habits/ (pilot rámce, docs/habits.md).
+    ModuleDef("habits", "Návyky", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "search", "today", "dashboard", "ai_context"}),
+              entity_types=frozenset({"habit"}), context_areas=frozenset({"habits"}), api_prefixes=("/habits",),
+              integrations=habits_integrations.INTEGRATIONS,
+              event_types=frozenset({"habits.entry.done", "habits.entry.skipped"})),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),
@@ -288,6 +312,20 @@ class ModuleAccess:
         m = self.module_for_path(path)
         return m is None or self.is_available(m.id)
 
+    def contributes(self, module_id: str, kind: str) -> bool:
+        """Smí modul přispět příspěvkem druhu `kind` (`module_contracts.CONTRIBUTION_CAPABILITY`)?"""
+        capability = CONTRIBUTION_CAPABILITY[kind]
+        return self.allows(module_id, capability) if capability else self.is_available(module_id)
+
+    def contributions(self, kind: str) -> list[tuple[str | None, object]]:
+        """MRK-20: příspěvky druhu `kind` od jádra (vlastník None, vždy) a od modulů, které smí přispět.
+        Pořadí: jádro, pak moduly v pořadí registru; agregátor si řadí sám (pořadí zdrojů, sekcí…)."""
+        out: list[tuple[str | None, object]] = [(None, item) for item in getattr(CORE_INTEGRATIONS, kind)]
+        for m in self.modules:
+            if self.contributes(m.id, kind):
+                out.extend((m.id, item) for item in getattr(m.integrations, kind))
+        return out
+
     def state(self, module_id: str) -> ModuleState:
         m = self._by_id[module_id]
         return self.states.get(module_id) or ModuleState(m.default_enabled, SOURCE_DEFAULT)
@@ -310,6 +348,15 @@ class ModuleAccess:
                 "capabilities": [c for c in CAPABILITIES if self.allows(m.id, c)],
             })
         return out
+
+
+def all_contributions(kind: str, modules: Iterable[ModuleDef] = MODULES) -> list[tuple[str | None, object]]:
+    """Všechny registrované příspěvky bez ohledu na stav modulů – pro statické tabulky (klíčová slova routingu,
+    pravidla klasifikace Rychlého přidání, klíče payloadu GET /dashboard). Gating dělá vždy `contributions`."""
+    out: list[tuple[str | None, object]] = [(None, item) for item in getattr(CORE_INTEGRATIONS, kind)]
+    for m in modules:
+        out.extend((m.id, item) for item in getattr(m.integrations, kind))
+    return out
 
 
 def current_access() -> ModuleAccess:

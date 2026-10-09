@@ -42,6 +42,75 @@ const GET_ROUTES = {
   "/today": () => fixture(todayState.fixture),
 };
 
+// MRK-19: doménové události mocku – SSE /events/stream (Last-Event-ID replay, keepalive). Události vznikají
+// z PUT /modules/{id} (system.module.enabled/disabled) a z /__mock/events/emit?type=…; /__mock/events = seznam.
+const mockEvents = [];
+const sseClients = new Set();
+const sseFrame = (e) => `id: ${e.id}\nevent: domain_event\ndata: ${JSON.stringify(e)}\n\n`;
+function mockEvent(type, moduleId, aggregateType, aggregateId, payload) {
+  const e = { id: mockEvents.length + 1, type, module_id: moduleId, aggregate_type: aggregateType, aggregate_id: aggregateId,
+    occurred_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), payload };
+  mockEvents.push(e);
+  for (const res of sseClients) res.write(sseFrame(e));
+  return e;
+}
+function openEventStream(req, res, url) {
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": req.headers.origin || "*", "Access-Control-Allow-Credentials": "true" });
+  res.write("retry: 1000\n\n");
+  const raw = req.headers["last-event-id"] ?? url.searchParams.get("last_event_id");
+  const cursor = /^\d+$/.test(String(raw ?? "")) ? Number(raw) : null;
+  const pos = cursor ?? mockEvents.length;
+  res.write(`id: ${pos}\nevent: ready\ndata: ${JSON.stringify({ latest_id: pos })}\n\n`);
+  if (cursor !== null) for (const e of mockEvents.filter((x) => x.id > cursor)) res.write(sseFrame(e));
+  sseClients.add(res);
+  const beat = setInterval(() => res.write(": keepalive\n\n"), 15000);
+  req.on("close", () => { clearInterval(beat); sseClients.delete(res); });
+}
+
+// MRK-28: „Co se změnilo" – položky relativně k času spuštění mocku (období 24 h / 7 d / 30 d má co filtrovat).
+// GET /changes respektuje since/module/limit a vypnuté moduly; /__mock/changes/complete přidá splněný úkol
+// „z jiného zařízení" a vyšle doménovou událost (stránka se má obnovit přes SSE, bez pollingu).
+const MOCK_START = Date.now();
+const ago = (ms) => new Date(MOCK_START - ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+const H = 3_600_000;
+const changesState = {
+  items: [
+    { id: "event:41", occurred_at: ago(1 * H), module_id: "school", entity_type: "assignment", entity_id: "12", kind: "completed",
+      title: "Úkol splněn: Sada 4 – integrály", summary: "", href: "/school?assignment=12", source: "event" },
+    { id: "activity:900", occurred_at: ago(3 * H), module_id: "finance", entity_type: "finance_transaction", entity_id: "77", kind: "created",
+      title: "Výdaj 249 Kč – Jídlo", summary: "", href: "/finance?transaction=77", source: "activity" },
+    { id: "event:40", occurred_at: ago(5 * H), module_id: "habits", entity_type: "entry", entity_id: "3", kind: "done",
+      title: "Rehab kolene: splněno (dnes)", summary: "", href: "/habits", source: "event" },
+    { id: "activity:880", occurred_at: ago(26 * H), module_id: null, entity_type: "reminder", entity_id: "5", kind: "created",
+      title: "Připomínka: zavolat zubaři", summary: "", href: "/reminders?reminder=5", source: "activity" },
+    { id: "activity:850", occurred_at: ago(3 * 24 * H), module_id: "wot", entity_type: "wot_grind", entity_id: "2", kind: "updated",
+      title: "Grind upraven: Object 279 (e)", summary: "", href: "/wot?grind=2", source: "activity" },
+    { id: "activity:700", occurred_at: ago(10 * 24 * H), module_id: "work", entity_type: "work_session", entity_id: "9", kind: "deleted",
+      title: "Směna smazána", summary: "", href: null, source: "activity" },
+  ],
+  calls: [],
+};
+function changesResponse(url) {
+  changesState.calls.push(url.search);
+  const available = new Set(modulesConfig().filter((m) => m.available).map((m) => m.id));
+  const since = Date.parse(url.searchParams.get("since") || ago(7 * 24 * H));
+  const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 50), 200));
+  const wanted = (url.searchParams.get("module") || "").split(",").filter(Boolean);
+  const inWindow = changesState.items
+    .filter((i) => Date.parse(i.occurred_at) >= since && (i.module_id === null || available.has(i.module_id)))
+    .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
+  const counts = new Map();
+  for (const i of inWindow) counts.set(i.module_id ?? "core", (counts.get(i.module_id ?? "core") ?? 0) + 1);
+  const filters = [
+    ...(counts.has("core") ? [{ id: "core", label: "Obecné", count: counts.get("core") }] : []),
+    ...MODULES.filter((m) => counts.has(m.id)).map((m) => ({ id: m.id, label: m.label, count: counts.get(m.id) })),
+  ];
+  const items = wanted.length ? inWindow.filter((i) => wanted.includes(i.module_id ?? "core")) : inWindow;
+  return { since: new Date(since).toISOString().replace(/\.\d{3}Z$/, "Z"), items: items.slice(0, limit), total: items.length,
+    truncated: items.length > limit, filters };
+}
+
 function send(res, req, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     ...extraHeaders,
@@ -209,6 +278,23 @@ createServer(async (req, res) => {
     return respond(200, { modules: modulesConfig() });
   }
   if (url.pathname === "/modules" && req.method === "GET") return respond(200, { modules: modulesConfig() }, 80);
+  if (url.pathname === "/events/stream" && req.method === "GET") return openEventStream(req, res, url);
+  if (url.pathname === "/__mock/events") return respond(200, mockEvents);
+  if (url.pathname === "/changes" && req.method === "GET") return respond(200, changesResponse(url), 60);
+  if (url.pathname === "/__mock/changes/calls") return respond(200, changesState.calls);
+  if (url.pathname === "/__mock/changes/reset") {
+    changesState.items = changesState.items.filter((i) => !i.title.includes("z telefonu"));
+    changesState.calls = [];
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/changes/complete") {
+    const id = 100 + changesState.items.length;
+    const e = mockEvent("school.assignment.completed", "school", "assignment", String(id), { assignment_id: id, subject_id: 1 });
+    changesState.items.push({ id: `event:${e.id}`, occurred_at: e.occurred_at, module_id: "school", entity_type: "assignment",
+      entity_id: String(id), kind: "completed", title: `Úkol splněn: Úkol z telefonu ${id}`, summary: "",
+      href: `/school?assignment=${id}`, source: "event" });
+    return respond(200, { ok: true, id });
+  }
   const moduleMatch = url.pathname.match(/^\/modules\/([a-z_]+)$/);
   if (moduleMatch && req.method === "PUT") {
     const m = MODULES.find((x) => x.id === moduleMatch[1]);
@@ -216,8 +302,11 @@ createServer(async (req, res) => {
     if (!m.implemented) return respond(422, { detail: { message: "Modul zatím není hotový.", module: m.id } });
     if (moduleLocked.has(m.id)) return respond(409, { detail: { message: "Vynuceno konfigurací serveru.", module: m.id } }, 120);
     if (typeof body?.enabled !== "boolean" && body?.enabled !== null) return respond(422, { detail: "enabled musí být true/false/null" });
+    const before = modulesConfig().find((x) => x.id === m.id).enabled;
     if (body.enabled === null || body.enabled === m.defaultEnabled) moduleOverrides.delete(m.id);
     else moduleOverrides.set(m.id, body.enabled);
+    const after = modulesConfig().find((x) => x.id === m.id).enabled;
+    if (after !== before) mockEvent(after ? "system.module.enabled" : "system.module.disabled", null, "module", m.id, { module_id: m.id, enabled: after, previous: before });
     return respond(200, modulesConfig().find((x) => x.id === m.id), 120);
   }
   // Roadmap 4E: Rychlé přidání. /quick-add/parse = odpovědi skutečného quick_add_service.parse (fixtures/quick-add.json,

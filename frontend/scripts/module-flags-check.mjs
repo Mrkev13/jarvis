@@ -7,6 +7,7 @@
 // Mock API vrací data všech modulů – kontrola tak dokazuje i pojistku frontendu (filtr výsledků a rozboru).
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stubLongRequests } from "./network-stubs.mjs";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
 const MOCK_API = process.env.MOCK_API_URL || "http://127.0.0.1:8000";
@@ -25,14 +26,16 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const NAV_TOTAL = 15; // + Nastavení (MRK-18 A2, jádro)
+const NAV_TOTAL = 17; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28)
 
 // Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
 await fetch(`${MOCK_API}/__mock/modules/reset`);
 if (DISABLED.size) await fetch(`${MOCK_API}/__mock/modules?disabled=${[...DISABLED].join(",")}`);
 
-async function open(path, { width = 1366, height = 900, setup } = {}) {
+async function open(path, { width = 1366, height = 900, setup, realtime = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: "dark", hasTouch: width < 500 });
+  // SSE stream by nikdy nedovolil „networkidle"; skutečný stream jen pro kontrolu realtime (čeká na „load")
+  await stubLongRequests(ctx, { eventStream: !realtime });
   const page = await ctx.newPage();
   const errors = [];
   const apiCalls = [];
@@ -41,7 +44,7 @@ async function open(path, { width = 1366, height = 900, setup } = {}) {
     if (r.url().startsWith(MOCK_API)) apiCalls.push(new URL(r.url()).pathname);
   });
   if (setup) await setup(page);
-  await page.goto(BASE + path, { waitUntil: "networkidle" });
+  await page.goto(BASE + path, { waitUntil: realtime ? "load" : "networkidle" });
   await page.waitForTimeout(600);
   return { ctx, page, errors, apiCalls };
 }
@@ -296,6 +299,29 @@ if (!DISABLED.size) {
   await page.screenshot({ path: `${OUT}module-settings-locked.png`, fullPage: true });
   check("nastavení: bez chyb JS", errors.length === 0, errors.join(" | "));
   await ctx.close();
+}
+// MRK-19: změna modulu z jiné záložky / zařízení (PUT mimo tuto stránku) → SSE system.module.* → navigace
+// se aktualizuje bez reloadu a bez pollingu.
+if (!DISABLED.size) {
+  await fetch(`${MOCK_API}/__mock/modules/reset`);
+  const { ctx, page, errors, apiCalls } = await open("/", { realtime: true });
+  let navigations = 0;
+  page.on("framenavigated", (f) => { if (f === page.mainFrame()) navigations += 1; });
+  check("realtime: stránka otevřela /events/stream", apiCalls.includes("/events/stream"), apiCalls.filter((c) => c.startsWith("/events")).join(","));
+  const modulesBefore = apiCalls.filter((c) => c === "/modules").length;
+  const put = (enabled) => fetch(`${MOCK_API}/modules/wot`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+  await put(false);
+  await page.waitForTimeout(1200);
+  check("realtime: vypnutí jinde → /wot zmizí z navigace", !(await navHrefs(page, "aside")).includes("/wot"));
+  await put(true);
+  await page.waitForTimeout(1200);
+  check("realtime: zapnutí jinde → /wot zpět v navigaci", (await navHrefs(page, "aside")).includes("/wot"));
+  check("realtime: bez reloadu stránky", navigations === 0, String(navigations));
+  const refetches = apiCalls.filter((c) => c === "/modules").length - modulesBefore;
+  check("realtime: /modules načteno jen po událostech (žádný polling)", refetches === 2, String(refetches));
+  check("realtime: bez chyb JS", errors.length === 0, errors.join(" | "));
+  await ctx.close();
+  await fetch(`${MOCK_API}/__mock/modules/reset`);
 }
 // Načítání bez cache a nedostupné /modules: stránka modulu se nevykreslí, jádro ano.
 {

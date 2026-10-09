@@ -4,6 +4,8 @@
  * časové osy a české popisky. Čas se počítá jednou při načtení – žádný tikající časovač.
  */
 
+import { MODULE_UI, moduleTodayAction, moduleTodayActionIds } from "./modules.ts";
+
 export type TodayStatus = "upcoming" | "due" | "past" | "done" | "overdue" | "open";
 
 export interface TodayItem {
@@ -22,8 +24,10 @@ export interface TodayItem {
   actions: TodayActionId[];
 }
 
-export type TodayActionId = "complete" | "snooze" | "record_result";
+/** Akce jádra; moduly přidávají vlastní (`MODULE_UI.<id>.todayActions`, např. „skip" u návyků). */
+export type TodayActionId = "complete" | "snooze" | "record_result" | (string & {});
 const ACTION_IDS: TodayActionId[] = ["complete", "snooze", "record_result"];
+const CORE_KINDS = ["reminder", "assignment", "exam"];
 
 /** Volba odložení spočítaná serverem v pražském čase (žádné datum z prohlížeče). */
 export interface SnoozeOption {
@@ -62,6 +66,12 @@ function safeHref(v: unknown): string | null {
   return typeof v === "string" && v.startsWith("/") && !v.startsWith("//") ? v : null;
 }
 
+/** Akce, které řádek smí nabídnout: jádro + akce, které modul deklaruje pro typ záznamu z refu. */
+function allowedActions(id: string): TodayActionId[] {
+  const kind = /^([a-z_]+):\d+$/.exec(id)?.[1];
+  return kind ? [...ACTION_IDS, ...moduleTodayActionIds(kind).filter((a) => !ACTION_IDS.includes(a))] : ACTION_IDS;
+}
+
 export function normalizeItem(raw: unknown): TodayItem | null {
   if (!isRecord(raw) || !str(raw.id) || !str(raw.title)) return null;
   const status = STATUSES.includes(raw.status as TodayStatus) ? (raw.status as TodayStatus) : "open";
@@ -79,7 +89,7 @@ export function normalizeItem(raw: unknown): TodayItem | null {
     priority: typeof raw.priority === "number" && raw.priority > 0 ? raw.priority : null,
     severity,
     href: safeHref(raw.href),
-    actions: Array.isArray(raw.actions) ? ACTION_IDS.filter((a) => (raw.actions as unknown[]).includes(a)) : [],
+    actions: Array.isArray(raw.actions) ? allowedActions(str(raw.id)).filter((a) => (raw.actions as unknown[]).includes(a)) : [],
   };
 }
 
@@ -170,6 +180,8 @@ export const TYPE_LABELS: Record<string, string> = {
   assignment: "Úkol",
   planner: "Plán",
   notification: "Upozornění",
+  // MRK-21: typy záznamů modulů z manifestů (např. „habit" → „Návyk")
+  ...Object.fromEntries(Object.values(MODULE_UI).flatMap((m) => Object.entries(m.typeLabels ?? {}))),
 };
 
 /** Krátké české datum pro „Potom" (pá 16. 10.) – z ISO data bez převodu přes časovou zónu prohlížeče. */
@@ -193,14 +205,28 @@ export function parseRef(ref: string): { kind: string; id: number } | null {
   return m ? { kind: m[1], id: Number(m[2]) } : null;
 }
 
-/** Druh záznamu pro akci (řádek plánu „assignment:5" je úkol). */
-export function entityKind(item: TodayItem): "reminder" | "assignment" | "exam" | null {
+/** Druh záznamu pro akci (řádek plánu „assignment:5" je úkol); typ modulu jen s deklarovanou akcí Dnes. */
+export function entityKind(item: TodayItem): string | null {
   const kind = parseRef(item.id)?.kind;
-  return kind === "reminder" || kind === "assignment" || kind === "exam" ? kind : null;
+  if (!kind) return null;
+  return CORE_KINDS.includes(kind) || moduleTodayActionIds(kind).length ? kind : null;
+}
+
+/** Akce modulu pro řádek (null = akce jádra). */
+export function moduleAction(item: TodayItem, action: TodayActionId) {
+  const kind = parseRef(item.id)?.kind;
+  return kind ? moduleTodayAction(kind, action) : null;
+}
+
+/** `{title}` / `{id}` v textech a cestách z manifestu modulu. */
+export function fillTemplate(template: string, values: { title?: string; id?: number }): string {
+  return template.replace("{title}", values.title ?? "").replace("{id}", String(values.id ?? ""));
 }
 
 /** Přístupný název ovládání vždy s názvem záznamu („Dokončit připomínku: Fyzioterapie"). */
 export function actionLabel(item: TodayItem, action: TodayActionId): string {
+  const declared = moduleAction(item, action);
+  if (declared) return fillTemplate(declared.ariaLabel, { title: item.title });
   const kind = entityKind(item);
   if (action === "complete") return kind === "assignment" ? `Dokončit úkol: ${item.title}` : `Dokončit připomínku: ${item.title}`;
   if (action === "snooze") return `Odložit připomínku: ${item.title}`;
@@ -209,6 +235,8 @@ export function actionLabel(item: TodayItem, action: TodayActionId): string {
 
 /** Hláška po úspěchu (oznamuje se čtečce, ukazuje se v liště nahoře). */
 export function successMessage(item: TodayItem, action: TodayActionId, snoozeLabel?: string): string {
+  const declared = moduleAction(item, action);
+  if (declared) return fillTemplate(declared.success, { title: item.title });
   if (action === "snooze") return `Odloženo: ${item.title}${snoozeLabel ? ` (${snoozeLabel})` : ""}.`;
   return entityKind(item) === "assignment" ? `Úkol „${item.title}“ je hotový.` : `Připomínka „${item.title}“ je hotová.`;
 }

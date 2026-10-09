@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
 import { WIDGET_COMPONENTS, type DashboardPayload } from "@/components/dashboard/widgets";
+import { MODULE_WIDGET_COMPONENTS } from "@/modules/registry";
 import {
   Button,
   Card,
@@ -198,7 +199,8 @@ export default function Home() {
           editing={editing}
           handlers={handlers}
           renderWidget={(id, position) => {
-            const Widget = WIDGET_COMPONENTS[id as WidgetId];
+            // jádro / starší moduly, pak widgety modulů z modules/registry.tsx (MRK-21)
+            const Widget = WIDGET_COMPONENTS[id as WidgetId] ?? MODULE_WIDGET_COMPONENTS[id];
             return Widget ? (
               <Widget
                 data={dashboard.data}

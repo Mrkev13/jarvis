@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  DESKTOP_UNITS, defaultLayout, hiddenWidgets, isDefaultLayout, LAYOUT_STORAGE_KEY, moveWidget, needsDashboardData,
+  CORE_WIDGETS, MODULE_WIDGETS, DESKTOP_UNITS, defaultLayout, hiddenWidgets, isDefaultLayout, LAYOUT_STORAGE_KEY, moveWidget, needsDashboardData,
   normalizeLayout, packDesktop, WIDGET_IDS, parseStoredLayout, serializeLayout, setWidgetSize, setWidgetVisible, visiblePosition,
   visibleWidgets, WIDGET_SIZES, WIDGETS,
 } from "./dashboardLayout.ts";
 
 const ids = (layout) => layout.widgets.map((w) => w.id);
 const DEFAULT_IDS = ["daily_briefing", "weekly_review", "today", "attention", "key_metrics", "goals", "upcoming", "work", "finance", "games", "quick_actions"];
+// MRK-21: widgety modulů (manifest) jsou ve výchozím stavu skryté → výchozí viditelné rozložení 4B.1 se nemění
+const MODULE_IDS = MODULE_WIDGETS.map((w) => w.id);
 
 test("registry: unique semantic ids, sane defaults", () => {
   const all = WIDGETS.map((w) => w.id);
@@ -23,15 +25,20 @@ test("registry: unique semantic ids, sane defaults", () => {
     assert.ok(w.allowedSizes.includes(w.defaultSize), `${w.id}: výchozí velikost je povolená`);
   }
   assert.equal(LAYOUT_STORAGE_KEY, "standa-hub:dashboard-layout:v1");
-  assert.deepEqual([...all].sort(), [...WIDGET_IDS].sort(), "registr = seznam id s komponentami");
+  assert.deepEqual(CORE_WIDGETS.map((w) => w.id).sort(), [...WIDGET_IDS].sort(), "jádro = seznam id s komponentami");
+  for (const w of MODULE_WIDGETS) {
+    assert.equal(w.modules?.length, 1, `${w.id}: widget modulu patří jednomu modulu`);
+    assert.ok(w.id.startsWith(`${w.modules[0]}_`), `${w.id}: id s prefixem modulu`);
+  }
 });
 
 test("default layout: all widgets visible in the 4B.1 order", () => {
   const d = defaultLayout();
   assert.equal(d.version, 1);
-  assert.deepEqual(ids(d), DEFAULT_IDS);
-  assert.ok(d.widgets.every((w) => w.visible));
-  assert.deepEqual(d.widgets.map((w) => w.order), DEFAULT_IDS.map((_, i) => (i + 1) * 10));
+  assert.deepEqual(ids(d).filter((id) => !MODULE_IDS.includes(id)), DEFAULT_IDS);
+  assert.deepEqual(visibleWidgets(d).map((w) => w.id), DEFAULT_IDS, "viditelné = 4B.1");
+  assert.ok(d.widgets.filter((w) => MODULE_IDS.includes(w.id)).every((w) => !w.visible), "widgety modulů skryté");
+  assert.deepEqual(d.widgets.map((w) => w.order), d.widgets.map((_, i) => (i + 1) * 10));
   assert.ok(isDefaultLayout(d));
 });
 
@@ -131,8 +138,8 @@ test("reorder moves among visible widgets and stops at edges", () => {
 test("hide / show and the dashboard data request", () => {
   let l = defaultLayout();
   l = setWidgetVisible(l, "games", false);
-  assert.deepEqual(hiddenWidgets(l).map((w) => w.id), ["games"]);
-  assert.equal(visibleWidgets(l).length, WIDGETS.length - 1);
+  assert.deepEqual(hiddenWidgets(l).map((w) => w.id).filter((id) => !MODULE_IDS.includes(id)), ["games"]);
+  assert.equal(visibleWidgets(l).length, DEFAULT_IDS.length - 1);
   l = setWidgetVisible(l, "games", true);
   assert.ok(isDefaultLayout(l));
   const onlySelfFetching = WIDGETS.reduce((acc, w) => (w.usesDashboardData ? setWidgetVisible(acc, w.id, false) : acc), defaultLayout());

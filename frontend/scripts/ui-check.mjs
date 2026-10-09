@@ -8,7 +8,10 @@
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
 import { mkdirSync, readFileSync } from "node:fs";
 import { stubPng } from "./stub-png.mjs";
+import { stubLongRequests } from "./network-stubs.mjs";
 import { fileURLToPath } from "node:url";
+// MRK-21: počet stránek navigace z registru (nový modul ui-check neupravuje); mock /modules = výchozí stav manifestu
+const { NAV_PAGES } = await import("../lib/navigation.ts");
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
 const OUT = fileURLToPath(new URL("./.ui-check/", import.meta.url));  // .pathname dává na Windows /C:/…
@@ -26,6 +29,7 @@ function check(name, ok, detail = "") {
 async function open(path, { width = 1440, height = 1000, scheme = "dark", reducedMotion = "no-preference", delayPath, setup } = {}) {
   // Mobilní šířka = dotykové zařízení (pointer: coarse → větší tlačítka, viz Button).
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion, hasTouch: width < 500 });
+  await stubLongRequests(ctx); // SSE stream a 404 manifestu by jinak nikdy nedovolily „networkidle"
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -52,6 +56,8 @@ const PAGES = [
   ["/finance", "finance"],
   ["/goals", "goals"],
   ["/activity", "activity"],
+  // MRK-28
+  ["/changes", "changes"],
   ["/memory", "memory"],
   ["/wot", "wot"],
   ["/mff", "mff"],
@@ -789,6 +795,7 @@ async function aiSend(page, text) {
 // 15) Roadmap 4C – proxy.ts (dříve middleware.ts) a login: skutečné přesměrování podle session cookie z mock API.
 {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await stubLongRequests(ctx);
   await ctx.addCookies([{ name: "standa_hub_session", value: "expired", domain: "127.0.0.1", path: "/" }]);
   const page = await ctx.newPage();
   const errors = [];
@@ -835,7 +842,7 @@ async function searchCalls() {
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   await page.waitForTimeout(80);
   check("hledání: fokus v poli (combobox s popiskem)", await input.evaluate((el) => el === document.activeElement));
-  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === 15); // + Nastavení (MRK-18 A2)
+  check("hledání: prázdný dotaz ukáže navigaci", (await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count()) === NAV_PAGES.length); // jádro + moduly z manifestu
   await page.screenshot({ path: `${OUT}search-empty.png` });
 
   const first = async () => (await dialog.getByRole("option").first().innerText()).split("\n")[0];

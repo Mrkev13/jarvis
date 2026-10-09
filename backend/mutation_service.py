@@ -25,12 +25,11 @@ from sqlalchemy import update as _sql_update
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
-from context_service import fold_text
 from database import SessionLocal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
 from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
-from text_utils import clip, finance_category_cz, format_num_cz
+from text_utils import clip, finance_category_cz, fold_text, format_num_cz
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20

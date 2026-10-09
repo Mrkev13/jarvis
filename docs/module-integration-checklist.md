@@ -1,13 +1,29 @@
-# Module integration checklist (Life Modules, Roadmap 5+)
+# How to fill a ModuleDef (module integration checklist, Platform 2.0)
 
-A checklist, **not a framework**. A new module is "well integrated" when it ticks the boxes that make sense for
-it; skip what does not apply and say why in the PR. Principles: [architecture-principles.md](architecture-principles.md).
+A new module plugs into the shared surfaces by **filling its `ModuleDef`**: a manifest entry plus providers in
+`backend/<module>_integrations.py`. Global aggregators (search, Today, dashboard, AI context, Quick Add, hourly job,
+navigation) are **not edited**. Tick what makes sense for the module, skip the rest and say why in the PR.
+Architecture and contracts: [module-framework.md](module-framework.md). Flags: [module-feature-flags.md](module-feature-flags.md).
+Principles: [architecture-principles.md](architecture-principles.md).
 
-## 0. Feature flag (Roadmap 6C)
-- [ ] Registry entry in `backend/module_registry.py` **and** `frontend/lib/modules.ts` (one line each, parity is
-      tested): capabilities, entity types, context areas, routes/API prefixes, Quick Add kinds. Default disabled
-      until the module is usable. See [module-feature-flags.md](module-feature-flags.md) – “How to register a new module”.
-- [ ] Pages/widgets tagged with `module` / `modules`; no ad-hoc `if (FLAG)` checks – ask `ModuleAccess.allows()`.
+## 0. Manifest (always)
+New modules (MRK-21+) live in packages: `backend/modules/<id>/` (`models.py`, `service.py`, `router.py`,
+`integrations.py`) and `frontend/modules/<id>/` (`manifest.ts`, page, components, `lib.ts` + tests). The worked example
+is Habits ([habits.md](habits.md)), and the exact list of files touched is in module-framework.md §8.
+- [ ] REST through `integrations.routers` (an `APIRouter` under the module's `api_prefixes`). Do not add routes to `main.py`.
+- [ ] Today row actions through `MODULE_UI.<id>.todayActions`, widgets through `MODULE_UI.<id>.widgets` plus a
+      component entry in `frontend/modules/registry.tsx`, area colour through `MODULE_UI.<id>.area`. Prefer
+      `defaultVisible: false` for new widgets so existing dashboards keep their layout.
+- [ ] `backend/module_registry.py`: replace `_planned("<id>", …)` with `ModuleDef(...)`: `implemented=True`,
+      `default_enabled` (`False` until usable), `capabilities`, `entity_types` (ref prefixes / search result types),
+      `context_areas`, `api_prefixes`, `quick_add_kinds`, `integrations=<id>_integrations.INTEGRATIONS` (one import).
+- [ ] `frontend/lib/modules.ts`: the same `MODULES` line (`routes` instead of `api_prefixes`; parity is tested) and
+      `MODULE_UI.<id>` (`nav`, `searchParams`, `searchGroupOrder`).
+- [ ] `backend/<id>_integrations.py` imports only models, services and the shared leaves (`module_contracts`,
+      `today_types`, `context_format`, `quick_add_text`, `text_utils`, `time_utils`, `statuses`) – **never** an
+      aggregator or `module_registry` (tested).
+- [ ] No ad-hoc `if (FLAG)` checks – disabled modules are filtered by `ModuleAccess.contributions()`; elsewhere ask
+      `ModuleAccess.allows()`.
 
 ## 1. Data and domain
 - [ ] Model(s) in `backend/models.py` with an **additive** Alembic migration (upgrade/downgrade/re-upgrade test;
@@ -30,13 +46,16 @@ it; skip what does not apply and say why in the PR. Principles: [architecture-pr
 - [ ] Sidebar entry only when the module is usable (no placeholder pages).
 
 ## 4. AI integration (only where useful)
-- [ ] Read access: a capped query in `read_queries.py` + `ToolSpec` in `tool_registry.py` with correct `areas`;
-      area keywords in `context_service` if CURRENT STATE should include it.
+- [ ] CURRENT STATE / routing: `ContextSection(area, keywords, order=, build=, covered_tools=, name_hints=)` in
+      `integrations.context` (area also in `ModuleDef.context_areas`). `build(ContextRequest)` returns short Czech
+      lines via `context_format` helpers; `order` = position among sections (gaps of 10). No edit in `context_service`.
+- [ ] Read tools: a capped query in `read_queries.py` + `ToolSpec` in `tool_registry.py` with `areas=[<area>]`
+      (legacy location; gating through `areas` is automatic).
 - [ ] Writes: resolver (preview) + executor through the pending-action flow; stale checks; undo if feasible
       (`mutation_service` EntityDef where it fits). Never a direct AI write.
 - [ ] Tool routing tests (`test_tool_router.py`) and token budget check (`test_llm_budget.py`).
 
-## 5. Briefing, review and notifications (only where relevant)
+## 5. Briefing, review and notifications (only where relevant – still central, see module-framework.md §7)
 - [ ] Daily Briefing: deterministic items with refs in `briefing_snapshot` (today/overdue/soon), respecting caps.
 - [ ] Weekly Review: deterministic metrics/items in `weekly_snapshot` (with previous-week comparison and a
       noise-free activity summary); forecasts only from deterministic candidates.
@@ -45,15 +64,15 @@ it; skip what does not apply and say why in the PR. Principles: [architecture-pr
 - [ ] Planner: deterministic candidates only if the module has deadlines/priorities.
 
 ## 6. Search integration (Roadmap 4D – Global Search / Ctrl+K)
-- [ ] Records: add a source to `_candidates()` in `backend/search_service.py` yielding
-      `(type, id, title, subtitle, extra, area, href)` – title = what the user names the record, subtitle = Czech
-      context (kind · date · status, no raw enums/ISO dates), extra = other searchable words, bounded query
-      (`ROW_LIMIT`), only records the module page actually shows (e.g. active ones).
-- [ ] `href` = module page + record param (`/<module>?<param>=<id>`); add the param to
-      `SEARCH_TARGET_PARAMS` (`frontend/lib/search.ts`) and `data-search-target="<param>-<id>"` (or
-      `EntityRow searchTarget`) on the row so the result opens focused and highlighted.
-- [ ] New area: label in `lib/areas.ts` (group heading) and position in `GROUP_ORDER`.
-- [ ] Page: entry in `lib/navigation.ts` (Czech label + keywords) – sidebar and Ctrl+K share it.
+- [ ] Records: `SearchSource(name, order, fetch)` in `integrations.search`; `fetch(db, q)` yields
+      `(type, id, title, subtitle, extra, area, href)` – type ∈ `entity_types`, title = what the user names the record,
+      subtitle = Czech context (kind · date · status, no raw enums/ISO dates), extra = other searchable words, bounded
+      query (`ROW_LIMIT`), only records the module page actually shows. Ranking, caps and gating are global.
+- [ ] `href` = module page + record param (`/<module>?<param>=<id>`); the param goes to `MODULE_UI.<id>.searchParams`
+      (tested against the backend href) and `data-search-target="<param>-<id>"` (or `EntityRow searchTarget`) on the
+      row so the result opens focused and highlighted.
+- [ ] Group: `MODULE_UI.<id>.searchGroupOrder`; label/colour in `lib/areas.ts` if the area is new.
+- [ ] Page: `MODULE_UI.<id>.nav` (Czech label + keywords + `order`) – sidebar, mobile menu and Ctrl+K derive it.
 - [ ] Tests: a representative hit in `backend/tests/test_search.py`; never index secrets, tokens, raw payloads or
       internal ids; a ui-check query for the module (mock `search.json` regenerated from the real service).
 - [ ] Search only navigates – creating data belongs to Quick Add (§7).
@@ -62,12 +81,16 @@ it; skip what does not apply and say why in the PR. Principles: [architecture-pr
 Only when the module has a record people create often from one sentence; otherwise skip.
 - [ ] A WRITE tool for creating the record already exists (`tools.py`, `tool_registry.py`) and writes its Activity
       entry with the passed `user_context` – Quick Add never gets its own mutation code.
-- [ ] Parser (`backend/quick_add_service.py`): an explicit keyword set for the kind, its place in the fixed
-      `classify()` priority, a `_parse_<kind>()` that fills fields, asks via `need()` for anything missing and never
-      invents values (categories only from explicit rules, shown as a warning); Prague dates via `time_utils`.
-- [ ] Validation in `to_tool_call()` (ranges, dates, foreign keys must exist) – the frontend is never trusted.
-- [ ] `_display()` Czech title/subtitle (no raw enums/ISO dates); area for the badge.
-- [ ] Frontend: `QuickAddKind`, `FIELD_DEFS`, `KIND_AREAS`, `KIND_HREFS` and one example in `lib/quickAdd.ts`.
+- [ ] Rules: `QuickAddRule(priority, kind, detect)` in `integrations.quick_add_rules` – explicit keywords
+      (`quick_add_text` helpers), a **unique** numeric priority relative to the existing ones (see the table in
+      module-framework.md §3; lower = earlier, first match wins). A disabled module's text becomes "unknown".
+- [ ] Kind: `QuickAddKind(kind, parse, to_tool_call, display, context=, output=)` in `integrations.quick_add_kinds`
+      and the kind in `ModuleDef.quick_add_kinds` (tested). `parse` fills `draft.fields`, asks via `need()` for
+      anything missing and never invents values; Prague dates via `time_utils`.
+- [ ] `to_tool_call(fields, draft, today, now_utc, db)` validates (ranges, dates, foreign keys must exist) – the
+      frontend is never trusted; `display` = Czech title/subtitle (no raw enums/ISO dates) and area.
+- [ ] Frontend: `QuickAddKind` union, `KIND_LABELS`, `FIELD_DEFS` and one example in `lib/quickAdd.ts`
+      (`KIND_AREAS` / `KIND_HREFS` are derived from the owning module).
 - [ ] Tests: parser matrix incl. ambiguous and invalid input in `backend/tests/test_quick_add.py`, prepare → confirm
       end to end (source `quick_add`, no AI approve log), `lib/quickAdd.test.mjs`; mock fixture regenerated from the
       real parser and a ui-check case.
@@ -75,14 +98,15 @@ Only when the module has a record people create often from one sentence; otherwi
 
 ## 8. Dashboard widget integration (Roadmap 4F – Command Center)
 Only when the module has a compact, glanceable summary; otherwise skip.
-- [ ] Data: extend `GET /dashboard` (one shared request) with a small summary, or – for a widget with its own
-      lifecycle – a separate endpoint fetched by the page only while the widget is visible (like
-      `/briefing/today`). Widgets never fetch on their own.
+- [ ] Data: `DashboardSection(key, build(db, access), empty=)` in `integrations.dashboard` – one small key of the
+      shared `GET /dashboard` (present always, `empty` when the module is off), or – for a widget with its own
+      lifecycle – a separate endpoint fetched by the page only while the widget is visible (like `/briefing/today`).
+      Widgets never fetch on their own.
 - [ ] Component in `components/dashboard/widgets.tsx` taking `WidgetProps`; keeps its own Loading/Error/Empty
       states; must render well at every allowed size (mobile is always one column).
 - [ ] Registry: add the id to `WIDGET_IDS` and an entry to `WIDGETS` – stable semantic snake_case id (persisted
       forever, never renamed or reused), `defaultOrder` between existing ones, `defaultSize`, `allowedSizes`,
-      `defaultVisible`, `usesDashboardData`; add it to `WIDGET_COMPONENTS`.
+      `defaultVisible`, `usesDashboardData`, `modules: ["<id>"]`; add it to `WIDGET_COMPONENTS` (legacy location).
 - [ ] Existing users get the new widget automatically after its default predecessor (`normalizeLayout`); check the
       default desktop packing still balances (`packDesktop` test).
 - [ ] Tests: registry uniqueness test still passes, default order assertion updated, a ui-check screenshot.
@@ -90,9 +114,12 @@ Only when the module has a compact, glanceable summary; otherwise skip.
 
 ## 9. Today Mode integration (Roadmap 4G – Dnes)
 Only for records that are dated or need action today; otherwise skip.
-- [ ] Source mapping in `backend/today_service.py`: an explicit function that returns `TodayItem`s – into the
-      timeline (dated today, `local_day_bounds_utc`), attention (overdue / needs action) or upcoming (next 7 days).
-      Reuse the module's own status rules (`statuses.py`), never new ones; no runtime plugin registry.
+- [ ] `TodaySource(name, order, timeline=, overdue=, upcoming=, closed_refs=)` in `integrations.today`: plain
+      functions `fn(TodayContext) -> list[TodayItem]` (`today_types`) – timeline (dated today, `local_day_bounds_utc`),
+      overdue (attention), upcoming (next 7 days), refs that no longer need anything. Reuse the module's own status
+      rules (`statuses.py`). Dedupe, caps and ordering are global (`today_service`).
+- [ ] `EntityRef(type, href="/<module>?<param>={id}", planner_actions=, notification_source=)` in
+      `integrations.entity_refs` so planner rows and notifications about the record open and merge correctly.
 - [ ] Stable `id` = ref `"<type>:<id>"` (the same ref the planner and notifications use) so deduplication works;
       `href` = the module deep link (`/<module>?<param>=<id>`, see Search integration).
 - [ ] Czech subtitle (kind · subject · date, no raw enums/ISO), `time` only when the record really has one.
@@ -104,8 +131,9 @@ Only for records that are dated or need action today; otherwise skip.
 Only for a low-risk action the module already supports cleanly; never new domain behaviour for Today's sake.
 - [ ] The action already exists as a safe path: a module endpoint with validation/stale checks and Activity
       logging that accepts `user_context`, or a `modify_records` action (pending → confirm, snapshot, undo).
-- [ ] Expose it declaratively: add the action id to `TodayItem.actions` in `backend/today_service.py` only for
-      states where it is valid (e.g. active, not recurring); no URLs or commands in the payload.
+- [ ] Expose it declaratively: add the action id to `TodayItem.actions` in the module's `TodaySource` only for
+      states where it is valid (e.g. active, not recurring), and to `EntityRef.planner_actions` for planner rows; no
+      URLs or commands in the payload.
 - [ ] Wire it: a module endpoint gets `?source=today` (only that value maps to `user_context="today"`), or
       `POST /today/actions/prepare` gets one more explicit `(action, ref)` mapping to an existing tool.
 - [ ] Frontend: one branch in `useTodayActions.run` + labels in `lib/today.ts` (`actionLabel`, `successMessage`);
@@ -142,7 +170,9 @@ Only when a module truly needs user files (e.g. WoT milestone screenshots, `docs
 
 ## 13. Operations and quality
 - [ ] Config via `env_config` (documented in `.env.template` and AGENTS.md); feature toggle only if needed.
-- [ ] Scheduler work (if any) as an isolated, idempotent, bounded job.
+- [ ] Scheduler work (if any): an idempotent, bounded `ScheduledStep(name, run(db))` in `integrations.hourly`
+      (runs only while the module is available; infrastructure jobs stay in `scheduler_service`).
 - [ ] Logs without secrets or private content.
-- [ ] Tests: domain behaviour, boundaries (DST, empty data, caps), failure handling; fake clocks/LLMs only.
+- [ ] Tests: domain behaviour, boundaries (DST, empty data, caps), failure handling; fake clocks/LLMs only;
+      `test_module_framework.py` and `test_module_registry.py` (parity) stay green without editing them.
 - [ ] AGENTS.md section for the module.

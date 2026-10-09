@@ -836,8 +836,13 @@ print(_hash_pin("123456"))
     `current_access().allows(modul, schopnost)`; brány v search/Dnes/Quick Add/AI kontextu/dashboardu a 404 pro
     REST vypnutého modulu (až po auth). Frontend stav čte za běhu z GET /modules. Zrcadlo `frontend/lib/modules.ts`.
     Podrobnosti: `docs/module-feature-flags.md`.
+  - **Rámec modulů (MRK-20)** – `ModuleDef.integrations` (`module_contracts.ModuleIntegrations`) z
+    `<modul>_integrations.py` (jádro: `core_integrations.py`). Vyhledávání, Dnes, GET /dashboard, AI kontext,
+    Rychlé přidání a hodinový job iterují `current_access().contributions(...)`; do agregátorů se modulový kód
+    **nepíše** (hlídá `tests/test_module_framework.py`). Poskytovatelé neimportují agregátory ani registr.
+    Návod: `docs/module-integration-checklist.md`, architektura a zbývající ruční místa: `docs/module-framework.md`.
   - `time_utils.py` – UTC úložiště, Europe/Prague pro „dnes" a plány; nikdy `date.today()`.
-  - `text_utils.py` – `clip()` a české názvy dnů.
+  - `text_utils.py` – `clip()`, české názvy dnů, `fold_text()` (bez diakritiky) a `join_parts()`.
   - `planner_guard.strict_text_problems` – přísný grounding pro přehledy.
   - `ai.LLMRateLimitError` / `DailyLimitError` – chyby LLM se rozlišují typem, ne textem.
 - **Testy:** sdílené test doubles v `tests/fakes.py` (`FakeGroq`, `completion`, `groq_error`, `FakeProvider`);

@@ -5,6 +5,8 @@ import { apiFetch, jsonBody } from "@/lib/api";
 import {
   classifyActionError,
   entityKind,
+  fillTemplate,
+  moduleAction,
   nextFocusId,
   parseRef,
   successMessage,
@@ -117,7 +119,11 @@ export function useTodayActions(reload: () => Promise<void>) {
       setRowErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== item.id)));
       try {
         let undo: (() => void) | undefined;
-        if (kind === "reminder" && action === "complete") {
+        const declared = moduleAction(item, action);
+        if (declared) {
+          // MRK-21: akce modulu z manifestu (MODULE_UI.<id>.todayActions) – endpoint modulu, žádná větev na typ
+          await call(fillTemplate(declared.path, { id: ref.id }), jsonBody("POST", declared.body ?? {}));
+        } else if (kind === "reminder" && action === "complete") {
           await call(`/reminders/${ref.id}/done?source=today`, { method: "POST" });
         } else if (kind === "reminder" && action === "snooze" && option) {
           const body = option.minutes ? { minutes: option.minutes } : { until_local: option.until_local };
