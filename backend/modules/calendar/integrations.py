@@ -8,7 +8,7 @@ from module_contracts import (
 )
 from modules.calendar.models import CalendarEvent
 from modules.calendar.free_blocks import get_free_blocks
-from modules.calendar.occurrences import get_calendar_occurrences, local_window
+from modules.calendar.occurrences import MAX_OCCURRENCES, get_calendar_occurrences, local_window
 from modules.calendar.router import router
 from time_utils import APP_TZ, to_local
 from today_types import TodayItem, UPCOMING_DAYS
@@ -103,6 +103,8 @@ def _day_occurrences(req):
     """One occurrence load per timeline request, shared by the items and the free blocks."""
     if _OCCURRENCES not in req.cache:
         req.cache[_OCCURRENCES] = get_calendar_occurrences(req.db, req.start, req.end)
+        if len(req.cache[_OCCURRENCES]) >= MAX_OCCURRENCES:
+            req.truncated = True  # capped load: the day may be incomplete even without free blocks
     return req.cache[_OCCURRENCES]
 
 

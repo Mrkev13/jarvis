@@ -181,6 +181,22 @@ def test_one_occurrence_load_shared_with_free_blocks(db, source):
     assert len(calls) == 1
 
 
+def test_capped_occurrence_load_marks_the_day_truncated_even_without_free_blocks(db, source, monkeypatch):
+    load(db, source, event('lecture', '20261012T100000', '20261012T113000'))
+    monkeypatch.setattr(calendar_integrations, 'MAX_OCCURRENCES', 1)
+    assert day(db, include_free_blocks=False)['truncated'] is True
+    assert day(db)['truncated'] is True
+
+
+def test_reminders_near_midnight_land_on_their_prague_day(db, source):
+    db.add_all([Reminder(title='Late', due_at=datetime(2026, 10, 12, 21, 30)),     # 23:30 Prague on the 12th
+                Reminder(title='Early next', due_at=datetime(2026, 10, 12, 22, 30)),  # 00:30 Prague on the 13th
+                Reminder(title='Just after midnight', due_at=datetime(2026, 10, 11, 22, 0))])  # 00:00 on the 12th
+    db.commit()
+    assert [i['title'] for i in day(db)['timed_items']] == ['Just after midnight', 'Late']
+    assert [i['title'] for i in day(db, DAY + timedelta(days=1))['timed_items']] == ['Early next']
+
+
 def test_failing_source_is_isolated(db, source, subject):
     db.add(Assignment(subject_id=subject, title='Essay', due_date=DAY))
     db.commit()

@@ -266,6 +266,7 @@ class TimelineRequest:
     end: Any        # aware UTC konec (23/24/25 h)
     now: Any        # aware UTC
     cache: dict[str, Any] = field(default_factory=dict)  # sdílená data v rámci jednoho požadavku
+    truncated: bool = False  # poskytovatel narazil na vlastní limit → osa není úplná (nastaví True, nikdy zpět)
 
 
 @dataclass(frozen=True)

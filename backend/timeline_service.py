@@ -79,6 +79,7 @@ def get_day_timeline(db, access, *, day: date, include_free_blocks: bool = True,
             free.extend(result.blocks)
             free_sources.append(source.name)
         free.sort(key=lambda b: (b.starts_at, b.ends_at))
+    truncated = truncated or req.truncated
     return {
         "date": day.isoformat(),
         "all_day_items": [item_dict(it) for _r, it in day_items[:MAX_ITEMS]],
