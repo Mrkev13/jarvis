@@ -267,24 +267,33 @@ def _backup_sqlite(dst: Path) -> tuple[bool, str]:
             shutil.copyfileobj(fin, fout)
         dst.with_suffix(".tmp").unlink(missing_ok=True)
         return True, ""
-    except Exception as e:
+    except Exception:
         try:
             dst.with_suffix(".tmp").unlink(missing_ok=True)
             dst.unlink(missing_ok=True)
         except Exception:
             pass
-        return False, f"sqlite backup failed: {e}"
+        return False, "sqlite backup failed"
 
 def _backup_postgres(dst: Path) -> tuple[bool, str]:
     try:
         env = os.environ.copy()
-        url = _DATABASE_URL
-        stripped = url.split("://", 1)[1]
-        userpass, hostpath = stripped.split("@", 1)
-        user, password = userpass.split(":", 1) if ":" in userpass else (userpass, "")
-        hostport, dbname = hostpath.split("/", 1)
-        host, port = hostport.split(":", 1) if ":" in hostport else (hostport, "5432")
-        env["PGPASSWORD"] = password
+        raw = _DATABASE_URL
+        if raw.startswith("postgres://"):
+            raw = "postgresql://" + raw[len("postgres://"):]
+        url = make_url(raw)
+        if url.get_backend_name() != "postgresql" or not url.database or not url.host:
+            return False, "invalid postgres backup configuration"
+        query_env = {"sslmode": "PGSSLMODE", "sslcert": "PGSSLCERT", "sslkey": "PGSSLKEY",
+                     "sslrootcert": "PGSSLROOTCERT", "application_name": "PGAPPNAME",
+                     "connect_timeout": "PGCONNECT_TIMEOUT", "options": "PGOPTIONS"}
+        if any(key not in query_env or not isinstance(value, str) for key, value in url.query.items()):
+            return False, "unsupported postgres backup options"
+        env["PGPASSWORD"] = url.password or ""
+        for key, value in url.query.items():
+            env[query_env[key]] = value
+        env.setdefault("PGCONNECT_TIMEOUT", "10")
+        host, port, user, dbname = url.host, str(url.port or 5432), url.username or "", url.database
         cmd = [
             find_pg_dump(),
             f"--host={host}",
@@ -306,11 +315,10 @@ def _backup_postgres(dst: Path) -> tuple[bool, str]:
                 dst.unlink(missing_ok=True)
             except Exception:
                 pass
-            err = stderr_b.decode("utf-8", errors="replace") if stderr_b else "unknown"
-            return False, f"pg_dump failed ({proc.returncode}): {err[:500]}"
+            return False, "pg_dump failed"
         return True, ""
-    except PgDumpNotFound as e:
-        return False, str(e)
+    except PgDumpNotFound:
+        return False, "pg_dump not found; configure PG_DUMP_PATH or PATH"
     except FileNotFoundError:
         try:
             dst.unlink(missing_ok=True)
@@ -323,12 +331,12 @@ def _backup_postgres(dst: Path) -> tuple[bool, str]:
         except Exception:
             pass
         return False, "pg_dump timeout"
-    except Exception as e:
+    except Exception:
         try:
             dst.unlink(missing_ok=True)
         except Exception:
             pass
-        return False, f"postgres backup failed: {e}"
+        return False, "postgres backup failed"
 
 def _verify_backup(dst: Path, expected_size: int, checksum_expected: str) -> bool:
     try:
@@ -394,9 +402,9 @@ def run_backup(db_session=None) -> int:
         if ok:
             try:
                 media_info = sync_media_archive(backup_root, backup_ts)
-            except Exception as exc:
+            except Exception:
                 ok = False
-                err = f"media backup failed: {exc}"
+                err = "media backup failed"
 
         finished = datetime.utcnow()
         duration = (finished - started).total_seconds()
@@ -419,9 +427,9 @@ def run_backup(db_session=None) -> int:
         }
         try:
             _write_json_atomic(metadata_path, metadata)
-        except Exception as exc:
+        except Exception:
             ok = False
-            err = f"backup metadata failed: {exc}"
+            err = "backup metadata failed"
 
         if ok:
             log.status = "success"
@@ -485,8 +493,8 @@ def _delete_run_metadata_for_dump(dump_name: str) -> None:
                 else:
                     manifest_path.unlink(missing_ok=True)
             metadata_path.unlink(missing_ok=True)
-        except Exception as exc:
-            logger.warning("Could not remove retained backup metadata %s: %s", metadata_path.name, exc)
+        except Exception:
+            logger.warning("Backup metadata retention failed")
 
 def list_backups(db_session=None, limit=20) -> list[dict]:
     db = db_session or SessionLocal()

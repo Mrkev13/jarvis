@@ -93,8 +93,8 @@ No panel now because truthful job/copy observations are unfinished.
 Reuse MRK-23 tracker and health observations. Add failure counts at its existing
 tracking boundary, without changing scheduling/reminder behavior. Document
 restart semantics (prefer persistent incidents if alerts must survive restarts).
-MRK-23 default backup health threshold is 36h; align deployment configuration
-`HEALTH_BACKUP_MAX_AGE_HOURS=26` after approval of its final interface.
+MRK-23 v2 uses this canonical 26h threshold directly (no 36h override).
+Its process-local scheduler tracker supplies failure streaks; see [operations](operations.md).
 Reuse MRK-25 copy metadata, never implement a second copy job here.
 
 Reuse existing notification dedupe/recovery and delivery queue. Currently

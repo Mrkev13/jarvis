@@ -47,3 +47,5 @@ next-env.d.ts
 # autorská práva Wargaming / Netmarble / Marvel → necommitovat (viz docs/game-assets.md)
 /public/game-assets/*
 !/public/game-assets/README.md
+
+!.env.production.template

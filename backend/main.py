@@ -246,7 +246,7 @@ allowed_origins = [
 ]
 
 # Cesty dostupné bez session (login flow + health check).
-AUTH_PUBLIC_PATHS = frozenset({"/", "/auth/login", "/auth/logout", "/auth/session/validate"})
+AUTH_PUBLIC_PATHS = frozenset({"/", "/health", "/auth/login", "/auth/logout", "/auth/session/validate"})
 
 
 def require_auth(request: Request) -> dict:
@@ -265,6 +265,8 @@ def require_auth(request: Request) -> dict:
 def require_module_available(request: Request) -> None:
     """Roadmap 6C: REST cesty vypnutého modulu → 404 (čistě, ne 500). Běží až PO auth (pořadí dependencies),
     takže nepřihlášený dostane 401 dřív, než se cokoliv dozví o modulech. Flag nic nepovoluje – jen ubírá."""
+    if request.url.path == "/health":
+        return  # infrastructure probe owns its bounded DB reads, independent of module settings
     access = current_access()
     module = access.module_for_path(request.url.path)
     if module and not access.is_available(module.id):
@@ -283,6 +285,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from health_router import router as health_router
+app.include_router(health_router)
 
 # MRK-21: REST modulů z `ModuleIntegrations.routers` (modules/<id>/router.py). Globální dependencies výše (auth,
 # brána vypnutého modulu) platí i pro ně – nový modul do main.py nic nepřidává.
