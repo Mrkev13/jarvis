@@ -95,7 +95,8 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
                 if name != 'status' and (name != 'title' or incoming.title is None):
                     values[name] = getattr(row, name)
         if values['title'] is None:
-            values['title'] = 'Zrušená událost'
+            # A cancellation without SUMMARY keeps the known name (history); placeholder only for unseen events.
+            values['title'] = row.title if row is not None else 'Zrušená událost'
         before = {name: _iso(getattr(row, name)) for name in AUDIT_FIELDS} if row is not None else {}
         changed = [name for name in BUSINESS_FIELDS if row is None or getattr(row, name) != values[name]]
         if not changed:

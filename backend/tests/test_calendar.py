@@ -358,3 +358,20 @@ def test_all_day_date_identity_does_not_shift_with_source_timezone(db, source):
     assert integrations.timeline(day_after) == []
     actual_day = TodayContext(db, NOW.replace(tzinfo=None), date(2026, 10, 9), datetime(2026, 10, 9))
     assert len(integrations.timeline(actual_day)) == 1
+
+
+def test_cancellation_with_time_but_no_summary_keeps_the_known_title(db, source):
+    service.import_ics(db, source, feed('basic.ics'), now=NOW)
+    db.commit()
+    row = db.query(CalendarEvent).filter_by(external_uid='lecture-1@test.invalid').one()
+    title = row.title
+    cancelled = (b'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:lecture-1@test.invalid\r\n'
+                 b'STATUS:CANCELLED\r\nSEQUENCE:4\r\nDTSTART:20261009T120000Z\r\nDTEND:20261009T133000Z\r\n'
+                 b'END:VEVENT\r\nEND:VCALENDAR\r\n')
+    assert service.import_ics(db, source, cancelled, now=NOW)['cancelled'] == 1
+    db.commit()
+    assert row.status == 'cancelled' and row.title == title  # history keeps the real name
+    unknown = cancelled.replace(b'lecture-1@test.invalid', b'never-seen@test.invalid')
+    assert service.import_ics(db, source, unknown, now=NOW)['cancelled'] == 1
+    db.commit()
+    assert db.query(CalendarEvent).filter_by(external_uid='never-seen@test.invalid').one().title == 'Zrušená událost'
