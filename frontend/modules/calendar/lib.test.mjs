@@ -94,3 +94,48 @@ test('MRK-40: source-missing records are history, never active', () => {
   assert.equal(calendar.groupEvents([missing], '2026-10-09').cancelled.length, 1);
   assert.match(renderList([missing]), /data-cancelled="true"/);
 });
+
+function renderFreeBlocks(props) {
+  const require = createRequire(import.meta.url);
+  const ui = {
+    EmptyState: ({ children }) => React.createElement('p', { 'data-empty': true }, children),
+    ErrorState: ({ message }) => React.createElement('p', { 'data-error': true }, message),
+    LoadingState: () => React.createElement('p', { 'data-loading': true }),
+  };
+  const compiled = ts.transpileModule(readFileSync(new URL('./FreeBlocksList.tsx', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const compiledModule = { exports: {} };
+  new Function('require', 'module', 'exports', compiled)(name => name === '@/components/ui' ? ui : name === './lib' ? calendar : require(name), compiledModule, compiledModule.exports);
+  return renderToStaticMarkup(React.createElement(compiledModule.exports.FreeBlocksList, props));
+}
+
+const block = (start, end, minutes) => ({ starts_at: `2026-10-12T${start}:00+02:00`, ends_at: `2026-10-12T${end}:00+02:00`, local_date: '2026-10-12', local_start: start, local_end: end, duration_minutes: minutes });
+
+test('MRK-32: free-block durations and labels', () => {
+  assert.equal(calendar.formatDuration(90), '1 h 30 min');
+  assert.equal(calendar.formatDuration(120), '2 h');
+  assert.equal(calendar.formatDuration(45), '45 min');
+  assert.equal(calendar.formatDuration(0), '0 min');
+  assert.equal(calendar.freeBlockLabel(block('10:30', '12:00', 90)), '10:30–12:00 · 1 h 30 min');
+  assert.equal(calendar.freeBlockLabel(block('21:00', '24:00', 180)), '21:00–24:00 · 3 h');
+});
+
+test('MRK-32: free-block query is one bounded local day with the chosen minimum', () => {
+  assert.equal(calendar.freeBlocksPath('2026-10-12', 60), '/calendar/free-blocks?start=2026-10-12&end=2026-10-13&min_minutes=60');
+  assert.equal(calendar.freeBlocksPath('2026-12-31', 30), '/calendar/free-blocks?start=2026-12-31&end=2027-01-01&min_minutes=30');
+  assert.equal(calendar.freeBlocksPath('', 30), null, 'no request without a valid day');
+  assert.deepEqual([...calendar.FREE_BLOCK_MINUTES], [15, 30, 60, 90, 120]);
+});
+
+test('MRK-32: FreeBlocksList renders blocks, empty (e.g. busy all day), loading, error and truncation', () => {
+  const html = renderFreeBlocks({ blocks: [block('07:00', '09:00', 120), block('10:00', '22:00', 720)], loading: false, error: null });
+  assert.equal((html.match(/data-free-block/g) ?? []).length, 2);
+  assert.match(html, /07:00–09:00 · 2 h/);
+  assert.match(html, /10:00–22:00 · 12 h/);
+  assert.match(renderFreeBlocks({ blocks: [], loading: false, error: null }), /data-empty/);
+  assert.match(renderFreeBlocks({ blocks: null, loading: true, error: null }), /data-loading/);
+  assert.match(renderFreeBlocks({ blocks: null, loading: false, error: 'x' }), /data-error/);
+  assert.match(renderFreeBlocks({ blocks: [block('07:00', '22:00', 900)], loading: false, error: null, truncated: true }), /nemusí být úplný/);
+  assert.doesNotMatch(html, /RRULE|recurrence/);
+});

@@ -130,7 +130,62 @@ stable per-instance `key`, times/dates, title, location and a `recurring` flag.
 No rule text or internal recurrence key is exposed in page payloads.
 
 Not covered: RANGE=THISANDFUTURE overrides (rejected at import), VTODO/VJOURNAL,
-sub-daily expansion, per-occurrence editing.
+sub-daily expansion, per-occurrence editing. A recurrence rule that can never match
+(for example `BYMONTH=2;BYMONTHDAY=30`) still terminates, but dateutil scans
+candidate days up to year 9999 before giving up (measured ~0.5–5 s per query in
+cloud). Real feeds such as Moodle do not produce such rules; no extra validation is
+added until one is seen.
+
+## Free blocks (MRK-32)
+
+"When am I free?" is a **derived projection**, computed on request by
+`modules.calendar.free_blocks.get_free_blocks(db, start=, end=, ...)` and never
+stored. It writes no Activity, emits no domain events and is not part of Search or
+What Changed. No migration (head stays `0020_calendar_source_presence`).
+
+- **Source:** busy time = active occurrences from `get_calendar_occurrences`,
+  called exactly once per query (recurrence, EXDATE, moved/cancelled overrides,
+  cancelled and source-missing records are already resolved there). Free time is
+  never inferred from master rows.
+- **Day window:** every Prague-local day in the range gets `[day_start, day_end]`,
+  default **07:00–22:00** (the bounds named in MRK-32; per-request parameters,
+  not a stored preference). `day_end=24:00` means the next local midnight;
+  overnight windows are not supported. Windows are built with zoneinfo, so a DST
+  day keeps real lengths: 00:00–24:00 is 23 h on the spring day and 25 h on the
+  autumn day, and 07:00–22:00 is always 15 real hours.
+- **Busy intervals:** timed occurrences, widened by an optional `buffer_minutes`
+  (0–120) on both sides. All-day occurrences do **not** block unless
+  `all_day_busy=true` (MRK-32 acceptance; there is no per-event busy flag yet);
+  then they block their Prague dates. Zero-length events block nothing but their
+  buffer. Intervals are clipped to the query, sorted and merged: overlapping,
+  nested and touching ones become one interval, so nothing is double-counted.
+- **Result:** windows minus merged busy time; blocks shorter than `min_minutes`
+  (5–720, default 30; exact elapsed time) are dropped. Ordered by start. If the
+  occurrence cap (5000) or block cap (500) is reached, `truncated` is true; the
+  service never silently reports a partial schedule as complete.
+- **API:** `GET /calendar/free-blocks?start=YYYY-MM-DD&end=YYYY-MM-DD` (local days,
+  end exclusive, max 31) with optional `min_minutes`, `buffer_minutes`,
+  `day_start`/`day_end` (`HH:MM`) and `all_day_busy`. Invalid or too large → 422;
+  normal auth and module gate. Response: `start`, `end`, `min_minutes`,
+  `truncated`, `blocks[]` with `starts_at`/`ends_at` (UTC ISO), `local_date`,
+  `local_start`/`local_end` (Prague `HH:MM`, `24:00` for midnight) and
+  `duration_minutes`. No event, recurrence or source data is exposed.
+- **AI context:** one line each for the rest of today and tomorrow (07–22,
+  ≥ 30 min, at most three blocks), deterministic, no tools.
+- **UI:** a small "Volné bloky" card on /calendar (day picker, minimum length,
+  list such as `10:30–12:00 · 1 h 30 min`). No planner, grid or task placement.
+- Not yet: unified day timeline with exams/reminders/work sessions, Today "next
+  free block" row, AI read tool and planner use (follow-ups of MRK-32).
+
+MRK-32 cloud evidence (2026-10-09, base main `bc67958`): free-block tests **18
+passed** (empty day, middle/start/end, overlapping/nested/touching, boundaries,
+min duration, buffer, all-day busy opt-in, recurring/EXDATE/moved/cancelled
+overrides, cancelled and source-missing records, ordering, 23 h/25 h DST days,
+bounds incl. 31 local days across DST, truncation, one occurrence query per
+request, no Activity/events, AI context, API auth/module gate/422/schema);
+full backend **955 passed, 8 skipped**; frontend **347 passed**; lint,
+TypeScript, pyflakes and production build passed; Alembic head unchanged.
+40 weekly series over 31 days: ~27 ms per query. **Real Groq requests: 0.**
 
 ## Framework and UI
 

@@ -1,12 +1,13 @@
 """Calendar supplies data through framework contributions, never aggregator branches."""
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from context_format import short
 from module_contracts import ChangeSource, ContextSection, EntityRef, ModuleIntegrations, SearchSource, TodaySource, event_changes
 from modules.calendar.models import CalendarEvent
+from modules.calendar.free_blocks import get_free_blocks
 from modules.calendar.occurrences import get_calendar_occurrences, local_window
 from modules.calendar.router import router
-from time_utils import to_local
+from time_utils import APP_TZ, to_local
 from today_types import TodayItem, UPCOMING_DAYS
 
 
@@ -62,7 +63,29 @@ def context_events(req):
     for o in rows[:8]:
         when = o.starts_on.isoformat() + ' celý den' if o.all_day else to_local(o.starts_at).strftime('%Y-%m-%d %H:%M')
         lines.append(f'Kalendář: {when} {short(o.title, 60)}')
-    return lines or ['Kalendář: žádné události v příštích 7 dnech.']
+    lines = lines or ['Kalendář: žádné události v příštích 7 dnech.']
+    return lines + _free_block_lines(req)
+
+
+def _duration(minutes: int) -> str:
+    hours, rest = divmod(minutes, 60)
+    return ' '.join(filter(None, [f'{hours} h' if hours else '', f'{rest} min' if rest else '']))
+
+
+def _free_block_lines(req) -> list[str]:
+    """MRK-32: deterministic free time (default 07:00–22:00, ≥ 30 min) for the rest of today and tomorrow."""
+    now = req.local_now.replace(tzinfo=APP_TZ) if req.local_now.tzinfo is None else req.local_now
+    lower = max(now, datetime.combine(req.today, time.min, APP_TZ))
+    upper = local_window(req.today, req.today + timedelta(days=2))[1]
+    if upper <= lower:
+        return []
+    blocks = get_free_blocks(req.db, start=lower, end=upper).blocks
+    lines = []
+    for label, day in (('dnes', req.today), ('zítra', req.today + timedelta(days=1))):
+        chosen = [b.as_dict() for b in blocks if b.starts_at.astimezone(APP_TZ).date() == day][:3]
+        text = ', '.join(f"{b['local_start']}–{b['local_end']} ({_duration(b['duration_minutes'])})" for b in chosen)
+        lines.append(f'Kalendář – volno {label} (07–22, min. 30 min): {text or "žádné"}')
+    return lines
 
 
 INTEGRATIONS = ModuleIntegrations(

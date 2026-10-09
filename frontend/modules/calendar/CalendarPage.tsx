@@ -6,6 +6,7 @@ import { Button, Card, CardHeader, ContentContainer, EmptyState, ErrorState, Loa
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiJson, jsonBody } from '@/lib/api';
 import { CalendarList } from './CalendarList';
+import { FreeBlocksCard } from './FreeBlocksCard';
 import { groupEvents, type CalendarPayload } from './lib';
 
 export default function CalendarPage() {
@@ -40,6 +41,7 @@ export default function CalendarPage() {
     {data ? <>
       {!data.moodle_configured ? <EmptyState>Zdroj ještě není připojený. Uložené události můžeš dál prohlížet.</EmptyState> : null}
       <Card><CardHeader title="Dnes" icon="calendar" /><CalendarList events={groups.today} sources={sources} empty="Dnes nemáš žádné události." /></Card>
+      <FreeBlocksCard today={data.today} />
       <Card><CardHeader title="Nadcházející" /><CalendarList events={groups.upcoming} sources={sources} empty="Žádné nadcházející události." /></Card>
       {groups.past.length ? <Card><CardHeader title="Nedávné události" /><CalendarList events={groups.past} sources={sources} empty="" /></Card> : null}
       {selectedEvent ? <Card><CardHeader title="Vybraná událost" /><CalendarList events={[selectedEvent]} sources={sources} empty="" /></Card> : null}
