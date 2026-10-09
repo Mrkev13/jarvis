@@ -71,3 +71,42 @@ export function eventState(event: CalendarEvent) {
   if (event.status === 'cancelled' || event.state === 'cancelled') return 'Zrušeno';
   return event.state === 'source_missing' ? 'Zmizelo ze zdroje' : 'Událost';
 }
+
+// ---------- MRK-32: free blocks (derived from active occurrences by the backend) ----------
+
+export interface FreeBlock {
+  starts_at: string;
+  ends_at: string;
+  local_date: string;
+  local_start: string;
+  local_end: string;
+  duration_minutes: number;
+}
+export interface FreeBlocksPayload {
+  start: string;
+  end: string;
+  min_minutes: number;
+  truncated: boolean;
+  blocks: FreeBlock[];
+}
+
+export const FREE_BLOCK_MINUTES = [15, 30, 60, 90, 120] as const;
+
+/** „1 h 30 min", „45 min", „2 h". */
+export function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60), rest = minutes % 60;
+  return [hours ? `${hours} h` : '', rest || !hours ? `${rest} min` : ''].filter(Boolean).join(' ');
+}
+
+/** „10:30–12:00 · 1 h 30 min" (backend already gives Prague-local clock times). */
+export function freeBlockLabel(block: FreeBlock): string {
+  return `${block.local_start}–${block.local_end} · ${formatDuration(block.duration_minutes)}`;
+}
+
+/** One local day [day, day+1) with the default 07:00–22:00 bounds; `day` is YYYY-MM-DD. */
+export function freeBlocksPath(day: string, minMinutes: number): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const next = new Date(day + 'T00:00:00Z');
+  next.setUTCDate(next.getUTCDate() + 1);
+  return `/calendar/free-blocks?start=${day}&end=${next.toISOString().slice(0, 10)}&min_minutes=${minMinutes}`;
+}
