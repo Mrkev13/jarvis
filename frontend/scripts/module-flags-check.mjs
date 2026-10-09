@@ -7,6 +7,7 @@
 // Mock API vrací data všech modulů – kontrola tak dokazuje i pojistku frontendu (filtr výsledků a rozboru).
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stubLongRequests } from "./network-stubs.mjs";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
 const MOCK_API = process.env.MOCK_API_URL || "http://127.0.0.1:8000";
@@ -31,8 +32,10 @@ const NAV_TOTAL = 17; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, mod
 await fetch(`${MOCK_API}/__mock/modules/reset`);
 if (DISABLED.size) await fetch(`${MOCK_API}/__mock/modules?disabled=${[...DISABLED].join(",")}`);
 
-async function open(path, { width = 1366, height = 900, setup } = {}) {
+async function open(path, { width = 1366, height = 900, setup, realtime = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: "dark", hasTouch: width < 500 });
+  // SSE stream by nikdy nedovolil „networkidle"; skutečný stream jen pro kontrolu realtime (čeká na „load")
+  await stubLongRequests(ctx, { eventStream: !realtime });
   const page = await ctx.newPage();
   const errors = [];
   const apiCalls = [];
@@ -41,7 +44,7 @@ async function open(path, { width = 1366, height = 900, setup } = {}) {
     if (r.url().startsWith(MOCK_API)) apiCalls.push(new URL(r.url()).pathname);
   });
   if (setup) await setup(page);
-  await page.goto(BASE + path, { waitUntil: "networkidle" });
+  await page.goto(BASE + path, { waitUntil: realtime ? "load" : "networkidle" });
   await page.waitForTimeout(600);
   return { ctx, page, errors, apiCalls };
 }
@@ -301,7 +304,7 @@ if (!DISABLED.size) {
 // se aktualizuje bez reloadu a bez pollingu.
 if (!DISABLED.size) {
   await fetch(`${MOCK_API}/__mock/modules/reset`);
-  const { ctx, page, errors, apiCalls } = await open("/");
+  const { ctx, page, errors, apiCalls } = await open("/", { realtime: true });
   let navigations = 0;
   page.on("framenavigated", (f) => { if (f === page.mainFrame()) navigations += 1; });
   check("realtime: stránka otevřela /events/stream", apiCalls.includes("/events/stream"), apiCalls.filter((c) => c.startsWith("/events")).join(","));

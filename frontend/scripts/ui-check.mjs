@@ -8,6 +8,7 @@
 // Výstup: screenshoty do scripts/.ui-check/ (gitignore) a seznam kontrol; exit 1 při selhání.
 import { mkdirSync, readFileSync } from "node:fs";
 import { stubPng } from "./stub-png.mjs";
+import { stubLongRequests } from "./network-stubs.mjs";
 import { fileURLToPath } from "node:url";
 // MRK-21: počet stránek navigace z registru (nový modul ui-check neupravuje); mock /modules = výchozí stav manifestu
 const { NAV_PAGES } = await import("../lib/navigation.ts");
@@ -28,6 +29,7 @@ function check(name, ok, detail = "") {
 async function open(path, { width = 1440, height = 1000, scheme = "dark", reducedMotion = "no-preference", delayPath, setup } = {}) {
   // Mobilní šířka = dotykové zařízení (pointer: coarse → větší tlačítka, viz Button).
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion, hasTouch: width < 500 });
+  await stubLongRequests(ctx); // SSE stream a 404 manifestu by jinak nikdy nedovolily „networkidle"
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -793,6 +795,7 @@ async function aiSend(page, text) {
 // 15) Roadmap 4C – proxy.ts (dříve middleware.ts) a login: skutečné přesměrování podle session cookie z mock API.
 {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await stubLongRequests(ctx);
   await ctx.addCookies([{ name: "standa_hub_session", value: "expired", domain: "127.0.0.1", path: "/" }]);
   const page = await ctx.newPage();
   const errors = [];
