@@ -125,3 +125,64 @@ export function syncSummary(result: Record<string, number>): string {
   const failed = result.courses_failed ? ` ${result.courses_failed} kurzů se nepodařilo načíst – jejich materiály zůstaly beze změny.` : '';
   return `Materiály: ${parts.join(', ')}.${failed}`;
 }
+
+// ---------- MRK-44: cílené čtení jednoho materiálu (GET /school/materials/{id}/content) ----------
+
+export type TextStatus = 'available' | 'empty' | 'failed' | 'unsupported' | 'not_downloaded';
+export interface ContentLocation { kind: 'page' | 'slide'; from: number; to: number }
+export interface ContentChunk {
+  index: number;
+  text: string;
+  location: ContentLocation | null;
+  score?: number;
+  matched_terms?: string[];
+}
+export interface MaterialContent {
+  material: { id: number; title: string; state: 'active' | 'source_missing' };
+  text_status: TextStatus;
+  text_message: string;
+  extraction_truncated: boolean;
+  query: string | null;
+  query_terms: string[];
+  chunks: ContentChunk[];
+  total_chunks: number;
+  matched_chunks: number;
+  returned_chars: number;
+  truncated: boolean;
+  outline?: { kind: 'page' | 'slide'; number: number; label: string }[];
+}
+
+export const MAX_FIND_CHARS = 200;
+
+/** API cesta čtení: id jen jako kladné celé číslo, dotaz oříznutý na limit serveru. */
+export function contentPath(materialId: number | string, query?: string | null): string | null {
+  const id = String(materialId);
+  if (!/^[1-9][0-9]*$/.test(id)) return null;
+  const q = (query ?? '').trim().slice(0, MAX_FIND_CHARS);
+  return `/school/materials/${id}/content${q ? `?${new URLSearchParams({ q })}` : ''}`;
+}
+
+export function locationLabel(location: ContentLocation | null): string | null {
+  if (!location) return null;
+  const word = location.kind === 'slide' ? 'Snímek' : 'Strana';
+  return location.from === location.to ? `${word} ${location.from}` : `${word} ${location.from}–${location.to}`;
+}
+
+/** Krátké shrnutí výsledku čtení pro čtečku i uživatele. */
+export function contentSummary(c: MaterialContent): string {
+  if (c.text_status !== 'available') return c.text_message;
+  if (c.query) {
+    if (!c.matched_chunks) return `„${c.query}“ se v materiálu nenašlo.`;
+    return `Nalezeno ${c.matched_chunks} ${c.matched_chunks === 1 ? 'místo' : c.matched_chunks < 5 ? 'místa' : 'míst'}, zobrazeno ${c.chunks.length}.`;
+  }
+  return c.truncated ? `Začátek materiálu (${c.chunks.length} z ${c.total_chunks} částí).` : 'Celý text materiálu.';
+}
+
+/** Stav extrakce v řádku vybraného materiálu (pro lidi; čtení samo vrací přesný `text_status`). */
+export function textStatusLabel(extraction: string | null, hasFile: boolean): string {
+  const labels: Record<string, string> = {
+    ok: 'získán', truncated: 'získán (zkrácený na limit)', empty: 'bez textové vrstvy (sken)', failed: 'nepodařilo se získat',
+    unsupported: 'typ se nečte',
+  };
+  return extraction ? labels[extraction] ?? extraction : hasFile ? 'zatím nezpracován' : 'není k dispozici (soubor neuložen)';
+}

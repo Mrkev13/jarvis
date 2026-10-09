@@ -9,6 +9,7 @@ vybírá menší sadu toolů pro konkrétní dotaz.
 """
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Callable
 
@@ -40,6 +41,7 @@ from reminder_actions import (
     propose_manage_reminder,
     query_reminders,
 )
+from modules.school.reading import ReadingError, find_materials, read_material
 from read_queries import (
     query_finance_transactions,
     query_goals,
@@ -56,6 +58,7 @@ AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS = "finance", "work", "school", 
 AREA_NOTIFICATIONS, AREA_WOT, AREA_MFF = "notifications", "wot", "mff"
 AREA_MEMORY, AREA_ACTIVITY = "memory", "activity"
 AREA_REMINDERS = "reminders"
+AREA_SCHOOL_MATERIALS = "school_materials"  # MRK-44: context area of the School module (study materials)
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,29 @@ def _write(name, description, properties=None, required=None, *, func, areas, re
                     False, tuple(requires), resolver=resolver, write_intent=write_intent)
 
 
+def _study_material_tool(func):
+    """MRK-44: read tools route by area but are not re-checked against the route when called, so the School gate is
+    enforced here too (disabled module → no data). Errors are allowlisted categories, never exception text."""
+    @functools.wraps(func)
+    def run(db, **arguments):
+        from module_registry import current_access  # lazy: the registry imports module providers
+        if not current_access().allows_context_area(AREA_SCHOOL_MATERIALS):
+            return {"error": "module_unavailable"}
+        try:
+            return func(db, **arguments)
+        except ReadingError as exc:
+            return {"error": exc.category}
+    return run
+
+
+def _find_study_materials(db, query: str | None = None, subject_id: int | None = None):
+    return find_materials(db, query=query, subject_id=subject_id)
+
+
+def _read_study_material(db, material_id: int, query: str | None = None):
+    return read_material(db, material_id, query=query)
+
+
 TOOL_SPECS: tuple[ToolSpec, ...] = (
     # ===== READ =====
     _read("get_wot_resources", "WoT resources: credits, gold, bonds, free XP.",
@@ -159,6 +185,21 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "date_to": _DATE,
         },
         func=query_school_exams, areas=[AREA_SCHOOL], takes_db=True,
+    ),
+    # MRK-44: study materials (Moodle) – ids/metadata, then bounded excerpts of ONE material; never whole documents
+    _read(
+        "get_study_materials",
+        "Study files (Moodle): ids by topic or subject, no text.",
+        {"query": _STR, "subject_id": _INT},
+        func=_study_material_tool(_find_study_materials), areas=[AREA_SCHOOL_MATERIALS], takes_db=True,
+    ),
+    _read(
+        "get_study_material_text",
+        "Bounded excerpts of one study file; query = find relevant parts.",
+        {"material_id": _INT, "query": _STR},
+        ["material_id"],
+        func=_study_material_tool(_read_study_material), areas=[AREA_SCHOOL_MATERIALS], takes_db=True,
+        requires=("get_study_materials",),
     ),
     _read("get_work_summary", "Work hours and earnings: total and current month.",
           func=get_work_summary, areas=[AREA_WORK], covered=True),
