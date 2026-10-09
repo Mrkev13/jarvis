@@ -1,6 +1,6 @@
 """Explicit, caller-owned import transaction; no scheduler, secret logging or hard deletion."""
 from dataclasses import fields
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from domain_events import ActivityProjection, append_domain_event
 from env_config import env_str
 from modules.calendar.models import CalendarEvent, CalendarSource, now_utc
+from modules.calendar.occurrences import CalendarWindowError, get_calendar_occurrences, local_window
 from modules.calendar.parser import MAX_FEED_BYTES, ParsedEvent, parse_ics
 from time_utils import APP_TZ, today_local
 
@@ -63,9 +64,36 @@ def _rank(sequence, updated):
     return sequence, updated or datetime.min.replace(tzinfo=timezone.utc)
 
 
+def _payload(row, source_id):
+    return {'event_id': row.id, 'source_id': source_id, 'status': row.status,
+            'starts_at': row.starts_at.isoformat(), 'ends_at': row.ends_at.isoformat(), 'all_day': row.all_day}
+
+
+def _presence_fact(db, row, source_id, action, now):
+    """MRK-40: one domain event + its Activity projection for leaving/returning to the source snapshot."""
+    missing = action == 'source_missing'
+    append_domain_event(db, event_type=f'calendar.event.{action}', aggregate_type='calendar_event', aggregate_id=row.id,
+                        payload=_payload(row, source_id), now=now,
+                        activity=ActivityProjection('calendar', 'source_missing' if missing else 'restore',
+                                                    f"{'Událost zmizela ze zdroje' if missing else 'Událost je zpět ve zdroji'}: {row.title}",
+                                                    'calendar_event', row.id,
+                                                    {'source': {'old': 'present' if missing else 'missing',
+                                                                'new': 'missing' if missing else 'present'}},
+                                                    'ics_import'))
+
+
+def _restore(db, row, source_id, now, stats):
+    row.source_missing_at = None
+    row.imported_at = row.updated_at = now
+    db.flush()
+    stats['restored'] += 1
+    _presence_fact(db, row, source_id, 'restored', now)
+
+
 def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
-    """Idempotent source/UID/recurrence upsert. Missing identities remain untouched."""
-    stats = dict(created=0, updated=0, unchanged=0, cancelled=0, errors=0)
+    """Idempotent source/UID/recurrence upsert. A complete snapshot marks absent identities source-missing
+    (never deleted) and restores the same row when an identity reappears; an incomplete one changes no presence."""
+    stats = dict(created=0, updated=0, unchanged=0, cancelled=0, errors=0, missing=0, restored=0)
     # PostgreSQL row lock serializes every import for this source until caller commit.
     # Refresh identity-map values too: a cached ORM row is not current source truth.
     db.flush()
@@ -81,10 +109,14 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
         row = db.query(CalendarEvent).filter_by(source_id=source.id, external_uid=incoming.external_uid,
                                                recurrence_id=incoming.recurrence_id).populate_existing().one_or_none()
         created = row is None
+        restoring = row is not None and row.source_missing_at is not None
         sequence = incoming.sequence if incoming.sequence is not None else (row.sequence if row else 0)
         source_updated = incoming.source_updated_at or (row.source_updated_at if row else None)
         if row is not None and _rank(sequence, source_updated) < _rank(row.sequence, row.source_updated_at):
-            stats['unchanged'] += 1
+            if restoring:
+                _restore(db, row, source.id, now, stats)  # present again; stale content is still rejected
+            else:
+                stats['unchanged'] += 1
             continue
         if created and incoming.starts_at is None:
             stats['errors'] += 1  # identity-only cancellation needs an existing historical record
@@ -104,7 +136,10 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
             # It is not a business change and emits no activity/domain event.
             if _rank(sequence, source_updated) > _rank(row.sequence, row.source_updated_at):
                 row.sequence, row.source_updated_at = sequence, source_updated
-            stats['unchanged'] += 1
+            if restoring:
+                _restore(db, row, source.id, now, stats)
+            else:
+                stats['unchanged'] += 1
             continue
         if created:
             row = CalendarEvent(source_id=source.id, external_uid=incoming.external_uid,
@@ -116,21 +151,46 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
         row.source_updated_at = source_updated
         row.imported_at = row.updated_at = now
         row.cancelled_at = (row.cancelled_at or now) if row.status == 'cancelled' else None
+        row.source_missing_at = None
         db.flush()
-        action = 'cancelled' if row.status == 'cancelled' and (created or before['status'] != 'cancelled') else ('created' if created else 'updated')
+        action = 'cancelled' if row.status == 'cancelled' and (created or before['status'] != 'cancelled') else (
+            'created' if created else ('restored' if restoring else 'updated'))
         stats[action] += 1
         after = {name: _iso(getattr(row, name)) for name in AUDIT_FIELDS}
         delta = {name: {'old': before.get(name), 'new': after[name]} for name in AUDIT_FIELDS if before.get(name) != after[name]}
-        label = {'created': 'Přidána událost', 'cancelled': 'Zrušena událost', 'updated': 'Změněna událost'}[action]
+        if restoring and action != 'restored':
+            stats['restored'] += 1  # the content change carries the presence change too
+            delta['source'] = {'old': 'missing', 'new': 'present'}
+        label = {'created': 'Přidána událost', 'cancelled': 'Zrušena událost', 'updated': 'Změněna událost',
+                 'restored': 'Událost je zpět ve zdroji'}[action]
         if action == 'updated' and any(name in changed for name in ('starts_at', 'ends_at', 'starts_on', 'ends_on')):
             label = 'Změněn čas události'
+        if action == 'restored':
+            delta['source'] = {'old': 'missing', 'new': 'present'}
+        activity_action = {'cancelled': 'cancel', 'created': 'create', 'restored': 'restore'}.get(action, 'update')
         append_domain_event(db, event_type=f'calendar.event.{action}', aggregate_type='calendar_event', aggregate_id=row.id,
-                            payload={'event_id': row.id, 'source_id': source.id, 'status': row.status,
-                                     'starts_at': row.starts_at.isoformat(), 'ends_at': row.ends_at.isoformat(),
-                                     'all_day': row.all_day}, now=now,
-                            activity=ActivityProjection('calendar', 'cancel' if action == 'cancelled' else ('create' if created else 'update'),
-                                                        f"{label}: {row.title}", 'calendar_event', row.id, delta, 'ics_import'))
+                            payload=_payload(row, source.id), now=now,
+                            activity=ActivityProjection('calendar', activity_action, f"{label}: {row.title}",
+                                                        'calendar_event', row.id, delta, 'ics_import'))
+    if parsed.complete:
+        _reconcile(db, source, parsed, now, stats)
     return stats
+
+
+def _reconcile(db, source, parsed, now, stats):
+    """Complete snapshot: present identities absent from it become source-missing (history kept, no deletion).
+    Runs in the caller's transaction under the source row lock taken by `import_ics`."""
+    seen = {(e.external_uid, e.recurrence_id) for e in parsed.events}
+    rows = (db.query(CalendarEvent).filter(CalendarEvent.source_id == source.id, CalendarEvent.source_missing_at.is_(None))
+            .order_by(CalendarEvent.id).all())
+    for row in rows:
+        if (row.external_uid, row.recurrence_id) in seen or row.external_uid in parsed.uncertain_uids:
+            continue
+        row.source_missing_at = now
+        row.updated_at = now
+        db.flush()
+        stats['missing'] += 1
+        _presence_fact(db, row, source.id, 'source_missing', now)
 
 
 def sync_moodle(db, *, fetch=None, now=None):
@@ -157,25 +217,50 @@ def sync_moodle(db, *, fetch=None, now=None):
 
 def event_dict(row):
     # No configuration, raw UID/ICS, description or private feed URL in page/list payloads.
-    return {name: _iso(getattr(row, name)) for name in
-            ('id', 'source_id', 'title', 'location', 'starts_at', 'ends_at', 'all_day', 'starts_on', 'ends_on',
-             'timezone', 'status', 'cancelled_at', 'rrule')}
+    out = {name: _iso(getattr(row, name)) for name in
+           ('id', 'source_id', 'title', 'location', 'starts_at', 'ends_at', 'all_day', 'starts_on', 'ends_on',
+            'timezone', 'status', 'cancelled_at', 'source_missing_at')}
+    out['recurring'] = bool(row.rrule)
+    out['state'] = 'source_missing' if row.source_missing_at else row.status
+    return out
+
+
+def occurrence_dict(occurrence):
+    """Active occurrence for the page/API: the event id plus a stable per-instance key (no recurrence internals)."""
+    data = occurrence.as_dict()
+    return {'key': data['key'], 'id': data['event_id'], 'source_id': data['source_id'], 'title': data['title'],
+            'location': data['location'], 'starts_at': data['starts_at'], 'ends_at': data['ends_at'],
+            'all_day': data['all_day'], 'starts_on': data['starts_on'], 'ends_on': data['ends_on'],
+            'timezone': data['timezone'], 'status': 'active', 'state': 'active', 'recurring': data['recurring']}
+
+
+MAX_API_DAYS = 92
+
+
+def occurrences_between(db, start: date, end: date) -> dict:
+    """GET /calendar/occurrences: local Prague days [start, end), at most MAX_API_DAYS."""
+    if end <= start or (end - start).days > MAX_API_DAYS:
+        raise CalendarWindowError('window must be 1–92 days')
+    lower, upper = local_window(start, end)
+    return {'start': start.isoformat(), 'end': end.isoformat(),
+            'occurrences': [occurrence_dict(o) for o in get_calendar_occurrences(db, lower, upper)]}
 
 
 def list_calendar(db, *, today=None, event_id=None):
     today = today or today_local()
-    # Include recent cancelled records without allowing an unbounded history response.
-    lower = datetime.combine(today - timedelta(days=7), time.min, APP_TZ).astimezone(timezone.utc)
-    upper = datetime.combine(today + timedelta(days=60), time.min, APP_TZ).astimezone(timezone.utc)
-    rows = (db.query(CalendarEvent).filter(CalendarEvent.ends_at >= lower, CalendarEvent.starts_at < upper)
-            .order_by(CalendarEvent.starts_at, CalendarEvent.id).limit(500).all())
-    if event_id is not None and not any(e.id == event_id for e in rows):
-        selected = db.get(CalendarEvent, event_id)
-        if selected is not None:
-            rows.append(selected)
-            rows.sort(key=lambda e: (e.starts_at, e.id))
+    lower, upper = local_window(today - timedelta(days=7), today + timedelta(days=60))
+    occurrences = [occurrence_dict(o) for o in get_calendar_occurrences(db, lower, upper)]
+    # Small bounded history: cancelled or source-missing records in the same window (never in the active list).
+    history_rows = (db.query(CalendarEvent)
+                    .filter(CalendarEvent.ends_at >= lower, CalendarEvent.starts_at < upper,
+                            (CalendarEvent.status == 'cancelled') | CalendarEvent.source_missing_at.isnot(None))
+                    .order_by(CalendarEvent.starts_at, CalendarEvent.id).limit(100).all())
+    selected = None
+    if event_id is not None and not any(o['id'] == event_id for o in occurrences):
+        row = db.get(CalendarEvent, event_id)
+        selected = event_dict(row) if row is not None else None
     sources = [{'id': s.id, 'kind': s.kind, 'name': s.name, 'enabled': s.enabled,
                 'configured': bool(feed_url()) if s.config_key == 'moodle' else False}
                for s in db.query(CalendarSource).order_by(CalendarSource.id).all()]
-    return {'today': today.isoformat(), 'events': [event_dict(e) for e in rows], 'sources': sources,
-            'moodle_configured': bool(feed_url())}
+    return {'today': today.isoformat(), 'events': occurrences, 'history': [event_dict(e) for e in history_rows],
+            'selected': selected, 'sources': sources, 'moodle_configured': bool(feed_url())}

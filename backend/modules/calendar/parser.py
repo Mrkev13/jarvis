@@ -35,6 +35,11 @@ class ParsedEvent:
 class ParseResult:
     events: tuple[ParsedEvent, ...]
     errors: int
+    # MRK-40: a complete, authoritative snapshot lets the importer mark absent identities source-missing.
+    # Incomplete = unreadable calendar, no VEVENT at all, or a component whose UID could not be read.
+    complete: bool = False
+    # UIDs present in the feed but not imported (malformed component, conflicting duplicates): never marked missing.
+    uncertain_uids: frozenset[str] = frozenset()
 
 
 def _text(component, name, maximum, *, required=False):
@@ -71,6 +76,23 @@ def _aware(value, zone, *, tzid=None):
     if value.astimezone(UTC).astimezone(value.tzinfo).replace(tzinfo=None) != value.replace(tzinfo=None):
         raise ValueError('nonexistent_time')
     return value.astimezone(UTC)
+
+
+def _zone_or(name, fallback):
+    try:
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 - 'UTC' labels etc. resolve; anything else falls back to the source zone
+        return fallback
+
+
+def _instant(value, zone):
+    """RDATE/EXDATE value → ISO date (all-day) or aware UTC ISO instant. Floating values use the event zone; like
+    generated instances, a nonexistent wall time takes the offset before the gap (RFC 5545 §3.3.5)."""
+    if isinstance(value, tuple):  # RDATE PERIOD → its start
+        value = value[0]
+    if not isinstance(value, datetime):
+        return value.isoformat()
+    return (value if value.tzinfo else value.replace(tzinfo=zone)).astimezone(UTC).isoformat()
 
 
 def _event(component, default_timezone):
@@ -129,11 +151,12 @@ def _event(component, default_timezone):
     if isinstance(rrule, list):
         raise ValueError('duplicate_rule')
     recurrence_metadata = {}
+    instant_zone = _zone_or(event_timezone, zone)
     for name in ['RDATE', 'EXDATE']:
         props = component.get(name)
         if props is not None:
             props = props if isinstance(props, list) else [props]
-            recurrence_metadata[name] = [p.to_ical().decode('utf-8') for p in props]
+            recurrence_metadata[name] = [_instant(item.dt, instant_zone) for p in props for item in p.dts]
     if len(event_timezone) > 80 or len(recurrence_id) > 100:
         raise ValueError('invalid_timezone_or_recurrence_id')
     return ParsedEvent(uid, recurrence_id, _text(component, 'SUMMARY', 300, required=not cancelled),
@@ -158,6 +181,8 @@ def parse_ics(data: bytes, default_timezone: str = 'Europe/Prague') -> ParseResu
     except Exception:
         return ParseResult((), 1)
     errors = 0
+    complete = bool(components)
+    uncertain = set()
     groups = {}
     for component in components:
         try:
@@ -165,12 +190,18 @@ def parse_ics(data: bytes, default_timezone: str = 'Europe/Prague') -> ParseResu
             groups.setdefault((event.external_uid, event.recurrence_id), []).append(event)
         except Exception:
             errors += 1
+            uid = component.get('UID')
+            if uid is None or isinstance(uid, list) or not str(uid).strip():
+                complete = False  # an unidentifiable component could be any stored event
+            else:
+                uncertain.add(str(uid).strip())
     chosen = []
-    for events in groups.values():
+    for (uid, _recurrence), events in groups.items():
         rank = lambda e: (e.sequence or 0, e.source_updated_at or datetime.min.replace(tzinfo=UTC))
         best = max(events, key=rank)
         if any(rank(e) == rank(best) and e != best for e in events):
             errors += 1
+            uncertain.add(uid)
             continue
         chosen.append(best)
-    return ParseResult(tuple(chosen), errors)
+    return ParseResult(tuple(chosen), errors, complete, frozenset(uncertain))

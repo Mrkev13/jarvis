@@ -71,3 +71,26 @@ test('Real CalendarList renders empty state', () => {
   assert.match(renderList([]), /Žádné události/);
   assert.doesNotMatch(renderList([]), /data-event=/);
 });
+
+test('MRK-40: recurring instances share an event id but render as separate rows by key', () => {
+  const weekly = { ...timed, recurring: true, state: 'active' };
+  const instances = [
+    { ...weekly, key: '1@2026-10-13T08:00:00+00:00', starts_at: '2026-10-13T08:00:00+00:00', ends_at: '2026-10-13T09:30:00+00:00' },
+    { ...weekly, key: '1@2026-10-20T08:00:00+00:00', starts_at: '2026-10-20T08:00:00+00:00', ends_at: '2026-10-20T09:30:00+00:00' },
+  ];
+  const groups = calendar.groupEvents(instances, '2026-10-13');
+  assert.equal(groups.today.length, 1);
+  assert.equal(groups.upcoming.length, 1);
+  const html = renderList(instances);
+  assert.equal((html.match(/data-event=/g) ?? []).length, 2);
+  assert.match(html, /Opakuje se/);
+  assert.doesNotMatch(html, /první výskyt/);
+});
+
+test('MRK-40: source-missing records are history, never active', () => {
+  const missing = { ...timed, state: 'source_missing' };
+  assert.equal(calendar.isActive(missing), false);
+  assert.equal(calendar.eventState(missing), 'Zmizelo ze zdroje');
+  assert.equal(calendar.groupEvents([missing], '2026-10-09').cancelled.length, 1);
+  assert.match(renderList([missing]), /data-cancelled="true"/);
+});

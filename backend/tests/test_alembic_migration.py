@@ -348,6 +348,28 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertTrue(STEP_0016_EXTRA <= _sqlite_tables(self.conn))
 
+    def test_0020_adds_calendar_source_presence_without_touching_rows(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0019_calendar")
+        self.conn.execute(text("INSERT INTO calendar_sources (kind, name, enabled, timezone, created_at) "
+                               "VALUES ('ics', 'Synthetic', 1, 'Europe/Prague', CURRENT_TIMESTAMP)"))
+        self.conn.execute(text("INSERT INTO calendar_events (source_id, external_uid, recurrence_id, title, starts_at, ends_at, "
+                               "all_day, timezone, status, sequence, imported_at, created_at, updated_at) VALUES (1, 'u@test', '', "
+                               "'Lecture', '2026-10-12 08:00:00', '2026-10-12 09:00:00', 0, 'Europe/Prague', 'active', 0, "
+                               "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0020_calendar_source_presence")
+        columns = {c["name"] for c in inspect(self.conn).get_columns("calendar_events")}
+        self.assertIn("source_missing_at", columns)
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events WHERE source_missing_at IS NULL")).scalar(),
+                         1, "existing events stay present")
+        alembic_cmd.downgrade(self.cfg, "0019_calendar")
+        columns = {c["name"] for c in inspect(self.conn).get_columns("calendar_events")}
+        self.assertNotIn("source_missing_at", columns)
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events")).scalar(), 1, "no row lost")
+        alembic_cmd.upgrade(self.cfg, "head")
+
     def test_0018_adds_domain_events_and_downgrades_cleanly(self):
         from sqlalchemy import inspect
 
