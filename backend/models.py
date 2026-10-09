@@ -715,7 +715,9 @@ from modules.habits.models import Habit, HabitEntry  # noqa: E402
 
 from modules.calendar.models import CalendarSource, CalendarEvent  # noqa: E402
 
-MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent)
+from modules.fitness.models import Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry  # noqa: E402
+
+MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry)
 
 
 class DomainEvent(Base):

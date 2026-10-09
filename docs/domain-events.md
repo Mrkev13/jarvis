@@ -58,6 +58,10 @@ declaration. Pilot types:
 | `school.assignment.completed` / `.reopened` | `school_service` | `assignment_id`, `subject_id`, `completed_at` / `previous_completed_at` |
 | `school.exam.closed` / `.reopened` | `school_service` | `exam_id`, `subject_id`, `outcome`, `result_type`, `completed_at` / `previous_outcome` |
 | `habits.entry.done` / `.skipped` | `modules/habits/service.set_entry` (only when the state changes; a note/value edit is Activity history only) | `habit_id`, `entry_id`, `date`, `state`, `previous_state` |
+| `fitness.exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |
+| `fitness.rehab_exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |
+| `fitness.workout.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
+| `fitness.rehab_session.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
 | `system.module.enabled` / `.disabled` | `PUT /modules/{id}` | `module_id`, `enabled`, `previous` |
 
 **Payload rules:** a JSON object of ids, states, dates and ISO times only – at most 3 levels, 2 KB. No ORM objects,

@@ -23,11 +23,11 @@ test("manifest: only implemented modules, nav for every module with the nav capa
 
 test("derived registries equal the previous hand-written lists (zero-surprise)", () => {
   assert.deepEqual(NAV_PAGES.map((p) => p.href), [
-    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/habits", "/calendar", "/wot", "/mff",
+    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/habits", "/calendar", "/fitness", "/wot", "/mff",
     "/changes", "/activity", "/memory", "/ai", "/settings",
   ]);
   for (const p of NAV_PAGES.filter((x) => x.module)) assert.equal(p.area, p.module);
-  assert.deepEqual(GROUP_ORDER, ["page", "school", "reminders", "work", "finance", "goals", "memory", "wot", "habits", "mff", "calendar"]);
+  assert.deepEqual(GROUP_ORDER, ["page", "school", "reminders", "work", "finance", "goals", "memory", "wot", "habits", "mff", "calendar", "fitness"]);
   assert.deepEqual(KIND_AREAS, { reminder: "reminders", finance: "finance", work: "work", exam: "school", assignment: "school" });
   assert.deepEqual(KIND_HREFS, { reminder: "/reminders", finance: "/finance", work: "/work", exam: "/school", assignment: "/school" });
 });
