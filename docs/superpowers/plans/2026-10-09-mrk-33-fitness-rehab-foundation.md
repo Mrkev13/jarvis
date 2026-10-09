@@ -1,7 +1,7 @@
 # MRK-33 Fitness & Rehab implementation plan
 
 Goal: durable manual workout and rehab history through the normal module framework.
-Base: 68d1df1; current Alembic head 0020_calendar_source_presence. New linear revision 0021_fitness.
+Integration base: post-MRK-42 main 9de1cde; Alembic parent 0021_study_materials. New linear revision 0022_fitness.
 
 Design: six tables (Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry).
 Sessions use performed_on (Prague calendar DATE), not an invented start instant. All records are logged
@@ -12,7 +12,7 @@ Child rows preserve definition name/type snapshots. Session metadata updates ret
 set/entry corrections are deliberately deferred rather than destructively replacing history.
 
 Execution and file ownership:
-- Backend models/schemas/services/router in backend/modules/fitness; 0021_fitness migration, model registration.
+- Backend models/schemas/services/router in backend/modules/fitness; 0022_fitness migration, model registration.
 - Backend providers: Search, What Changed, bounded AI context, Today completed facts (no clock times).
   Registry declares implemented capabilities and safe event types. No central aggregator changes.
 - Frontend standalone /fitness with exercises, workouts/detail and rehab tabs, using shared UI/API components;

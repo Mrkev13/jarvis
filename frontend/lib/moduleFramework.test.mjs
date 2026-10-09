@@ -36,10 +36,11 @@ test("search params and groups: unique, every module param is an href the backen
   assert.equal(new Set(SEARCH_TARGET_PARAMS).size, SEARCH_TARGET_PARAMS.length);
   assert.equal(new Set(GROUP_ORDER).size, GROUP_ORDER.length);
   for (const [id, ui] of Object.entries(MODULE_UI)) {
-    const provider = [new URL(`../../backend/${id}_integrations.py`, import.meta.url),
-      new URL(`../../backend/modules/${id}/integrations.py`, import.meta.url)].find((u) => existsSync(u));
-    if (!provider) continue; // frontend bez backendu
-    const src = readFileSync(provider, "utf8");
+    // starší `<id>_integrations.py` i balíček `modules/<id>/integrations.py` (Škola má oba – MRK-42 materiály)
+    const providers = [new URL(`../../backend/${id}_integrations.py`, import.meta.url),
+      new URL(`../../backend/modules/${id}/integrations.py`, import.meta.url)].filter((u) => existsSync(u));
+    if (!providers.length) continue; // frontend bez backendu
+    const src = providers.map((u) => readFileSync(u, "utf8")).join("\n");
     for (const param of ui.searchParams ?? []) assert.ok(src.includes(`?${param}=`), `${id}: backend nevytváří ?${param}=`);
   }
 });

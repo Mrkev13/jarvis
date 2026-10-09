@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 import quick_add_text as qt
 from context_format import MAX_ITEMS, WINDOW_DAYS, list_or_none, short
 from models import Assignment, Exam, Goal, Subject
+from modules.school import integrations as materials
 from module_contracts import (
     ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule,
@@ -383,12 +384,14 @@ INTEGRATIONS = ModuleIntegrations(
     # MRK-28: dokončení/znovuotevření = doménové události, ostatní změny školy z Aktivity
     changes=(ChangeSource(
         "school", areas=frozenset({"school"}),
-        from_event=event_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}"},
+        from_event=event_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}", **materials.CHANGE_HREFS},
                                  {"school.assignment.completed": "Úkol splněn", "school.assignment.reopened": "Úkol znovu otevřen",
-                                  "school.exam.closed": "Zkouška uzavřena", "school.exam.reopened": "Zkouška znovu otevřena"}),
-        from_activity=activity_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}"}, "/school"),
+                                  "school.exam.closed": "Zkouška uzavřena", "school.exam.reopened": "Zkouška znovu otevřena",
+                                  **materials.CHANGE_TITLES}),
+        from_activity=activity_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}",
+                                        **materials.CHANGE_HREFS}, "/school"),
     ),),
-    search=(SearchSource("school", 10, search_school),),
+    search=(SearchSource("school", 10, search_school), *materials.SEARCH),
     today=(
         TodaySource("school", 20, timeline=today_school_timeline, overdue=today_school_overdue,
                     upcoming=today_school_upcoming, closed_refs=today_school_closed),
@@ -396,11 +399,13 @@ INTEGRATIONS = ModuleIntegrations(
     entity_refs=(
         EntityRef("assignment", "/school?assignment={id}", planner_actions=("complete",), notification_source=True),
         EntityRef("exam", "/school?exam={id}", notification_source=True),
+        *materials.ENTITY_REFS,
     ),
     dashboard=(DashboardSection("upcoming", dashboard_upcoming, empty=[]),),
     context=(
         ContextSection("school", ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test"),
                        order=10, build=context_school, covered_tools=("get_school_assignments", "get_school_exams")),
+        *materials.CONTEXT,
     ),
     quick_add_rules=(
         QuickAddRule(20, "exam", lambda t: "high" if KW_EXAM.search(t.f) else None),
@@ -412,4 +417,5 @@ INTEGRATIONS = ModuleIntegrations(
         QuickAddKind("assignment", parse_school, _school_tool_call("assignment"), _school_display("assignment"),
                      context=quick_add_context, output=quick_add_output),
     ),
+    routers=materials.ROUTERS,  # MRK-42 /school/materials
 )

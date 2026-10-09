@@ -39,7 +39,7 @@ The module manifest supplies Search (definition names/workout titles), Today (co
 
 ## Migration and verification
 
-`0021_fitness` follows `0020_calendar_source_presence`, adding six tables with numeric/order constraints, restrictive references and date/reference indexes. Downgrade removes these tables: back up first; it is not a history-preserving production rollback.
+`0022_fitness` follows `0021_study_materials`, adding six tables with numeric/order constraints, restrictive references and date/reference indexes. Downgrade removes these tables: back up first; it is not a history-preserving production rollback.
 
 Focused checks: `python -m pytest backend/tests/test_fitness.py --disable-socket --allow-unix-socket -q`; frontend Fitness tests run with `npm test`. Full CI commands are in [the README](../README.md). Verify migration upgrade → downgrade -1 → upgrade and schema parity on a disposable PostgreSQL database, never the real user DB.
 
@@ -51,4 +51,4 @@ After production build/start (`npm run start -- --hostname 127.0.0.1 --port 3033
 
 [Desktop screenshot](images/fitness/desktop.png) · [Mobile screenshot](images/fitness/mobile.png)
 
-MRK-33 cloud verification: backend 1000 passed / 8 skipped / 412 subtests, focused Fitness 26 passed; frontend 363 passed, typecheck/build/pyflakes passed. Lint has three existing Calendar warnings. SQLite and disposable PostgreSQL upgrade/downgrade/upgrade and schema parity passed; PostgreSQL batch rollback, snapshots/archive and restrictive FK behavior passed. Independent review found no blockers. No real Windows/mobile device or user DB acceptance was performed. Groq requests: 0.
+Post-MRK-42 integration verification against main `9de1cde`: backend 1028 passed / 9 skipped / 412 subtests; focused Fitness/framework/provider/Moodle/migration coverage 227 passed / 1 skipped / 37 subtests. Frontend 367 passed, typecheck/build/pyflakes passed; both `/fitness` and `/school/materials` build. Lint has three existing Calendar warnings. The preservation regression in `backend/tests/test_fitness_migration.py` passed on SQLite and disposable PostgreSQL: it seeds School data at `0021_study_materials` and proves subject/course mapping, extracted text, checksum and source-missing state stay identical through Fitness upgrade, downgrade and re-upgrade, while only Fitness tables disappear. Schema parity and single head `0022_fitness` passed. Browser checks passed at 1366/390 px. Independent review found no blockers. No real Windows/mobile device or user DB acceptance was performed. Groq requests: 0.

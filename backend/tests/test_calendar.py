@@ -283,7 +283,7 @@ def test_calendar_sqlite_migration_roundtrip_and_parity(tmp_path, monkeypatch):
     with engine.connect() as connection:
         columns = {c['name'] for c in inspect(connection).get_columns('calendar_events')}
         assert 'source_missing_at' not in columns and 'external_uid' in columns
-    command.downgrade(config, '-1')  # 0019
+    command.downgrade(config, '0018_domain_events')  # 0019
     with engine.connect() as connection:
         assert 'calendar_events' not in inspect(connection).get_table_names()
     command.upgrade(config, 'head')

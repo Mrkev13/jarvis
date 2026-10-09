@@ -61,7 +61,8 @@ STEP_0016_EXTRA = {"module_settings"}  # MRK-18 A2
 STEP_0017_EXTRA = {"habits", "habit_entries"}  # MRK-21 Návyky
 STEP_0018_EXTRA = {"domain_events"}  # MRK-19
 STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
-STEP_0021_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
+STEP_0021_EXTRA = {"study_courses", "study_materials"}  # MRK-42
+STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
 
 
 def _sqlite_tables(conn):
@@ -170,7 +171,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -371,6 +372,21 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events")).scalar(), 1, "no row lost")
         alembic_cmd.upgrade(self.cfg, "head")
 
+    def test_0021_adds_study_materials_and_downgrades_cleanly(self):
+        alembic_cmd.upgrade(self.cfg, "0020_calendar_source_presence")
+        self.conn.execute(text("INSERT INTO subjects (name, active) VALUES ('Synthetic subject', 1)"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0021_study_materials")
+        self.assertTrue(STEP_0021_EXTRA <= _sqlite_tables(self.conn))
+        self.conn.execute(text("INSERT INTO study_courses (source, external_id, name, subject_id, created_at, updated_at) "
+                               "VALUES ('moodle', '101', 'Synthetic course', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        alembic_cmd.downgrade(self.cfg, "0020_calendar_source_presence")
+        self.assertFalse(STEP_0021_EXTRA & _sqlite_tables(self.conn))
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM subjects")).scalar(), 1, "subjects untouched")
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertTrue(STEP_0021_EXTRA <= _sqlite_tables(self.conn))
+
     def test_0018_adds_domain_events_and_downgrades_cleanly(self):
         from sqlalchemy import inspect
 
@@ -558,7 +574,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA)
 
             db = main.SessionLocal()
             try:

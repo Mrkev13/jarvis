@@ -39,7 +39,7 @@ function planned(id: string, label: string): ModuleDef {
 
 // Jeden řádek = jeden modul (backend test parity čte tento tvar).
 export const MODULES: ModuleDef[] = [
-  { id: "school", label: "Škola", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["subject", "assignment", "exam"], routes: ["/school"], quickAddKinds: ["exam", "assignment"] },
+  { id: "school", label: "Škola", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["subject", "assignment", "exam", "study_material", "study_course"], routes: ["/school"], quickAddKinds: ["exam", "assignment"] },
   { id: "work", label: "Práce", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["work_session"], routes: ["/work"], quickAddKinds: ["work"] },
   { id: "finance", label: "Finance", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["transaction"], routes: ["/finance"], quickAddKinds: ["finance"] },
   { id: "goals", label: "Cíle", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["goal"], routes: ["/goals"], quickAddKinds: [] },
@@ -104,7 +104,8 @@ export const MODULE_UI: Record<string, ModuleUi> = {
   },
   school: {
     nav: { href: "/school", label: "Škola", keywords: ["school", "úkol", "úkoly", "zkouška", "zkoušky", "předmět", "předměty", "termín", "termíny"], order: 20 },
-    searchParams: ["subject", "assignment", "exam"], searchGroupOrder: 10,
+    searchParams: ["subject", "assignment", "exam", "material", "course"], searchGroupOrder: 10,
+    typeLabels: { study_material: "Studijní materiál" },
   },
   work: {
     nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },
