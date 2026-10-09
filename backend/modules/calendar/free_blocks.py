@@ -105,7 +105,10 @@ def subtract(window, busy):
 
 def get_free_blocks(db, *, start: datetime, end: datetime, min_minutes: int = 30,
                     day_start: time = DEFAULT_DAY_START, day_end: time | None = DEFAULT_DAY_END,
-                    buffer_minutes: int = 0, all_day_busy: bool = False) -> FreeBlockResult:
+                    buffer_minutes: int = 0, all_day_busy: bool = False,
+                    occurrences: list | None = None) -> FreeBlockResult:
+    """`occurrences`: already loaded active occurrences covering [start - buffer, end + buffer] (the day timeline
+    shares its single load); None = load them here, once."""
     if start.tzinfo is None or end.tzinfo is None:
         raise FreeBlockError("window must be timezone-aware")
     if end <= start:
@@ -122,7 +125,8 @@ def get_free_blocks(db, *, start: datetime, end: datetime, min_minutes: int = 30
     buffer = timedelta(minutes=buffer_minutes)
 
     # One occurrence query for the whole range (+ buffer on both sides): no per-day loops over the database.
-    occurrences = get_calendar_occurrences(db, lo - buffer, hi + buffer)
+    if occurrences is None:
+        occurrences = get_calendar_occurrences(db, lo - buffer, hi + buffer)
     truncated = len(occurrences) >= MAX_OCCURRENCES
     busy = []
     for o in occurrences:

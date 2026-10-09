@@ -14,13 +14,14 @@ import reminder_service as rs
 from context_format import MAX_ITEMS, WEEKDAYS, list_or_none, short
 from models import Memory, Notification, Reminder
 from module_contracts import (
+    TimelineItem, TimelineSource,
     ChangeSource, activity_changes,
     ContextRequest, ContextSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
     TodaySource,
 )
 from statuses import REMINDER_ACTIVE_STATUSES
 from text_utils import format_date_cz, join_parts
-from time_utils import local_day_bounds_utc, local_to_utc, now_local, to_local
+from time_utils import APP_TZ, local_day_bounds_utc, local_to_utc, now_local, to_local
 from today_types import UPCOMING_DAYS, TodayItem
 
 ROW_LIMIT = 500  # na tabulku (search_service.ROW_LIMIT)
@@ -256,7 +257,49 @@ def reminder_display(f: dict, ctx: dict, today) -> dict:
     return {"title": f.get("title") or "Připomínka", "subtitle": sub, "area": "reminders"}
 
 
+# ---------- denní osa (MRK-13) ----------
+
+def timeline_reminders(req) -> list[TimelineItem]:
+    """Připomínky dne jako časové body (bez konce – neobsazují čas, volné bloky neovlivní)."""
+    start, end = (req.start.astimezone(timezone.utc).replace(tzinfo=None), req.end.astimezone(timezone.utc).replace(tzinfo=None))
+    now = req.now.astimezone(timezone.utc).replace(tzinfo=None)
+    items = []
+    for r in req.db.query(Reminder).filter(Reminder.status.in_(("scheduled", "fired", "done"))).all():
+        # stejná pravidla jako režim Dnes (today_reminders_timeline)
+        when = rs.effective_due(r) if r.status in ("scheduled", "fired") else r.due_at
+        if start <= when < end:
+            status = "done" if r.status == "done" else ("due" if r.status == "fired" or when <= now else "upcoming")
+        elif r.recurrence != "none" and r.last_fired_at is not None and start <= r.last_fired_at < end:
+            when, status = r.last_fired_at, "past"  # opakovaná připomínka v tento den už zazněla
+        else:
+            continue
+        items.append(TimelineItem(
+            id=f"reminder:{r.id}", kind="reminder", title=r.title, date=req.day.isoformat(), status=status,
+            subtitle="Připomínka" + (f" · {rs.describe_recurrence(r)}" if r.recurrence != "none" else ""),
+            starts_at=when.replace(tzinfo=timezone.utc), href=f"/reminders?reminder={r.id}"))
+    return items
+
+
+def context_timeline(req: ContextRequest) -> list[str]:
+    """MRK-13: krátký deterministický souhrn dne z denní osy – další časová položka, další volno, termíny dne."""
+    if req.day_timeline is None:
+        return []
+    data = req.day_timeline()
+    now = req.local_now if req.local_now.tzinfo else req.local_now.replace(tzinfo=APP_TZ)
+    now_iso = now.astimezone(timezone.utc).isoformat()
+    upcoming = [i for i in data["timed_items"] if (i["ends_at"] or i["starts_at"]) > now_iso and i["status"] not in ("done", "past")]
+    nxt = f"{upcoming[0]['local_start']} {short(upcoming[0]['title'], 50)}" if upcoming else "nic dalšího s časem"
+    free = [b for b in data["free_blocks"] if b["ends_at"] > now_iso]
+    # volno, které už běží, se ukáže od teď (ne od svého začátku)
+    gap_start = (now.strftime("%H:%M") if free and free[0]["starts_at"] < now_iso else free[0]["local_start"]) if free else ""
+    gap = f"{gap_start}–{free[0]['local_end']}" if free else "žádné (07–22, min. 30 min)"
+    deadlines = [short(i["title"], 40) for i in data["all_day_items"] if i["status"] not in ("done", "past")][:3]
+    caveat = " (neúplné)" if data.get("truncated") else ""
+    return [f"Den dnes{caveat}: další {nxt}; nejbližší volno {gap}; celodenní/termíny: {list_or_none(deadlines, len(deadlines))}"]
+
+
 CORE_INTEGRATIONS = ModuleIntegrations(
+    timeline=(TimelineSource("reminders", 10, timeline_reminders),),
     # MRK-28: změny jádra (system.* je provoz, ne změna pro člověka – ten change_feed vyřadí jako šum)
     changes=(
         ChangeSource("reminders", areas=frozenset({"reminders"}),
@@ -276,6 +319,8 @@ CORE_INTEGRATIONS = ModuleIntegrations(
     context=(
         ContextSection("reminders", ("pripom", "upomin", "reminder"), order=20, build=context_reminders,
                        covered_tools=("get_reminders",)),
+        ContextSection("timeline", ("program", "muj den", "harmonogram", "timeline", "voln"),
+                       order=5, build=context_timeline),
         ContextSection("notifications", ("upozorn", "notifikac", "notifik"), order=30, build=context_notifications,
                        covered_tools=("get_notification_summary",)),
     ),

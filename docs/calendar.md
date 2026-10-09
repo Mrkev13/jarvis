@@ -177,6 +177,62 @@ What Changed. No migration (head stays `0020_calendar_source_presence`).
 - Not yet: unified day timeline with exams/reminders/work sessions, Today "next
   free block" row, AI read tool and planner use (follow-ups of MRK-32).
 
+## Day timeline (MRK-13)
+
+"What does my day actually look like?" – `timeline_service.get_day_timeline(db,
+access, day=…, include_free_blocks=True, min_minutes=30)`, a deterministic
+**projection** (not stored; no Activity, domain events, Search or What Changed;
+no migration). Modules contribute through `ModuleIntegrations.timeline`
+(`TimelineSource`, gated by the `today` capability); each module normalizes its
+own records into a presentation-safe `TimelineItem` (id, kind, module_id, title,
+subtitle, starts_at/ends_at aware UTC or empty, all_day, date, status, href,
+busy). The service owns collection, sections, ordering, caps and free blocks;
+it has no module-specific branches (AST purity test).
+
+| source | in timeline | semantics |
+|---|---|---|
+| Calendar occurrences | yes | actual occurrences (recurrence/overrides resolved); timed = real start/end, all-day → day section; `busy` |
+| Reminders (core) | yes | timed **point** at the effective (snooze-aware) due time; does not occupy time |
+| School exams / assignments | yes | **day section** only – they have a date, no time; no time is invented |
+| Work sessions | no | only date + hours, no start time; never turned into fake slots |
+| Habits | no | no schedule (Today shows them) |
+| Free blocks | yes | derived from Calendar (MRK-32) |
+
+- **Sections:** `all_day_items` (exams, then assignments, then all-day events;
+  then source order, title, id) and `timed_items` (start, end – a point counts
+  as ending at its start –, source order, id). Never database order.
+- **Overlaps** are listed as separate items, never merged; the UI shows them in
+  order. Same start: the shorter (or point) item first, then source order.
+- **Free blocks** use the day window 07:00–22:00 and `min_minutes` (default
+  30) and count **Calendar occupancy only** (`free_blocks_from` names the
+  contributing sources). That keeps them consistent with the timeline: the
+  only other timed items are reminders (points, not occupied time); deadlines
+  and work logs have no time. A generic busy-source abstraction can be added
+  when a non-Calendar source gets real time slots.
+- **Performance:** one Calendar occurrence load per request, shared with the
+  free blocks (`get_free_blocks(..., occurrences=…)`); one query per other
+  source; cap 200 items (`truncated`, also set when free blocks are truncated).
+  A failing source is skipped (logged by type), the rest of the day still
+  renders.
+- **DST:** the day is the real Prague day (23/24/25 h); items keep real times.
+- **API:** `GET /timeline/day?date=YYYY-MM-DD[&free_blocks=false][&min_minutes=5..720]`
+  → `{date, all_day_items, timed_items, free_blocks, free_blocks_from,
+  truncated}`; auth and module gates as everywhere; invalid input → 422.
+- **AI context:** core section `timeline` (keywords program/můj den/
+  harmonogram/timeline/volno): one line with the next timed item, the nearest
+  free time from now and open day items; marked incomplete when truncated.
+- **UI:** "Můj den" card on /calendar (day picker, day section, timed list with
+  free gaps, module badges, links). No grid, drag/drop or planner. Because it
+  lives on /calendar it is hidden when Calendar is disabled; the API still
+  serves the other modules.
+- Not yet: manual timetable entry linked to subjects (MRK-13's original scope
+  beyond ICS import), a Today "next free block" row, week view, planner use.
+
+MRK-13 cloud evidence (2026-10-09, base main `59d3402`): timeline tests **13
+passed**; full backend **972 passed, 8 skipped**; frontend **350 passed**;
+lint, TypeScript, pyflakes and production build passed; Alembic head unchanged
+(`0020_calendar_source_presence`). **Real Groq requests: 0.**
+
 MRK-32 cloud evidence (2026-10-09, base main `bc67958`): free-block tests **18
 passed** (empty day, middle/start/end, overlapping/nested/touching, boundaries,
 min duration, buffer, all-day busy opt-in, recurring/EXDATE/moved/cancelled

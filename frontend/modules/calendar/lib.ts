@@ -110,3 +110,51 @@ export function freeBlocksPath(day: string, minMinutes: number): string | null {
   next.setUTCDate(next.getUTCDate() + 1);
   return `/calendar/free-blocks?start=${day}&end=${next.toISOString().slice(0, 10)}&min_minutes=${minMinutes}`;
 }
+
+// ---------- MRK-13: unified day timeline (GET /timeline/day; projection, never stored) ----------
+
+export interface TimelineItem {
+  id: string;
+  kind: string;
+  module_id: string | null;
+  title: string;
+  subtitle: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  all_day: boolean;
+  date: string;
+  status: string;
+  href: string | null;
+  busy: boolean;
+  local_start?: string;
+  local_end?: string | null;
+}
+export interface DayTimelinePayload {
+  date: string;
+  all_day_items: TimelineItem[];
+  timed_items: TimelineItem[];
+  free_blocks: FreeBlock[];
+  free_blocks_from: string[];
+  truncated: boolean;
+}
+export type DayRow = { type: 'item'; key: string; item: TimelineItem } | { type: 'free'; key: string; block: FreeBlock };
+
+export function timelinePath(day: string, minMinutes = 30): string | null {
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `/timeline/day?date=${day}&min_minutes=${minMinutes}` : null;
+}
+
+/** Timed items and free gaps in one chronological list. Overlapping items stay separate rows (never merged);
+ * on the same instant an item comes before a free gap. Server order is kept for items. */
+export function dayRows(data: Pick<DayTimelinePayload, 'timed_items' | 'free_blocks'>): DayRow[] {
+  const rows: (DayRow & { at: number; rank: number; index: number })[] = [
+    ...data.timed_items.map((item, index) => ({ type: 'item' as const, key: item.id, item, at: Date.parse(item.starts_at!), rank: 0, index })),
+    ...data.free_blocks.map((block, index) => ({ type: 'free' as const, key: `free:${block.starts_at}`, block, at: Date.parse(block.starts_at), rank: 1, index })),
+  ];
+  rows.sort((a, b) => a.at - b.at || a.rank - b.rank || a.index - b.index);
+  return rows.map(({ at: _at, rank: _rank, index: _index, ...row }) => row as DayRow);
+}
+
+export function timelineTime(item: TimelineItem): string {
+  if (!item.local_start) return '';
+  return item.local_end && item.local_end !== item.local_start ? `${item.local_start}–${item.local_end}` : item.local_start;
+}

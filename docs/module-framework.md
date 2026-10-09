@@ -54,6 +54,7 @@ cycles.
 | `quick_add_kinds: (QuickAddKind(kind, parse, to_tool_call, display, context=, output=),)` | parse into a `Draft`; validate → `(WRITE tool, args)`; Czech preview; optional extra data (`context(db)`) and response keys (`output(ctx)`) | `quick_add` | response shape, pending-action prepare/confirm, `QuickAddInvalid` |
 | `hourly: (ScheduledStep(name, run(db)),)` | idempotent, bounded step of the hourly job | module available | scheduling, commit/rollback per step, infrastructure steps |
 | `routers: (APIRouter,)` (MRK-21) | the module's REST routes under its `api_prefixes` | always mounted; disabled → 404 via `require_module_available` | `main.py` mounts every registered router; app-level auth + module gate apply (tested) |
+| `timeline: (TimelineSource,)` (MRK-13) | the module's items of one Prague day as `TimelineItem`s (timed or day-section); optional `free_blocks(req, min_minutes)` | `today` | `timeline_service.get_day_timeline` collects, orders, sections, caps and adds free blocks; the AI context gets it via `ContextRequest.day_timeline` (providers never import the service) |
 
 Static vs gated tables. Classification inputs are built from **all** registered modules (`all_contributions`):
 AI area keywords and Quick Add rules. A text that only matches a disabled module therefore becomes "unknown"

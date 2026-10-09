@@ -139,3 +139,66 @@ test('MRK-32: FreeBlocksList renders blocks, empty (e.g. busy all day), loading,
   assert.match(renderFreeBlocks({ blocks: [block('07:00', '22:00', 900)], loading: false, error: null, truncated: true }), /nemusí být úplný/);
   assert.doesNotMatch(html, /RRULE|recurrence/);
 });
+
+function renderTimeline(props) {
+  const require = createRequire(import.meta.url);
+  const ui = {
+    EmptyState: ({ children }) => React.createElement('p', { 'data-empty': true }, children),
+    ErrorState: ({ message }) => React.createElement('p', { 'data-error': true }, message),
+    LoadingState: () => React.createElement('p', { 'data-loading': true }),
+    StatusBadge: ({ children }) => React.createElement('span', { 'data-badge': true }, children),
+  };
+  const compiled = ts.transpileModule(readFileSync(new URL('./DayTimelineList.tsx', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const compiledModule = { exports: {} };
+  new Function('require', 'module', 'exports', compiled)(name => name === '@/components/ui' ? ui : name === './lib' ? calendar : require(name), compiledModule, compiledModule.exports);
+  return renderToStaticMarkup(React.createElement(compiledModule.exports.DayTimelineList, { moduleLabels: { calendar: 'Kalendář', school: 'Škola' }, ...props }));
+}
+
+const at = (hhmm) => `2026-10-12T${String(Number(hhmm.slice(0, 2)) - 2).padStart(2, '0')}:${hhmm.slice(3)}:00+00:00`;
+const tItem = (id, kind, module_id, title, start, end, extra = {}) => ({ id, kind, module_id, title, subtitle: '', starts_at: start ? at(start) : null,
+  ends_at: end ? at(end) : null, all_day: !start, date: '2026-10-12', status: 'upcoming', href: `/x/${id}`, busy: Boolean(end),
+  ...(start ? { local_start: start, local_end: end } : {}), ...extra });
+const gap = (start, end, minutes) => ({ starts_at: at(start), ends_at: at(end), local_date: '2026-10-12', local_start: start, local_end: end, duration_minutes: minutes });
+const mixed = {
+  date: '2026-10-12', truncated: false, free_blocks_from: ['calendar'],
+  all_day_items: [tItem('exam:1', 'exam', 'school', 'Algebra exam'), tItem('calendar_event:2', 'calendar_event', 'calendar', 'Holiday')],
+  timed_items: [tItem('reminder:1', 'reminder', null, 'Take pills', '10:00', null), tItem('calendar_event:3', 'calendar_event', 'calendar', 'Lecture', '10:00', '11:30'),
+    tItem('calendar_event:4', 'calendar_event', 'calendar', 'Meeting', '11:00', '12:00')],
+  free_blocks: [gap('07:00', '10:00', 180), gap('12:00', '22:00', 600)],
+};
+
+test('MRK-13: timeline path is one valid day', () => {
+  assert.equal(calendar.timelinePath('2026-10-12'), '/timeline/day?date=2026-10-12&min_minutes=30');
+  assert.equal(calendar.timelinePath('x'), null);
+});
+
+test('MRK-13: dayRows interleaves free gaps chronologically and keeps overlapping items separate', () => {
+  const rows = calendar.dayRows(mixed);
+  assert.deepEqual(rows.map(r => r.type === 'item' ? r.item.title : `free ${r.block.local_start}`),
+    ['free 07:00', 'Take pills', 'Lecture', 'Meeting', 'free 12:00']);
+  assert.equal(new Set(rows.map(r => r.key)).size, rows.length);
+  assert.equal(calendar.timelineTime(mixed.timed_items[0]), '10:00', 'a point has no range');
+  assert.equal(calendar.timelineTime(mixed.timed_items[1]), '10:00–11:30');
+});
+
+test('MRK-13: DayTimelineList renders mixed modules, all-day section, timed rows, gaps, links and states', () => {
+  const html = renderTimeline({ data: mixed, loading: false, error: null });
+  assert.match(html, /Celý den a termíny/);
+  assert.match(html, /Během dne/);
+  assert.equal((html.match(/data-timeline-item=/g) ?? []).length, 5);
+  assert.equal((html.match(/data-free-gap/g) ?? []).length, 2);
+  assert.match(html, /Volno · 3 h/);
+  assert.match(html, /Škola/); assert.match(html, /Kalendář/); assert.match(html, /Obecné/);
+  assert.match(html, /href="\/x\/calendar_event:3"/);
+  assert.ok(html.indexOf('Lecture') < html.indexOf('Meeting'), 'overlaps listed, in order');
+  const empty = { ...mixed, all_day_items: [], timed_items: [], free_blocks: [] };
+  assert.match(renderTimeline({ data: empty, loading: false, error: null }), /Na tento den nic nemáš/);
+  assert.match(renderTimeline({ data: null, loading: true, error: null }), /data-loading/);
+  assert.match(renderTimeline({ data: null, loading: false, error: 'x' }), /data-error/);
+  assert.match(renderTimeline({ data: { ...mixed, truncated: true }, loading: false, error: null }), /nemusí být úplný/);
+  const busy = { ...mixed, all_day_items: [tItem('calendar_event:9', 'calendar_event', 'calendar', 'Trip')], timed_items: [], free_blocks: [] };
+  const busyHtml = renderTimeline({ data: busy, loading: false, error: null });
+  assert.match(busyHtml, /Trip/); assert.doesNotMatch(busyHtml, /Během dne/);
+});

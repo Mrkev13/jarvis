@@ -15,7 +15,7 @@ from models import Assignment, Exam, Goal, Subject
 from module_contracts import (
     ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule,
-    SearchSource, TodaySource,
+    SearchSource, TimelineItem, TimelineSource, TodaySource,
 )
 from statuses import (
     ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, is_assignment_done, is_exam_open, norm,
@@ -359,7 +359,27 @@ def quick_add_output(ctx: dict) -> dict:
     return {"subjects": [{"id": s["id"], "name": s["name"]} for s in ctx.get("subjects") or []]}
 
 
+# ---------- denní osa (MRK-13) ----------
+
+def timeline_school(req) -> list[TimelineItem]:
+    """Zkoušky a termíny úkolů daného dne: jen datum, žádný vymyšlený čas → denní sekce osy."""
+    subjects = _subjects(req)
+    items = []
+    for e in req.db.query(Exam).filter(Exam.exam_date == req.day).all():
+        items.append(TimelineItem(
+            id=f"exam:{e.id}", kind="exam", title=e.title, date=req.day.isoformat(),
+            status="open" if is_exam_open(e.status) else "done",
+            subtitle=_school_subtitle(_exam_kind(e.exam_type), subjects.get(e.subject_id)), href=f"/school?exam={e.id}"))
+    for a in req.db.query(Assignment).filter(Assignment.due_date == req.day).all():
+        items.append(TimelineItem(
+            id=f"assignment:{a.id}", kind="assignment", title=a.title, date=req.day.isoformat(),
+            status="done" if is_assignment_done(a.status) else "open",
+            subtitle=_school_subtitle("Úkol · termín", subjects.get(a.subject_id)), href=f"/school?assignment={a.id}"))
+    return items
+
+
 INTEGRATIONS = ModuleIntegrations(
+    timeline=(TimelineSource("school", 20, timeline_school),),
     # MRK-28: dokončení/znovuotevření = doménové události, ostatní změny školy z Aktivity
     changes=(ChangeSource(
         "school", areas=frozenset({"school"}),

@@ -2,7 +2,10 @@
 from datetime import datetime, time, timedelta
 
 from context_format import short
-from module_contracts import ChangeSource, ContextSection, EntityRef, ModuleIntegrations, SearchSource, TodaySource, event_changes
+from module_contracts import (
+    ChangeSource, ContextSection, EntityRef, ModuleIntegrations, SearchSource, TimelineItem, TimelineSource, TodaySource,
+    event_changes,
+)
 from modules.calendar.models import CalendarEvent
 from modules.calendar.free_blocks import get_free_blocks
 from modules.calendar.occurrences import get_calendar_occurrences, local_window
@@ -91,9 +94,44 @@ def _free_block_lines(req) -> list[str]:
     return lines
 
 
+# ---------- denní osa (MRK-13) ----------
+
+_OCCURRENCES = 'calendar.occurrences'
+
+
+def _day_occurrences(req):
+    """One occurrence load per timeline request, shared by the items and the free blocks."""
+    if _OCCURRENCES not in req.cache:
+        req.cache[_OCCURRENCES] = get_calendar_occurrences(req.db, req.start, req.end)
+    return req.cache[_OCCURRENCES]
+
+
+def _timeline_status(o, now):
+    if (o.ends_at > o.starts_at and o.ends_at <= now) or (o.ends_at == o.starts_at and o.starts_at < now):
+        return 'past'
+    return 'now' if o.starts_at <= now < o.ends_at else 'upcoming'
+
+
+def timeline_items(req):
+    items = []
+    for o in _day_occurrences(req):
+        items.append(TimelineItem(
+            id=_ref(o), kind='calendar_event', title=o.title, date=req.day.isoformat(),
+            status=_timeline_status(o, req.now), subtitle=' · '.join(filter(None, ['Opakuje se' if o.recurring else '', o.location])),
+            starts_at=None if o.all_day else o.starts_at, ends_at=None if o.all_day else o.ends_at, all_day=o.all_day,
+            href=f'/calendar?event={o.event_id}', busy=not o.all_day))
+    return items
+
+
+def timeline_free_blocks(req, min_minutes):
+    return get_free_blocks(req.db, start=req.start, end=req.end, min_minutes=min_minutes,
+                           occurrences=_day_occurrences(req))
+
+
 INTEGRATIONS = ModuleIntegrations(
     search=(SearchSource('calendar', 85, search_events),),
     today=(TodaySource('calendar', 35, timeline=timeline, upcoming=upcoming),),
+    timeline=(TimelineSource('calendar', 30, timeline_items, free_blocks=timeline_free_blocks),),
     entity_refs=(EntityRef('calendar_event', '/calendar?event={id}'),),
     context=(ContextSection('calendar', ('kalendar', 'calendar', 'udalost', 'rozvrh', 'prednask', 'schuzk'),
                             order=85, build=context_events),),
