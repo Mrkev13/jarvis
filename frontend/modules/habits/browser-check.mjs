@@ -12,6 +12,7 @@
 // Spuštění: node modules/habits/browser-check.mjs (PLAYWRIGHT_MODULE / PLAYWRIGHT_CHROMIUM jako ui-check).
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stubLongRequests } from "../../scripts/network-stubs.mjs";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
@@ -23,6 +24,7 @@ const results = [];
 const check = (name, ok, detail = "") => { results.push(ok); console.log(`${ok ? "✓" : "✗"} ${name}${detail ? " – " + detail : ""}`); };
 async function open(path, width = 1366) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: "dark", hasTouch: width < 500 });
+  await stubLongRequests(ctx); // SSE stream a 404 manifestu by jinak nikdy nedovolily „networkidle"
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
