@@ -88,8 +88,9 @@ one VEVENT and every component has a readable UID. A malformed component with a
 readable UID (or conflicting duplicates) protects that UID: it is never marked
 missing. A failed download, an unreadable feed, an empty calendar or a rollback
 never changes presence. Active views (occurrences, Today, AI context, page list)
-exclude both cancelled and source-missing records; Search and the page history
-still show them, labelled.
+and Search exclude both cancelled and source-missing records; the rows stay
+durable and their history is visible in the page history, What Changed and
+Activity. A restored record is present again and reappears everywhere.
 
 ## Events vs. occurrences (MRK-40)
 
@@ -254,8 +255,9 @@ contributions. No Calendar branch is added to global aggregators.
   `calendar_event:<id>@<instance>` so global dedupe keeps each instance; links go
   to `/calendar?event=<id>`. Global limits/order/dedupe apply.
 - Search: event definitions (not generated instances), title/location through
-  existing global matching and Czech normalization; recurring, cancelled and
-  source-missing records are labelled. Results use `/calendar?event=<id>`; an
+  existing global matching and Czech normalization; only active, present records
+  (recurring ones are labelled). Cancelled and source-missing records are history,
+  not search results. Results use `/calendar?event=<id>`; an
   out-of-window target is returned as `selected`, never mixed into active lists.
 - AI context: a small snapshot of actual occurrences for today and the next
   seven days, no descriptions or tools.
