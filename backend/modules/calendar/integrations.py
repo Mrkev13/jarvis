@@ -50,12 +50,13 @@ def upcoming(c):
 def search_events(db, q):
     # Definitions, not generated instances (Search must not expand thousands of occurrences).
     # Global Search owns normalization/diacritic folding and matching policy.
+    # Only currently relevant facts: cancelled and source-missing rows stay durable (history lives in What Changed
+    # and Activity) but are not normal Search results. A restored row is present again and reappears.
     for e in (db.query(CalendarEvent)
+              .filter(CalendarEvent.status == 'active', CalendarEvent.source_missing_at.is_(None))
               .order_by(CalendarEvent.starts_at.desc(), CalendarEvent.id).limit(500).all()):
         when = e.starts_on.isoformat() if e.all_day else to_local(e.starts_at).strftime('%d.%m.%Y %H:%M')
-        subtitle = ' · '.join(filter(None, [f'opakuje se od {when}' if e.rrule else when, e.location,
-                                           'zrušeno' if e.status == 'cancelled' else None,
-                                           'zmizelo ze zdroje' if e.source_missing_at else None]))
+        subtitle = ' · '.join(filter(None, [f'opakuje se od {when}' if e.rrule else when, e.location]))
         yield 'calendar_event', e.id, e.title, subtitle, 'kalendar calendar udalost', 'calendar', f'/calendar?event={e.id}'
 
 
