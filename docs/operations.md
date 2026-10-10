@@ -127,7 +127,11 @@ The backend helper defaults to `<installation>\.venv\Scripts\python.exe`; an
 explicit `-PythonPath` supports other installations. Scripts preserve child exit
 codes, handle spaces, fail with fixed messages and never echo secret config.
 Do not bypass execution policy machine-wide; if local policy disallows scripts,
-use your normal approved signing/policy process.
+use your normal approved signing/policy process for manual runs. The registered
+tasks pass a process-scoped `-ExecutionPolicy Bypass` for their own start script
+only (a machine `AllSigned` policy would otherwise refuse the unsigned scripts at
+boot under SYSTEM); machine policy stays unchanged, so the installation folder
+must be writable only by Administrators/SYSTEM.
 
 After manual smoke tests, in an elevated local PowerShell:
 

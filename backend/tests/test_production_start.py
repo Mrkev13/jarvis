@@ -65,7 +65,8 @@ def test_foreground_exec_one_worker_explicit_cwd(tmp_path, monkeypatch):
     for key in [*env, 'PYTHON_DOTENV_DISABLED', 'APP_COMMIT']:
         monkeypatch.setenv(key, '')
     monkeypatch.setattr(production.os, 'chdir', lambda path: captured.update(cwd=path))
-    monkeypatch.setattr(production.os, 'execv', lambda executable,args: captured.update(executable=executable,args=args))
+    # Capture the command on every platform (Windows runs a supervised child, POSIX execs) – never start a server.
+    monkeypatch.setattr(production, 'run_server', lambda args: captured.update(args=args) or 0)
     production.main(['--env-file',str(target)])
     assert captured['cwd'] == Path(production.__file__).resolve().parent
     assert '--reload' not in captured['args']
