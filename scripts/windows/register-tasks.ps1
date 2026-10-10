@@ -22,8 +22,10 @@ try {
         if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Missing start script' }
     }
     # Native argument quoting handles spaces. No credentials or secret env values in task arguments.
-    $backendArgs = '-NoProfile -NonInteractive -File "{0}" -ProjectDirectory "{1}" -EnvFile "{2}" -PythonPath "{3}"' -f $backendScript, $root, $config, $PythonPath
-    $frontendArgs = '-NoProfile -NonInteractive -File "{0}" -ProjectDirectory "{1}"' -f $frontendScript, $root
+    # Process-scoped Bypass for these two tasks only: a machine AllSigned policy would otherwise refuse the unsigned
+    # start scripts under SYSTEM. Machine policy is untouched; protect the installation with admin/SYSTEM-only ACLs.
+    $backendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}" -EnvFile "{2}" -PythonPath "{3}"' -f $backendScript, $root, $config, $PythonPath
+    $frontendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}"' -f $frontendScript, $root
     $backendAction = New-ScheduledTaskAction -Execute $shell -Argument $backendArgs -WorkingDirectory (Join-Path $root 'backend')
     $frontendAction = New-ScheduledTaskAction -Execute $shell -Argument $frontendArgs -WorkingDirectory (Join-Path $root 'frontend')
     Register-ScheduledTask -TaskName 'StandaHub-Backend' -Action $backendAction -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
