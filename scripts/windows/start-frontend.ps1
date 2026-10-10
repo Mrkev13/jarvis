@@ -1,9 +1,13 @@
-# Build separately during deployment; production start never rebuilds on restart.
+# Build separately during deployment; production start never rebuilds on restart. Start supervises the Next server
+# itself (Task Scheduler does not restart an action that exits nonzero): exit 0/130 ends, a crash restarts with
+# back-off; stopping the task ends the whole process tree.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$ProjectDirectory,
     [int]$Port = 3000,
-    [switch]$Build
+    [switch]$Build,
+    [int]$RestartDelaySeconds = 10,
+    [int]$MaxRestartDelaySeconds = 60
 )
 $ErrorActionPreference = 'Stop'
 try {
@@ -29,8 +33,17 @@ try {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $frontend '.next\BUILD_ID') -PathType Leaf)) { throw 'Missing production build' }
     $startArgs = @('run', 'start', '--', '--hostname', '0.0.0.0', '--port', $Port.ToString())
-    & $npm @startArgs
-    exit $LASTEXITCODE
+    $delay = [Math]::Max(1, $RestartDelaySeconds)
+    while ($true) {
+        $started = Get-Date
+        & $npm @startArgs
+        $code = $LASTEXITCODE
+        if ($code -eq 0 -or $code -eq 130) { exit $code }
+        if (((Get-Date) - $started).TotalSeconds -ge 120) { $delay = [Math]::Max(1, $RestartDelaySeconds) }
+        [Console]::Error.WriteLine("Frontend exited with code $code; restarting in $delay s.")
+        Start-Sleep -Seconds $delay
+        $delay = [Math]::Min($delay * 2, [Math]::Max($delay, $MaxRestartDelaySeconds))
+    }
 } catch {
     [Console]::Error.WriteLine('Frontend production start/build failed; verify config, Node/npm and build.')
     exit 1

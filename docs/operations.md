@@ -142,11 +142,27 @@ After manual smoke tests, in an elevated local PowerShell:
 Idempotently registers/replaces **only** `StandaHub-Backend` and
 `StandaHub-Frontend`. SYSTEM service-account principal requires no stored user
 password. Startup trigger has 30s delay, `StartWhenAvailable`, no execution limit,
-ignore duplicate instance, retry on nonzero failure every minute up to 999 times.
+ignore duplicate instance, task-level retry every minute up to 999 times. That retry
+only covers a task that fails to **launch**; Windows treats an action that exits
+nonzero as a completed run and does not restart it (verified on Windows). Crash
+recovery therefore lives in the start scripts: each runs its child in a loop and
+restarts it after a nonzero exit (10s, doubling to 60s; reset after 2 minutes up).
+Exit 0 or 130 (clean shutdown / Ctrl+C) ends the script; `Stop-ScheduledTask`
+ends the whole process tree (verified: no orphan Uvicorn/Node, ports released).
 This helper does not start tasks, migrate, build or provision PostgreSQL. Configure
 PostgreSQL's own service/autostart locally. Port-in-use startup fails; never launch
 a dev backend alongside the production scheduler. Restart timing and behavior
 when a child is killed must be verified on Windows, not assumed from cloud tests.
+
+**Antivirus "gaming/performance" modes can disable the tasks.** On the acceptance
+machine, AVG (Avast engine) Gaming mode disabled both tasks within seconds whenever
+a game was running (Task Scheduler Operational log: Event ID 142 "System disabled
+task \StandaHub-Backend", in the same batch as other background tasks, plus a
+`\AVAST Software\Gaming mode Task Scheduler recovery` task that re-enables them at
+boot). A disabled task keeps the running instance alive but **gets no restart on
+failure**. Exclude the two tasks from that mode (or turn off its pausing of
+scheduled/background tasks); do not weaken antivirus protection. Verify with the
+Operational log enabled and the game running, then re-check `Settings.Enabled`.
 
 ```powershell
 Start-ScheduledTask -TaskName StandaHub-Backend
@@ -255,9 +271,9 @@ Health mismatch is a stop signal. Avoid parallel backend instances during recove
    directory/settings). Start them; test scripts with a project path containing spaces.
 5. Reboot PC: PostgreSQL starts, both tasks start without interactive login, Hub
    returns; inspect PostgreSQL startup races, task history and orphan processes.
-6. Kill backend worker: wrapper exits nonzero and task returns within one minute
-   (verify actual retry timing). Kill frontend similarly. If graceful child exit is
-   treated as success, do not claim recovery; adjust wrapper/service policy locally.
+6. Kill backend worker: the start script restarts it (~10s) and /health returns;
+   kill frontend similarly. Do not rely on Task Scheduler retry for this (it does
+   not restart an action that exited nonzero).
 7. Confirm scheduler timestamps/success/failure streaks with synthetic failing work;
    three failures degrade, success recovers, restart resets observations honestly.
    Verify reminders and MRK-19 retention still operate with single ownership.
