@@ -48,6 +48,7 @@ import work_integrations
 import wot_integrations
 from modules.habits import integrations as habits_integrations
 from modules.calendar import integrations as calendar_integrations
+from modules.fitness import integrations as fitness_integrations
 from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
 from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
@@ -94,11 +95,14 @@ def _planned(module_id: str, label: str) -> ModuleDef:
 
 MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("school", "Škola", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
-              entity_types=frozenset({"subject", "assignment", "exam"}), context_areas=frozenset({"school"}),
+              entity_types=frozenset({"subject", "assignment", "exam", "study_material", "study_course"}),
+              context_areas=frozenset({"school", "school_materials"}),
               api_prefixes=("/school",), quick_add_kinds=("exam", "assignment"),
               integrations=school_integrations.INTEGRATIONS,
               event_types=frozenset({"school.assignment.completed", "school.assignment.reopened",
-                                     "school.exam.closed", "school.exam.reopened"})),
+                                     "school.exam.closed", "school.exam.reopened",
+                                     "school.material.created", "school.material.updated",
+                                     "school.material.source_missing", "school.material.restored"})),
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
               api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
@@ -120,7 +124,11 @@ MODULES: tuple[ModuleDef, ...] = (
               entity_types=frozenset({"mff_character"}), context_areas=frozenset({"mff"}),
               api_prefixes=("/mff",), integrations=mff_integrations.INTEGRATIONS),
     _planned("food", "Jídlo"),
-    _planned("fitness", "Fitness"),
+    ModuleDef("fitness", "Fitness", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "search", "today", "ai_context"}),
+              entity_types=frozenset({"fitness_exercise", "fitness_workout", "fitness_rehab_exercise", "fitness_rehab_session"}),
+              context_areas=frozenset({"fitness"}), api_prefixes=("/fitness",),
+              integrations=fitness_integrations.INTEGRATIONS, event_types=frozenset(fitness_integrations.EVENTS)),
     # MRK-21: první modul postavený celý v balíčku modules/habits/ (pilot rámce, docs/habits.md).
     ModuleDef("habits", "Návyky", default_enabled=True, implemented=True,
               capabilities=frozenset({"nav", "search", "today", "dashboard", "ai_context"}),

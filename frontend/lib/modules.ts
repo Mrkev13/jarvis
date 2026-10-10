@@ -13,6 +13,7 @@
 
 import type { WidgetDef } from "./dashboardLayout.ts";
 import { HABITS_UI } from "../modules/habits/manifest.ts";
+import { FITNESS_UI } from "../modules/fitness/manifest.ts";
 import { CALENDAR_UI } from "../modules/calendar/manifest.ts";
 
 export const CAPABILITIES = ["nav", "search", "quick_add", "today", "dashboard", "ai_context"] as const;
@@ -38,14 +39,14 @@ function planned(id: string, label: string): ModuleDef {
 
 // Jeden řádek = jeden modul (backend test parity čte tento tvar).
 export const MODULES: ModuleDef[] = [
-  { id: "school", label: "Škola", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["subject", "assignment", "exam"], routes: ["/school"], quickAddKinds: ["exam", "assignment"] },
+  { id: "school", label: "Škola", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["subject", "assignment", "exam", "study_material", "study_course"], routes: ["/school"], quickAddKinds: ["exam", "assignment"] },
   { id: "work", label: "Práce", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["work_session"], routes: ["/work"], quickAddKinds: ["work"] },
   { id: "finance", label: "Finance", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["transaction"], routes: ["/finance"], quickAddKinds: ["finance"] },
   { id: "goals", label: "Cíle", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["goal"], routes: ["/goals"], quickAddKinds: [] },
   { id: "wot", label: "World of Tanks", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["wot_grind", "wot_resource", "wot_replay"], routes: ["/wot"], quickAddKinds: [] },
   { id: "mff", label: "Marvel Future Fight", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["mff_character"], routes: ["/mff"], quickAddKinds: [] },
   planned("food", "Jídlo"),
-  planned("fitness", "Fitness"),
+  { id: "fitness", label: "Fitness & Rehab", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["fitness_exercise", "fitness_workout", "fitness_rehab_exercise", "fitness_rehab_session"], routes: ["/fitness"], quickAddKinds: [] },
   { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
   { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
   planned("projects", "Projekty"),
@@ -96,13 +97,15 @@ export interface ModuleTodayAction {
 export const MODULE_UI: Record<string, ModuleUi> = {
   habits: HABITS_UI,
   calendar: CALENDAR_UI,
+  fitness: FITNESS_UI,
   goals: {
     nav: { href: "/goals", label: "Cíle", keywords: ["goals", "goal", "cíl", "progres"], order: 10 },
     searchParams: ["goal"], searchGroupOrder: 50,
   },
   school: {
     nav: { href: "/school", label: "Škola", keywords: ["school", "úkol", "úkoly", "zkouška", "zkoušky", "předmět", "předměty", "termín", "termíny"], order: 20 },
-    searchParams: ["subject", "assignment", "exam"], searchGroupOrder: 10,
+    searchParams: ["subject", "assignment", "exam", "material", "course"], searchGroupOrder: 10,
+    typeLabels: { study_material: "Studijní materiál" },
   },
   work: {
     nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },

@@ -1,0 +1,184 @@
+{
+ "configured": true,
+ "materials": [
+  {
+   "id": 1,
+   "title": "Přednáška 1 – stavba buňky",
+   "file_name": "prednaska-01.pdf",
+   "material_type": "pdf",
+   "mime_type": null,
+   "size_bytes": 2480000,
+   "section_name": "Týden 1",
+   "source_modified_at": "2026-10-08T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "stored",
+   "has_file": true,
+   "extraction_status": "ok",
+   "course": {
+    "id": 1,
+    "name": "Biologie buňky (BIO101)"
+   },
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   }
+  },
+  {
+   "id": 2,
+   "title": "Slajdy – mitochondrie",
+   "file_name": "mitochondrie.pptx",
+   "material_type": "pptx",
+   "mime_type": null,
+   "size_bytes": 5300000,
+   "section_name": "Týden 2",
+   "source_modified_at": "2026-10-07T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "stored",
+   "has_file": true,
+   "extraction_status": "ok",
+   "course": {
+    "id": 1,
+    "name": "Biologie buňky (BIO101)"
+   },
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   }
+  },
+  {
+   "id": 3,
+   "title": "Seminář – zadání protokolu",
+   "file_name": "protokol.docx",
+   "material_type": "docx",
+   "mime_type": null,
+   "size_bytes": 84000,
+   "section_name": "Týden 2",
+   "source_modified_at": "2026-10-06T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "stored",
+   "has_file": true,
+   "extraction_status": "ok",
+   "course": {
+    "id": 1,
+    "name": "Biologie buňky (BIO101)"
+   },
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   }
+  },
+  {
+   "id": 4,
+   "title": "Skripta – kapitola 3 (sken)",
+   "file_name": "skripta-kap3.pdf",
+   "material_type": "pdf",
+   "mime_type": null,
+   "size_bytes": 61000000,
+   "section_name": "Studijní literatura",
+   "source_modified_at": "2026-10-05T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "too_large",
+   "has_file": false,
+   "extraction_status": null,
+   "course": {
+    "id": 1,
+    "name": "Biologie buňky (BIO101)"
+   },
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   }
+  },
+  {
+   "id": 5,
+   "title": "Obrázky z cvičení",
+   "file_name": "mikroskop.png",
+   "material_type": "other",
+   "mime_type": null,
+   "size_bytes": 900000,
+   "section_name": "Týden 3",
+   "source_modified_at": "2026-10-09T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "unsupported",
+   "has_file": false,
+   "extraction_status": null,
+   "course": {
+    "id": 1,
+    "name": "Biologie buňky (BIO101)"
+   },
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   }
+  },
+  {
+   "id": 6,
+   "title": "Úvod do stechiometrie",
+   "file_name": "stechiometrie.pdf",
+   "material_type": "pdf",
+   "mime_type": null,
+   "size_bytes": 1100000,
+   "section_name": "Úvod",
+   "source_modified_at": "2026-10-08T08:00:00",
+   "created_at": "2026-10-01T08:00:00",
+   "updated_at": "2026-10-08T08:00:00",
+   "source_missing_at": null,
+   "state": "active",
+   "download_status": "stored",
+   "has_file": true,
+   "extraction_status": "ok",
+   "course": {
+    "id": 2,
+    "name": "Obecná chemie"
+   },
+   "subject": null
+  }
+ ],
+ "truncated": false,
+ "courses": [
+  {
+   "id": 1,
+   "name": "Biologie buňky (BIO101)",
+   "short_name": "BIO101",
+   "subject": {
+    "id": 1,
+    "name": "Biologie"
+   },
+   "suggested_subject_id": null,
+   "materials": 5
+  },
+  {
+   "id": 2,
+   "name": "Obecná chemie",
+   "short_name": "CHE1",
+   "subject": null,
+   "suggested_subject_id": 2,
+   "materials": 1
+  }
+ ],
+ "subjects": [
+  {
+   "id": 1,
+   "name": "Biologie"
+  },
+  {
+   "id": 2,
+   "name": "Chemie"
+  }
+ ]
+}
