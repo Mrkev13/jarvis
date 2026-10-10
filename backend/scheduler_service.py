@@ -6,6 +6,7 @@ from database import SessionLocal
 from notifications_service import create_all_overdue_and_upcoming_notifications
 from env_config import env_bool, env_int
 from module_registry import current_access
+from scheduler_health import tracker
 
 _scheduler: BackgroundScheduler | None = None
 SCHEDULER_ENABLED = env_bool("SCHEDULER_ENABLED", False)
@@ -27,6 +28,7 @@ SINGLE_WORKER_ASSUMPTION_DOC = (
 )
 
 
+@tracker.tracked("standa_hub_hourly")
 def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job started at {datetime.utcnow().isoformat()}")
     db = SessionLocal()
@@ -38,17 +40,19 @@ def _run_hourly_job() -> None:
                 result = step.run(db)
                 print(f"[scheduler] {step.name}: {result}")
                 db.commit()
-            except Exception as _serr:  # noqa: BLE001 - modulový krok nesmí shodit hodinový job
+            except Exception:  # noqa: BLE001 - modulový krok nesmí shodit hodinový job
                 db.rollback()
-                print(f"[scheduler] {step.name} ({owner}) failed: {type(_serr).__name__}: {_serr}")
+                tracker.failed("standa_hub_hourly")
+                print("[scheduler] module step failed")
         # Infrastruktura (notifikace, zálohy) zůstává globální.
         try:
             notif_count = create_all_overdue_and_upcoming_notifications(db)
             print(f"[scheduler] notifications created: {notif_count}")
             db.commit()
-        except Exception as _nerr:
+        except Exception:
             db.rollback()
-            print(f"[scheduler] notifications failed: {_nerr}")
+            tracker.failed("standa_hub_hourly")
+            print("[scheduler] notifications failed")
         try:
             # MRK-19: retence přenosové historie událostí (jen domain_events; Aktivita a historie zůstávají)
             from domain_events import cleanup_domain_events
@@ -56,20 +60,24 @@ def _run_hourly_job() -> None:
             db.commit()
             if removed:
                 print(f"[scheduler] domain events retention removed: {removed}")
-        except Exception as _eerr:
+        except Exception:
             db.rollback()
-            print(f"[scheduler] domain events retention failed: {type(_eerr).__name__}")
+            tracker.failed("standa_hub_hourly")
+            print("[scheduler] domain events retention failed")
         try:
             from backup_service import run_backup, should_run_backup_daily
             if should_run_backup_daily():
                 bid = run_backup(db)
                 print(f"[scheduler] daily backup ran id={bid}")
-        except Exception as _berr:
-            print(f"[scheduler] daily backup skipped: {_berr}")
-    except Exception as _jerr:
-        import traceback
-        print(f"[scheduler] hourly job FAILED: {_jerr}")
-        traceback.print_exc()
+                from models import BackupLog
+                if bid != -1 and db.get(BackupLog, bid).status != "success":
+                    tracker.failed("standa_hub_hourly")
+        except Exception:
+            tracker.failed("standa_hub_hourly")
+            print("[scheduler] daily backup failed")
+    except Exception:
+        tracker.failed("standa_hub_hourly")
+        print("[scheduler] hourly job failed")
         try:
             db.rollback()
         except Exception:
@@ -79,69 +87,84 @@ def _run_hourly_job() -> None:
     print(f"[scheduler] hourly job finished at {datetime.utcnow().isoformat()}")
 
 
+@tracker.tracked("standa_hub_reminders")
 def _run_reminders_job() -> None:
     from reminder_service import process_due_reminders
 
     db = SessionLocal()
     try:
         stats = process_due_reminders(db)
+        if stats["failed"]:
+            tracker.failed("standa_hub_reminders")
         if stats["fired"] or stats["failed"]:
             print(f"[scheduler] reminders: {stats}")
-    except Exception as _rerr:  # noqa: BLE001 - job nesmí shodit scheduler
+    except Exception:  # noqa: BLE001 - job nesmí shodit scheduler
         try:
             db.rollback()
         except Exception:
             pass
-        print(f"[scheduler] reminders job failed: {type(_rerr).__name__}: {_rerr}")
+        tracker.failed("standa_hub_reminders")
+        print("[scheduler] reminders job failed")
     # Phase E: externí doručení až po zazvonění a odděleně – jeho chyba nesmí ovlivnit připomínky.
     try:
         from delivery_service import run_delivery_cycle
 
         dstats = run_delivery_cycle(db)
+        if dstats.get("failed"):
+            tracker.failed("standa_hub_reminders")
         if dstats.get("enqueued") or dstats.get("sent") or dstats.get("failed") or dstats.get("retry"):
             print(f"[scheduler] external delivery: {dstats}")
-    except Exception as _derr:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         try:
             db.rollback()
         except Exception:
             pass
-        print(f"[scheduler] external delivery failed: {type(_derr).__name__}")
+        tracker.failed("standa_hub_reminders")
+        print("[scheduler] external delivery failed")
     finally:
         db.close()
 
 
+@tracker.tracked("standa_hub_briefing")
 def _run_briefing_job() -> None:
     from briefing_service import run_scheduled
 
     db = SessionLocal()
     try:
         state = run_scheduled(db)
+        if state == "gave_up":
+            tracker.failed("standa_hub_briefing")
         if state in ("generated", "retried"):
             print(f"[scheduler] daily briefing: {state}")
-    except Exception as _berr:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
+    except Exception:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
         try:
             db.rollback()
         except Exception:
             pass
-        print(f"[scheduler] daily briefing job failed: {type(_berr).__name__}")
+        tracker.failed("standa_hub_briefing")
+        print("[scheduler] daily briefing job failed")
     finally:
         db.close()
 
 
+@tracker.tracked("standa_hub_weekly_review")
 def _run_weekly_review_job() -> None:
     from weekly_review_service import run_scheduled
 
     db = SessionLocal()
     try:
         state = run_scheduled(db)
+        if state == "gave_up":
+            tracker.failed("standa_hub_weekly_review")
         if state in ("generated", "retried"):
             print(f"[scheduler] weekly review: {state}")
-    except Exception as _werr:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
+    except Exception:  # noqa: BLE001 - přehled nesmí shodit scheduler ani ostatní joby
         try:
             db.rollback()
         except Exception:
             pass
-        print(f"[scheduler] weekly review job failed: {type(_werr).__name__}")
+        tracker.failed("standa_hub_weekly_review")
+        print("[scheduler] weekly review job failed")
     finally:
         db.close()
 
@@ -222,3 +245,15 @@ def stop_scheduler() -> None:
             _scheduler.shutdown(wait=False)
         finally:
             _scheduler = None
+
+
+def scheduler_snapshot() -> dict:
+    enabled = {
+        "standa_hub_hourly": SCHEDULER_ENABLED, "standa_hub_reminders": REMINDERS_CHECK_ENABLED,
+        "standa_hub_briefing": DAILY_BRIEFING_ENABLED, "standa_hub_weekly_review": WEEKLY_REVIEW_ENABLED,
+    }
+    jobs = [{"id": name, "enabled": active, **tracker.snapshot(name)} for name, active in enabled.items()]
+    status = "disabled" if not any(enabled.values()) else "running" if _scheduler and _scheduler.running else "stopped"
+    if status == "running" and any(j["enabled"] and j["status"] == "warning" for j in jobs):
+        status = "degraded"
+    return {"status": status, "backup_job_enabled": SCHEDULER_ENABLED, "jobs": jobs}
