@@ -10,7 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from domain_events import ActivityProjection, append_domain_event
 from env_config import env_str
 from modules.calendar.models import CalendarEvent, CalendarSource, now_utc
-from modules.calendar.occurrences import CalendarWindowError, get_calendar_occurrences, local_window
+from modules.calendar.occurrences import CalendarWindowError, MAX_OCCURRENCES, get_calendar_occurrences, local_window
 from modules.calendar.parser import MAX_FEED_BYTES, ParsedEvent, parse_ics
 from time_utils import APP_TZ, today_local
 
@@ -242,8 +242,10 @@ def occurrences_between(db, start: date, end: date) -> dict:
     if end <= start or (end - start).days > MAX_API_DAYS:
         raise CalendarWindowError('window must be 1–92 days')
     lower, upper = local_window(start, end)
+    occurrences = get_calendar_occurrences(db, lower, upper)
     return {'start': start.isoformat(), 'end': end.isoformat(),
-            'occurrences': [occurrence_dict(o) for o in get_calendar_occurrences(db, lower, upper)]}
+            'truncated': len(occurrences) >= MAX_OCCURRENCES,
+            'occurrences': [occurrence_dict(o) for o in occurrences]}
 
 
 def list_calendar(db, *, today=None, event_id=None):

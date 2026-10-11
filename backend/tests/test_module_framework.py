@@ -100,7 +100,7 @@ WITH_ALPHA = (*mr.MODULES, ALPHA)
 
 
 def _access(**flags):
-    return ModuleAccess({"alpha": True, **flags}, WITH_ALPHA)
+    return ModuleAccess({"alpha": True, "calendar": False, **flags}, WITH_ALPHA)  # Isolate fake-module contributions.
 
 
 class RegistryContractTestCase(unittest.TestCase):
@@ -310,7 +310,7 @@ class FakeModuleEndToEndTestCase(unittest.TestCase):
             raise RuntimeError("boom")
         broken = ModuleDef("beta", "Beta", True, True, capabilities=frozenset({"today"}),
                            integrations=ModuleIntegrations(today=(TodaySource("beta", 1, timeline=boom),)))
-        access = ModuleAccess({"alpha": True, "beta": True}, (*WITH_ALPHA, broken))
+        access = ModuleAccess({"alpha": True, "beta": True, "calendar": False}, (*WITH_ALPHA, broken))
         with patch.object(ts, "generate_plan", return_value={"actions": []}):
             out = ts.build_today(self.db, now_utc=NOW, access=access)
         self.assertEqual([it["id"] for it in out["timeline"]], ["alpha_item:1"])

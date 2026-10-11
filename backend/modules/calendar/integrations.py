@@ -1,5 +1,5 @@
 """Calendar supplies data through framework contributions, never aggregator branches."""
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 from context_format import short
 from module_contracts import (
@@ -95,6 +95,41 @@ def _free_block_lines(req) -> list[str]:
     return lines
 
 
+def _next_free_block(c):
+    """One derived result per Today request; the tomorrow fallback belongs only in Upcoming."""
+    key = 'calendar.next_free_block'
+    if key not in c.cache:
+        now = c.now_utc.replace(tzinfo=timezone.utc) if c.now_utc.tzinfo is None else c.now_utc
+        lower = max(now, local_window(c.today, c.today + timedelta(days=1))[0])
+        upper = local_window(c.today, c.today + timedelta(days=2))[1]
+        result = get_free_blocks(c.db, start=lower, end=upper, min_minutes=30)
+        if result.truncated:
+            c.cache[key] = TodayItem(
+                id=f'calendar_free_block:uncertain:{c.today}', type='calendar_free_block',
+                title='Volno nelze spolehlivě určit', subtitle='Neúplná data kalendáře; zkontroluj týdenní přehled.',
+                area='calendar', date=c.today.isoformat(), severity='warning', href='/calendar')
+        elif result.blocks:
+            block = result.blocks[0].as_dict()
+            c.cache[key] = TodayItem(
+                id=f"calendar_free_block:{block['starts_at']}", type='calendar_free_block',
+                title=f"Volno {block['local_start']}–{block['local_end']} ({_duration(block['duration_minutes'])})",
+                subtitle='Podle Kalendáře · 07–22 · alespoň 30 min', area='calendar',
+                date=block['local_date'], time=block['local_start'], status='open', href='/calendar')
+        else:
+            c.cache[key] = None
+    return c.cache[key]
+
+
+def next_free_block_today(c):
+    item = _next_free_block(c)
+    return [item] if item and item.date == c.today.isoformat() else []
+
+
+def next_free_block_upcoming(c):
+    item = _next_free_block(c)
+    return [item] if item and item.date != c.today.isoformat() else []
+
+
 # ---------- denní osa (MRK-13) ----------
 
 _OCCURRENCES = 'calendar.occurrences'
@@ -133,7 +168,8 @@ def timeline_free_blocks(req, min_minutes):
 
 INTEGRATIONS = ModuleIntegrations(
     search=(SearchSource('calendar', 85, search_events),),
-    today=(TodaySource('calendar', 35, timeline=timeline, upcoming=upcoming),),
+    today=(TodaySource('calendar', 35, timeline=timeline, upcoming=upcoming),
+           TodaySource('calendar_free_block', 36, timeline=next_free_block_today, upcoming=next_free_block_upcoming)),
     timeline=(TimelineSource('calendar', 30, timeline_items, free_blocks=timeline_free_blocks),),
     entity_refs=(EntityRef('calendar_event', '/calendar?event={id}'),),
     context=(ContextSection('calendar', ('kalendar', 'calendar', 'udalost', 'rozvrh', 'prednask', 'schuzk'),
