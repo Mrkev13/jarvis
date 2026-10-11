@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { activeFilterCount, fileState, formatSize, materialMeta, materialsPath, parseFilters, syncSummary } from './materialsLib.ts';
+import {
+  ZIP_IMPORT_PATH, activeFilterCount, fileState, formatSize, importErrorMessage, importSummary, isZipFile, materialMeta,
+  materialsPath, parseFilters, syncSummary, uploadMoodleZip,
+} from './materialsLib.ts';
 import { createModuleAccess, manifestFlags } from '../../lib/modules.ts';
 
 const base = {
@@ -125,4 +128,67 @@ test('reader shows unavailable text, loading and error states', () => {
   assert.match(scan.html, /nemá textovou vrstvu/); assert.doesNotMatch(scan.html, /data-empty/);
   assert.match(renderReader({ data: null, loading: true, error: null }).html, /data-loading/);
   assert.match(renderReader({ data: null, loading: false, error: 'x' }).html, /Text materiálu se nepodařilo načíst/);
+});
+
+
+// ---------- MRK-56: import ZIPu ----------
+
+const zipFile = (name = 'course-export.zip', bytes = 'PK' + String.fromCharCode(3, 4) + 'synthetic') => new File([bytes], name, { type: '' });
+
+function fakeFetch(response) {
+  const calls = [];
+  const fetcher = async (path, init) => {
+    calls.push({ path, init });
+    if (response instanceof Error) throw response;
+    return response;
+  };
+  return { calls, fetcher };
+}
+
+test('only non-empty .zip files are accepted; anything else never reaches the server', async () => {
+  assert.equal(isZipFile({ name: 'Kurz.ZIP', size: 10 }), true);
+  assert.equal(isZipFile({ name: 'notes.pdf', size: 10 }), false);
+  assert.equal(isZipFile({ name: 'empty.zip', size: 0 }), false);
+  const { calls, fetcher } = fakeFetch(new Response('{}'));
+  const outcome = await uploadMoodleZip(zipFile('lecture.pdf'), fetcher);
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.message, /Vyber soubor \.zip/);
+  assert.equal(calls.length, 0);
+});
+
+test('successful upload posts the raw ZIP to the import endpoint and summarises the result', async () => {
+  const stats = { created: 5, updated: 1, unchanged: 2, file_unsupported: 1, files_listed_missing: 1, completeness: 'unproven' };
+  const { calls, fetcher } = fakeFetch(new Response(JSON.stringify(stats), { status: 200 }));
+  const file = zipFile();
+  const outcome = await uploadMoodleZip(file, fetcher);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, ZIP_IMPORT_PATH);
+  assert.equal(ZIP_IMPORT_PATH, '/school/materials/import-zip');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/zip');
+  assert.equal(calls[0].init.body, file);
+  assert.deepEqual(outcome, { ok: true, summary: 'Import hotový: nové 5, změněné 1, beze změny 2 (nepodporované soubory 1, v ZIPu chybí 1).' });
+  assert.equal(importSummary({ created: 0, updated: 0, unchanged: 3 }), 'Import hotový: nové 0, změněné 0, beze změny 3.');
+});
+
+test('backend validation errors show a safe Czech message, never the raw response body', async () => {
+  const leaky = { detail: { category: 'unsafe_path', debug: 'C:/secret/path token=abc' } };
+  const { fetcher } = fakeFetch(new Response(JSON.stringify(leaky), { status: 400 }));
+  const outcome = await uploadMoodleZip(zipFile(), fetcher);
+  assert.deepEqual(outcome, { ok: false, message: 'ZIP obsahuje nebezpečné cesty k souborům – import byl odmítnut.' });
+  assert.doesNotMatch(outcome.message, /secret|token|C:/);
+  for (const [category, pattern] of [['not_course_export', /Stáhnout obsah kurzu/], ['archive_too_large', /příliš velký/],
+    ['compression_ratio', /kompresní poměr/], ['encrypted_entry', /šifrované/]]) {
+    assert.match(importErrorMessage(category), pattern);
+  }
+  assert.equal(importErrorMessage('<script>alert(1)</script>'), importErrorMessage(undefined), 'unknown category → generic text');
+  assert.equal(importErrorMessage('toString'), importErrorMessage(undefined), 'prototype keys are not categories');
+});
+
+test('non-JSON error bodies and network failures fall back to generic messages', async () => {
+  const html = await uploadMoodleZip(zipFile(), fakeFetch(new Response('<html>Traceback: /srv/app.py</html>', { status: 502 })).fetcher);
+  assert.equal(html.ok, false);
+  assert.doesNotMatch(html.message, /Traceback|srv/);
+  const offline = await uploadMoodleZip(zipFile(), fakeFetch(new TypeError('Failed to fetch')).fetcher);
+  assert.deepEqual(offline, { ok: false, message: 'Import se nepovedl – server je nedostupný. Uložené materiály zůstaly beze změny.' });
 });

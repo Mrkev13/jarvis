@@ -13,7 +13,40 @@ import models
 from modules.school import integrations, service, zip_import
 from modules.school.models import StudyCourse, StudyMaterial
 from modules.school.service import RemoteFile, CourseSnapshot
-from tests.test_study_materials import NOW, LATER, api, db, make_docx, make_pdf, make_pptx  # noqa: F401 - fixtures
+from tests.test_study_materials import NOW, LATER, make_docx, make_pdf, make_pptx
+
+
+@pytest.fixture
+def db(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from database import Base
+    monkeypatch.setenv('MEDIA_DIR', str(tmp_path / 'media'))
+    monkeypatch.setenv('MOODLE_MAX_FILE_MB', '5')
+    for key in ('MOODLE_WS_BASE_URL', 'MOODLE_WS_TOKEN', 'MOODLE_COURSE_IDS', 'MOODLE_ZIP_MAX_MB'):
+        monkeypatch.delenv(key, raising=False)
+    engine = create_engine('sqlite+pysqlite:///:memory:', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    yield session
+    session.close()
+    engine.dispose()
+
+
+@pytest.fixture
+def api(db, monkeypatch):
+    from fastapi.testclient import TestClient
+    import database
+    import main
+    from module_registry import ModuleAccess
+    monkeypatch.setattr(database, 'SessionLocal', lambda: db)
+    monkeypatch.setattr(main, 'SessionLocal', lambda: db)
+    monkeypatch.setattr(db, 'close', lambda: None)
+    client = TestClient(main.app)
+    with patch.object(main, 'auth_enabled', return_value=False), patch.object(main, 'current_access', return_value=ModuleAccess({})):
+        yield client
+    client.close()
 
 COURSE_DIR = 'Kurz_SYN101_SYN202_Synteticky_kurz_..._.900001'
 COURSE_TITLE = 'Syntetický kurz – ZS 99/00'

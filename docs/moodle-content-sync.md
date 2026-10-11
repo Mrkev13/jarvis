@@ -50,8 +50,9 @@ text): the token, the base URL with any secret, signed or private file URLs, ups
 
 ## Data model (migration `0021_study_materials`)
 
-- `study_courses`: `(source='moodle', external_id)` unique; `name`, `short_name`; **`subject_id` = manual mapping**
-  (nullable, `ON DELETE SET NULL`). A sync never sets or changes it.
+- `study_courses`: `(source, external_id)` unique, `source IN ('moodle', 'moodle_export')` (the second value since
+  migration `0023_study_course_export_source`, see "ZIP import fallback"); `name`, `short_name`;
+  **`subject_id` = manual mapping** (nullable, `ON DELETE SET NULL`). Neither a sync nor an import sets or changes it.
 - `study_materials`: unique `(course_id, external_id)` where `external_id = "<course module id>:<filepath><filename>"`
   (sha256 when too long). Metadata (title, section, file name, type, mime, size, modified time), download outcome
   (`stored | metadata_only | too_large | unsupported | rejected | failed`), content-addressed `stored_name` +
@@ -131,6 +132,57 @@ Jarvis can inspect **one** material on demand; documents are never pushed wholes
 Future RAG boundary: `extracted_text` is the derived, rebuildable input for later chunking/embedding; no vector DB yet.
 
 Status split: **the code foundation is merged; the real ČZU connector is NOT verified** – tracked separately.
+
+## ZIP import fallback (MRK-56)
+
+**Official Moodle Web Services remain the primary integration.** When the site does not give students a web-service
+token, materials can still reach the Hub by a manual transport: the official Moodle feature **„Stáhnout obsah kurzu"**
+(*Download course content*) produces one ZIP per course, which is imported by the same core – no token, no HTML
+scraping, no login automation.
+
+**One shared core.** `modules/school/zip_import.py` validates the archive, turns it into the MRK-42
+`CourseSnapshot`/`RemoteFile` model and applies it with `service._sync_course`: the same `study_courses` /
+`study_materials` tables and identity scheme (`"<activity id>:<path><file name>"`), the same download policy (type
+allowlist, `MOODLE_MAX_FILE_MB`, signature sniffing, macro-package rejection), content-addressed storage, extraction,
+domain events (`school.material.*`, Activity context `moodle_zip_import`), Search, What Changed and AI metadata.
+
+| Rule | Behaviour |
+|---|---|
+| Source | Courses are stored with `source = 'moodle_export'`; Web Services rows keep `source = 'moodle'`. |
+| Identity | The export's own folder numbers (course folder, activity folders). **They are not assumed to equal Moodle API ids** – on a real export the course id linked from the export index differed from the folder number – so the two sources never share a row and no seamless reconciliation with a later Web Services sync is claimed. |
+| Presence | A course ZIP is **not a provably complete snapshot** (Moodle leaves out files above its download limit and items it cannot export; folder activities may come without files). An import therefore only **adds/updates**; it never sets `source_missing_at`. Files listed in an activity page but absent from the ZIP become `metadata_only` rows. |
+| Content | Only **PDF / PPTX / DOCX / TXT** are stored and extracted. Other files inside an activity are recorded as `unsupported` metadata. |
+| HTML | The export's `index.html` pages are parsed locally (bounded, stdlib parser, no network) for the course name, section headings and full activity titles only. HTML never becomes a material, Search hit or AI context. |
+| Idempotency | Export timestamps are the export time, so changes are detected by **content sha256**: re-importing the same ZIP writes, downloads and emits nothing; a changed file updates its row; the binary is stored once per checksum. |
+| Mapping | Course → subject stays manual; the exact-code suggestion uses the course codes found in the export folder name. |
+
+**Using it.**
+
+- UI: `/school/materials` → **Importovat ZIP z Moodle** → pick the `.zip`. The page shows a short summary (new /
+  changed / unchanged, unsupported, missing from the ZIP) or a safe Czech error, then reloads the list.
+  API: `POST /school/materials/import-zip`, the raw ZIP as the request body (`Content-Type: application/zip`);
+  errors are allowlisted categories only (`archive_invalid`, `not_course_export`, `unsafe_path`, …).
+- Folder: a thin wrapper over the same service imports every `*.zip` directly in a folder (not recursive):
+
+  ```
+  cd backend
+  python scripts/import_moodle_zips.py <folder with exported ZIPs> --env-file <protected production env file>
+  ```
+
+  It prints only file names and counts and exits non-zero if any archive was rejected. It is a one-shot CLI, not a
+  server or scheduler.
+
+**Archive safety.** The whole archive is validated before anything is read, and rejected on: absolute paths, drive
+letters, backslashes, `.`/`..`/empty path segments, control characters, over-long names, symlink entries, encrypted
+entries, duplicate (case-insensitive) names, more than 5000 entries, more than 4 GiB declared uncompressed in total,
+or an entry above 1 MiB compressed more than 200×. The upload is streamed with a hard cap (`MOODLE_ZIP_MAX_MB`,
+default 512) into a spooled temp file that is deleted afterwards. Entries are read in memory with hard byte caps
+(HTML ≤ 1 MB, files ≤ `MOODLE_MAX_FILE_MB`) whatever their headers claim; a corrupt entry is a per-file `failed`.
+Nothing is extracted to disk and nested archives are never opened. One import is one transaction: a failure rolls
+back everything.
+
+**Tests and data.** `backend/tests/test_moodle_zip_import.py` builds synthetic exports in memory (invented course,
+generated documents). **No real Moodle export, file or extracted text belongs in git.**
 
 ## Needs real verification (not done – cloud session, synthetic fixtures only)
 
