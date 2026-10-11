@@ -20,11 +20,13 @@ class StudyCourse(Base):
     __tablename__ = 'study_courses'
     __table_args__ = (
         UniqueConstraint('source', 'external_id', name='uq_study_courses_source_identity'),
-        CheckConstraint("source = 'moodle'", name='ck_study_courses_source'),
+        # 'moodle' = Web Services sync (MRK-42); 'moodle_export' = official course ZIP export (MRK-56) – its folder
+        # numbers are not Moodle API ids, so the two sources never share an identity
+        CheckConstraint("source IN ('moodle', 'moodle_export')", name='ck_study_courses_source'),
     )
     id = Column(Integer, primary_key=True)
     source = Column(String(20), nullable=False, default='moodle')
-    external_id = Column(String(64), nullable=False)  # Moodle course id (stable), never a URL
+    external_id = Column(String(64), nullable=False)  # Moodle course id / export folder number (stable), never a URL
     name = Column(String(300), nullable=False)
     short_name = Column(String(100), nullable=True)
     # Manual mapping only (MRK-42): a sync never sets or changes it; NULL = unmatched.

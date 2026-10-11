@@ -387,6 +387,36 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertTrue(STEP_0021_EXTRA <= _sqlite_tables(self.conn))
 
+    def test_0023_allows_export_source_keeps_rows_and_guards_downgrade(self):
+        from sqlalchemy import inspect
+        from sqlalchemy.exc import IntegrityError
+
+        insert = ("INSERT INTO study_courses (source, external_id, name, created_at, updated_at) "
+                  "VALUES (:source, :ext, 'Synthetic course', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+        alembic_cmd.upgrade(self.cfg, "0022_fitness")
+        self.conn.execute(text(insert), {"source": "moodle", "ext": "101"})
+        self.conn.commit()
+        with self.assertRaises(IntegrityError):
+            self.conn.execute(text(insert), {"source": "moodle_export", "ext": "900001"})
+        self.conn.rollback()
+        alembic_cmd.upgrade(self.cfg, "0023_study_course_export_source")
+        self.conn.execute(text(insert), {"source": "moodle_export", "ext": "900001"})
+        self.conn.commit()
+        with self.assertRaises(IntegrityError):
+            self.conn.execute(text(insert), {"source": "scraped", "ext": "1"})
+        self.conn.rollback()
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM study_courses")).scalar(), 2, "rows preserved")
+        idx = {i["name"] for i in inspect(self.conn).get_indexes("study_courses")}
+        self.assertIn("ix_study_courses_subject_id", idx, "batch recreation keeps the index")
+        with self.assertRaises(Exception):
+            alembic_cmd.downgrade(self.cfg, "0022_fitness")  # refuses while export rows exist
+        self.conn.rollback()
+        self.conn.execute(text("DELETE FROM study_courses WHERE source = 'moodle_export'"))
+        self.conn.commit()
+        alembic_cmd.downgrade(self.cfg, "0022_fitness")
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM study_courses")).scalar(), 1)
+        alembic_cmd.upgrade(self.cfg, "head")
+
     def test_0018_adds_domain_events_and_downgrades_cleanly(self):
         from sqlalchemy import inspect
 

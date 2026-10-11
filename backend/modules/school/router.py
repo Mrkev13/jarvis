@@ -1,14 +1,19 @@
 """Study materials REST (MRK-42). Inherits application auth and the School module gate (`/school` prefix).
 No URL or credential is accepted from or returned to clients; errors are allowlisted categories only."""
+import tempfile
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 import database
-from modules.school import reading, service
+from modules.school import reading, service, zip_import
 from modules.school.moodle import MoodleSyncError
+
+ZIP_MEDIA_TYPES = frozenset({'application/zip', 'application/x-zip-compressed', 'application/octet-stream'})
+SPOOL_MEMORY_BYTES = 32 * 1024 * 1024
 
 router = APIRouter(prefix='/school/materials', tags=['school'])
 
@@ -49,6 +54,30 @@ def materials_list(subject_id: int | None = Query(default=None, ge=1), course_id
 def materials_sync():
     """Commits per course inside the service; a failed course is rolled back on its own."""
     return _run(service.sync_materials)
+
+
+@router.post('/import-zip')
+async def materials_import_zip(request: Request):
+    """MRK-56: one official Moodle course ZIP („Stáhnout obsah kurzu") as the raw request body. Streamed with a hard
+    size cap into a spooled temp file (deleted afterwards), then the shared import core; never extracted to disk."""
+    media_type = (request.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+    if media_type not in ZIP_MEDIA_TYPES:
+        raise HTTPException(status_code=415, detail={'category': 'unsupported_media_type'})
+    limit = zip_import.max_archive_bytes()
+    declared = request.headers.get('content-length', '')
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail={'category': 'archive_too_large'})
+    with tempfile.SpooledTemporaryFile(max_size=SPOOL_MEMORY_BYTES) as spool:
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(status_code=413, detail={'category': 'archive_too_large'})
+            spool.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail={'category': 'archive_invalid'})
+        spool.seek(0)
+        return await run_in_threadpool(_run, lambda db: zip_import.import_course_export(db, spool))
 
 
 @router.put('/courses/{course_id}')
