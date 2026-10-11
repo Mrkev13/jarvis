@@ -51,6 +51,10 @@ def main(argv=None) -> int:
         except zip_import.ZipImportError as error:
             print(f'{path.name}: chyba ({error.category})')
             failures += 1
+        except Exception:  # noqa: BLE001 - never a traceback with internal names; continue with the next archive
+            db.rollback()
+            print(f'{path.name}: chyba (import_failed)')
+            failures += 1
         finally:
             db.close()
     return 1 if failures else 0

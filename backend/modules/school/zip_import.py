@@ -45,6 +45,10 @@ MAX_RATIO = 200  # per entry, for entries above RATIO_MIN_BYTES
 RATIO_MIN_BYTES = 1024 * 1024
 MAX_HTML_BYTES = 1_000_000
 MAX_NAME = 1024
+MAX_HTML_TOTAL = 64 * 1024 * 1024  # HTML bytes parsed per import; beyond it, folder-name fallbacks are used
+MAX_LISTED_MISSING = 200  # links listed by one activity page but absent from the ZIP (metadata-only rows)
+MAX_FILES = 5000  # RemoteFiles per import (bounds DB rows, domain events and Activity per upload)
+UNREADABLE = 'unreadable'  # content_sha256 sentinel: never equals a checksum → the file is re-read and ends `failed`
 CHUNK = 64 * 1024
 NESTED_ARCHIVES = ('.zip', '.rar', '.7z', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.zst')
 _ID_SUFFIX = re.compile(r'\.(\d{1,20})$')
@@ -71,6 +75,8 @@ def max_archive_bytes() -> int:
 # ---------- archive validation & bounded reads ----------
 
 def _unsafe_name(name: str) -> bool:
+    # Note: on Windows zipfile already turns '\\' into '/' when reading, so the backslash test only fires elsewhere;
+    # the resulting path still passes the same '..'/absolute/drive checks. No ZIP name is ever a filesystem path.
     if not name or len(name) > MAX_NAME or name.startswith(('/', '\\')) or '\\' in name or ':' in name:
         return True
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
@@ -94,7 +100,7 @@ def _validated(zf: zipfile.ZipFile) -> tuple[str, str, dict[str, zipfile.ZipInfo
             raise ZipImportError('symlink_entry')
         if info.flag_bits & 0x1:
             raise ZipImportError('encrypted_entry')
-        key = info.filename.rstrip('/').casefold()
+        key = info.filename.rstrip('/')  # exact match: Moodle may legitimately export case-variant names
         if key in seen:
             raise ZipImportError('duplicate_entry')
         seen.add(key)
@@ -142,6 +148,8 @@ def _sha256(zf, info, cap: int) -> str | None:
         _stream(zf, info, cap, digest.update)
     except _TooLarge:
         return None
+    except Exception:  # noqa: BLE001 - CRC error, unsupported compression…: this file only, never the whole import
+        return UNREADABLE
     return digest.hexdigest()
 
 
@@ -193,13 +201,15 @@ class _Outline(HTMLParser):
             self._heading = None
 
 
-def _outline(zf, info) -> list[tuple[str, str]]:
-    if info is None:
+def _outline(zf, info, budget: list[int]) -> list[tuple[str, str]]:
+    """Headings/links of one page. `budget` = remaining HTML bytes for this import (shared, decremented)."""
+    if info is None or info.file_size > min(MAX_HTML_BYTES, budget[0]):
         return []
     try:
-        data = _read(zf, info, MAX_HTML_BYTES)
+        data = _read(zf, info, min(MAX_HTML_BYTES, budget[0]))
     except Exception:  # noqa: BLE001 - oversized/corrupt page: no metadata, never a failure
         return []
+    budget[0] -= len(data)
     parser = _Outline()
     try:
         parser.feed(data.decode('utf-8', 'replace'))
@@ -240,7 +250,8 @@ class CourseExport:
 
 def parse_export(zf: zipfile.ZipFile, limit: int) -> CourseExport:
     root, export_id, files = _validated(zf)
-    root_events = _outline(zf, files.get(f'{root}/index.html'))
+    html_budget = [MAX_HTML_TOTAL]
+    root_events = _outline(zf, files.get(f'{root}/index.html'), html_budget)
     course_name = next((text for tag, text in root_events if tag == 'h1' and text), None)
     sections: dict[str, str | None] = {}
     current: str | None = None
@@ -274,16 +285,16 @@ def parse_export(zf: zipfile.ZipFile, limit: int) -> CourseExport:
                 snap.errors += 1
             continue
         activity_id = match.group(1)
-        events = _outline(zf, pages.get(folder))
+        events = _outline(zf, pages.get(folder), html_budget)
         headings = [text for tag, text in events if tag in ('h1', 'h2', 'h3', 'h4') and text and text != course_name]
         title = (_text(headings[0], 300) if headings else None) or _fallback_name(folder)
         present = {'/'.join(i.filename.split('/')[3:]): i for i in contents.get(folder, [])}
-        listed = []
+        listed: dict[str, None] = {}  # ordered set
         for tag, value in events:
             target = _relative(value) if tag == 'a' else None
-            if target and target.startswith('content/') and target[len('content/'):] not in listed:
-                listed.append(target[len('content/'):])
-        missing = [rel for rel in listed if rel not in present]
+            if target and target.startswith('content/'):
+                listed.setdefault(target[len('content/'):], None)
+        missing = [rel for rel in listed if rel not in present][:MAX_LISTED_MISSING]
         entries = [(rel, present[rel]) for rel in sorted(present)] + [(rel, None) for rel in missing]
         if not entries:
             continue  # page/quiz/forum etc.: HTML only, never a material
@@ -301,6 +312,8 @@ def parse_export(zf: zipfile.ZipFile, limit: int) -> CourseExport:
                 snap.duplicates += 1
                 continue
             seen.add(identity)
+            if len(snap.files) >= MAX_FILES:
+                raise ZipImportError('too_many_entries', 413)
             material_type = material_type_for(file_name)
             digest = None
             if info is not None and material_type in STORABLE and info.file_size <= limit:

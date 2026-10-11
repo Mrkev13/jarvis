@@ -239,7 +239,7 @@ def _needs_download(row, remote: RemoteFile, limit: int) -> bool:
         return False
     if row is None or row.size_bytes != remote.size_bytes or row.source_modified_at != remote.source_modified_at:
         return True
-    if remote.content_sha256 is not None and row.checksum != remote.content_sha256:
+    if remote.content_sha256 is not None and row.download_status == 'stored' and row.checksum != remote.content_sha256:
         return True  # local bytes differ from the stored copy (same size, no usable timestamp)
     if row.download_status == 'failed' or row.material_type != remote.material_type:
         return True

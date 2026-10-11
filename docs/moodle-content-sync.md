@@ -174,10 +174,13 @@ domain events (`school.material.*`, Activity context `moodle_zip_import`), Searc
 
 **Archive safety.** The whole archive is validated before anything is read, and rejected on: absolute paths, drive
 letters, backslashes, `.`/`..`/empty path segments, control characters, over-long names, symlink entries, encrypted
-entries, duplicate (case-insensitive) names, more than 5000 entries, more than 4 GiB declared uncompressed in total,
+entries, exact duplicate names (case variants are distinct files), more than 5000 entries, more than 4 GiB declared uncompressed in total,
 or an entry above 1 MiB compressed more than 200×. The upload is streamed with a hard cap (`MOODLE_ZIP_MAX_MB`,
 default 512) into a spooled temp file that is deleted afterwards. Entries are read in memory with hard byte caps
-(HTML ≤ 1 MB, files ≤ `MOODLE_MAX_FILE_MB`) whatever their headers claim; a corrupt entry is a per-file `failed`.
+(HTML ≤ 1 MB per page and 64 MB per import – beyond that folder names are used; files ≤ `MOODLE_MAX_FILE_MB`)
+whatever their headers claim; a corrupt or unreadable entry (bad CRC, unsupported compression) is a per-file
+`failed`, never a failed import. At most 200 listed-but-absent links per activity become `metadata_only` rows and
+at most 5000 files are accepted per import (`too_many_entries`), which bounds rows, events and Activity per upload.
 Nothing is extracted to disk and nested archives are never opened. One import is one transaction: a failure rolls
 back everything.
 

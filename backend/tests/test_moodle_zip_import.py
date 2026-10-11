@@ -257,10 +257,109 @@ def test_symlink_encrypted_and_duplicate_entries_are_rejected(db):
     link.external_attr = (stat.S_IFLNK | 0o777) << 16
     encrypted = set_encrypted_flag(zip_with([f'{COURSE_DIR}/secret.pdf']), f'{COURSE_DIR}/secret.pdf')
     for data, category in ((zip_with([link]), 'symlink_entry'), (encrypted, 'encrypted_entry'),
-                           (zip_with([f'{COURSE_DIR}/A.pdf', f'{COURSE_DIR}/a.pdf']), 'duplicate_entry')):
+                           (exact_duplicate_zip(), 'duplicate_entry')):
         with pytest.raises(zip_import.ZipImportError) as error:
             run_import(db, data)
         assert error.value.category == category
+
+
+def exact_duplicate_zip():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')  # zipfile warns about the duplicate name it is told to write
+        return zip_with([f'{COURSE_DIR}/same.pdf', f'{COURSE_DIR}/same.pdf'])
+
+
+def test_case_variant_names_are_distinct_files_not_duplicates(db):
+    acts = {'Soubor_Case_.900061': ('Case', {'Notes.txt': b'Upper case synthetic', 'notes.txt': b'lower case synthetic'})}
+    stats = run_import(db, build_export(acts, sections=[('S', list(acts))]))
+    assert stats['created'] == 2 and {m.file_name for m in db.query(StudyMaterial).all()} == {'Notes.txt', 'notes.txt'}
+
+
+def corrupt_entry(data: bytes, name: str, *, method: int | None = None) -> bytes:
+    """Flip one byte of the entry's compressed data, or rewrite its compression method in both headers."""
+    import struct
+    raw, encoded = bytearray(data), name.encode()
+    start = raw.find(b'PK\x03\x04')
+    while start != -1:
+        name_len, extra_len = struct.unpack_from('<HH', raw, start + 26)
+        if raw[start + 30:start + 30 + name_len] == encoded:
+            if method is None:
+                raw[start + 30 + name_len + extra_len + 2] ^= 0xFF
+            else:
+                struct.pack_into('<H', raw, start + 8, method)
+        start = raw.find(b'PK\x03\x04', start + 4)
+    if method is not None:
+        start = raw.find(b'PK\x01\x02')
+        while start != -1:
+            name_len = struct.unpack_from('<H', raw, start + 28)[0]
+            if raw[start + 46:start + 46 + name_len] == encoded:
+                struct.pack_into('<H', raw, start + 10, method)
+            start = raw.find(b'PK\x01\x02', start + 4)
+    return bytes(raw)
+
+
+@pytest.mark.parametrize('method', [None, 9])  # corrupt deflate stream / unsupported Deflate64
+def test_one_unreadable_entry_fails_only_that_file(db, method):
+    name = f'{COURSE_DIR}/Sloka_Seminar_.900013/content/reading.txt'
+    stats = run_import(db, corrupt_entry(build_export(), name, method=method))
+    rows = materials(db)
+    assert rows['reading.txt'].download_status == 'failed' and rows['reading.txt'].stored_name is None
+    assert rows['lecture.pdf'].download_status == 'stored' and stats['created'] == 5
+
+
+def test_listed_missing_links_and_files_per_import_are_capped(db, monkeypatch):
+    links = [f'missing-{i}.pdf' for i in range(zip_import.MAX_LISTED_MISSING + 50)] * 2  # duplicates collapse
+    stats = run_import(db, build_export(listed_extra={'Soubor_Prednaska_1_.900011': links}))
+    assert stats['files_listed_missing'] == zip_import.MAX_LISTED_MISSING
+    assert db.query(StudyMaterial).filter_by(download_status='metadata_only').count() == zip_import.MAX_LISTED_MISSING
+    monkeypatch.setattr(zip_import, 'MAX_FILES', 3)
+    with pytest.raises(zip_import.ZipImportError) as error:
+        run_import(db, build_export(), now=LATER)
+    assert error.value.category == 'too_many_entries'
+
+
+def test_html_budget_falls_back_to_folder_names(db, monkeypatch):
+    monkeypatch.setattr(zip_import, 'MAX_HTML_TOTAL', 10)
+    stats = run_import(db, build_export())
+    course = db.query(StudyCourse).one()
+    assert stats['created'] == 5 and course.name == 'SYN101 SYN202 Synteticky kurz ...'
+    assert materials(db)['lecture.pdf'].title == 'Prednaska 1' and materials(db)['lecture.pdf'].section_name is None
+
+
+def test_rejected_files_are_not_reread_on_unchanged_reimport(db):
+    acts = {'Soubor_Fake_.900032': ('Fake', {'fake.pdf': b'MZ\x90\x00 not a pdf'})}
+    data = build_export(acts, sections=[('S', list(acts))])
+    run_import(db, data)
+    stats = run_import(db, data, now=LATER)
+    assert (stats['downloaded'], stats['file_rejected'], stats['unchanged']) == (0, 0, 1)
+
+
+def test_folder_wrapper_survives_an_unexpected_failure(db, tmp_path, monkeypatch, capsys):
+    import database
+    import importlib.util
+    folder = tmp_path / 'exports'
+    folder.mkdir()
+    (folder / 'a.zip').write_bytes(build_export())
+    (folder / 'b.zip').write_bytes(build_export())
+    monkeypatch.setattr(database, 'SessionLocal', lambda: db)
+    monkeypatch.setattr(db, 'close', lambda: None)
+    spec = importlib.util.spec_from_file_location('import_moodle_zips', os.path.join(
+        os.path.dirname(__file__), '..', 'scripts', 'import_moodle_zips.py'))
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    real = zip_import.import_course_export
+    calls = []
+
+    def flaky(session, handle):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError('internal C:/secret/entry/name')
+        return real(session, handle)
+    monkeypatch.setattr(zip_import, 'import_course_export', flaky)
+    assert script.main([str(folder)]) == 1
+    out = capsys.readouterr().out
+    assert 'a.zip: chyba (import_failed)' in out and 'b.zip: nové 5' in out and 'secret' not in out
 
 
 def test_name_guard_rejects_backslashes_drives_and_dot_segments():
