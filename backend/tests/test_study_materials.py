@@ -51,12 +51,16 @@ def make_pdf(text='Synthetic PDF lecture about photosynthesis'):
     return out.getvalue()
 
 
+FIXTURE_ZIP_TIME = (2026, 1, 1, 0, 0, 0)  # fixed entry timestamps: equal content -> equal bytes -> equal checksum
+
+
 def _zip(parts):
     buffer = io.BytesIO()
+    entries = {'[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+               **parts}
     with zipfile.ZipFile(buffer, 'w') as archive:
-        archive.writestr('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
-        for name, body in parts.items():
-            archive.writestr(name, body)
+        for name, body in entries.items():
+            archive.writestr(zipfile.ZipInfo(name, date_time=FIXTURE_ZIP_TIME), body)
     return buffer.getvalue()
 
 
@@ -702,3 +706,13 @@ def test_concurrent_identical_store_never_tears(tmp_path, monkeypatch):
     [t.join() for t in threads]
     assert len(set(names)) == 1 and storage.read(names[0]) == data
     assert sorted(p.name for p in (tmp_path / 'study-materials').iterdir()) == [names[0]], 'no temp files left'
+
+
+def test_office_fixtures_are_byte_deterministic(monkeypatch):
+    # Content checksums drive change detection, so a fixture must not depend on the wall clock: zipfile stamps
+    # entries with the current time (2 s resolution) and two builds straddling a boundary used to differ.
+    builds = []
+    for clock in (1_000_000_000, 1_000_000_010):
+        monkeypatch.setattr(zipfile.time, 'time', lambda clock=clock: clock)
+        builds.append((make_pptx('Slide'), make_docx('Paragraph')))
+    assert builds[0] == builds[1]
