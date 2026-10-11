@@ -505,3 +505,25 @@ def test_folder_wrapper_uses_the_same_core(db, tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'course-a.zip: nové 5' in out and 'broken.zip: chyba (archive_invalid)' in out and 'deep.zip' not in out
     assert db.query(StudyCourse).count() == 1
+
+
+def test_control_characters_never_reach_extracted_text(db, monkeypatch):
+    """PostgreSQL rejects NUL in text columns (SQLite does not): one PDF whose text layer yields NUL used to abort the
+    whole import. Simulate the PostgreSQL rule on flush and feed an extraction with NUL/control characters."""
+    from sqlalchemy import event
+    from modules.school import extract
+
+    def postgres_like(session, *_):
+        for obj in list(session.new) + list(session.dirty):
+            if isinstance(obj, StudyMaterial) and obj.extracted_text and '\x00' in obj.extracted_text:
+                raise ValueError('A string literal cannot contain NUL (0x00) characters.')
+    event.listen(db, 'before_flush', postgres_like)
+    try:
+        assert extract._finish(['Úvod\x00 do\x07 logiky\x1b', '\x7fstrana ⟦2⟧']).text == 'Úvod do logiky\nstrana ⟦2⟧'
+        real = extract.extract_text
+        monkeypatch.setattr(service, 'extract_text', lambda data, kind: extract._finish(['Synthetic\x00 text\x01 with NUL']) if kind == 'pdf' else real(data, kind))
+        stats = run_import(db, build_export())
+        row = materials(db)['lecture.pdf']
+        assert stats['created'] == 5 and row.extracted_text == 'Synthetic text with NUL'
+    finally:
+        event.remove(db, 'before_flush', postgres_like)
