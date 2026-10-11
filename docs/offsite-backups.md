@@ -42,7 +42,7 @@ When encryption is required:
 
 Before publication, the newly encrypted artifact is decrypted back into scratch and the complete DB/manifest/media checksum contract is verified again. Successful encryption alone is therefore never reported as a completed, restorable copy.
 
-This workstation has OpenSSL 3.3, but not `age`, `7z`, GPG or the PostgreSQL CLI tools. OpenSSL is not selected automatically because MRK-25 does not define a safe passphrase/key lifecycle for it. No global dependency was installed.
+When MRK-25 was built, the workstation had OpenSSL 3.3, but not `age`, `7z`, GPG or the PostgreSQL CLI tools (the production Windows machine now has the PostgreSQL 18 client tools). OpenSSL is not selected automatically because MRK-25 does not define a safe passphrase/key lifecycle for it. No global dependency was installed.
 
 ## Safe metadata and outcomes
 
@@ -77,7 +77,7 @@ The three sets are unioned by run ID. The newest valid completed run is always r
 
 Extraction rejects absolute paths, Windows drive paths, `..`, duplicate members, symlinks, hardlinks, devices, FIFOs and any resolved escape from scratch. Only regular files and directories are created. Verification never invokes production database tools and never writes to the production media directory.
 
-The current local drill is integrity-only because `psql`, `createdb`, `dropdb` and `pg_restore` are not available. A later local acceptance step may restore a **copy** into a uniquely named disposable PostgreSQL database, validate it, and drop it in a `finally` path. That operation must require an explicitly test/scratch connection and must never infer the production database as a destination.
+`verify_offsite_run` itself stays integrity-only. A full local database drill (restore of a local run into a disposable `standa_hub_restore_drill` database plus scratch media, application read checks, then cleanup) was performed on the production machine on 2026-10-11; procedure and result are in [backups.md](backups.md#obnova). A restore from an actual off-machine copy has not been performed yet. Any such step must restore a **copy** into a uniquely named disposable PostgreSQL database, validate it, and drop it in a `finally` path. That operation must require an explicitly test/scratch connection and must never infer the production database as a destination.
 
 ## MRK-23 and MRK-26 integration contract
 
