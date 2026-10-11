@@ -126,6 +126,75 @@ export function syncSummary(result: Record<string, number>): string {
   return `Materiály: ${parts.join(', ')}.${failed}`;
 }
 
+// ---------- MRK-56: ruční import ZIPu „Stáhnout obsah kurzu" (POST /school/materials/import-zip) ----------
+
+export const ZIP_IMPORT_PATH = '/school/materials/import-zip';
+
+/** Jen soubor s příponou .zip a nenulovou velikostí (MIME typ prohlížeče u ZIPu nebývá spolehlivý). */
+export function isZipFile(file: { name: string; size: number }): boolean {
+  return /\.zip$/i.test(file.name) && file.size > 0;
+}
+
+// Backend vrací jen kategorii chyby; text pro člověka je tady (nikdy surové tělo odpovědi).
+const IMPORT_ERRORS: Record<string, string> = {
+  archive_invalid: 'Soubor není platný ZIP.',
+  archive_too_large: 'ZIP je příliš velký.',
+  unsupported_media_type: 'Soubor není ZIP.',
+  not_course_export: 'Tohle nevypadá jako export kurzu z Moodle („Stáhnout obsah kurzu“).',
+  unsafe_path: 'ZIP obsahuje nebezpečné cesty k souborům – import byl odmítnut.',
+  symlink_entry: 'ZIP obsahuje odkazy na jiné soubory – import byl odmítnut.',
+  encrypted_entry: 'ZIP obsahuje šifrované soubory – import byl odmítnut.',
+  duplicate_entry: 'ZIP obsahuje duplicitní soubory – import byl odmítnut.',
+  too_many_entries: 'ZIP obsahuje příliš mnoho souborů.',
+  uncompressed_too_large: 'Rozbalený obsah ZIPu je příliš velký.',
+  compression_ratio: 'ZIP má podezřele vysoký kompresní poměr – import byl odmítnut.',
+  import_failed: 'Import se nepovedl. Uložené materiály zůstaly beze změny.',
+};
+const IMPORT_GENERIC = 'Import se nepovedl. Uložené materiály zůstaly beze změny.';
+
+export function importErrorMessage(category: unknown): string {
+  return typeof category === 'string' && Object.hasOwn(IMPORT_ERRORS, category) ? IMPORT_ERRORS[category] : IMPORT_GENERIC;
+}
+
+export function importSummary(result: Record<string, unknown>): string {
+  const n = (key: string) => (typeof result[key] === 'number' ? (result[key] as number) : 0);
+  const extra = [
+    n('file_unsupported') ? `nepodporované soubory ${n('file_unsupported')}` : null,
+    n('files_listed_missing') ? `v ZIPu chybí ${n('files_listed_missing')}` : null,
+  ].filter(Boolean);
+  return `Import hotový: nové ${n('created')}, změněné ${n('updated')}, beze změny ${n('unchanged')}`
+    + (extra.length ? ` (${extra.join(', ')})` : '') + '.';
+}
+
+export type ImportOutcome = { ok: true; summary: string } | { ok: false; message: string };
+type Fetcher = (path: string, init: RequestInit) => Promise<Response>;
+
+/** Pošle ZIP jako tělo požadavku. Vrací jen bezpečný český text – nikdy tělo chyby ze serveru. */
+export async function uploadMoodleZip(file: Blob & { name: string; size: number }, fetcher: Fetcher): Promise<ImportOutcome> {
+  if (!isZipFile(file)) return { ok: false, message: 'Vyber soubor .zip stažený z Moodle („Stáhnout obsah kurzu“).' };
+  let res: Response;
+  try {
+    res = await fetcher(ZIP_IMPORT_PATH, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
+  } catch {
+    return { ok: false, message: 'Import se nepovedl – server je nedostupný. Uložené materiály zůstaly beze změny.' };
+  }
+  if (res.ok) {
+    try {
+      return { ok: true, summary: importSummary((await res.json()) as Record<string, unknown>) };
+    } catch {
+      return { ok: true, summary: 'Import hotový.' };
+    }
+  }
+  let category: unknown = null;
+  try {
+    const body = (await res.json()) as { detail?: { category?: unknown } };
+    category = body?.detail?.category;
+  } catch {
+    // ne-JSON tělo (proxy/HTML) – obecná hláška
+  }
+  return { ok: false, message: importErrorMessage(category) };
+}
+
 // ---------- MRK-44: cílené čtení jednoho materiálu (GET /school/materials/{id}/content) ----------
 
 export type TextStatus = 'available' | 'empty' | 'failed' | 'unsupported' | 'not_downloaded';

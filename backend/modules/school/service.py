@@ -62,6 +62,9 @@ class RemoteFile:
     size_bytes: int | None
     source_modified_at: datetime | None
     file_url: str | None  # transient – never stored, logged or returned
+    # MRK-56: sha256 of the bytes when the source has them locally (ZIP export); detects content changes that keep
+    # size and timestamp (export timestamps are the export time). None for Web Services (no download to compare).
+    content_sha256: str | None = None
 
 
 @dataclass
@@ -166,21 +169,25 @@ def _course_filter() -> set[str] | None:
     return {part.strip() for part in raw.split(',') if part.strip()} or None if raw else None
 
 
-def _course_row(db, external_id: str, name: str, short_name: str | None, now) -> StudyCourse:
+SOURCE_LABELS = {'moodle': 'Moodle kurz nalezen', 'moodle_export': 'Moodle kurz importován ze ZIPu'}
+
+
+def _course_row(db, external_id: str, name: str, short_name: str | None, now, *, source: str = 'moodle',
+                context: str = 'moodle_sync') -> StudyCourse:
     insert = postgres_insert if db.get_bind().dialect.name == 'postgresql' else sqlite_insert
-    result = db.execute(insert(StudyCourse).values(source='moodle', external_id=external_id, name=name,
+    result = db.execute(insert(StudyCourse).values(source=source, external_id=external_id, name=name,
                                                    short_name=short_name, created_at=now, updated_at=now)
                         .on_conflict_do_nothing(index_elements=['source', 'external_id']))
-    # row lock: concurrent syncs of one course serialize here until commit
-    course = (db.query(StudyCourse).filter_by(source='moodle', external_id=external_id)
+    # row lock: concurrent syncs/imports of one course serialize here until commit
+    course = (db.query(StudyCourse).filter_by(source=source, external_id=external_id)
               .populate_existing().with_for_update().one())
     if result.rowcount == 1:
-        log_activity(db, 'school', 'create', f'Moodle kurz nalezen: {name}', entity_type='study_course',
-                     entity_id=course.id, user_context='moodle_sync')
+        log_activity(db, 'school', 'create', f'{SOURCE_LABELS[source]}: {name}', entity_type='study_course',
+                     entity_id=course.id, user_context=context)
     return course
 
 
-def _event(db, row, action: str, now, delta: dict, changed: list[str]):
+def _event(db, row, action: str, now, delta: dict, changed: list[str], context: str = 'moodle_sync'):
     labels = {'created': ('create', 'Nový studijní materiál'), 'updated': ('update', 'Studijní materiál změněn'),
               'source_missing': ('source_missing', 'Materiál zmizel z Moodlu'),
               'restored': ('restore', 'Materiál je zpět v Moodlu')}
@@ -190,7 +197,7 @@ def _event(db, row, action: str, now, delta: dict, changed: list[str]):
         payload={'material_id': row.id, 'course_id': row.course_id, 'material_type': row.material_type,
                  'download_status': row.download_status, 'changed': changed},
         activity=ActivityProjection('school', activity_action, f'{label}: {row.title}', 'study_material', row.id,
-                                    delta or None, 'moodle_sync'))
+                                    delta or None, context))
 
 
 def _is_error_body(data: bytes) -> bool:
@@ -232,6 +239,8 @@ def _needs_download(row, remote: RemoteFile, limit: int) -> bool:
         return False
     if row is None or row.size_bytes != remote.size_bytes or row.source_modified_at != remote.source_modified_at:
         return True
+    if remote.content_sha256 is not None and row.download_status == 'stored' and row.checksum != remote.content_sha256:
+        return True  # local bytes differ from the stored copy (same size, no usable timestamp)
     if row.download_status == 'failed' or row.material_type != remote.material_type:
         return True
     if row.download_status == 'too_large' and remote.size_bytes is not None and remote.size_bytes <= limit:
@@ -239,7 +248,8 @@ def _needs_download(row, remote: RemoteFile, limit: int) -> bool:
     return row.download_status == 'stored' and not storage.exists(row.stored_name)
 
 
-def _apply_file(db, course: StudyCourse, remote: RemoteFile, client, limit: int, now, stats):
+def _apply_file(db, course: StudyCourse, remote: RemoteFile, client, limit: int, now, stats,
+                context: str = 'moodle_sync'):
     row = (db.query(StudyMaterial).filter_by(course_id=course.id, external_id=remote.external_id)
            .populate_existing().one_or_none())
     restoring = row is not None and row.source_missing_at is not None
@@ -286,7 +296,7 @@ def _apply_file(db, course: StudyCourse, remote: RemoteFile, client, limit: int,
         delta['source'] = {'old': 'missing', 'new': 'present'}
     action = 'created' if created else ('restored' if restoring else 'updated')
     stats[action] += 1
-    _event(db, row, action, now, delta, [c for c in changed if c not in ('extracted_text', 'extracted_at')])
+    _event(db, row, action, now, delta, [c for c in changed if c not in ('extracted_text', 'extracted_at')], context)
 
 
 def _audit(value):
@@ -371,22 +381,26 @@ def sync_materials(db, *, client=None, now=None) -> dict:
     return stats
 
 
-def _sync_course(db, external_id, name, short_name, snap, client, limit, now, stats):
-    course = _course_row(db, external_id, name, short_name, now)
+def _sync_course(db, external_id, name, short_name, snap, client, limit, now, stats, *, source='moodle',
+                 context='moodle_sync'):
+    """Shared core for one course snapshot (Web Services sync and ZIP import alike). Reconciles presence only for
+    a complete snapshot; an incomplete one adds/updates and never marks anything missing."""
+    course = _course_row(db, external_id, name, short_name, now, source=source, context=context)
     if (course.name, course.short_name) != (name, short_name):
         delta = {'name': {'old': course.name, 'new': name}} if course.name != name else {}
         course.name, course.short_name, course.updated_at = name, short_name, now
         db.flush()
         log_activity(db, 'school', 'update', f'Moodle kurz přejmenován: {name}', entity_type='study_course',
-                     entity_id=course.id, delta=delta or None, user_context='moodle_sync')
+                     entity_id=course.id, delta=delta or None, user_context=context)
     stats['errors'] += snap.errors
     stats['duplicates'] += snap.duplicates
     for remote in snap.files:
-        _apply_file(db, course, remote, client, limit, now, stats)
+        _apply_file(db, course, remote, client, limit, now, stats, context)
     if snap.complete:
         _reconcile(db, course, snap, now, stats)
     else:
         stats['courses_incomplete'] += 1
+    return course
 
 
 # ---------- read model & manual mapping ----------

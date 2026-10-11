@@ -295,3 +295,57 @@ def test_missing_override_reverts_to_the_generated_instance_and_master_missing_h
                        'RRULE:FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2;COUNT=4\nSUMMARY:Synthetic seminar')
     imported(db, source, only_seminar)
     assert {o.title for o in between(db, date(2026, 10, 1), date(2026, 12, 1))} == {'Synthetic seminar'}
+
+
+# ---------- Search policy: only currently relevant facts ----------
+
+def _search_titles(db):
+    return sorted(title for _type, _id, title, *_rest in integrations.search_events(db, 'lecture'))
+
+
+def test_search_shows_active_events_hides_source_missing_and_shows_restored_again(db, source):
+    imported(db, source, feed('presence-a.ics'))
+    assert _search_titles(db) == ['Synthetic dropped lecture', 'Synthetic kept lecture'], 'active events appear'
+
+    imported(db, source, feed('presence-b.ics'))
+    dropped = db.query(CalendarEvent).filter_by(external_uid='drop@test.invalid').one()
+    assert dropped.source_missing_at is not None
+    assert _search_titles(db) == ['Synthetic kept lecture'], 'source-missing event is not a search result'
+    assert db.query(CalendarEvent).count() == 2, 'the durable row is kept, only hidden from Search'
+
+    imported(db, source, feed('presence-a.ics'))
+    assert dropped.source_missing_at is None
+    assert _search_titles(db) == ['Synthetic dropped lecture', 'Synthetic kept lecture'], 'restored event appears again'
+
+
+def _event(uid, title, start, extra=''):
+    lines = [f'UID:{uid}', f'SUMMARY:{title}', f'DTSTART;TZID=Europe/Prague:{start}',
+             f'DTEND;TZID=Europe/Prague:{start[:9]}{int(start[9:11]) + 1:02d}{start[11:]}']
+    return '\n'.join(lines + ([extra] if extra else []))
+
+
+def test_search_hides_cancelled_events_through_global_search(db, source):
+    import search_service
+
+    imported(db, source, ics(_event('cancel-me@test.invalid', 'Synthetic cancelled seminar', '20261012T090000'),
+                             _event('stay@test.invalid', 'Synthetic staying seminar', '20261012T110000')))
+
+    def found():
+        result = search_service.search(db, 'seminar', access=ModuleAccess({'calendar': True}))
+        return sorted(r['title'] for r in result['results'] if r['type'] == 'calendar_event')
+
+    assert found() == ['Synthetic cancelled seminar', 'Synthetic staying seminar']
+    imported(db, source, ics(_event('cancel-me@test.invalid', 'Synthetic cancelled seminar', '20261012T090000',
+                                   extra='STATUS:CANCELLED\nSEQUENCE:1'),
+                             _event('stay@test.invalid', 'Synthetic staying seminar', '20261012T110000')))
+    cancelled = db.query(CalendarEvent).filter_by(external_uid='cancel-me@test.invalid').one()
+    assert cancelled.status == 'cancelled' and cancelled.source_missing_at is None
+    assert found() == ['Synthetic staying seminar'], 'cancelled event is not a search result'
+    assert db.query(CalendarEvent).count() == 2, 'the cancelled row is kept as history'
+
+
+def test_synthetic_fixtures_are_checked_out_byte_exact():
+    # .gitattributes keeps these LF-stored fixtures from being converted to CRLF on Windows checkouts; tests that
+    # edit fixture bytes (e.g. removing an override) would otherwise silently compare unchanged feeds.
+    for path in FIXTURES.glob('*.ics'):
+        assert b'\r\n' not in path.read_bytes(), f'{path.name} was checked out with converted line endings'

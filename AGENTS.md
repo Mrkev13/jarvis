@@ -15,7 +15,8 @@ a navrhuje změny, které uživatel potvrzuje. Jediný uživatel, česky psané 
   nový modul: [docs/module-framework.md](docs/module-framework.md) +
   [docs/module-integration-checklist.md](docs/module-integration-checklist.md) (pilot: Návyky) ·
   události: [docs/domain-events.md](docs/domain-events.md) ·
-  UI: [docs/design-system.md](docs/design-system.md).
+  UI: [docs/design-system.md](docs/design-system.md) ·
+  externí služby a zdroje pravdy: [docs/home-server.md](docs/home-server.md).
 - Roadmapa a úkoly: Linear, projekt **Standa Hub** (tým MRK). GitHub = zdroj pravdy pro kód.
 
 ## Setup (idempotentní)

@@ -35,8 +35,15 @@ class Extraction:
     text: str | None
 
 
+# C0 control characters other than tab/newline/CR/FF/VT (those are normalised as whitespace below) and DEL.
+# NUL in particular: PDF text layers can contain it, SQLite stores it, PostgreSQL rejects it in text columns – one
+# such file used to abort the whole sync/import transaction.
+_CONTROL = re.compile(r'[\x00-\x08\x0e-\x1f\x7f]')
+
+
 def _finish(parts) -> Extraction:
-    text = re.sub(r'[ \t\r\f\v]+', ' ', '\n'.join(p for p in parts if p)).strip()
+    text = _CONTROL.sub('', '\n'.join(p for p in parts if p))
+    text = re.sub(r'[ \t\r\f\v]+', ' ', text).strip()
     text = re.sub(r'\n{3,}', '\n\n', text)
     if not text:
         return Extraction('empty', None)

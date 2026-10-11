@@ -13,6 +13,9 @@ const PORT = Number(process.env.MOCK_API_PORT || 8000);
 const DELAY_MS = Number(process.env.MOCK_API_DELAY_MS || 0); // simulace pomalé sítě pro skeletony
 const ACTION_DELAY_MS = 700; // akce trvají chvíli, aby byl vidět busy stav
 
+// MRK-56: přijaté importy ZIPu (jen velikosti) – materials-import-check ověřuje, že UI posílá syrový ZIP.
+const materialImports = [];
+
 const GET_ROUTES = {
   "/dashboard": () => fixture("dashboard"),
   "/briefing/today": () => fixture("briefing"),
@@ -34,6 +37,7 @@ const GET_ROUTES = {
   "/school/exams": () => schoolState.exams,
   // MRK-42: studijní materiály (syntetické, žádná URL Moodlu ani token)
   "/school/materials": () => fixture("school-materials"),
+  "/__mock/materials/imports": () => materialImports,  // MRK-56: velikosti přijatých ZIPů (kontrola UI)
   "/school/materials/1": () => fixture("school-material-1"),
   "/school/materials/1/content": () => fixture("school-material-1-content"),  // MRK-44 (dotaz ?q= se ignoruje)
   "/work/sessions": () => fixture("work-sessions"),
@@ -586,6 +590,16 @@ createServer(async (req, res) => {
     if (url.pathname.startsWith("/weekly-review/week/")) return respond(200, fixture("weekly-review"));
     const route = GET_ROUTES[url.pathname];
     return route ? respond(200, route()) : respond(404, { detail: "Mock: neznámá cesta" });
+  }
+  // MRK-56: import ZIPu – syntetická odpověď: tělo začínající „PK" = úspěch, jinak allowlistovaná kategorie chyby.
+  if (url.pathname === "/school/materials/import-zip" && req.method === "POST") {
+    const data = req.rawBody ?? Buffer.alloc(0);
+    materialImports.push(data.length);
+    if (data.subarray(0, 2).toString("latin1") !== "PK") {
+      return respond(400, { detail: { category: "not_course_export" } }, ACTION_DELAY_MS);
+    }
+    return respond(200, { courses: 1, created: 3, updated: 0, unchanged: 1, file_unsupported: 1, files_listed_missing: 0,
+      completeness: "unproven" }, ACTION_DELAY_MS);
   }
   // Zápisy: úspěch po krátké prodlevě (UI ukáže busy stav), data se nemění.
   return respond(200, {}, ACTION_DELAY_MS);

@@ -1,17 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Button, ButtonLink, Card, CardHeader, ContentContainer, EmptyState, EntityList, EntityRow, ErrorState, FilterBar,
   FilterSelect, LoadingState, PageHeader, StatusBadge, buttonClass,
 } from '@/components/ui';
 import { useApiResource } from '@/hooks/useApiResource';
-import { apiJson, apiUrl, errorMessage, jsonBody } from '@/lib/api';
+import { apiFetch, apiJson, apiUrl, errorMessage, jsonBody } from '@/lib/api';
 import { MaterialReader } from './MaterialReader';
 import {
   STATE_OPTIONS, TYPE_OPTIONS, activeFilterCount, fileState, materialMeta, materialsPath, parseFilters, syncSummary,
-  textStatusLabel, typeLabel, type MaterialFilters, type MaterialsPayload, type StudyCourse, type StudyMaterial,
+  textStatusLabel, typeLabel, uploadMoodleZip, type MaterialFilters, type MaterialsPayload, type StudyCourse,
+  type StudyMaterial,
 } from './materialsLib';
 
 type MaterialDetail = StudyMaterial & { extracted_chars: number };
@@ -71,6 +72,23 @@ export default function MaterialsPage() {
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const zipInput = useRef<HTMLInputElement>(null);
+
+  async function importZip(file: File | undefined) {
+    if (zipInput.current) zipInput.current.value = '';  // stejný soubor lze vybrat znovu
+    if (!file) return;
+    setImporting(true); setSyncError(null); setNotice(null);
+    try {
+      const outcome = await uploadMoodleZip(file, apiFetch);
+      if (outcome.ok) {
+        setNotice(outcome.summary);
+        await materials.reload();
+      } else {
+        setSyncError(outcome.message);
+      }
+    } finally { setImporting(false); }
+  }
 
   function setFilters(next: Partial<MaterialFilters>) {
     const merged = { ...filters, ...next };
@@ -99,14 +117,20 @@ export default function MaterialsPage() {
     <PageHeader title="Studijní materiály" subtitle="Soubory z kurzů v Moodlu – prezentace, PDF a dokumenty."
       actions={<>
         <ButtonLink href="/school" variant="ghost">Zpět do Školy</ButtonLink>
-        <Button variant="secondary" busy={syncing} disabled={!data?.configured} onClick={() => void sync()}>Synchronizovat</Button>
+        <input ref={zipInput} id="moodle-zip-input" type="file" accept=".zip,application/zip" className="sr-only"
+          tabIndex={-1} aria-label="Soubor ZIP s obsahem kurzu z Moodle" data-testid="moodle-zip-input"
+          onChange={event => void importZip(event.target.files?.[0])} />
+        <Button variant="secondary" busy={importing} disabled={syncing} aria-controls="moodle-zip-input"
+          onClick={() => zipInput.current?.click()}>Importovat ZIP z Moodle</Button>
+        <Button variant="secondary" busy={syncing} disabled={!data?.configured || importing} onClick={() => void sync()}>Synchronizovat</Button>
       </>} />
     {notice ? <p role="status" className="text-sm text-ink-muted">{notice}</p> : null}
     {syncError ? <ErrorState message={syncError} /> : null}
     {materials.loading ? <LoadingState lines={4} /> : null}
     {materials.error ? <ErrorState message="Materiály se nepodařilo načíst." onRetry={() => void materials.reload()} /> : null}
     {data ? <>
-      {!data.configured ? <EmptyState>Moodle ještě není připojený (nastavuje se jen na serveru). Uložené materiály můžeš dál prohlížet.</EmptyState> : null}
+      {!data.configured ? <EmptyState>Moodle ještě není připojený (nastavuje se jen na serveru). Materiály můžeš nahrát
+        importem ZIPu – v kurzu v Moodlu zvol „Stáhnout obsah kurzu“ a pak „Importovat ZIP z Moodle“.</EmptyState> : null}
       {selectedDetail ? <Card>
         <CardHeader title="Vybraný materiál" />
         <EntityList label="Vybraný materiál"><MaterialRow m={selectedDetail} /></EntityList>
