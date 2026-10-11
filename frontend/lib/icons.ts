@@ -47,6 +47,7 @@ export const ICONS = {
   refresh: [p("M20 11a8 8 0 1 0-2.3 5.7"), p("M20 4v7h-7")],
   mic: [r(9, 3, 6, 11, 3), p("M5 11a7 7 0 0 0 14 0"), p("M12 18v3")],
   volume: [p("M4 9v6h4l5 4V5L8 9H4Z"), p("M16.5 9a4 4 0 0 1 0 6"), p("M19 6.5a7.5 7.5 0 0 1 0 11")],
+  paw: [c(7, 7, 2), c(12, 5.5, 2), c(17, 7, 2), c(19, 12, 1.75), p("M7.5 17.5c0-3 2-5.5 4.5-5.5s4.5 2.5 4.5 5.5c0 2-1.5 3-4.5 3s-4.5-1-4.5-3Z")],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof ICONS;
