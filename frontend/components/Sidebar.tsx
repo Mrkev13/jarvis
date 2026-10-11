@@ -1,6 +1,7 @@
 "use client";
 
 import { Icon } from "@/components/ui/Icon";
+import { CharlieMemorial, CharlieMemorialButton, CharlieMemorialDialog } from "@/components/CharlieMemorial";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -82,6 +83,8 @@ function Brand({ as: Tag = "div" }: { as?: "div" | "p" }) {
 
 export function MobileHeader() {
   const [open, setOpen] = useState(false);
+  const [memorialOpen, setMemorialOpen] = useState(false);
+  const [restoreMemorialFocus, setRestoreMemorialFocus] = useState(false);
   // Po navigaci z menu se fokus nevrací na ☰, ale přesune do obsahu nové stránky.
   // navFrom = cesta, ze které uživatel v menu klikl (null = menu se zavřelo jinak).
   const [navFrom, setNavFrom] = useState<string | null>(null);
@@ -133,7 +136,13 @@ export function MobileHeader() {
         title="Menu"
         width="sm"
         restoreFocus={navFrom === null}
-        initialFocus={() => document.querySelector<HTMLElement>('[data-drawer-nav] a[aria-current="page"]')}
+        initialFocus={() => {
+          if (restoreMemorialFocus) {
+            queueMicrotask(() => setRestoreMemorialFocus(false));
+            return document.querySelector<HTMLElement>('[data-mobile-charlie] button');
+          }
+          return document.querySelector<HTMLElement>('[data-drawer-nav] a[aria-current="page"]');
+        }}
       >
         <div className="p-4" data-drawer-nav>
           <Sidebar
@@ -143,8 +152,23 @@ export function MobileHeader() {
               setOpen(false);
             }}
           />
+          <div className="mt-6 border-t border-line pt-3" data-mobile-charlie>
+            <CharlieMemorialButton onOpen={() => {
+              setOpen(false);
+              setMemorialOpen(true);
+            }} />
+          </div>
         </div>
       </Drawer>
+      <CharlieMemorialDialog
+        open={memorialOpen}
+        restoreFocus={false}
+        onClose={() => {
+          setMemorialOpen(false);
+          setRestoreMemorialFocus(true);
+          setOpen(true);
+        }}
+      />
     </>
   );
 }
@@ -162,8 +186,9 @@ export function DesktopSidebar() {
         <QuickAddButton variant="field" />
       </div>
       <Sidebar />
-      <div className="mt-auto hidden border-t border-line pt-3 lg:block">
-        <JarvisCompanionToggle />
+      <div className="mt-auto flex items-end justify-between gap-2 border-t border-line pt-3">
+        <div className="hidden lg:block"><JarvisCompanionToggle /></div>
+        <CharlieMemorial />
       </div>
     </aside>
   );
