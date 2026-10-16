@@ -62,7 +62,7 @@ STEP_0017_EXTRA = {"habits", "habit_entries"}  # MRK-21 Návyky
 STEP_0018_EXTRA = {"domain_events"}  # MRK-19
 STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
 STEP_0021_EXTRA = {"study_courses", "study_materials"}  # MRK-42
-STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
+STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
 STEP_0024_EXTRA = {"offsite_backup_runs"}  # MRK-57 off-machine backup history
 
 

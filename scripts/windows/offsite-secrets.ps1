@@ -15,6 +15,8 @@ $ErrorActionPreference = 'Stop'
 function Set-ProtectedAcl([string]$Path) {
     $acl = Get-Acl -LiteralPath $Path
     $acl.SetAccessRuleProtection($true, $false)   # no inheritance; drop inherited Users/Authenticated Users
+    # Owner = Administrators: a pre-existing file owned by a standard user would otherwise let that user re-grant itself.
+    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')))
     foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
     $isDir = (Get-Item -LiteralPath $Path).PSIsContainer
     $inherit = if ($isDir) { 'ContainerInherit,ObjectInherit' } else { 'None' }
@@ -29,7 +31,9 @@ function Test-ProtectedAcl([string]$Path) {
     $acl = Get-Acl -LiteralPath $Path
     $sids = @($acl.Access | ForEach-Object {
         try { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { 'unknown' } })
-    return $acl.AreAccessRulesProtected -and -not ($sids | Where-Object { $_ -notin @('S-1-5-18', 'S-1-5-32-544') })
+    $owner = try { (New-Object System.Security.Principal.NTAccount($acl.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { 'unknown' }
+    return $acl.AreAccessRulesProtected -and ($owner -in @('S-1-5-18', 'S-1-5-32-544')) -and
+        -not ($sids | Where-Object { $_ -notin @('S-1-5-18', 'S-1-5-32-544') })
 }
 
 $template = @'

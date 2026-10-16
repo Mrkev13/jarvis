@@ -129,8 +129,9 @@ def test_successful_upload_of_the_verified_run_only(setup, db):
     row = db.query(OffsiteBackupRun).one()
     assert (row.status, row.outcome, row.source_backup_id, row.source_run) == ("success", "success", setup["log"].id, RUN_ID)
     assert row.snapshot_id.startswith("abc123") and (row.files_new, row.bytes_added) == (3, 1234)
-    assert fake.commands() == ["unlock", "snapshots", "backup"]
-    backup = fake.calls[-1]
+    assert fake.commands() == ["unlock", "snapshots", "backup", "tag", "snapshots"]
+    backup = fake.calls[2]
+    assert fake.calls[3]["args"][1:] == ["tag", "--add", "complete", "abc123" * 6]   # only after a clean exit
     assert backup["cwd"] == setup["backup_dir"]
     assert sorted(fake.listing) == sorted([f"runs/backup_{RUN_ID}.json", f"standa_hub_{RUN_ID}.pgdump.gz",
                                            f"media/manifests/media_{RUN_ID}.json",
@@ -276,8 +277,8 @@ def test_interrupted_running_row_expires_and_upload_retries(setup, db):
 def test_first_success_runs_sampled_check_then_prune_and_later_only_metadata_checks(setup, db):
     fake = ok_restic()
     assert off.run_scheduled(db, fake, env=setup["env"]) == "success"
-    assert fake.commands() == ["unlock", "snapshots", "backup", "check", "forget"]
-    assert fake.calls[3]["args"][2:] == ["--read-data-subset", off.DATA_SUBSET]
+    assert fake.commands() == ["unlock", "snapshots", "backup", "tag", "snapshots", "check", "forget"]
+    assert fake.calls[5]["args"][2:] == ["--read-data-subset", off.DATA_SUBSET]
     # Next hour: already uploaded, maintenance not due, metadata check not due either.
     nxt = ok_restic()
     assert off.run_scheduled(db, nxt, env=setup["env"]) == "already_uploaded" and nxt.calls == []
@@ -294,6 +295,9 @@ def test_failed_check_blocks_prune_and_degrades(setup, db, engine):
     fake = ok_restic(check=off.ResticResult(1, "", "Fatal: repository contains errors"))
     off.run_scheduled(db, fake, env=setup["env"])
     assert "forget" not in fake.commands()
+    # Cadence follows the last ATTEMPT: a failing check is not repeated every hour (no hourly 5 % data reads).
+    again = ok_restic()
+    assert off.run_scheduled(db, again, env=setup["env"]) == "already_uploaded" and again.calls == []
     assert db.query(OffsiteBackupRun).filter_by(operation="check").one().outcome == "check_failed"
     with engine.connect() as conn:
         section = off.health_section(conn, datetime.now(timezone.utc), env=setup["env"])
@@ -438,8 +442,9 @@ def test_real_restic_backup_idempotency_and_verified_restore(setup, db, tmp_path
     db.query(OffsiteBackupRun).delete()   # lose the record → the tagged snapshot is found, not re-uploaded
     db.commit()
     assert off.backup_latest(db, config) == "already_uploaded"
-    result = off.Restic(config).run("snapshots", "--json", "--tag", off.TAG)
-    assert len(json.loads(result.stdout)) == 1
+    snaps = json.loads(off.Restic(config).run("snapshots", "--json", "--tag", off.TAG).stdout)
+    assert len(snaps) == 1 and "complete" in snaps[0]["tags"] and f"run:{RUN_ID}" in snaps[0]["tags"]
+    assert db.query(OffsiteBackupRun).filter_by(status="success").first().snapshot_id == snaps[0]["id"]
     assert off.check(db, config, read_data=True) == "success"
     assert off.prune(db, config) == "success"
     with patch.dict(os.environ, {"MEDIA_DIR": str(tmp_path / "media-live")}):
@@ -448,3 +453,49 @@ def test_real_restic_backup_idempotency_and_verified_restore(setup, db, tmp_path
     assert restored.read_bytes() == b"%PDF synthetic"
     with pytest.raises(off.OffsiteConfigError):
         off._restore(config, setup["backup_dir"] / "inside", "latest")   # never into BACKUP_DIR
+
+
+# ---------- review regressions (MRK-57 review H1/M3/M4) ----------
+
+def test_partial_snapshot_is_never_counted_as_uploaded(setup, db):
+    # restic exit 3 = snapshot created but some files unreadable (e.g. a locked file). It carries the run tag.
+    partial = ok_restic(backup=off.ResticResult(3, SUMMARY + "\n", "error: open media: Access is denied"))
+    assert off.backup_latest(db, setup["config"], partial) == "source_incomplete"
+    assert "tag" not in partial.commands(), "partial snapshot is not marked complete"
+    # Next cycle: the lookup filters on the `complete` tag, so it uploads again instead of reusing the partial one.
+    retry = ok_restic()
+    assert off.backup_latest(db, setup["config"], retry) == "success"
+    lookup = next(c for c in retry.calls if c["args"][1] == "snapshots")["args"]
+    assert lookup[-1] == f"standa-hub,run:{RUN_ID},complete" and "backup" in retry.commands()
+
+
+def test_snapshot_without_complete_mark_is_retried(setup, db):
+    fake = ok_restic(tag=off.ResticResult(1, "", "connection reset by peer"))
+    assert off.backup_latest(db, setup["config"], fake) == "network_unavailable"
+    assert db.query(OffsiteBackupRun).one().status == "failed"
+
+
+def test_utf16_secrets_file_is_misconfigured_not_a_silent_running_row(setup, db):
+    Path(setup["env"]["OFFSITE_SECRETS_FILE"]).write_text("RESTIC_REPOSITORY=s3:https://x/y\n", encoding="utf-16")
+    assert off.backup_latest(db, setup["config"], ok_restic()) == "misconfigured"
+    assert db.query(OffsiteBackupRun).filter_by(status="running").count() == 0
+
+
+def test_unexpected_error_still_finishes_the_attempt(setup, db):
+    def explode(args, env, cwd, timeout):
+        raise RuntimeError("unexpected")
+    assert off.backup_latest(db, setup["config"], explode) == "restic_failed"
+    row = db.query(OffsiteBackupRun).one()
+    assert (row.status, row.outcome) == ("failed", "restic_failed") and row.finished_at is not None
+    assert db.query(Notification).filter_by(dedupe_key="offsite:backup", resolved=False).count() == 1
+
+
+def test_one_deadline_bounds_the_whole_cycle(setup, db):
+    import time
+    fake = ok_restic()
+    assert off.backup_latest(db, setup["config"], fake, deadline=time.monotonic() - 1) == "timeout"
+    assert fake.calls == [], "no restic call once the cycle deadline has passed"
+    seen = []
+    off.backup_latest(db, setup["config"], lambda a, e, c, t: seen.append(t) or off.ResticResult(0, "[]", ""),
+                      deadline=time.monotonic() + 120)
+    assert seen and max(seen) <= 120, "each call gets only the remaining cycle time"

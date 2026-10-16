@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -92,8 +93,8 @@ def read_secrets(path: Path, *, allow_local: bool = False) -> dict[str, str]:
     """KEY=VALUE file with an allowlist; values never leave this process except into restic's environment."""
     try:
         lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
-        raise OffsiteConfigError("secrets file unreadable") from None
+    except (OSError, ValueError):   # ValueError covers UnicodeDecodeError (e.g. saved as UTF-16 by an editor)
+        raise OffsiteConfigError("secrets file unreadable (expected UTF-8 KEY=VALUE lines)") from None
     values: dict[str, str] = {}
     for line in lines:
         line = line.strip()
@@ -171,16 +172,24 @@ def classify(result: ResticResult) -> str:
 
 
 class Restic:
-    def __init__(self, config: OffsiteConfig, runner: Runner = _subprocess_runner, *, maintenance: bool = False):
+    """One restic invocation context. `deadline` (time.monotonic) bounds ALL calls of a cycle together, so an
+    unreachable B2 can never hold the hourly job longer than OFFSITE_TIMEOUT_SECONDS in total."""
+
+    def __init__(self, config: OffsiteConfig, runner: Runner = _subprocess_runner, *, maintenance: bool = False,
+                 deadline: Optional[float] = None):
         source = config.maintenance_secrets_file if (maintenance and config.maintenance_secrets_file) else config.secrets_file
         if not config.password_file.is_file():
             raise OffsiteConfigError("restic password file missing")
         self.config, self.runner = config, runner
+        self.deadline = deadline if deadline is not None else time.monotonic() + config.timeout_seconds
         self.env = _child_env(config, read_secrets(source, allow_local=config.allow_local_repository))
 
     def run(self, *args: str, cwd: Optional[Path] = None) -> ResticResult:
+        remaining = int(self.deadline - time.monotonic())
+        if remaining <= 0:
+            return ResticResult(-1, "", "timeout")
         return self.runner([str(self.config.restic_path), *args], self.env, cwd or self.config.backup_dir,
-                           self.config.timeout_seconds)
+                           min(remaining, self.config.timeout_seconds))
 
 
 def forget_args() -> list[str]:
@@ -194,8 +203,11 @@ def _run_tag(run_id: str) -> str:
     return f"run:{run_id}"
 
 
+COMPLETE_TAG = "complete"   # added only after a clean exit - an exit-3 (partial) snapshot never counts as uploaded
+
+
 def _existing_snapshot(restic: Restic, run_id: str) -> tuple[str, Optional[str]]:
-    result = restic.run("snapshots", "--json", "--tag", f"{TAG},{_run_tag(run_id)}")
+    result = restic.run("snapshots", "--json", "--tag", f"{TAG},{_run_tag(run_id)},{COMPLETE_TAG}")
     outcome = classify(result)
     if outcome != "success":
         return outcome, None
@@ -240,7 +252,8 @@ def latest_local_run(db, backup_dir: Path):
 # ---------- state / alerts ----------
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    from time_utils import utc_now   # canonical naive-UTC clock (AGENTS.md)
+    return utc_now()
 
 
 def _record(db, operation: str, **fields):
@@ -296,10 +309,11 @@ def _log(operation: str, outcome: str) -> None:
 
 # ---------- operations ----------
 
-def backup_latest(db, config: OffsiteConfig, runner: Runner = _subprocess_runner) -> str:
-    """Upload the newest verified local run once. Idempotent: an existing `run:<id>` snapshot is reused."""
+def backup_latest(db, config: OffsiteConfig, runner: Runner = _subprocess_runner, *,
+                  deadline: Optional[float] = None) -> str:
+    """Upload the newest verified local run once. Idempotent: a `run:<id>` snapshot tagged `complete` is reused.
+    Every attempt that wrote a `running` record ends with an outcome - unexpected errors become `restic_failed`."""
     from models import OffsiteBackupRun
-    from offsite_backup import _SourceError, _load_source_run
     log, run_path = latest_local_run(db, config.backup_dir)
     if not log:
         return "no_source"
@@ -309,24 +323,34 @@ def backup_latest(db, config: OffsiteConfig, runner: Runner = _subprocess_runner
         return "busy"
     run_id = run_path.stem.removeprefix("backup_") if run_path else None
     row = _record(db, "backup", source_backup_id=log.id, source_run=run_id)
+    try:
+        outcome, fields = _upload(config, runner, run_path, deadline)
+    except Exception:
+        db.rollback()
+        outcome, fields = "restic_failed", {}
+    return _finish(db, row, outcome, **fields)
+
+
+def _upload(config: OffsiteConfig, runner: Runner, run_path: Optional[Path], deadline: Optional[float]):
+    from offsite_backup import _SourceError, _load_source_run
     if not run_path:
-        return _finish(db, row, "source_invalid")
+        return "source_invalid", {}
     try:
         source = _load_source_run(config.backup_dir, run_path)
     except (_SourceError, OSError, ValueError):
-        return _finish(db, row, "source_invalid")
+        return "source_invalid", {}
     try:
-        restic = Restic(config, runner)
+        restic = Restic(config, runner, deadline=deadline)
     except OffsiteConfigError:
-        return _finish(db, row, "misconfigured")
+        return "misconfigured", {}
     unlock = restic.run("unlock")   # removes only stale locks (e.g. after an interrupted upload)
     if classify(unlock) != "success":
-        return _finish(db, row, classify(unlock))
+        return classify(unlock), {}
     outcome, snapshot = _existing_snapshot(restic, source.run_id)
     if outcome != "success":
-        return _finish(db, row, outcome)
-    if snapshot:   # uploaded before but not recorded (crash/timeout after restic finished)
-        return _finish(db, row, "already_uploaded", snapshot_id=snapshot[:64])
+        return outcome, {}
+    if snapshot:   # completed before but not recorded (crash/timeout after restic finished)
+        return "already_uploaded", {"snapshot_id": snapshot[:64]}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as handle:
         handle.write("\n".join(f.archive_name for f in source.files) + "\n")
         listing = Path(handle.name)
@@ -337,32 +361,49 @@ def backup_latest(db, config: OffsiteConfig, runner: Runner = _subprocess_runner
         listing.unlink(missing_ok=True)
     outcome = classify(result)
     if outcome != "success":
-        return _finish(db, row, outcome)
+        # Exit 3 leaves a partial snapshot carrying the run tag; without the `complete` tag it is never reused,
+        # the next cycle uploads again (deduplicated) and retention removes the partial one with time.
+        return outcome, {}
     summary = _summary(result.stdout)
-    return _finish(db, row, "success", snapshot_id=str(summary.get("snapshot_id") or "")[:64] or None,
-                   files_new=summary.get("files_new"), bytes_added=summary.get("data_added"))
+    snapshot_id = str(summary.get("snapshot_id") or "")
+    if not snapshot_id:
+        return "restic_failed", {}
+    marked = classify(restic.run("tag", "--add", COMPLETE_TAG, snapshot_id))
+    if marked != "success":
+        return marked, {}   # snapshot exists but unmarked: retried next cycle, never counted as uploaded
+    # `restic tag` rewrites the snapshot (new id): record the id of the complete snapshot as it now exists.
+    _, complete_id = _existing_snapshot(restic, source.run_id)
+    return "success", {"snapshot_id": (complete_id or snapshot_id)[:64], "files_new": summary.get("files_new"),
+                       "bytes_added": summary.get("data_added")}
 
 
-def check(db, config: OffsiteConfig, runner: Runner = _subprocess_runner, *, read_data: bool = False) -> str:
+def check(db, config: OffsiteConfig, runner: Runner = _subprocess_runner, *, read_data: bool = False,
+          deadline: Optional[float] = None) -> str:
     row = _record(db, "check")
     try:
-        restic = Restic(config, runner)
+        restic = Restic(config, runner, deadline=deadline)
+        args = ["check"] + (["--read-data-subset", DATA_SUBSET] if read_data else [])
+        outcome = classify(restic.run(*args))
     except OffsiteConfigError:
-        return _finish(db, row, "misconfigured")
-    args = ["check"] + (["--read-data-subset", DATA_SUBSET] if read_data else [])
-    outcome = classify(restic.run(*args))
+        outcome = "misconfigured"
+    except Exception:
+        db.rollback()
+        outcome = "restic_failed"
     return _finish(db, row, "check_failed" if outcome == "restic_failed" else outcome)
 
 
-def prune(db, config: OffsiteConfig, runner: Runner = _subprocess_runner) -> str:
+def prune(db, config: OffsiteConfig, runner: Runner = _subprocess_runner, *, deadline: Optional[float] = None) -> str:
     """forget + prune with the retention policy, maintenance credentials when configured. Callers run it only after
     a successful check; a failure leaves existing snapshots intact (restic forget/prune never touches kept data)."""
     row = _record(db, "prune")
     try:
-        restic = Restic(config, runner, maintenance=True)
+        outcome = classify(Restic(config, runner, maintenance=True, deadline=deadline).run(*forget_args()))
     except OffsiteConfigError:
-        return _finish(db, row, "misconfigured")
-    return _finish(db, row, classify(restic.run(*forget_args())))
+        outcome = "misconfigured"
+    except Exception:
+        db.rollback()
+        outcome = "restic_failed"
+    return _finish(db, row, outcome)
 
 
 def _last(db, operation: str, status: Optional[str] = None):
@@ -374,6 +415,7 @@ def _last(db, operation: str, status: Optional[str] = None):
 
 
 def _expire_stale_running(db, config: OffsiteConfig) -> None:
+    # A whole cycle is bounded by one deadline (timeout_seconds), so 2x that is safely "dead".
     from models import OffsiteBackupRun
     cutoff = _utcnow() - timedelta(seconds=config.timeout_seconds * 2)
     for row in db.query(OffsiteBackupRun).filter(OffsiteBackupRun.status == "running",
@@ -382,9 +424,14 @@ def _expire_stale_running(db, config: OffsiteConfig) -> None:
     db.commit()
 
 
+def _due(row, interval: timedelta, now: datetime) -> bool:
+    return row is None or now - row.started_at >= interval
+
+
 def run_scheduled(db, runner: Runner = _subprocess_runner, env=os.environ) -> Optional[str]:
     """Hourly scheduler hook (after the local backup step). Never raises; returns the backup outcome or None.
-    Missed/failed uploads retry on the next cycle; checks ~daily; sampled check + prune weekly after a good check."""
+    One deadline bounds the whole cycle. Failed uploads retry next cycle. Maintenance cadence follows the last
+    ATTEMPT (not success), so a failing check/prune backs off to ~daily/weekly instead of repeating hourly."""
     try:
         config = load_config(env)
     except OffsiteConfigError:
@@ -392,18 +439,19 @@ def run_scheduled(db, runner: Runner = _subprocess_runner, env=os.environ) -> Op
     if config is None or not _lock.acquire(blocking=False):
         return None if config is None else "busy"
     try:
+        deadline = time.monotonic() + config.timeout_seconds
         _expire_stale_running(db, config)
-        outcome = backup_latest(db, config, runner)
+        outcome = backup_latest(db, config, runner, deadline=deadline)
         if outcome not in {"success", "already_uploaded"}:
             return outcome
         now = _utcnow()
-        last_check = _last(db, "check", "success")
-        last_prune = _last(db, "prune", "success")
-        if not last_prune or now - last_prune.started_at >= MAINTENANCE_INTERVAL:
-            if check(db, config, runner, read_data=True) == "success":
-                prune(db, config, runner)
-        elif not last_check or now - last_check.started_at >= CHECK_INTERVAL:
-            check(db, config, runner)
+        if not _due(_last(db, "check"), CHECK_INTERVAL, now):
+            return outcome
+        if _due(_last(db, "prune"), MAINTENANCE_INTERVAL, now):
+            if check(db, config, runner, read_data=True, deadline=deadline) == "success":
+                prune(db, config, runner, deadline=deadline)
+        else:
+            check(db, config, runner, deadline=deadline)
         return outcome
     except Exception:
         db.rollback()
@@ -531,7 +579,9 @@ def _restore(config: OffsiteConfig, target: Path, snapshot: str) -> str:
     if target.exists() and any(target.iterdir()):
         raise OffsiteConfigError("restore target must be empty")
     target.mkdir(parents=True, exist_ok=True)
-    outcome = classify(Restic(config).run("restore", snapshot, "--target", str(target)))
+    # "latest" means the newest COMPLETE snapshot - a partial (exit 3) one is never restored by default.
+    selector = ["--tag", f"{TAG},{COMPLETE_TAG}"] if snapshot == "latest" else []
+    outcome = classify(Restic(config).run("restore", snapshot, *selector, "--target", str(target)))
     if outcome != "success":
         return outcome
     runs = sorted((target / "runs").glob("backup_*.json"))

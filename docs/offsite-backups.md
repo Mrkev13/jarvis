@@ -22,11 +22,12 @@
 
 | When | What | Notes |
 |---|---|---|
-| Every hourly cycle | Upload the newest verified local run if it has no successful off-site record | Idempotent: an existing `run:<id>` snapshot (e.g. after a crash) is reused, never duplicated. A failed or missed upload retries next hour. `restic unlock` first removes only *stale* locks. |
-| ~daily (≥ 20 h since the last good check) | `restic check` (metadata only) | No data download. |
-| Weekly (≥ 7 days since the last good prune) | `restic check --read-data-subset 5%`, then **only if it passed** `restic forget --tag standa-hub --group-by host --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune` | `--group-by host`: snapshot paths differ per run, so grouping by paths would never forget anything. A failed prune leaves existing snapshots intact. |
+| Every hourly cycle | Upload the newest verified local run if it has no successful off-site record | Only a clean exit tags the snapshot `complete`; a partial snapshot (exit 3, e.g. a locked file) never counts. Idempotent: an existing `run:<id>` + `complete` snapshot (e.g. after a crash) is reused, never duplicated. A failed or missed upload retries next hour. `restic unlock` first removes only *stale* locks. |
+| ~daily (≥ 20 h since the last check **attempt**) | `restic check` (metadata only) | No data download. Cadence follows attempts, so a failing check or prune backs off to daily/weekly instead of repeating hourly. |
+| Weekly (≥ 7 days since the last prune attempt) | `restic check --read-data-subset 5%`, then **only if it passed** `restic forget --tag standa-hub --group-by host --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune` | `--group-by host`: snapshot paths differ per run, so grouping by paths would never forget anything. A failed prune leaves existing snapshots intact. |
 
-**Concurrency:**
+**Concurrency and time bound:**
+- one deadline (`OFFSITE_TIMEOUT_SECONDS`, default 3600) bounds the whole cycle, every restic call included, so an unreachable B2 can never hold the hourly job (and the next local backup) for hours;
 - one off-site operation per backend process (lock), and restic's own repository lock;
 - the scheduler has a single owner (MRK-23);
 - a `running` record older than twice the timeout is marked `interrupted` and retried.
@@ -133,7 +134,7 @@ The CLI prints outcome codes only.
    MRK-25 checksum contract on the restored run (run JSON, dump, manifest, every media file).
 3. The restored tree has exactly the local `BACKUP_DIR` layout (`runs/`, `standa_hub_<ts>.pgdump.gz`,
    `media/manifests`, `media/archive`). Continue with [backups.md → Obnova](backups.md#obnova): scratch DB, scratch
-   media, verify, and only then switch over.
+   media, verify, and only then switch over. `latest` means the newest snapshot tagged `complete`.
 4. **Mini PC / Linux (MRK-27, MRK-49):** the same repository URL, keys and password work with restic on Linux. The
    new host keeps `--host standa-hub` (that is the code's constant), so the snapshot history and retention continue
    in one lineage. Run a restore drill there first, never an experiment on the only original.
