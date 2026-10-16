@@ -44,10 +44,26 @@ def validate_environment(env):
     for name in ('MEDIA_DIR', 'BACKUP_DIR'):
         if not Path(env[name]).is_absolute():
             raise ValueError(f'{name} must be an absolute production path')
+    _validate_offsite(env)
     try:
         bcrypt.checkpw(b'validation', env['AUTH_PIN_HASH'].encode())
     except (ValueError, TypeError):
         raise ValueError('AUTH_PIN_HASH must be a valid bcrypt hash') from None
+
+
+def _validate_offsite(env):
+    """MRK-57: off-machine backups need the local pipeline as their only source and protected, separate secrets."""
+    from offsite_restic import OffsiteConfigError, enabled, load_config
+    if not enabled(env):
+        return
+    if env['BACKUP_ENABLED'].lower() not in _TRUE:
+        raise ValueError('OFFSITE_BACKUP_ENABLED requires BACKUP_ENABLED (verified local runs are the only source)')
+    if str(env.get('OFFSITE_ALLOW_LOCAL_REPOSITORY', '')).strip().lower() in _TRUE:
+        raise ValueError('OFFSITE_ALLOW_LOCAL_REPOSITORY is for tests/drills only')
+    try:
+        load_config(env)
+    except OffsiteConfigError as error:
+        raise ValueError(f'Off-site backup configuration invalid: {error}') from None
 
 
 def load_production_environment(path):

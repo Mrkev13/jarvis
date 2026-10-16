@@ -106,7 +106,7 @@ Nepokrývá (obnovit nebo uložit jinak):
 - PostgreSQL server, role a oprávnění (dump je `--no-owner --no-privileges`);
 - externí služby (Moodle, ICS kalendáře) – jejich data se po obnově znovu stáhnou.
 
-Na tomto stroji leží `BACKUP_DIR` na stejném disku jako produkce a `MEDIA_DIR`; selhání disku zničí obojí. Off-machine vrstva (níže) existuje v kódu, ale v produkci se zatím automaticky nespouští.
+Na tomto stroji leží `BACKUP_DIR` na stejném disku jako produkce a `MEDIA_DIR`; selhání disku zničí obojí. Proto existuje off-machine kopie na B2 (MRK-57, níže), jakmile je nakonfigurovaná. Heslo restic repozitáře a B2 klíč je nutné mít uložené **mimo tento počítač**, jinak kopie po ztrátě PC nejde dešifrovat.
 
 ### Restore drill
 
@@ -116,7 +116,7 @@ Na tomto stroji leží `BACKUP_DIR` na stejném disku jako produkce a `MEDIA_DIR
 
 ## Off-machine kopie
 
-Provider-independent balení dokončeného běhu, filesystem target, volitelné fail-closed šifrování, GFS retention a scratch-only restore verification popisuje [offsite-backups.md](offsite-backups.md). Tato vrstva čte zdrojový backup strom pouze read-only a publikuje self-contained kopii; není automaticky zapojena do scheduleru, notifikací ani `/health`.
+**Produkce (MRK-57): restic → Backblaze B2.** Po každé úspěšné lokální záloze hodinový job scheduleru nahraje znovu ověřený běh (run JSON, dump, manifest a média podle SHA-256) do šifrovaného, deduplikovaného restic repozitáře na B2. Retence je 14 denních, 8 týdenních a 12 měsíčních záloh. Kontrola metadat běží zhruba denně, kontrola vzorku dat a prune jednou týdně. Stav je v `/health.offsite`; selhání pošle upozornění. **Lokální záloha na síti nikdy nezávisí.** Nastavení B2, tajných hodnot, provoz a obnova z B2: [offsite-backups.md](offsite-backups.md). Původní MRK-25 knihovna (TAR + age + filesystem target) slouží jako kontrola integrity běhu před nahráním a po obnově.
 
 ## Kapacita
 
