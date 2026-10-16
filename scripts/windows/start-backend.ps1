@@ -8,6 +8,8 @@ param(
     [Parameter(Mandatory=$true)][string]$EnvFile,
     [string]$PythonPath = '',
     [int]$Port = 8000,
+    # MRK-24: 127.0.0.1 once Tailscale Serve is the only browser entry; 0.0.0.0 keeps direct tailnet HTTP.
+    [string]$BindAddress = '0.0.0.0',
     [int]$RestartDelaySeconds = 10,
     [int]$MaxRestartDelaySeconds = 60
 )
@@ -18,11 +20,12 @@ try {
     if (-not $PythonPath) { $PythonPath = Join-Path $root '.venv\Scripts\python.exe' }
     if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) { throw 'Missing Python' }
     if ($Port -lt 1 -or $Port -gt 65535) { throw 'Invalid port' }
+    if ($BindAddress -notin @('0.0.0.0', '127.0.0.1')) { throw 'Invalid bind address' }
     Set-Location -LiteralPath (Join-Path $root 'backend')
     $delay = [Math]::Max(1, $RestartDelaySeconds)
     while ($true) {
         $started = Get-Date
-        & $PythonPath -m production --env-file $config --host '0.0.0.0' --port $Port
+        & $PythonPath -m production --env-file $config --host $BindAddress --port $Port
         $code = $LASTEXITCODE
         if ($code -eq 0 -or $code -eq 130) { exit $code }
         # A run that stayed up for a while resets the back-off; a crash loop backs off up to the maximum.

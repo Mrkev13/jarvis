@@ -690,11 +690,12 @@ print(_hash_pin("123456"))
   Bez klíčů se nic externě neposílá. Vyžaduje běžící reminder job (`REMINDERS_CHECK_ENABLED=true`).
 - **Frontend**: `public/sw.js` (jen push + klik), `app/manifest.ts` + ikony, panel `PushSettings` na
   `/reminders` (oprávnění jen po kliknutí, test, vypnutí, vysvětlení nepodporovaného prostředí).
-- **HTTPS (nutné pro mobil)**: prohlížeč povolí Web Push jen na https nebo localhost. Na PC stačí
-  `http://localhost:3000`. Pro mobil přes Tailscale:
-  `tailscale serve --bg 3000` a `tailscale serve --bg --https=8443 http://127.0.0.1:8000`, pak ve frontendu
-  `NEXT_PUBLIC_API_URL=https://<pc>.<tailnet>.ts.net:8443` a `NEXT_DEV_EXTRA_ORIGINS=<pc>.<tailnet>.ts.net`,
-  v backendu `FRONTEND_ORIGINS` doplnit `https://<pc>.<tailnet>.ts.net` a `AUTH_COOKIE_SECURE=true`.
+- **HTTPS (nutné pro mobil, MRK-24)**: prohlížeč povolí Web Push a instalaci PWA jen na https nebo localhost.
+  Produkce: Tailscale Serve jen v tailnetu (nikdy Funnel) – `https://<pc>.<tailnet>.ts.net` → :3000 a
+  `:8443` → :8000 přes `scripts/windows/tailscale-serve.ps1`; `NEXT_PUBLIC_API_URL=https://<pc>.<tailnet>.ts.net:8443`,
+  `FRONTEND_ORIGINS` + https origin, `AUTH_COOKIE_SECURE=true` (`production.py` hlídá shodu). Postup, rollback,
+  změna certu/hostname, VAPID a troubleshooting: [docs/https-pwa-push.md](../docs/https-pwa-push.md).
+  Vývoj přes Tailscale: navíc `NEXT_DEV_EXTRA_ORIGINS=<pc>.<tailnet>.ts.net`.
   iPhone/iPad: Safari → Sdílet → Přidat na plochu, upozornění zapnout z ikony na ploše (iOS 16.4+).
 - Testy: `test_webpush.py`, `test_delivery.py`, `test_push_api.py`, migrace v `test_alembic_migration.py`,
   frontend `lib/push.test.mjs`.

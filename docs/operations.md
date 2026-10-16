@@ -123,6 +123,10 @@ PowerShell, replace placeholders with locally chosen paths (no real secrets here
 & .\scripts\windows\check-health.ps1 -RequireHealthy
 ```
 
+Private HTTPS for browsers/PWA/Web Push is Tailscale Serve in front of these ports (tailnet only, never Funnel):
+`scripts/windows/tailscale-serve.ps1`, cutover/rollback and `-BindAddress 127.0.0.1` in
+[https-pwa-push.md](https-pwa-push.md).
+
 The backend helper defaults to `<installation>\.venv\Scripts\python.exe`; an
 explicit `-PythonPath` supports other installations. Scripts preserve child exit
 codes, handle spaces, fail with fixed messages and never echo secret config.

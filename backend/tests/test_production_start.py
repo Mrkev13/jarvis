@@ -30,6 +30,40 @@ def test_unsafe_config_rejected_without_values(tmp_path, key, value):
     assert 'secret-canary' not in str(error.value)
 
 
+HTTPS_ORIGIN = 'https://hub.example-tailnet.ts.net'
+
+
+@pytest.mark.parametrize('origins,secure', [
+    ('http://localhost:3000', None),                          # today's HTTP-only runtime stays valid
+    ('http://localhost:3000', 'false'),
+    (HTTPS_ORIGIN, 'true'),                                     # MRK-24: Tailscale Serve HTTPS
+    (f'http://127.0.0.1:3000,{HTTPS_ORIGIN}', 'true'),          # local upstream origin kept next to HTTPS
+])
+def test_cookie_security_matches_frontend_origins(tmp_path, origins, secure):
+    from production import validate_environment
+    env = {**config(tmp_path), 'FRONTEND_ORIGINS': origins}
+    if secure is not None:
+        env['AUTH_COOKIE_SECURE'] = secure
+    validate_environment(env)
+
+
+@pytest.mark.parametrize('origins,secure', [
+    (HTTPS_ORIGIN, None),        # HTTPS frontend must not issue a session cookie usable over plain HTTP
+    (HTTPS_ORIGIN, 'false'),
+    (f'http://localhost:3000, {HTTPS_ORIGIN}', 'false'),
+    ('http://localhost:3000', 'true'),   # Secure cookie with no HTTPS origin = login can never succeed
+    (HTTPS_ORIGIN, 'maybe'),
+])
+def test_cookie_security_mismatch_is_rejected(tmp_path, origins, secure):
+    from production import validate_environment
+    env = {**config(tmp_path), 'FRONTEND_ORIGINS': origins}
+    if secure is not None:
+        env['AUTH_COOKIE_SECURE'] = secure
+    with pytest.raises(ValueError) as error:
+        validate_environment(env)
+    assert 'AUTH_COOKIE_SECURE' in str(error.value) and 'ts.net' not in str(error.value)
+
+
 def test_file_overrides_inherited_dev_config_and_disables_dotenv(tmp_path, monkeypatch):
     from production import load_production_environment
     env = config(tmp_path)
@@ -99,3 +133,23 @@ def test_windows_waits_for_worker_and_propagates_failure(monkeypatch):
     monkeypatch.setattr(production.subprocess, 'run', run)
     assert production.run_server(['python', '-m', 'uvicorn', 'main:app']) == 17
     assert calls == [(['python', '-m', 'uvicorn', 'main:app'], {'check':False})]
+
+
+SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts' / 'windows'
+
+
+@pytest.mark.parametrize('name', ['start-backend.ps1', 'start-frontend.ps1', 'register-tasks.ps1'])
+def test_bind_address_is_allowlisted_and_defaults_to_current_behaviour(name):
+    # MRK-24: 127.0.0.1 after Tailscale Serve acceptance; the default keeps today's direct tailnet HTTP.
+    text = (SCRIPTS / name).read_text(encoding='utf-8')
+    assert "[string]$BindAddress = '0.0.0.0'" in text
+    assert "$BindAddress -notin @('0.0.0.0', '127.0.0.1')" in text
+    assert "'0.0.0.0' --port" not in text and "'--hostname', '0.0.0.0'" not in text, 'no hard-coded bind left'
+
+
+def test_tailscale_serve_script_is_tailnet_only():
+    text = (SCRIPTS / 'tailscale-serve.ps1').read_text(encoding='utf-8')
+    commands = [line for line in text.splitlines() if '& $ts ' in line]
+    assert commands and not any('funnel' in line.lower() for line in commands), 'never enables Funnel'
+    assert all('http://127.0.0.1:' in line for line in commands if '--bg' in line), 'loopback upstreams only'
+    assert 'Assert-NoFunnel $before' in text and 'Assert-NoFunnel $after' in text

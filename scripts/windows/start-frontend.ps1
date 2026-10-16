@@ -5,6 +5,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$ProjectDirectory,
     [int]$Port = 3000,
+    # MRK-24: 127.0.0.1 once Tailscale Serve is the only browser entry; 0.0.0.0 keeps direct tailnet HTTP.
+    [string]$BindAddress = '0.0.0.0',
     [switch]$Build,
     [int]$RestartDelaySeconds = 10,
     [int]$MaxRestartDelaySeconds = 60
@@ -14,6 +16,7 @@ try {
     $root = (Resolve-Path -LiteralPath $ProjectDirectory).Path
     $frontend = Join-Path $root 'frontend'
     if ($Port -lt 1 -or $Port -gt 65535) { throw 'Invalid port' }
+    if ($BindAddress -notin @('0.0.0.0', '127.0.0.1')) { throw 'Invalid bind address' }
     # Next prioritizes .env.local even in production. Refuse ambiguous dev configuration.
     foreach ($name in @('.env', '.env.local')) {
         if (Test-Path -LiteralPath (Join-Path $frontend $name)) { throw 'Development env file present' }
@@ -32,7 +35,7 @@ try {
         exit $LASTEXITCODE
     }
     if (-not (Test-Path -LiteralPath (Join-Path $frontend '.next\BUILD_ID') -PathType Leaf)) { throw 'Missing production build' }
-    $startArgs = @('run', 'start', '--', '--hostname', '0.0.0.0', '--port', $Port.ToString())
+    $startArgs = @('run', 'start', '--', '--hostname', $BindAddress, '--port', $Port.ToString())
     $delay = [Math]::Max(1, $RestartDelaySeconds)
     while ($true) {
         $started = Get-Date
