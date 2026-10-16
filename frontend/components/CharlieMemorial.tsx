@@ -65,8 +65,11 @@ export function CharlieMemorialPanel({
           </button>
         </div>
         <div className="p-4 sm:p-5">
+          {/* unoptimized: /_next/image fetches the file server-side without the session cookie, the auth proxy
+              redirects that to /login and the photo breaks. The browser loads it directly, still behind login. */}
           <Image
             src="/charlie-memorial.jpg"
+            unoptimized
             width={1536}
             height={668}
             sizes="(max-width: 768px) calc(100vw - 2rem), 640px"
