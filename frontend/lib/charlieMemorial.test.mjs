@@ -83,3 +83,17 @@ test("X and backdrop close the memorial without treating panel clicks as outside
   backdrop.props.onMouseDown({ target: {}, currentTarget: outside, preventDefault() {} });
   assert.equal(closes, 2);
 });
+
+test("the photo bypasses the server-side image optimizer so it stays behind login", () => {
+  // next/image fetches local files internally without the browser's cookies; that request hits the auth proxy
+  // and is redirected to /login, so an optimized URL is a broken image for a logged-in user. The browser must
+  // load /charlie-memorial.jpg itself (with its session cookie); the file must not be made public instead.
+  const { CharlieMemorialPanel } = loadMemorial();
+  const panel = CharlieMemorialPanel({ onClose: () => undefined, panelRef: { current: null } });
+  const photo = findElement(panel, (node) => node.props?.src === "/charlie-memorial.jpg");
+
+  assert.ok(photo, "photo element present");
+  assert.equal(photo.props.unoptimized, true);
+  const publicPaths = readFileSync(new URL("./publicPaths.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(publicPaths, /charlie/i);
+});
