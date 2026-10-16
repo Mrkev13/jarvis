@@ -151,5 +151,11 @@ def test_tailscale_serve_script_is_tailnet_only():
     text = (SCRIPTS / 'tailscale-serve.ps1').read_text(encoding='utf-8')
     commands = [line for line in text.splitlines() if '& $ts ' in line]
     assert commands and not any('funnel' in line.lower() for line in commands), 'never enables Funnel'
-    assert all('http://127.0.0.1:' in line for line in commands if '--bg' in line), 'loopback upstreams only'
-    assert 'Assert-NoFunnel $before' in text and 'Assert-NoFunnel $after' in text
+    serve_bg = [line for line in commands if '--bg' in line]
+    assert serve_bg and all(line.rstrip().endswith('$route.Expected | Out-Null') for line in serve_bg)
+    assert 'Expected = "http://127.0.0.1:$FrontendPort"' in text and 'Expected = "http://127.0.0.1:$BackendPort"' in text, \
+        'loopback upstreams only'
+    # Fail closed: a failed `serve status` must never read as "nothing configured", and Funnel is detected anywhere
+    # in the JSON (including foreground sessions), refusing Apply and failing every mode at the end.
+    assert "if ($LASTEXITCODE -ne 0) { throw 'tailscale serve status failed" in text
+    assert '"AllowFunnel"' in text and 'if (Test-Funnel $before) { throw' in text and 'if (Test-Funnel $after) { throw' in text

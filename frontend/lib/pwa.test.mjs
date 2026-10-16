@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import ts from "typescript";
 
@@ -65,7 +66,7 @@ function sourceFiles(dir) {
 }
 
 test("permission is requested and the worker registered only from the explicit opt-in click", () => {
-  const app = new URL(".", root).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+  const app = fileURLToPath(root);  // decodes spaces/diacritics in the checkout path
   const callers = ["app", "components", "lib", "hooks", "modules"]
     .flatMap((dir) => sourceFiles(join(app, dir)))
     .filter((file) => /requestPermission|serviceWorker\.register/.test(readFileSync(file, "utf8")))

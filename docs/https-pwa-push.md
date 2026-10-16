@@ -30,8 +30,12 @@ In the Tailscale admin console, under DNS: **MagicDNS** on and **HTTPS Certifica
 powershell -ExecutionPolicy Bypass -File scripts\windows\tailscale-serve.ps1 -Mode Status
 ```
 
-`Status` fails with "HTTPS certificates are not enabled" until that is done. It always prints `funnel: off`. If
-Funnel is on for anything, every mode refuses to continue.
+`Status` fails with "HTTPS certificates are not enabled" until that is done. Exit codes: `0` = both routes as
+expected (after `Reset`: both removed), `2` = routes missing or pointing elsewhere, `1` = error (CLI failed or not
+elevated, certificates off, or **Funnel on**). Funnel is detected anywhere in the Serve config, foreground sessions
+included. `Apply` refuses to run and every mode ends with an error while it is on. `Reset` still removes our
+listeners first, so rollback works. `Apply` never overwrites a port that already serves a different upstream, and
+`Reset` removes only listeners that point at `127.0.0.1:3000`/`:8000`.
 
 ## Tailscale Serve: apply, inspect, remove
 
