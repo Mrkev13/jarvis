@@ -69,6 +69,8 @@ def deliverable_types() -> tuple[str, ...]:
         types.append("daily_briefing")
     if env_bool("WEEKLY_REVIEW_PUSH", True):
         types.append("weekly_review")
+    if env_bool("OPS_ALERT_PUSH", True):
+        types.append("ops_alert")  # MRK-57: off-machine backup/check failures (fixed text, no secrets)
     return tuple(types)
 
 

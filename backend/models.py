@@ -2,7 +2,7 @@ from datetime import datetime
 import json as _json
 import re
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -539,6 +539,30 @@ class BackupLog(Base):
     duration_seconds = Column(Float, nullable=True)
     error_message = Column(Text, nullable=True)
     retention_days = Column(Integer, nullable=False, default=30)
+
+
+class OffsiteBackupRun(Base):
+    """MRK-57: one off-machine operation (restic backup of a verified local run, repository check or prune).
+    Only allowlisted outcome codes - never credentials, repository URL, paths or raw tool output."""
+    __tablename__ = "offsite_backup_runs"
+    __table_args__ = (
+        CheckConstraint("operation IN ('backup', 'check', 'prune')", name="ck_offsite_backup_runs_operation"),
+        CheckConstraint("status IN ('running', 'success', 'failed')", name="ck_offsite_backup_runs_status"),
+        Index("ix_offsite_backup_runs_operation_started", "operation", "started_at"),
+        Index("ix_offsite_backup_runs_source_backup_id", "source_backup_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    operation = Column(String(10), nullable=False)
+    status = Column(String(10), nullable=False)
+    outcome = Column(String(40), nullable=True)
+    source_backup_id = Column(Integer, nullable=True)  # BackupLog.id; no FK - local retention deletes old logs
+    source_run = Column(String(64), nullable=True)  # local run id (timestamp), not a path
+    snapshot_id = Column(String(64), nullable=True)
+    files_new = Column(Integer, nullable=True)
+    bytes_added = Column(BigInteger, nullable=True)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
 
 
 class AuthSession(Base):

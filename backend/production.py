@@ -45,6 +45,7 @@ def validate_environment(env):
         if not Path(env[name]).is_absolute():
             raise ValueError(f'{name} must be an absolute production path')
     _validate_cookie_security(env)
+    _validate_offsite(env)
     try:
         bcrypt.checkpw(b'validation', env['AUTH_PIN_HASH'].encode())
     except (ValueError, TypeError):
@@ -63,6 +64,21 @@ def _validate_cookie_security(env):
         raise ValueError('An https FRONTEND_ORIGINS entry requires AUTH_COOKIE_SECURE=true')
     if raw in _TRUE and not has_https:
         raise ValueError('AUTH_COOKIE_SECURE=true requires an https FRONTEND_ORIGINS entry')
+
+
+def _validate_offsite(env):
+    """MRK-57: off-machine backups need the local pipeline as their only source and protected, separate secrets."""
+    from offsite_restic import OffsiteConfigError, enabled, load_config
+    if not enabled(env):
+        return
+    if env['BACKUP_ENABLED'].lower() not in _TRUE:
+        raise ValueError('OFFSITE_BACKUP_ENABLED requires BACKUP_ENABLED (verified local runs are the only source)')
+    if str(env.get('OFFSITE_ALLOW_LOCAL_REPOSITORY', '')).strip().lower() in _TRUE:
+        raise ValueError('OFFSITE_ALLOW_LOCAL_REPOSITORY is for tests/drills only')
+    try:
+        load_config(env)
+    except OffsiteConfigError as error:
+        raise ValueError(f'Off-site backup configuration invalid: {error}') from None
 
 
 def load_production_environment(path):

@@ -226,9 +226,11 @@ existing validated DB+media pipeline. No rehash/reverification or new scanner in
 health. Exactly **26h is fresh; greater is stale**. Missing/future finish is unknown;
 a newer unfinished success-labelled row cannot conceal an older stale backup.
 A recent failure warns even with a fresh prior backup (freshness remains separate).
-No off-machine state is fabricated: MRK-25 has package metadata but no persisted
-shared automatic-copy observations yet. See [offsite backups](offsite-backups.md)
-and [monitoring](monitoring.md) for those deferred interfaces/alerts.
+Off-machine copies (MRK-57, restic → B2) report in `/health.offsite`. Once
+`OFFSITE_BACKUP_ENABLED=true`, the overall status is degraded if there was no successful
+off-site copy in more than 26h, the last repository check failed, or the configuration
+is unusable. Before configuration the section says `disabled` and never degrades.
+Setup, policy and restore: [offsite backups](offsite-backups.md).
 
 No database URL, username/password, filename/path, env values, raw exception,
 stack trace, API key, feed URL or user records in health. PostgreSQL backup URLs

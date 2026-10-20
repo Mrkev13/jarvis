@@ -106,17 +106,18 @@ Nepokrývá (obnovit nebo uložit jinak):
 - PostgreSQL server, role a oprávnění (dump je `--no-owner --no-privileges`);
 - externí služby (Moodle, ICS kalendáře) – jejich data se po obnově znovu stáhnou.
 
-Na tomto stroji leží `BACKUP_DIR` na stejném disku jako produkce a `MEDIA_DIR`; selhání disku zničí obojí. Off-machine vrstva (níže) existuje v kódu, ale v produkci se zatím automaticky nespouští.
+Na tomto stroji leží `BACKUP_DIR` na stejném disku jako produkce a `MEDIA_DIR`; selhání disku zničí obojí. Proto existuje off-machine kopie na B2 (MRK-57, níže), jakmile je nakonfigurovaná. Heslo restic repozitáře a B2 klíč je nutné mít uložené **mimo tento počítač**, jinak kopie po ztrátě PC nejde dešifrovat.
 
 ### Restore drill
 
 | Datum | Záloha | Výsledek |
 |---|---|---|
 | 2026-10-11 | čerstvý běh přes `run_backup()` (0,5 s), PostgreSQL 18 | Obnova do scratch DB `standa_hub_restore_drill` (`psql`, single transaction): 0 chyb, 0,7 s; 43/43 tabulek a všechny řádky shodné s produkcí (kromě očekávaného `backup_logs`), indexy/sekvence/FK identické, CHECK constrainty se stejnými hodnotami a vynucované. Média do scratch složky: 59/59 souborů ověřeno podle manifestu, 0 chybějících referencí, 0 nesouladů SHA-256. Aplikace (jednorázový proces bez scheduleru a bez portu) četla scratch DB/média: `/health` migrace `current`, Kalendář, Návyky, Škola, materiály včetně stažení souborů, Hledání (název i text) a Co se změnilo; žádný zápis. Scratch DB a složka poté smazány. Drill byl lokální, ne z off-machine kopie. |
+| 2026-10-20 | **off-machine kopie z Backblaze B2** (restic snapshot `complete` lokálního běhu id 20, produkce `adf0d4c`, migrace 0024) | `python -m offsite_restic restore` do prázdné scratch složky: 9 s, 62 souborů ověřeno podle SHA-256 (kontrakt MRK-25). Dump do scratch DB `standa_hub_b2_restore_drill` (`psql`, single transaction): exit 0, 0 chyb, migrace `0024`. 44 tabulek: 40 bit po bitu shodných s produkcí, 4 se změnily až po záloze (`backup_logs`, `offsite_backup_runs`, `notifications`, `auth_sessions`). Počty sedí (subjects 4, exams 2, calendar_events 8, habits 1, study_courses 1, study_materials 54, domain_events 62, activity_logs 174). Média 59/59 podle manifestu, studijní bloby 45 (0 chybí, 0 nesouhlasí), WoT replaye OK, 16 FK bez sirotků, všechny constrainty platné. Aplikace (jednorázový proces bez scheduleru a bez portu): kalendář 8/8 výskytů, Návyky, Škola, Co se změnilo, 54 materiálů, stažení souborů 6/6 podle SHA, Hledání 5/5 (název) a 3/3 (text); žádný zápis. Scratch DB, soubory i restic cache poté smazány; B2 repozitář a oba snapshoty zachovány. |
 
 ## Off-machine kopie
 
-Provider-independent balení dokončeného běhu, filesystem target, volitelné fail-closed šifrování, GFS retention a scratch-only restore verification popisuje [offsite-backups.md](offsite-backups.md). Tato vrstva čte zdrojový backup strom pouze read-only a publikuje self-contained kopii; není automaticky zapojena do scheduleru, notifikací ani `/health`.
+**Produkce (MRK-57): restic → Backblaze B2.** Po každé úspěšné lokální záloze hodinový job scheduleru nahraje znovu ověřený běh (run JSON, dump, manifest a média podle SHA-256) do šifrovaného, deduplikovaného restic repozitáře na B2. Retence je 14 denních, 8 týdenních a 12 měsíčních záloh. Kontrola metadat běží zhruba denně, kontrola vzorku dat a prune jednou týdně. Stav je v `/health.offsite`; selhání pošle upozornění. **Lokální záloha na síti nikdy nezávisí.** Nastavení B2, tajných hodnot, provoz a obnova z B2: [offsite-backups.md](offsite-backups.md). Původní MRK-25 knihovna (TAR + age + filesystem target) slouží jako kontrola integrity běhu před nahráním a po obnově.
 
 ## Kapacita
 

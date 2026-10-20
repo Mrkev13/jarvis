@@ -63,6 +63,7 @@ STEP_0018_EXTRA = {"domain_events"}  # MRK-19
 STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
 STEP_0021_EXTRA = {"study_courses", "study_materials"}  # MRK-42
 STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
+STEP_0024_EXTRA = {"offsite_backup_runs"}  # MRK-57 off-machine backup history
 
 
 def _sqlite_tables(conn):
@@ -171,7 +172,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -386,6 +387,25 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM subjects")).scalar(), 1, "subjects untouched")
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertTrue(STEP_0021_EXTRA <= _sqlite_tables(self.conn))
+
+    def test_0024_offsite_history_table_round_trip(self):
+        from sqlalchemy import inspect
+        from sqlalchemy.exc import IntegrityError
+
+        alembic_cmd.upgrade(self.cfg, "0024_offsite_backup_runs")
+        insert = ("INSERT INTO offsite_backup_runs (operation, status, outcome, started_at) "
+                  "VALUES (:op, :status, 'success', CURRENT_TIMESTAMP)")
+        self.conn.execute(text(insert), {"op": "backup", "status": "success"})
+        self.conn.commit()
+        with self.assertRaises(IntegrityError):
+            self.conn.execute(text(insert), {"op": "delete-everything", "status": "success"})
+        self.conn.rollback()
+        idx = {i["name"] for i in inspect(self.conn).get_indexes("offsite_backup_runs")}
+        self.assertEqual(idx, {"ix_offsite_backup_runs_operation_started", "ix_offsite_backup_runs_source_backup_id"})
+        alembic_cmd.downgrade(self.cfg, "0023_study_course_export_source")
+        self.assertNotIn("offsite_backup_runs", inspect(self.conn).get_table_names())
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertIn("offsite_backup_runs", inspect(self.conn).get_table_names())
 
     def test_0023_allows_export_source_keeps_rows_and_guards_downgrade(self):
         from sqlalchemy import inspect
@@ -604,7 +624,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA)
 
             db = main.SessionLocal()
             try:
