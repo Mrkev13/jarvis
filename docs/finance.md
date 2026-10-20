@@ -68,8 +68,39 @@ VS/KS/SS, `txn_key`/`fingerprint` (dedupe, MRK-62), system/override/effective ca
 - **Downgrade guard:** `0025` refuses to downgrade while imports, rules, revisions, user accounts/categories, voided or
   imported rows exist.
 
+## Import core (MRK-62)
+
+`backend/modules/finance/importing/`: **adapter → `NormalizedRow` → validation → preview → commit**. Adapters only
+parse (`rows.ImportAdapter`: `id`, `family`, `version`, `detect(head)`, `parse(stream)`); the registry picks exactly one
+adapter by signature, otherwise `unknown_format` (never a guess). Production registers no adapter until MRK-63; tests
+use the synthetic format in `tests/finance_fakes.py` (not a real bank format).
+
+- **REST** (`modules/finance/router.py`): `POST /finance/imports/preview?account_id=…` (raw body, no filename,
+  `text/csv`/`text/plain`/`application/octet-stream`, streamed, cap `FINANCE_IMPORT_MAX_MB`, default 20, max 200) →
+  counts `new/duplicate/changed/pending_skipped/invalid/possible_duplicate`, date range, issues (row, code, field) and a
+  `preview_token`; `POST /finance/imports/{token}/commit[?skip_invalid=true]`; `POST /finance/imports/{token}/cancel`;
+  `GET /finance/imports` (history, counts only). Errors are `{"category": <code>}`.
+- **Preview = dry run**: only the `finance_imports` row (`previewed`) is written. The same file again on the same
+  account (UNIQUE account + SHA-256) → `already_imported`, 0 new rows.
+- **Commit**: recomputes the plan against the current DB and writes transactions, corrections + revisions, issues, the
+  import record, the `finance.import.completed` event and its Activity summary in **one transaction**. Invalid rows
+  need `skip_invalid=true`. Any failure rolls everything back and marks the import `failed` separately; retry = upload
+  again (the same import record is reused, no duplicates).
+- **Dedupe**: bank ID → `txn_key = bank:<family>:<id>` (same fields = duplicate; different = correction with a revision,
+  manual/legacy category kept); otherwise a fingerprint (account, booking day, amount, currency, counterparty account
+  hash, VS/KS/SS, normalized text without digit runs ≥ 12) with the multiset rule – k equal rows in the file vs m in the
+  DB → insert k−m as `fp:<fingerprint>:<ordinal>` (m+1…k); nothing is ever deleted when k < m. A new row without bank ID
+  matching an active row by account + amount within ±3 days but with a different fingerprint is inserted with
+  `review_flag` (possible duplicate), never merged. Pending rows are skipped and counted.
+- **Categories**: a `Categorizer` hook (rules arrive in MRK-65); until then imported rows are „Nezařazeno“.
+- **Raw file**: `FINANCE_IMPORT_TMP_DIR` (default: system temp / `standa-hub-finance-import`), outside `MEDIA_DIR` and
+  backups, named only by import id; deleted after commit, failure, cancel or the 30-minute TTL (hourly cleanup also
+  removes leftovers). Only the SHA-256 and counts remain.
+- **Privacy**: responses, issues, events, Activity and logs never contain row values, account/card numbers,
+  counterparty names, filenames or file contents (canary test). Stored descriptions mask digit runs ≥ 12 as „…1234“.
+
 ## Next
 
-Import core (MRK-62), mBank adapter (MRK-63), import UI (MRK-64),
+mBank adapter (MRK-63), import UI (MRK-64),
 transactions/categories/rules (MRK-65), overview/Search/What Changed (MRK-66), real-data acceptance (MRK-68).
 Real bank files are never committed, logged or put into fixtures.

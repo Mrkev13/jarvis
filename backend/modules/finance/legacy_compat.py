@@ -108,8 +108,9 @@ def _fill(connection, tx, *, insert_: bool, changed: set[str]) -> None:
     if tx.review_flag is None:
         tx.review_flag = False
     # kategorie: starý text → vestavěná kategorie jako ruční volba (zachová, co uživatel kdysi zvolil)
-    legacy_remap = not insert_ and "override_category_id" not in changed and (
-        "category" in changed or (tx.category_source == "legacy" and {"transaction_type", "direction"} & changed))
+    # text kategorie přemapuje jen u starých zápisů (import/ruční zápis nové služby nastavují kategorie samy)
+    legacy_remap = not insert_ and "override_category_id" not in changed and tx.category_source in (None, "legacy") \
+        and bool("category" in changed or {"transaction_type", "direction"} & changed)
     if (tx.override_category_id is None and tx.system_category_id is None and tx.category) or legacy_remap:
         tx.override_category_id = builtin_category_id(connection, legacy_category_key(tx.category, tx.direction))
         tx.category_source = "legacy"

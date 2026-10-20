@@ -62,6 +62,7 @@ declaration. Pilot types:
 | `fitness.rehab_exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |
 | `fitness.workout.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
 | `fitness.rehab_session.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
+| `finance.import.completed` | `modules/finance/importing/core.commit_import` (MRK-62; same transaction as the ledger rows) | `import_id`, `account_id`, `counts`, `date_from`, `date_to` – never row values |
 | `system.module.enabled` / `.disabled` | `PUT /modules/{id}` | `module_id`, `enabled`, `previous` |
 
 **Payload rules:** a JSON object of ids, states, dates and ISO times only – at most 3 levels, 2 KB. No ORM objects,
