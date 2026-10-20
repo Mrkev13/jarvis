@@ -3,7 +3,9 @@
 param(
     [Parameter(Mandatory=$true)][string]$ProjectDirectory,
     [Parameter(Mandatory=$true)][string]$BackendEnvFile,
-    [string]$PythonPath = ''
+    [string]$PythonPath = '',
+    # MRK-24: '127.0.0.1' after Tailscale Serve HTTPS acceptance (Serve proxies to localhost; no direct tailnet HTTP).
+    [string]$BindAddress = '0.0.0.0'
 )
 $ErrorActionPreference = 'Stop'
 try {
@@ -11,6 +13,7 @@ try {
     $config = (Resolve-Path -LiteralPath $BackendEnvFile).Path
     if (-not $PythonPath) { $PythonPath = Join-Path $root '.venv\Scripts\python.exe' }
     if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) { throw 'Missing Python' }
+    if ($BindAddress -notin @('0.0.0.0', '127.0.0.1')) { throw 'Invalid bind address' }
     $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
@@ -24,8 +27,8 @@ try {
     # Native argument quoting handles spaces. No credentials or secret env values in task arguments.
     # Process-scoped Bypass for these two tasks only: a machine AllSigned policy would otherwise refuse the unsigned
     # start scripts under SYSTEM. Machine policy is untouched; protect the installation with admin/SYSTEM-only ACLs.
-    $backendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}" -EnvFile "{2}" -PythonPath "{3}"' -f $backendScript, $root, $config, $PythonPath
-    $frontendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}"' -f $frontendScript, $root
+    $backendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}" -EnvFile "{2}" -PythonPath "{3}" -BindAddress {4}' -f $backendScript, $root, $config, $PythonPath, $BindAddress
+    $frontendArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ProjectDirectory "{1}" -BindAddress {2}' -f $frontendScript, $root, $BindAddress
     $backendAction = New-ScheduledTaskAction -Execute $shell -Argument $backendArgs -WorkingDirectory (Join-Path $root 'backend')
     $frontendAction = New-ScheduledTaskAction -Execute $shell -Argument $frontendArgs -WorkingDirectory (Join-Path $root 'frontend')
     Register-ScheduledTask -TaskName 'StandaHub-Backend' -Action $backendAction -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null

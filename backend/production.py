@@ -44,11 +44,26 @@ def validate_environment(env):
     for name in ('MEDIA_DIR', 'BACKUP_DIR'):
         if not Path(env[name]).is_absolute():
             raise ValueError(f'{name} must be an absolute production path')
+    _validate_cookie_security(env)
     _validate_offsite(env)
     try:
         bcrypt.checkpw(b'validation', env['AUTH_PIN_HASH'].encode())
     except (ValueError, TypeError):
         raise ValueError('AUTH_PIN_HASH must be a valid bcrypt hash') from None
+
+
+def _validate_cookie_security(env):
+    """MRK-24: an HTTPS (Tailscale Serve) frontend needs a Secure session cookie, and a Secure cookie needs at least one
+    HTTPS frontend – either mismatch is caught here instead of as a silent login failure. Messages never echo origins."""
+    raw = (env.get('AUTH_COOKIE_SECURE') or 'false').strip().lower()
+    if raw not in _TRUE | _FALSE:
+        raise ValueError('AUTH_COOKIE_SECURE must be an explicit boolean')
+    origins = [o.strip().lower() for o in env['FRONTEND_ORIGINS'].split(',') if o.strip()]
+    has_https = any(o.startswith('https://') for o in origins)
+    if has_https and raw not in _TRUE:
+        raise ValueError('An https FRONTEND_ORIGINS entry requires AUTH_COOKIE_SECURE=true')
+    if raw in _TRUE and not has_https:
+        raise ValueError('AUTH_COOKIE_SECURE=true requires an https FRONTEND_ORIGINS entry')
 
 
 def _validate_offsite(env):
