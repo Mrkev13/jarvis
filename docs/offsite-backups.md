@@ -1,4 +1,149 @@
-# Off-machine backup copies (MRK-25)
+# Off-machine backup copies (MRK-25, MRK-57)
+
+## Production: restic → Backblaze B2 (MRK-57)
+
+**Architecture**
+
+- The local pipeline (`backup_service.run_backup`, [backups.md](backups.md)) stays the only source of truth.
+- After the daily local backup, the hourly scheduler job runs `offsite_restic.run_scheduled`. That step:
+  1. picks the newest **successful** `BackupLog`;
+  2. re-verifies its run with the MRK-25 contract (`offsite_backup._load_source_run`: run JSON, dump SHA-256,
+     manifest and every media archive file);
+  3. uploads exactly those files with `restic backup` into one repository on Backblaze B2.
+- The upload never reads the live DB or `MEDIA_DIR`.
+- **Local backup success never depends on the network.** The off-site step is a separate `try` after the local step,
+  and a B2 outage only shows up in `/health.offsite` and an alert.
+- **restic** provides client-side encryption (AES-256 + Poly1305 under a repository password), content-defined
+  deduplication (only new chunks are uploaded), snapshots, retention and integrity checks. Each upload is one snapshot
+  tagged `standa-hub` + `run:<local run id>`, with the fixed host `standa-hub`.
+- **B2 is accessed through its S3-compatible API**, which restic recommends over the native `b2:` backend.
+
+### Behaviour
+
+| When | What | Notes |
+|---|---|---|
+| Every hourly cycle | Upload the newest verified local run if it has no successful off-site record | Only a clean exit tags the snapshot `complete`; a partial snapshot (exit 3, e.g. a locked file) never counts. Idempotent: an existing `run:<id>` + `complete` snapshot (e.g. after a crash) is reused, never duplicated. A failed or missed upload retries next hour. `restic unlock` first removes only *stale* locks. |
+| ~daily (≥ 20 h since the last check **attempt**) | `restic check` (metadata only) | No data download. Cadence follows attempts, so a failing check or prune backs off to daily/weekly instead of repeating hourly. |
+| Weekly (≥ 7 days since the last prune attempt) | `restic check --read-data-subset 5%`, then **only if it passed** `restic forget --tag standa-hub --group-by host --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune` | `--group-by host`: snapshot paths differ per run, so grouping by paths would never forget anything. A failed prune leaves existing snapshots intact. |
+
+**Concurrency and time bound:**
+- one deadline (`OFFSITE_TIMEOUT_SECONDS`, default 3600) bounds the whole cycle, every restic call included, so an unreachable B2 can never hold the hourly job (and the next local backup) for hours;
+- one off-site operation per backend process (lock), and restic's own repository lock;
+- the scheduler has a single owner (MRK-23);
+- a `running` record older than twice the timeout is marked `interrupted` and retried.
+
+**History** goes into `offsite_backup_runs` (migration `0024`). It holds only the operation, status, an allowlisted
+outcome code, the local backup id/run id, the snapshot id, new files/bytes and timestamps: never credentials, the
+repository URL, paths or raw restic output.
+
+**Outcome codes:** `success`, `already_uploaded`, `no_source`, `busy`, `not_configured`, `misconfigured`,
+`source_invalid`, `auth_failed`, `network_unavailable`, `repository_missing`, `wrong_password`, `locked`, `timeout`,
+`interrupted`, `source_incomplete`, `check_failed`, `restic_failed`.
+
+### Health and alerts
+
+`/health.offsite` contains:
+- `configured`, `status` (`disabled | fresh | stale | check_failed | misconfigured | unknown`), `degraded`;
+- `last_attempt_at` / `last_attempt_outcome`, `last_success_at`, `source_backup_id`, `age_seconds`, `max_age_seconds`
+  (26 h);
+- last check and prune time and status, the retention policy, `encrypted: true`.
+
+No bucket, endpoint, account, key, password, path or raw output ever appears there. Once configured, **no successful
+off-site copy for more than 26 h, a failed repository check, or an unusable configuration** turns the overall status
+`degraded` (HTTP 200). Before the first upload the status is `stale`, which is honest.
+
+Every failure upserts one bell notification per operation (`offsite:backup|check|prune`, type `ops_alert`, fixed
+Czech text plus the outcome code); the next success resolves it. `ops_alert` is a Web Push deliverable type
+(`OPS_ALERT_PUSH`, default on), so when MRK-24 HTTPS push is live the same alert reaches the phone through the
+existing delivery queue. The MRK-26 monitoring log records only `off_machine` + `ok/warning`.
+
+### Backblaze B2 setup (owner, once; never paste these values anywhere)
+
+1. **Bucket:**
+   - Private, with a globally unique name.
+   - Note its **S3 endpoint** (bucket details, e.g. `s3.<region>.backblazeb2.com`).
+   - **Lifecycle:** *Keep prior versions for this number of days* = **30**. With the S3 API, restic deletes by
+     *hiding* objects, so this keeps every pruned or hidden object recoverable for 30 days, including after a
+     malicious "delete everything" with the upload key.
+   - **Object Lock: off.** restic over the S3 API with Object Lock is not verified here.
+   - Server-side encryption is optional, since restic already encrypts client-side.
+2. **Upload application key** restricted to that bucket:
+   - Capabilities `listBuckets`, `listAllBucketNames` (needed by bucket-restricted keys), `listFiles`, `readFiles`,
+     `writeFiles`.
+   - **Hardened variant: without `deleteFiles`.** Backblaze documents `writeFiles` for deleting by name (a hide) and
+     `deleteFiles` for deleting a specific version. Whether S3 DeleteObject-by-name works without `deleteFiles` is
+     **verified during production acceptance**: `restic backup`, `unlock` and `forget --prune` must all succeed. If
+     it fails, use the web console's read-and-write key, which includes deletion, and rely on the 30-day lifecycle
+     window.
+   - The web console's key types may not let you leave out `deleteFiles`. The B2 CLI can create a key with an exact
+     capability list (`b2 key create …`; check `--help` for the current syntax).
+   - Copy the **keyID** and **applicationKey** (shown once) only into the local protected file (step 4).
+3. **Separate maintenance credential: not needed by default.** Because prune only *hides* objects, the automated key
+   can't destroy history. Real deletion happens only through the bucket lifecycle rule or your own account login,
+   which never lives on this machine. If you want prune on a different key anyway, set
+   `OFFSITE_MAINTENANCE_SECRETS_FILE` to a second protected file in the same format; only the weekly prune uses it.
+4. **Secrets on the production machine**, in an elevated PowerShell:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\windows\offsite-secrets.ps1 -Mode Prepare -GeneratePassword
+   notepad C:\ProgramData\StandaHub\offsite\b2.env          # fill RESTIC_REPOSITORY / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+   notepad C:\ProgramData\StandaHub\offsite\restic-password.txt   # copy the generated password into your password manager
+   powershell -ExecutionPolicy Bypass -File scripts\windows\offsite-secrets.ps1 -Mode Check   # names/booleans only
+   ```
+
+   - `RESTIC_REPOSITORY=s3:https://<s3 endpoint>/<bucket>/standa-hub`.
+   - The folder and files are **SYSTEM + Administrators only** (inheritance off) and live outside the git checkout.
+     The restic password is a separate file from the B2 key.
+   - **Repository password warning:** without it, the off-site copy can never be decrypted, and Backblaze can't help.
+     Keep it, plus the keyID/applicationKey or your B2 login, **off this machine**. Losing the PC must not lose them.
+5. **`backend\.env.production`** (protected, edit in place):
+
+   ```
+   OFFSITE_BACKUP_ENABLED=true
+   OFFSITE_RESTIC_PATH=C:\Program Files\WinGet\Packages\restic.restic_Microsoft.Winget.Source_8wekyb3d8bbwe\restic_<version>_windows_amd64.exe
+   OFFSITE_SECRETS_FILE=C:\ProgramData\StandaHub\offsite\b2.env
+   OFFSITE_RESTIC_PASSWORD_FILE=C:\ProgramData\StandaHub\offsite\restic-password.txt
+   # optional: OFFSITE_TIMEOUT_SECONDS=3600, OFFSITE_MAINTENANCE_SECRETS_FILE=…, OPS_ALERT_PUSH=true
+   ```
+
+   `production.py` refuses an off-site setup that isn't absolute and separate, or that has no local backup
+   (`BACKUP_ENABLED`). restic is installed machine-wide (`winget install --id restic.restic --source winget --scope
+   machine`) under `C:\Program Files\WinGet\Packages`, where only SYSTEM/Administrators can write and SYSTEM can
+   execute. Use the absolute path, because the task runs as SYSTEM.
+6. **Create the repository once:** `python -m offsite_restic --env-file <env> init` (it refuses an existing
+   repository). Then restart `StandaHub-Backend`.
+
+### Operator CLI (elevated, in `C:\StandaHub\backend`)
+
+`python -m offsite_restic --env-file <protected env>` followed by one of:
+- `status`: the same JSON as `/health.offsite`;
+- `backup`: upload the newest verified run now;
+- `check [--read-data]`;
+- `prune`: sampled check first;
+- `snapshots`: count and newest time only;
+- `restore --target <empty scratch dir> [--snapshot <id>|latest]`.
+
+The CLI prints outcome codes only.
+
+### Restore from B2 (drill or disaster)
+
+1. On any machine with restic, the two protected files and network access:
+   `python -m offsite_restic --env-file <env> restore --target D:\restore-drill`. Or plain restic:
+   `restic -r s3:https://… restore latest --target <dir>` with the same environment variables and password file.
+2. The CLI refuses targets inside `BACKUP_DIR`/`MEDIA_DIR` and non-empty targets. After restoring, it re-runs the
+   MRK-25 checksum contract on the restored run (run JSON, dump, manifest, every media file).
+3. The restored tree has exactly the local `BACKUP_DIR` layout (`runs/`, `standa_hub_<ts>.pgdump.gz`,
+   `media/manifests`, `media/archive`). Continue with [backups.md → Obnova](backups.md#obnova): scratch DB, scratch
+   media, verify, and only then switch over. `latest` means the newest snapshot tagged `complete`.
+4. **Mini PC / Linux (MRK-27, MRK-49):** the same repository URL, keys and password work with restic on Linux. The
+   new host keeps `--host standa-hub` (that is the code's constant), so the snapshot history and retention continue
+   in one lineage. Run a restore drill there first, never an experiment on the only original.
+
+## MRK-25 integrity library
+
+The rest of this document describes the MRK-25 library. Its run and manifest verification is the gate before every
+restic upload and after every restore. The TAR + `age` + filesystem-target path below remains a tested,
+provider-independent fallback, but **production uses restic → B2** (above).
 
 `backend/offsite_backup.py` turns one completed local backup run into a self-contained, verifiable artifact. It is deliberately separate from backup scheduling, notifications and `/health`: callers decide when to invoke it and persist only the returned safe status.
 

@@ -75,6 +75,14 @@ def _run_hourly_job() -> None:
         except Exception:
             tracker.failed("standa_hub_hourly")
             print("[scheduler] daily backup failed")
+        try:
+            # MRK-57: off-machine copy of the newest verified local run (restic → B2). Separate step: the local
+            # backup above never waits for or depends on the network; failures/retries live in offsite_backup_runs
+            # and /health.offsite, not in the hourly job's failure count.
+            from offsite_restic import run_scheduled
+            run_scheduled(db)
+        except Exception:
+            print("[scheduler] off-site step failed")
     except Exception:
         tracker.failed("standa_hub_hourly")
         print("[scheduler] hourly job failed")

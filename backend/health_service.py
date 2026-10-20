@@ -33,7 +33,7 @@ def _timestamp(value):
     return _utc(value).isoformat() if value else None
 
 
-def collect_health(engine, scheduler, *, backup_enabled=False, now=None, version=None):
+def collect_health(engine, scheduler, *, backup_enabled=False, now=None, version=None, offsite=False):
     now = _utc(now or datetime.now(timezone.utc))
     result = {
         'status': 'healthy', 'checked_at': now.isoformat(),
@@ -77,9 +77,18 @@ def collect_health(engine, scheduler, *, backup_enabled=False, now=None, version
     except Exception:
         # Never expose SQL, database URLs, driver/OS exception text or private filenames.
         result['status'] = 'unhealthy'
+    if offsite:
+        from offsite_restic import enabled as offsite_enabled, health_section
+        try:
+            with engine.connect() as conn:
+                result['offsite'] = health_section(conn, now)
+        except Exception:
+            # Secret-safe fallback; an unknown off-site state only degrades health when off-site is configured.
+            result['offsite'] = {'configured': offsite_enabled(), 'status': 'unknown', 'degraded': offsite_enabled()}
     if result['status'] != 'unhealthy' and (
         scheduler['status'] not in {'running', 'disabled'} or
-        (backup_enabled and (result['backup']['state'] != 'ok' or not scheduler.get('backup_job_enabled', False)))
+        (backup_enabled and (result['backup']['state'] != 'ok' or not scheduler.get('backup_job_enabled', False))) or
+        result.get('offsite', {}).get('degraded')   # MRK-57: no off-site copy for >26 h once configured
     ):
         result['status'] = 'degraded'
     return result
@@ -109,7 +118,7 @@ def runtime_health():
     from scheduler_service import scheduler_snapshot
     try:
         return collect_health(probe_engine(), scheduler_snapshot(), backup_enabled=env_bool('BACKUP_ENABLED', False),
-                              version=runtime_version())
+                              version=runtime_version(), offsite=True)
     except Exception:
         # Engine/config failures must still be a bounded, secret-safe 503 response.
         return {'status': 'unhealthy', 'version': runtime_version(), 'database': {'status': 'unreachable'},
