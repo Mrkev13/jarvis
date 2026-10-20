@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from datetime import date, datetime, timedelta, timezone
 
 from database import SessionLocal
-from models import WotResource, WotGrind, FinanceTransaction, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
+from models import WotResource, WotGrind, Subject, Assignment, Exam, WorkSession, MffCharacter, Goal, Memory, Conversation, Message, ActivityLog, PendingAction
 from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 
 from auth_service import (
@@ -48,7 +48,7 @@ import briefing_service
 import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
-from text_utils import finance_summary_cz, format_hours_cz, planner_action_line
+from text_utils import format_hours_cz, planner_action_line
 from time_utils import utc_now
 from env_config import env_bool
 from module_registry import all_contributions, current_access
@@ -1429,84 +1429,32 @@ def wot_replay_file(replay_id: int):
 
 @app.post("/finance/transaction")
 def add_finance_transaction(request: FinanceTransactionRequest):
+    """MRK-61: tenký obal nad modules.finance.service (účet „Ruční / hotovost", amount_minor + měna)."""
+    from modules.finance import service as finance_service
+    from modules.finance.legacy_compat import legacy_request_minor
+
     db = SessionLocal()
-
     try:
-        item = FinanceTransaction(
-            amount=request.amount,
-            category=request.category,
-            description=request.description,
-            transaction_type=request.transaction_type
-        )
-
-        db.add(item)
-        db.flush()
-        item_id_for_log = item.id
-
-        summary = finance_summary_cz(request.transaction_type, request.amount, request.category, request.description)
-        log_activity(
-            db, "finance", "create", summary,
-            entity_type="FinanceTransaction", entity_id=item_id_for_log,
-            delta=delta_dict(None, item, ["amount", "category", "description", "transaction_type"]),
-            user_context="manual"
-        )
-
+        try:
+            item = finance_service.create_manual_transaction(
+                db, amount_minor=legacy_request_minor(request.amount),
+                direction="in" if request.transaction_type == "income" else "out",
+                category=request.category, description=request.description, user_context="manual")
+        except finance_service.FinanceError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.message) from None
         db.commit()
-        db.refresh(item)
-
-        goals = (
-            db.query(Goal)
-            .filter((Goal.tracking_type == "automatic") | (Goal.tracking_type == "Automatic"))
-            .filter(Goal.source == "finance_balance")
-            .all()
-        )
-        changed = 0
-        for g in goals:
-            before_pct, _ = compute_goal_progress_and_value(db, g)
-            if ensure_goal_progress_snapshot(db, g):
-                after_pct, _ = compute_goal_progress_and_value(db, g)
-                if before_pct != after_pct:
-                    log_activity(
-                        db, "goals", "snapshot",
-                        f"Cíl '{g.title}' {before_pct}% → {after_pct}%",
-                        entity_type="Goal", entity_id=g.id,
-                        user_context="manual"
-                    )
-                changed += 1
-        if changed:
-            db.commit()
-
-        return {
-            "status": "ok",
-            "id": item.id
-        }
-
+        finance_service.refresh_finance_goals(db)
+        return {"status": "ok", "id": item.id}
     finally:
         db.close()
 
 @app.get("/finance/transactions")
 def finance_transactions():
+    from modules.finance import service as finance_service
+
     db = SessionLocal()
-
     try:
-        items = (
-            db.query(FinanceTransaction)
-            .order_by(FinanceTransaction.created_at.desc())
-            .all()
-        )
-
-        return [
-            {
-                "id": item.id,
-                "amount": item.amount,
-                "category": item.category,
-                "description": item.description,
-                "transaction_type": item.transaction_type,
-                "created_at": item.created_at
-            }
-            for item in items
-        ]
-
+        return finance_service.list_transactions(db)  # bez zrušených řádků (MRK-61)
     finally:
         db.close()
 
@@ -2881,36 +2829,18 @@ def delete_wot_grind(item_id: int):
 
 @app.delete("/finance/transaction/{item_id}")
 def delete_finance_transaction(item_id: int):
+    """MRK-61: zrušení (voided_at) místo smazání – řádek i vazba z práce zůstávají v historii."""
+    from modules.finance import service as finance_service
+
     db = SessionLocal()
     try:
-        item = db.query(FinanceTransaction).filter(FinanceTransaction.id == item_id).first()
-        if item is None:
-            raise HTTPException(status_code=404, detail="FinanceTransaction not found")
         try:
-            sp = db.begin_nested()
-            try:
-                from sqlalchemy import text as _tx
-                db.execute(
-                    _tx("UPDATE work_sessions SET finance_transaction_id = NULL WHERE finance_transaction_id = :tid"),
-                    {"tid": item_id},
-                )
-                sp.commit()
-            except Exception:
-                sp.rollback()
-        except Exception:
-            pass
-
-        summary = finance_summary_cz(item.transaction_type, item.amount, item.category, item.description)
-        log_activity(
-            db, "finance", "delete", f"Smazáno: {summary}",
-            entity_type="FinanceTransaction", entity_id=item.id,
-            delta=delta_dict(item, None, ["amount", "category", "description", "transaction_type", "created_at"]),
-            user_context="manual"
-        )
-
-        db.delete(item)
+            finance_service.void_transaction(db, item_id, user_context="manual")
+        except finance_service.FinanceError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.message) from None
         db.commit()
-        return {"status": "ok", "deleted": True, "id": item_id}
+        finance_service.refresh_finance_goals(db)
+        return {"status": "ok", "deleted": True, "voided": True, "id": item_id}
     finally:
         db.close()
 

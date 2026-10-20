@@ -37,8 +37,39 @@ that would double-count income, so:
   are not deleted, nulled or rewritten. The Work page still shows "Zapsáno ve Financích" for them;
 - work earnings stay in the Work module (and its AI tools); only the Finance link is hidden from AI.
 
+## Ledger schema (MRK-61, migration `0025_finance_ledger`)
+
+`finance_transactions` is **evolved, not replaced** (no parallel ledger). New tables: `finance_accounts`,
+`finance_imports`, `finance_import_issues`, `finance_categories`, `finance_rules`, `finance_transaction_revisions`
+(`backend/modules/finance/models.py`). New columns on transactions: account/import/source, `booked_on`/`value_on`,
+`amount_minor` (BIGINT, signed: minus = money out) + `currency` + `direction`, counterparty (masked/hashed account),
+VS/KS/SS, `txn_key`/`fingerprint` (dedupe, MRK-62), system/override/effective category, `transfer_link_id`,
+`review_flag`, `voided_at`/`void_reason`, `search_text`.
+
+- **Money:** new logic uses `amount_minor` + `currency` only (`modules/finance/money.py`, Decimal parsing).
+  A test fails if `modules/finance/` uses `float` outside the legacy bridge.
+- **Legacy bridge** (`modules/finance/legacy_compat.py`): `amount` (Float) and `category` (text) stay as a mirror.
+  A before-insert/update hook fills the ledger columns from legacy writes (and the mirror from ledger writes), so old
+  writers and fixtures keep working. It is the only Float code; remove it with the legacy columns in a later migration.
+- **Legacy rows** were moved to the built-in account „Ruční / hotovost“ (`key = manual_cash`, CZK):
+  `amount_minor = round(amount × 100)` signed by type (same totals per type), `booked_on` = Prague date of
+  `created_at` (migration day if missing; `created_at` itself untouched), `source = work_sync` where a work session
+  links the row (links unchanged), legacy text category → built-in category as a manual override
+  (`category_source = legacy`; unknown → Ostatní / Ostatní příjmy).
+- **Void, not delete:** `DELETE /finance/transaction/{id}` sets `voided_at` (+ Activity delta). Voided rows stay in the
+  DB (and keep work links) but are excluded from totals, lists, Search, the dashboard and goals
+  (`service.active_transactions`). Imported rows cannot be voided (MRK-62/65: review flag).
+- **Readers moved:** Search, dashboard, `finance_*` goals, `/finance/summary` and the legacy routes read
+  `amount_minor`, `booked_on` and skip voided rows. The legacy API keeps its fields (`amount` as a positive number)
+  and adds `amount_minor`, `currency`, `direction`, `booked_on`, `account_id`, `source`, `category_id`.
+- **Accounts/categories service:** create, update/rename, archive (built-ins cannot be archived; categories at most two
+  levels). Account numbers: only a masked suffix and a SHA-256 fingerprint for matching (low-entropy numbers – the
+  fingerprint is not a secret; protection is the private DB). UI comes in MRK-65.
+- **Downgrade guard:** `0025` refuses to downgrade while imports, rules, revisions, user accounts/categories, voided or
+  imported rows exist.
+
 ## Next
 
-Schema modernization (MRK-61), import core (MRK-62), mBank adapter (MRK-63), import UI (MRK-64),
+Import core (MRK-62), mBank adapter (MRK-63), import UI (MRK-64),
 transactions/categories/rules (MRK-65), overview/Search/What Changed (MRK-66), real-data acceptance (MRK-68).
 Real bank files are never committed, logged or put into fixtures.

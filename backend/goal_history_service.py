@@ -7,9 +7,9 @@ import calendar
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import FinanceTransaction, Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam
+from models import Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_PASSED_STATUSES, MFF_BUILT_STATUSES, norm
-from time_utils import local_month_bounds_utc, today_local
+from time_utils import today_local
 
 
 def _float_equal(a: float | None, b: float | None) -> bool:
@@ -61,30 +61,16 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
         return float(hours or 0.0), True
 
     if source in ("finance_balance", "finance_total_balance"):
-        income = (
-            db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0))
-            .filter(FinanceTransaction.transaction_type == "income")
-            .scalar()
-        )
-        expenses = (
-            db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0))
-            .filter(FinanceTransaction.transaction_type == "expense")
-            .scalar()
-        )
-        return float(income or 0.0) - float(expenses or 0.0), True
+        # MRK-61: haléře se znaménkem, bez zrušených řádků; hodnota cíle zůstává v korunách
+        from modules.finance.service import totals_minor
+        t = totals_minor(db)
+        return (t["income_minor"] - t["expenses_minor"]) / 100, True
 
     if source in ("finance_month_income", "finance_month_expenses"):
-        # created_at je naive UTC → pražský kalendářní měsíc převedený do UTC, [start, end).
-        month_start_utc, month_end_utc = local_month_bounds_utc(d)
-        kind = "income" if source == "finance_month_income" else "expense"
-        amount = (
-            db.query(func.coalesce(func.sum(FinanceTransaction.amount), 0.0))
-            .filter(FinanceTransaction.transaction_type == kind)
-            .filter(FinanceTransaction.created_at >= month_start_utc)
-            .filter(FinanceTransaction.created_at < month_end_utc)
-            .scalar()
-        )
-        return float(amount or 0.0), True
+        # pražský kalendářní měsíc podle dne zaúčtování (u ručních řádků = pražský den vzniku)
+        from modules.finance.service import month_totals_minor
+        t = month_totals_minor(db, d)
+        return t["income_minor" if source == "finance_month_income" else "expenses_minor"] / 100, True
 
     if source == "school_completed_assignments":
         total = (

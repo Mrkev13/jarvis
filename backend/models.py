@@ -2,7 +2,7 @@ from datetime import datetime
 import json as _json
 import re
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -125,14 +125,62 @@ def legacy_role_string_to_list(role_str: str | None) -> list[str]:
 
 
 class FinanceTransaction(Base):
+    """Účetní řádek Finance. MRK-61: nové sloupce (účet, datum zaúčtování, `amount_minor` + měna, kategorie, void…)
+    jsou zdrojem pravdy; `amount` (Float) a `category` (text) jsou legacy zrcadlo, které drží
+    `modules/finance/legacy_compat.py`, dokud je nečte nikdo starý (pozdější migrace je odstraní)."""
     __tablename__ = "finance_transactions"
+    __table_args__ = (
+        CheckConstraint("source IN ('manual', 'work_sync', 'import')", name="ck_finance_transactions_source"),
+        CheckConstraint("direction IN ('in', 'out')", name="ck_finance_transactions_direction"),
+        CheckConstraint("(direction = 'in' AND amount_minor >= 0) OR (direction = 'out' AND amount_minor <= 0)",
+                        name="ck_finance_transactions_sign"),
+        CheckConstraint("length(currency) = 3", name="ck_finance_transactions_currency"),
+        UniqueConstraint("account_id", "txn_key", name="uq_finance_transactions_account_txn_key"),
+        Index("ix_finance_transactions_account_booked", "account_id", "booked_on"),
+        Index("ix_finance_transactions_booked_on", "booked_on"),
+        Index("ix_finance_transactions_category_booked", "effective_category_id", "booked_on"),
+        Index("ix_finance_transactions_fingerprint", "fingerprint"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
+    # --- legacy (zrcadlo; nové čtení přes amount_minor / effective_category_id) ---
     amount = Column(Float, nullable=False)
     category = Column(String(100), nullable=False)
-    description = Column(String(255), default="")
+    description = Column(String(255), default="")  # očištěný popis (bez čísel účtů)
     transaction_type = Column(String(20), nullable=False)  # income / expense
     created_at = Column(DateTime, default=datetime.utcnow)
+    # --- identita a zdroj ---
+    account_id = Column(Integer, ForeignKey("finance_accounts.id", ondelete="RESTRICT"), nullable=False)
+    import_id = Column(Integer, ForeignKey("finance_imports.id", ondelete="RESTRICT"))
+    source = Column(String(20), nullable=False)  # manual / work_sync / import
+    # --- datum a částka ---
+    booked_on = Column(Date, nullable=False)  # pražský den zaúčtování
+    value_on = Column(Date)
+    amount_minor = Column(BigInteger, nullable=False)  # haléře se znaménkem: minus = odchozí
+    currency = Column(String(3), nullable=False)
+    direction = Column(String(3), nullable=False)  # in / out
+    # --- protistrana ---
+    counterparty_name = Column(String(200))
+    counterparty_account_masked = Column(String(40))
+    counterparty_account_hash = Column(String(64))
+    vs = Column(String(10))
+    ks = Column(String(10))
+    ss = Column(String(10))
+    # --- deduplikace a metadata (MRK-62) ---
+    txn_key = Column(String(128))
+    fingerprint = Column(String(64))
+    extra = Column(Text)  # JSON, jen allowlist polí adaptéru
+    # --- kategorie ---
+    system_category_id = Column(Integer, ForeignKey("finance_categories.id", ondelete="RESTRICT"))
+    category_source = Column(String(20))  # legacy / manual / rule / none
+    override_category_id = Column(Integer, ForeignKey("finance_categories.id", ondelete="RESTRICT"))
+    effective_category_id = Column(Integer, ForeignKey("finance_categories.id", ondelete="RESTRICT"))
+    # --- vazby a stavy ---
+    transfer_link_id = Column(Integer, ForeignKey("finance_transactions.id", ondelete="RESTRICT"))
+    review_flag = Column(Boolean, nullable=False, default=False)
+    voided_at = Column(DateTime)  # MRK-61: místo DELETE; zrušený řádek se nepočítá, nehledá ani nenabízí
+    void_reason = Column(String(200))
+    search_text = Column(String(600))
 
 
 class Goal(Base):
@@ -741,8 +789,15 @@ from modules.calendar.models import CalendarSource, CalendarEvent  # noqa: E402
 
 from modules.school.models import StudyCourse, StudyMaterial  # noqa: E402
 from modules.fitness.models import Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry  # noqa: E402
+from modules.finance.models import (  # noqa: E402
+    FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision,
+)
+from modules.finance.legacy_compat import install_legacy_compat  # noqa: E402
 
-MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, StudyCourse, StudyMaterial, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry)
+install_legacy_compat(FinanceTransaction)
+
+MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, StudyCourse, StudyMaterial, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry,
+                 FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision)
 
 
 class DomainEvent(Base):
