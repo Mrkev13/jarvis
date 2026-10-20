@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from openai import OpenAI
 from sqlalchemy import update as _sql_update
 
-from tool_registry import READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS
+from tool_registry import MANUAL_ONLY_SPECS, READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS
 from activity_service import log_activity
 from database import SessionLocal
 from models import PendingAction
@@ -49,9 +49,10 @@ client = OpenAI(
 
 
 SYSTEM_PROMPT = """
-You are the AI assistant inside Standa Hub, a personal dashboard: finances, work, school, goals, World of Tanks (WoT), Marvel Future Fight (MFF), long-term memory.
+You are the AI assistant inside Standa Hub, a personal dashboard: work, school, goals, World of Tanks (WoT), Marvel Future Fight (MFF), long-term memory.
 
 TOOLS
+- Finance (money, transactions, balances, bank statements) is not available to you: no data, no tools. Never estimate or invent amounts; point the user to the Finance page.
 - READ tools (get_*) never change data. WRITE tools (add_*, update_*, upsert_*, save_memory, modify_records, undo_change, manage_reminder): they only PREPARE a change; the system returns confirmation_required and the user must confirm it in the UI.
 - CURRENT STATE (system message) is live module data: if it answers the question, answer directly. Never re-fetch what it contains; call READ tools only for missing data, all needed ones in one turn. No identical repeated calls.
 - Tool results are authoritative for current data, like CURRENT STATE. RELEVANT MEMORY is context only.
@@ -78,7 +79,7 @@ MEMORY
 
 PLANNER (what to do today/this week, priorities, focus, stagnating goals, time split)
 - Read-only. Goals and memories come from CURRENT STATE / RELEVANT MEMORY; only if missing call get_goals AND get_memories (together), then only tools for data still missing.
-- Priority order: overdue obligations > hard deadlines within 14 days > exams within 14 days > finance constraints / lagging monthly targets > work commitments / lagging hour targets > high-priority goals under 50 % > medium > low > routine tasks.
+- Priority order: overdue obligations > hard deadlines within 14 days > exams within 14 days > lagging monthly targets > work commitments / lagging hour targets > high-priority goals under 50 % > medium > low > routine tasks.
 - GROUNDING: project names, amounts, dates, deadlines and targets only if they appear in tool results or the current context. Missing value: omit it, never invent it. Up to 5 actions; fewer grounded actions beat speculative ones.
 - Each action: specific, actionable now (bad: "Více se učit."). No generic filler ("šetři peníze") unless directly supported. WoT/MFF: no speculative mechanics.
 - The planner never creates or modifies anything by itself; saving an action needs the WRITE tool and confirmation.
@@ -121,6 +122,8 @@ READ_TOOL_FUNCTIONS = {s.name: s.func for s in READ_SPECS}
 WRITE_TOOL_FUNCTIONS = {s.name: s.func for s in WRITE_SPECS}
 TOOL_FUNCTIONS = {**READ_TOOL_FUNCTIONS, **WRITE_TOOL_FUNCTIONS}
 WRITE_TOOL_NAMES = set(WRITE_TOOL_FUNCTIONS.keys())
+# MRK-60: jen pro pending akce ručních zdrojů (Rychlé přidání); model je nevidí a jeho návrh se neprovede.
+MANUAL_ONLY_TOOL_FUNCTIONS = {s.name: s.func for s in MANUAL_ONLY_SPECS}
 
 
 def _store_pending_action(db, tool: str, arguments: dict, *, ttl_minutes: int = 10) -> str:
@@ -662,7 +665,7 @@ SUMMARY_SYSTEM_PROMPT = (
     "Zachovej: rozhodnutí a preference uživatele vyslovené v konverzaci; nevyřešené úkoly a otevřené otázky; "
     "důležitá fakta a dohody; odkazy potřebné k navázání (o čem se mluvilo, na co se uživatel odkazuje).\n"
     "Vynech: small talk, pozdravy, opakování, doslovné formulace, přesná aktuální čísla z modulů "
-    "(finance, hodiny, XP, progres – ta se vždy čtou živě).\n"
+    "(hodiny, XP, progres – ta se vždy čtou živě). Žádné částky ani transakce z financí.\n"
     "Nic nevymýšlej. Česky, stručné odrážky, nejvýše {max_words} slov."
 )
 
@@ -887,7 +890,8 @@ def execute_confirm_action(action_id: str):
         manual = source in MANUAL_SOURCES
         user_context = source if manual else "ai_confirm"
 
-        if tool_name not in WRITE_TOOL_FUNCTIONS:
+        fn = WRITE_TOOL_FUNCTIONS.get(tool_name) or (MANUAL_ONLY_TOOL_FUNCTIONS.get(tool_name) if manual else None)
+        if fn is None:
             _finalize_pending_status(db, action_id, "failed")
             try:
                 log_activity(
@@ -906,7 +910,6 @@ def execute_confirm_action(action_id: str):
                 "detail": f"Tool '{tool_name}' is not a known write tool requiring confirmation.",
             }
 
-        fn = WRITE_TOOL_FUNCTIONS[tool_name]
         try:
             fn_args = dict(arguments)
             fn_args["user_context"] = user_context

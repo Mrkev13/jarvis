@@ -44,9 +44,9 @@ class ToolRegistryTestCase(unittest.TestCase):
                 self.assertEqual(next(iter(params)), "db")
 
     def test_schemas_keep_registry_order(self):
-        names = ["save_memory", "get_wot_resources", "add_finance_transaction"]
+        names = ["save_memory", "get_wot_resources", "add_work_session"]
         got = [s["function"]["name"] for s in reg.schemas(names)]
-        self.assertEqual(got, ["get_wot_resources", "add_finance_transaction", "save_memory"])
+        self.assertEqual(got, ["get_wot_resources", "add_work_session", "save_memory"])
 
 
 if __name__ == "__main__":

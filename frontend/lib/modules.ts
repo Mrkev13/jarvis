@@ -41,7 +41,7 @@ function planned(id: string, label: string): ModuleDef {
 export const MODULES: ModuleDef[] = [
   { id: "school", label: "Škola", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["subject", "assignment", "exam", "study_material", "study_course"], routes: ["/school"], quickAddKinds: ["exam", "assignment"] },
   { id: "work", label: "Práce", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["work_session"], routes: ["/work"], quickAddKinds: ["work"] },
-  { id: "finance", label: "Finance", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard", "ai_context"], entityTypes: ["transaction"], routes: ["/finance"], quickAddKinds: ["finance"] },
+  { id: "finance", label: "Finance", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "quick_add", "today", "dashboard"], entityTypes: ["transaction"], routes: ["/finance"], quickAddKinds: ["finance"] },
   { id: "goals", label: "Cíle", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["goal"], routes: ["/goals"], quickAddKinds: [] },
   { id: "wot", label: "World of Tanks", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["wot_grind", "wot_resource", "wot_replay"], routes: ["/wot"], quickAddKinds: [] },
   { id: "mff", label: "Marvel Future Fight", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["mff_character"], routes: ["/mff"], quickAddKinds: [] },

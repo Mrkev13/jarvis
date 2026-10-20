@@ -2,8 +2,9 @@
 
 Sestaví se z reálných dat PŘED voláním LLM, bez historie konverzace a bez toolů. Každá položka má odkaz
 `ref` („assignment:12", „reminder:5"…), takže LLM smí jen vybírat a řadit – ne vymýšlet úkoly.
-Sekce: today (dnes), overdue (po termínu), soon (brzy), goals, attention (upozornění), finance (jen když je
-něco neobvyklého), changes (co se změnilo od minulého přehledu). Velikost hlídají stropy položek a tokenů.
+Sekce: today (dnes), overdue (po termínu), soon (brzy), goals, attention (upozornění), changes (co se změnilo
+od minulého přehledu). Velikost hlídají stropy položek a tokenů.
+Finance tu není ani nepřímo (MRK-60: do LLM nejde – finance_ai_policy.py).
 """
 from __future__ import annotations
 
@@ -17,24 +18,24 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
-from models import ActivityLog, Assignment, Exam, FinanceTransaction, Goal, Notification, Reminder
+from finance_ai_policy import is_finance_activity, is_finance_goal, is_finance_notification
+from models import ActivityLog, Assignment, Exam, Goal, Notification, Reminder
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
-from time_utils import local_day_bounds_utc, local_month_bounds_utc, to_local
+from time_utils import local_day_bounds_utc, to_local
 from text_utils import WEEKDAYS_CZ_SHORT, clip
 
-SECTION_ORDER = ("today", "overdue", "soon", "attention", "goals", "finance", "changes")
+SECTION_ORDER = ("today", "overdue", "soon", "attention", "goals", "changes")
 SECTION_TITLES = {
     "today": "DNES",
     "overdue": "PO TERMÍNU / NEVYŘÍZENÉ",
     "soon": "BRZY",
     "attention": "UPOZORNĚNÍ",
     "goals": "CÍLE",
-    "finance": "FINANCE",
     "changes": "ZMĚNY OD MINULÉHO PŘEHLEDU",
 }
-SECTION_CAPS = {"today": 6, "overdue": 6, "soon": 6, "attention": 3, "goals": 3, "finance": 1, "changes": 4}
-# Při ořezu na rozpočet se bere od konce: nejdřív změny, finance, cíle…
-TRIM_ORDER = ("changes", "finance", "goals", "attention", "soon", "overdue", "today")
+SECTION_CAPS = {"today": 6, "overdue": 6, "soon": 6, "attention": 3, "goals": 3, "changes": 4}
+# Při ořezu na rozpočet se bere od konce: nejdřív změny, cíle…
+TRIM_ORDER = ("changes", "goals", "attention", "soon", "overdue", "today")
 MAX_SNAPSHOT_TOKENS = 1200
 SOON_DAYS = 7
 EXAM_SOON_DAYS = 14
@@ -44,7 +45,7 @@ LABEL_CHARS = 70
 _DONE = ASSIGNMENT_DONE_STATUSES  # kanonické stavy: statuses.py
 _EXAM_OPEN = EXAM_OPEN_STATUSES
 _GOAL_INACTIVE = GOAL_INACTIVE_STATUSES
-_ATTENTION_TYPES = ("goal_stagnation", "work_behind", "finance_goal_stagnation")
+_ATTENTION_TYPES = ("goal_stagnation", "work_behind")
 _WEEKDAYS = WEEKDAYS_CZ_SHORT
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
@@ -131,7 +132,7 @@ class Snapshot:
 
     @property
     def refs(self) -> list[str]:
-        return sorted({i.ref for i in self.items() if not i.ref.startswith(("activity:", "finance:"))})
+        return sorted({i.ref for i in self.items() if not i.ref.startswith("activity:")})
 
     @property
     def is_quiet(self) -> bool:
@@ -232,7 +233,8 @@ def build_snapshot(
             sections["soon"].append(item)
 
     # --- cíle ---
-    active_goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in _GOAL_INACTIVE]
+    active_goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in _GOAL_INACTIVE
+                    and not is_finance_goal(g.source)]
     for g in active_goals:
         if g.target_date is None:
             continue
@@ -257,29 +259,17 @@ def build_snapshot(
     for n in (db.query(Notification)
               .filter(Notification.resolved == False, Notification.notification_type.in_(_ATTENTION_TYPES))  # noqa: E712
               .order_by(Notification.created_at.desc()).all()):
+        if is_finance_notification(n.area, n.notification_type):
+            continue
         sections["attention"].append(Item(f"notification:{n.id}", "notification", _short(n.title), "",
                                           None, n.action_url or "/", n.severity or ""))
-
-    # --- finance: jen když je měsíc ve ztrátě ---
-    m_start, m_end = local_month_bounds_utc(today)
-    income = expenses = 0.0
-    for tx in db.query(FinanceTransaction).filter(FinanceTransaction.created_at >= m_start,
-                                                  FinanceTransaction.created_at < m_end).all():
-        if (tx.transaction_type or "").lower() == "income":
-            income += float(tx.amount or 0)
-        else:
-            expenses += float(tx.amount or 0)
-    if expenses > income and expenses > 0:
-        sections["finance"].append(Item(
-            f"finance:{today:%Y-%m}", "finance",
-            f"Výdaje tento měsíc {expenses:,.0f} Kč převyšují příjmy {income:,.0f} Kč".replace(",", " "),
-            "", None, "/finance"))
 
     # --- změny od minulého přehledu ---
     since = changes_since or (now_utc - timedelta(hours=24))
     logs = meaningful_activity(db.query(ActivityLog)
                                .filter(ActivityLog.timestamp >= since)
                                .order_by(ActivityLog.timestamp.desc()).all())
+    logs = [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type)]
     counts: dict[str, int] = {}
     for lg in logs:
         counts[lg.area] = counts.get(lg.area, 0) + 1

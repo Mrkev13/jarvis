@@ -34,7 +34,7 @@ class StripRefsTestCase(unittest.TestCase):
             ("Odevzdej úkol assignment:12 dnes.", "Odevzdej úkol dnes."),
             ("Zkouška [exam:2] je dnes.", "Zkouška je dnes."),
             ("Fyzio (reminder:5) v 18:00.", "Fyzio v 18:00."),
-            ("Cíl goal:1, upozornění notification:9 a finance:2026-10.", "Cíl, upozornění a."),
+            ("Cíl goal:1, upozornění notification:9 a activity:4.", "Cíl, upozornění a."),
             ("Viz activity:117; activity:116", "Viz"),
         ):
             with self.subTest(raw=raw):

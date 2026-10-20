@@ -1,7 +1,7 @@
 """Filtrované a omezené read dotazy pro AI tooly (Roadmap 3.0 A5).
 
 REST endpointy dál používají plné seznamy z `tools.py` (tvar odpovědí se nemění). AI tooly místo toho
-dostanou jen to, co dotaz potřebuje: filtry (typ, kategorie, projekt, stav, období) a strop počtu položek.
+dostanou jen to, co dotaz potřebuje: filtry (typ, projekt, stav, období) a strop počtu položek.
 Výsledek je obálka `{"items", "total", "returned", "truncated", "filters"}` – model tak ví, že existuje víc
 dat a může se doptat užším filtrem, místo aby dostal stovky řádků do promptu.
 
@@ -14,8 +14,9 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from models import ActivityLog, Assignment, Exam, FinanceTransaction, Subject, WorkSession
-from time_utils import local_day_bounds_utc, to_local, utc_now
+from finance_ai_policy import FINANCE_AREA, is_finance_goal
+from models import ActivityLog, Assignment, Exam, Subject, WorkSession
+from time_utils import to_local, utc_now
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
@@ -62,45 +63,6 @@ def _like(column, text: str):
     return func.lower(column).like(f"%{text.strip().lower()}%")
 
 
-def query_finance_transactions(
-    db: Session,
-    limit: int | None = None,
-    transaction_type: str | None = None,
-    category: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-) -> dict:
-    """Transakce od nejnovější; období je v pražských kalendářních dnech (včetně obou krajních)."""
-    n = _limit(limit)
-    start, end = _parse_date(date_from, "date_from"), _parse_date(date_to, "date_to")
-    q = db.query(FinanceTransaction)
-    if transaction_type:
-        q = q.filter(func.lower(FinanceTransaction.transaction_type) == transaction_type.strip().lower())
-    if category and category.strip():
-        q = q.filter(_like(FinanceTransaction.category, category))
-    if start:
-        q = q.filter(FinanceTransaction.created_at >= local_day_bounds_utc(start)[0])
-    if end:
-        q = q.filter(FinanceTransaction.created_at < local_day_bounds_utc(end)[1])
-    total = q.count()
-    rows = q.order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(n).all()
-    items = [
-        {
-            "id": t.id,
-            "amount": t.amount,
-            "category": t.category,
-            "description": t.description,
-            "transaction_type": t.transaction_type,
-            "created_at": _local_iso(t.created_at),
-        }
-        for t in rows
-    ]
-    return _envelope(items, total, {
-        "limit": n, "transaction_type": transaction_type, "category": category,
-        "date_from": date_from, "date_to": date_to,
-    })
-
-
 def query_work_sessions(
     db: Session,
     limit: int | None = None,
@@ -129,8 +91,6 @@ def query_work_sessions(
             "description": s.description,
             "hourly_rate": s.hourly_rate,
             "earnings": round((s.hours or 0) * (s.hourly_rate or 0), 2),
-            "finance_transaction_id": s.finance_transaction_id,
-            "sync_to_finance": bool(s.sync_to_finance if s.sync_to_finance is not None else True),
         }
         for s in rows
     ]
@@ -245,7 +205,8 @@ def query_goals(
 
     n = _limit(limit)
     status_norm = (status or "all").strip().lower()
-    goals = tools.get_goals()
+    # MRK-60: automatické cíle počítané z Finance (bilance, měsíční příjmy/výdaje) AI nevidí.
+    goals = [g for g in tools.get_goals() if not is_finance_goal(g.get("source"))]
     if area and area.strip():
         goals = [g for g in goals if (g.get("area") or "").lower() == area.strip().lower()]
     if status_norm == "open":
@@ -270,7 +231,10 @@ def query_recent_activity(
         d = DEFAULT_ACTIVITY_DAYS
     d = max(1, min(d, MAX_ACTIVITY_DAYS))
     since = (now_utc or utc_now()) - timedelta(days=d)
-    q = db.query(ActivityLog).filter(ActivityLog.timestamp >= since)
+    # MRK-60: záznamy Finance (souhrny obsahují částky) AI nevidí.
+    q = db.query(ActivityLog).filter(ActivityLog.timestamp >= since,
+                                     func.lower(func.coalesce(ActivityLog.area, "")) != FINANCE_AREA,
+                                     func.coalesce(ActivityLog.entity_type, "") != "FinanceTransaction")
     if area and area.strip():
         q = q.filter(func.lower(ActivityLog.area) == area.strip().lower())
     total = q.count()

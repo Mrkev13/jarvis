@@ -132,8 +132,10 @@ class SnapshotTestCase(BriefingTestBase):
         self.assertEqual(sorted(refs["today"]), ["assignment:2", "reminder:1"])
         self.assertEqual(refs["soon"], ["assignment:4", "exam:1"])
         self.assertEqual(refs["goals"], ["goal:1"])
-        self.assertIn("1× finance", snap.changes_summary)
+        # MRK-60: změna ve Finance (seed: -120 Kč) do snímku pro LLM nejde ani jako počet
+        self.assertNotIn("finance", snap.changes_summary)
         text = snap.render()
+        self.assertNotIn("-120", text)
         self.assertIn("[assignment:2] Esej o ústavě (Matematika) · termín dnes · priorita high", text)
         self.assertNotIn("Hotový úkol", text)
         self.assertFalse(snap.is_quiet)
@@ -572,9 +574,9 @@ class ChangesNoiseTestCase(BriefingTestBase):
         for text in ("Snapshot", "Synchronizace", "Sync hodin", "Chyba AI", "Potvrzena", "[TEST]", "cleanup",
                      "Dočasný", "Úprava"):
             self.assertFalse(any(text in s for s in summaries), text)
-        # počty v souhrnu jen ze smysluplných změn (seed: 1× finance create)
+        # počty v souhrnu jen ze smysluplných změn; seed 1× finance create vynechán (MRK-60: Finance do LLM nejde)
         self.assertEqual(sorted(snap.changes_summary.split(", ")),
-                         ["1× finance", "1× goals", "1× reminders", "2× school"])
+                         ["1× goals", "1× reminders", "2× school"])
 
 
 class IntegrationTestCase(BriefingTestBase):

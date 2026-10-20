@@ -70,7 +70,6 @@ export default function WorkPage() {
   const [project, setProject] = useState("");
   const [description, setDescription] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
-  const [syncToFinance, setSyncToFinance] = useState(true);
 
   const estimate = estimateEarnings(hours, hourlyRate);
 
@@ -99,14 +98,12 @@ export default function WorkPage() {
           project: project.trim(),
           description: description.trim(),
           hourly_rate: isFinite(rate) ? rate : 0,
-          sync_to_finance: syncToFinance,
         }),
       );
       setHours("");
       setProject("");
       setDescription("");
       setHourlyRate("");
-      setSyncToFinance(true);
       setShowForm(false);
       await reloadAll();
     } catch (err) {
@@ -223,24 +220,6 @@ export default function WorkPage() {
                   />
                 )}
               </FormField>
-              <div className="flex items-start gap-3 sm:col-span-2">
-                <input
-                  id="sync-finance"
-                  type="checkbox"
-                  checked={syncToFinance}
-                  onChange={(e) => setSyncToFinance(e.target.checked)}
-                  aria-describedby="sync-finance-hint"
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-accent [color-scheme:dark]"
-                />
-                <div className="min-w-0">
-                  <label htmlFor="sync-finance" className="text-sm text-ink select-none">
-                    Zapsat výdělek také do Financí
-                  </label>
-                  <p id="sync-finance-hint" className="text-xs text-ink-muted">
-                    Vytvoří příjem v kategorii „work“.
-                  </p>
-                </div>
-              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">

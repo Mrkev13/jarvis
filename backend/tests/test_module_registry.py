@@ -103,7 +103,11 @@ class RegistryTestCase(unittest.TestCase):
         for mid in ("school", "work", "finance", "goals", "wot", "mff"):
             self.assertTrue(access.is_available(mid), mid)
             for cap in ("nav", "search", "dashboard", "ai_context"):
+                if (mid, cap) == ("finance", "ai_context"):
+                    continue  # MRK-60: Finance do AI nejde nikdy
                 self.assertTrue(access.allows(mid, cap), (mid, cap))
+        self.assertFalse(access.allows("finance", "ai_context"))
+        self.assertFalse(access.allows_context_area("finance"), "oblast finance patří Finance, ne jádru")
         for kind in qa.KINDS:
             self.assertTrue(access.allows_quick_add_kind(kind), kind)
 
@@ -262,10 +266,11 @@ class AiContextGateTestCase(unittest.TestCase):
     def test_disabled_module_contributes_no_section(self):
         q = "jak jsem na tom s penězi a prací"
         on = build_current_context(self.db, q, now_utc=self.NOW, access=ModuleAccess({}))
-        self.assertIn("finance", on.sections)
-        off = build_current_context(self.db, q, now_utc=self.NOW, access=ModuleAccess({"finance": False}))
+        self.assertIn("work", on.sections)
+        self.assertNotIn("finance", on.sections, "MRK-60: Finance nemá AI kontext ani zapnutá")
+        off = build_current_context(self.db, q, now_utc=self.NOW, access=ModuleAccess({"work": False}))
+        self.assertNotIn("work", off.sections)
         self.assertNotIn("finance", off.sections)
-        self.assertIn("work", off.sections)
 
     def test_canonical_answer(self):
         access = ModuleAccess({"wot": False})

@@ -55,13 +55,9 @@ export function groupSessionsByDay(sessions: readonly WorkSessionItem[]): WorkDa
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
-/** Štítek zápisu do Financí: zapsáno / chtěné, ale nezapsané / nic (bez synchronizace nebo nulový výdělek). */
-export function financeSyncMeta(s: Pick<WorkSessionItem, "finance_transaction_id" | "sync_to_finance" | "earnings">):
-  | { label: string; tone: Tone }
-  | null {
-  if (s.finance_transaction_id) return { label: "Zapsáno ve Financích", tone: "success" };
-  if (s.sync_to_finance && s.earnings > 0) return { label: "Finance: nezapsáno", tone: "warning" };
-  return null;
+/** Štítek historického zápisu do Financí (MRK-60: nové záznamy práce Finance nezapisují, starší vazby zůstávají). */
+export function financeSyncMeta(s: Pick<WorkSessionItem, "finance_transaction_id">): { label: string; tone: Tone } | null {
+  return s.finance_transaction_id ? { label: "Zapsáno ve Financích", tone: "success" } : null;
 }
 
 /** Odhad výdělku z textových polí formuláře; null, když jedno z polí chybí nebo není číslo. */

@@ -153,7 +153,7 @@ _clip = clip
 
 
 # Interní odkazy snímku („exam:2", „[activity:117]") slouží uzemnění a odkazům, ne textu pro uživatele.
-_strip_refs = make_ref_stripper(("assignment", "exam", "reminder", "goal", "notification", "finance", "activity"))
+_strip_refs = make_ref_stripper(("assignment", "exam", "reminder", "goal", "notification", "activity"))
 
 
 def _clean_visible(content: dict) -> dict:
@@ -203,7 +203,7 @@ def ground(data: dict, snap: Snapshot) -> tuple[dict, int]:
             out.append(item)
         return out
 
-    actionable = {"assignment", "exam", "reminder", "goal", "notification", "finance"}
+    actionable = {"assignment", "exam", "reminder", "goal", "notification"}
     priorities = items(data.get("priorities") or [], "title", MAX_PRIORITIES, actionable)
     watch = items(data.get("watch") or [], "text", MAX_LIST, actionable)
     upcoming = items(data.get("upcoming") or [], "text", MAX_LIST, actionable)

@@ -120,8 +120,7 @@
    "date": "2026-10-11",
    "hours": 2.0,
    "project": "Servind",
-   "hourly_rate": 0,
-   "sync_to_finance": true
+   "hourly_rate": 0
   },
   "display": {
    "title": "Servind",
@@ -129,7 +128,7 @@
    "area": "work"
   },
   "warnings": [
-   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše."
+   "Bez hodinové sazby – výdělek 0 Kč."
   ],
   "needs_input": [],
   "errors": [],
@@ -142,8 +141,7 @@
    "date": "2026-10-11",
    "hours": 6.5,
    "project": "Workshop",
-   "hourly_rate": 375.0,
-   "sync_to_finance": true
+   "hourly_rate": 375.0
   },
   "display": {
    "title": "Workshop",
@@ -162,8 +160,7 @@
    "date": "2026-10-11",
    "hours": 3.0,
    "project": "RaceX",
-   "hourly_rate": 0,
-   "sync_to_finance": true
+   "hourly_rate": 0
   },
   "display": {
    "title": "RaceX",
@@ -171,7 +168,7 @@
    "area": "work"
   },
   "warnings": [
-   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše.",
+   "Bez hodinové sazby – výdělek 0 Kč.",
    "Rozpoznáno jako práce podle hodin – zkontroluj."
   ],
   "needs_input": [],
@@ -424,8 +421,7 @@
    "date": "2026-10-11",
    "hours": 2.0,
    "project": "Servind",
-   "hourly_rate": 0,
-   "sync_to_finance": true
+   "hourly_rate": 0
   },
   "display": {
    "title": "Servind",
@@ -433,7 +429,7 @@
    "area": "work"
   },
   "warnings": [
-   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše.",
+   "Bez hodinové sazby – výdělek 0 Kč.",
    "Rozpoznáno jako práce podle hodin – zkontroluj."
   ],
   "needs_input": [],
@@ -473,8 +469,7 @@
    "date": "2026-10-11",
    "hours": 40.0,
    "project": "",
-   "hourly_rate": 0,
-   "sync_to_finance": true
+   "hourly_rate": 0
   },
   "display": {
    "title": "Práce",
@@ -482,7 +477,7 @@
    "area": "work"
   },
   "warnings": [
-   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše."
+   "Bez hodinové sazby – výdělek 0 Kč."
   ],
   "needs_input": [],
   "errors": [
@@ -591,8 +586,7 @@
    "date": "2026-10-11",
    "hours": 4.0,
    "project": "",
-   "hourly_rate": 0,
-   "sync_to_finance": true
+   "hourly_rate": 0
   },
   "display": {
    "title": "Práce",
@@ -600,7 +594,7 @@
    "area": "work"
   },
   "warnings": [
-   "Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše."
+   "Bez hodinové sazby – výdělek 0 Kč."
   ],
   "needs_input": [],
   "errors": [],

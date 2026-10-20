@@ -62,18 +62,21 @@ def _seed_basic(db):
 class AreaSelectionTestCase(unittest.TestCase):
     def test_keyword_areas(self):
         self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
-        self.assertEqual(classify_areas("kolik jsem utratil za jídlo"), {"finance", "goals"})
+        # MRK-60: finanční dotaz se pozná (router pak nenabídne obecnou sadu toolů), ale nic dalšího nepřitáhne
+        self.assertEqual(classify_areas("kolik jsem utratil za jídlo"), {"finance"})
         self.assertEqual(classify_areas("kolik mám kreditů ve WoT?"), {"wot"})
         self.assertEqual(classify_areas("ahoj"), set())
         self.assertIn("work", classify_areas("jak jde Servind", project_names=["Servind"]))
-        self.assertEqual(classify_areas("jak jde Servind", project_names=["Servind"]), {"work", "finance", "goals"})
+        self.assertEqual(classify_areas("jak jde Servind", project_names=["Servind"]), {"work", "goals"})
         self.assertIn("wot", classify_areas("kolik zbývá na VZ.55", tank_names=["VZ.55"]))
 
-    def test_planning_questions_include_work_and_finance(self):
-        # Regrese (live A3 C): planner priority řadí finance a práci, ale kontext je nenesl →
-        # každý týdenní plán potřeboval extra kolo get_finance_summary + get_work_summary (a 429 TPM).
+    def test_planning_questions_include_work_but_never_finance(self):
+        # Regrese (live A3 C): planner řadí práci, ale kontext ji nenesl → extra kolo get_work_summary (a 429 TPM).
+        # MRK-60: Finance do plánu (ani implicitně) nejde.
         for question in ("co mám dělat tento týden", "co mám dneska dělat", "naplánuj mi zítřek", "jaké mám priority"):
-            self.assertTrue({"work", "finance", "school", "goals", "notifications"} <= classify_areas(question), question)
+            areas = classify_areas(question)
+            self.assertTrue({"work", "school", "goals", "notifications"} <= areas, question)
+            self.assertNotIn("finance", areas, question)
         # Čistě časový dotaz bez plánovacího záměru zůstává úzký.
         self.assertEqual(classify_areas("co mám zítra"), {"school", "goals", "notifications", "reminders"})
 
@@ -83,9 +86,10 @@ class AreaSelectionTestCase(unittest.TestCase):
         try:
             _seed_basic(db)
             ctx = build_current_context(db, "co mám dělat tento týden", now_utc=NOW_UTC)
-            self.assertTrue({"get_work_summary", "get_finance_summary"} <= ctx.covered_tools)
+            self.assertIn("get_work_summary", ctx.covered_tools)
             self.assertIn("work", ctx.sections)
-            self.assertIn("finance", ctx.sections)
+            self.assertNotIn("finance", ctx.sections)
+            self.assertNotIn("9 000", ctx.text, "MRK-60: žádná Finance čísla v kontextu")
             self.assertLessEqual(ctx.estimated_tokens, CONTEXT_TARGET_TOKENS)
         finally:
             db.close()
@@ -162,16 +166,24 @@ class MemoryAndAuthorityTestCase(unittest.TestCase):
         self.assertNotIn("NEAKTIVNI", ctx.text)
 
     def test_live_state_precedes_and_outranks_conflicting_memory(self):
-        self.db.add(Memory(area="finance", category="context", content="Na účtu mám 50 000 Kč.", importance=9, active=True))
+        self.db.add(Memory(area="wot", category="context", content="Mám 5 000 000 kreditů.", importance=9, active=True))
         self.db.commit()
-        ctx = build_current_context(self.db, "jaká je moje finanční bilance", now_utc=NOW_UTC)
+        ctx = build_current_context(self.db, "kolik mám kreditů ve WoT", now_utc=NOW_UTC)
         state, memory = ctx.text.split("RELEVANT MEMORY")
-        self.assertIn("celková bilance 9 000 Kč", state)
-        self.assertIn("50 000 Kč", memory)
+        self.assertIn("credits 3 082 152", state)
+        self.assertIn("5 000 000", memory)
         self.assertIn("never a source of current numbers", memory)
         self.assertTrue(ctx.text.startswith("CURRENT STATE"))
-        self.assertIn("50 000", ctx.memory_text)
-        self.assertNotIn("9 000", ctx.memory_text)
+        self.assertIn("5 000 000", ctx.memory_text)
+        self.assertNotIn("3 082 152", ctx.memory_text)
+
+    def test_finance_question_gets_no_finance_state(self):
+        """MRK-60: ani výslovný finanční dotaz nedostane Finance data (transakce, bilance, měsíční souhrn)."""
+        ctx = build_current_context(self.db, "jaká je moje finanční bilance a kolik jsem utratil", now_utc=NOW_UTC)
+        self.assertNotIn("finance", ctx.sections)
+        self.assertNotIn("9 000", ctx.text)
+        self.assertNotIn("Finance", ctx.text)
+        self.assertFalse({t for t in ctx.covered_tools if "finance" in t})
 
 
 class ContextBudgetTestCase(unittest.TestCase):
@@ -320,27 +332,29 @@ class AskAiWithContextTestCase(unittest.TestCase):
         self.assertNotIn("Esej", "\n".join(logs.output), msg="obsah kontextu se nesmí logovat")
 
     def test_missing_data_still_uses_a_tool(self):
-        result = self._ask("Ukaž mi moje poslední finanční transakce.", [
-            _tool_round("get_finance_transactions"),
-            _message(content="Poslední transakce: příjem 9 000 Kč (work)."),
+        result = self._ask("Ukaž mi moje poslední pracovní směny.", [
+            _tool_round("get_work_sessions"),
+            _message(content="Poslední směna: Servind 7,5 h."),
         ])
         self.assertEqual(len(self.sent), 2)
-        self.assertIn("get_finance_transactions", self.sent[1][-2]["tool_calls"][0]["function"]["name"])
+        self.assertIn("get_work_sessions", self.sent[1][-2]["tool_calls"][0]["function"]["name"])
         tool_result = self.sent[1][-1]
         self.assertEqual(tool_result["role"], "tool")
-        self.assertIn("9000", tool_result["content"].replace(" ", ""))
-        self.assertIn("9 000", result["answer"])
+        self.assertIn("Servind", tool_result["content"])
+        self.assertNotIn("finance_transaction_id", tool_result["content"], "MRK-60: AI nevidí vazbu na Finance")
+        self.assertIn("Servind", result["answer"])
 
     def test_planner_grounding_uses_live_state_not_memory_numbers(self):
         db = ai.SessionLocal()
         db.add(Memory(area="finance", category="context", content="Na účtu mám 50 000 Kč.", importance=9, active=True))
         db.commit()
         db.close()
+        # MRK-60: bilance (9 000 Kč) už v kontextu není → akce o ní neprojde groundingem stejně jako číslo z paměti.
         result = self._ask("co mám dělat tento týden s financemi", [
             _plan("Finance", [
-                ("finance", "Zkontrolovat cíl Našetřit 150 000 Kč", "Bilance je 9 000 Kč."),
+                ("finance", "Zkontrolovat cíl Našetřit 150 000 Kč", "Cíl je na 6 %."),
                 ("finance", "Převést 50 000 Kč na spoření", "Podle paměti je to na účtu."),
-                ("finance", "Odložit 3 000 Kč stranou", "Vymyšlená částka."),
+                ("finance", "Odložit 9 000 Kč stranou", "Bilance je 9 000 Kč."),
             ]),
         ])
         titles = [a["title"] for a in find_planner_block(result["answer"]).plan["actions"]]

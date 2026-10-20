@@ -30,7 +30,7 @@ from history_service import (  # noqa: E402
 )
 from llm_budget import estimate_fixed_overhead  # noqa: E402
 from llm_config import LLM_SETTINGS, load_llm_settings  # noqa: E402
-from models import Conversation, FinanceTransaction, Message, PendingAction  # noqa: E402
+from models import Conversation, Message, PendingAction, WorkSession  # noqa: E402
 
 SETTINGS = LLM_SETTINGS  # defaulty: okno 8, práh 1000, shrnutí 300, historie 2500
 WINDOW = SETTINGS.history_window_messages
@@ -291,19 +291,19 @@ class ChatIntegrationTestCase(unittest.TestCase):
 
     def test_write_proposal_with_long_history_stays_pending_only(self):
         tool_call = types.SimpleNamespace(id="w1", function=types.SimpleNamespace(
-            name="add_finance_transaction",
-            arguments='{"amount": 300, "category": "Jídlo", "transaction_type": "expense", "description": "oběd"}',
+            name="add_work_session",
+            arguments='{"date_value": "2026-10-03", "hours": 2, "project": "Servind", "hourly_rate": 300}',
         ))
         self.chat_script = [
             _completion(tool_calls=[tool_call]),
             _completion(content="Připravil jsem změnu k potvrzení."),
         ]
-        result = self._chat("přidej výdaj 300 Kč za oběd")
+        result = self._chat("zapiš práci 2 hodiny na Servind za 300 Kč/h")
         self.assertEqual(result["answer"], "Připravil jsem změnu k potvrzení.")
-        self.assertEqual([p["tool"] for p in result["pending_actions"]], ["add_finance_transaction"])
+        self.assertEqual([p["tool"] for p in result["pending_actions"]], ["add_work_session"])
         db = self.Session()
         try:
-            self.assertEqual(db.query(FinanceTransaction).count(), 0, msg="bez potvrzení žádná transakce")
+            self.assertEqual(db.query(WorkSession).count(), 0, msg="bez potvrzení žádný záznam")
             pending = db.query(PendingAction).one()
             self.assertEqual(pending.status, "pending")
         finally:
@@ -311,7 +311,7 @@ class ChatIntegrationTestCase(unittest.TestCase):
         self.assertEqual(main.ai_reject(result["pending_actions"][0]["id"])["status"], "rejected")
         db = self.Session()
         try:
-            self.assertEqual(db.query(FinanceTransaction).count(), 0)
+            self.assertEqual(db.query(WorkSession).count(), 0)
         finally:
             db.close()
 

@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import unittest
-from datetime import date, datetime
+from datetime import date
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
@@ -39,16 +39,14 @@ class MutationTestBase(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def seed_finance(self):
+    def seed_work(self):
+        # MRK-60: obecné chování resolveru/provedení se ověřuje na práci (Finance už AI entita není).
         self.db.add_all([
-            FinanceTransaction(amount=300, category="Jídlo", description="oběd", transaction_type="expense",
-                               created_at=datetime(2026, 10, 1, 10, 0)),
-            FinanceTransaction(amount=320, category="Jídlo", description="oběd s kolegy", transaction_type="expense",
-                               created_at=datetime(2026, 10, 2, 10, 0)),
-            FinanceTransaction(amount=1, category="Ostatní", description="testovací výdaj", transaction_type="expense",
-                               created_at=datetime(2026, 10, 2, 11, 0)),
-            FinanceTransaction(amount=9000, category="work", description="výplata", transaction_type="income",
-                               created_at=datetime(2026, 9, 30, 10, 0)),
+            WorkSession(date=date(2026, 10, 1), hours=3, project="Servind", hourly_rate=300, description="workshop"),
+            WorkSession(date=date(2026, 10, 2), hours=3.5, project="Servind", hourly_rate=300,
+                        description="workshop s kolegy"),
+            WorkSession(date=date(2026, 10, 2), hours=1, project="Ostatní", hourly_rate=0, description="testovací směna"),
+            WorkSession(date=date(2026, 9, 30), hours=8, project="Contoso", hourly_rate=500, description="konzultace"),
         ])
         self.db.commit()
 
@@ -72,73 +70,72 @@ class MutationTestBase(unittest.TestCase):
 
 
 class ResolveTestCase(MutationTestBase):
-    def test_edit_latest_lunch_expense(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "update",
-                                   {"text": "oběd", "type": "expense", "latest": True}, {"amount": 450})
+    def test_edit_latest_matching_session(self):
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "update", {"text": "workshop", "latest": True}, {"hours": 4})
         self.assertEqual(len(plan["targets"]), 1)
-        target = self.db.get(FinanceTransaction, plan["targets"][0]["id"])
-        self.assertEqual(target.description, "oběd s kolegy")
+        target = self.db.get(WorkSession, plan["targets"][0]["id"])
+        self.assertEqual(target.description, "workshop s kolegy")
         change = plan["preview"]["items"][0]["changes"][0]
-        self.assertEqual((change["label"], change["old"], change["new"]), ("Částka", "320 Kč", "450 Kč"))
+        self.assertEqual((change["label"], change["old"], change["new"]), ("Hodiny", "3,5", "4"))
         self.assertEqual(plan["preview"]["kind"], "update")
         json.dumps(plan)  # plán musí jít uložit do PendingAction.arguments
 
     def test_text_match_ignores_diacritics(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "testovaci"})
-        self.assertEqual(plan["preview"]["items"][0]["label"].split(" · ")[0], "−1 Kč Ostatní (testovací výdaj)")
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "delete", {"text": "testovaci"})
+        self.assertEqual(plan["preview"]["items"][0]["label"], "2. 10. 2026 · 1 h · Ostatní · 0 Kč/h")
 
     def test_ambiguous_target_is_refused_with_candidates(self):
-        self.seed_finance()
+        self.seed_work()
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "oběd"})
+            ms.resolve_mutation(self.db, "work_session", "delete", {"text": "workshop"})
         self.assertEqual(ctx.exception.code, "ambiguous_target")
         self.assertEqual(len(ctx.exception.candidates), 2)
         self.assertEqual(ctx.exception.as_tool_result()["status"], "not_prepared")
 
     def test_undescribed_target_is_refused(self):
-        self.seed_finance()
+        self.seed_work()
         for target in ({}, {"latest": True}, {"all_matching": True}):
             with self.subTest(target=target), self.assertRaises(ms.MutationRefused) as ctx:
-                ms.resolve_mutation(self.db, "finance_transaction", "delete", target)
+                ms.resolve_mutation(self.db, "work_session", "delete", target)
             self.assertEqual(ctx.exception.code, "ambiguous_target")
 
     def test_unknown_or_invalid_ids(self):
-        self.seed_finance()
+        self.seed_work()
         cases = [
             ({"id": 999}, "target_not_found"),
             ({"id": "abc"}, "invalid_target"),
-            ({"id": 1, "text": "výplata"}, "id_mismatch"),  # id existuje, ale popis sedí na jiný záznam
+            ({"id": 1, "text": "konzultace"}, "id_mismatch"),  # id existuje, ale popis sedí na jiný záznam
         ]
         for target, code in cases:
             with self.subTest(target=target), self.assertRaises(ms.MutationRefused) as ctx:
-                ms.resolve_mutation(self.db, "finance_transaction", "delete", target)
+                ms.resolve_mutation(self.db, "work_session", "delete", target)
             self.assertEqual(ctx.exception.code, code)
 
     def test_not_found(self):
-        self.seed_finance()
+        self.seed_work()
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "benzín"})
+            ms.resolve_mutation(self.db, "work_session", "delete", {"text": "benzín"})
         self.assertEqual(ctx.exception.code, "target_not_found")
 
     def test_invalid_changes(self):
-        self.seed_finance()
+        self.seed_work()
         cases = [
             ({}, "invalid_changes"),
-            ({"amount": -5}, "invalid_changes"),
+            ({"hours": -5}, "invalid_changes"),
             ({"id": 3}, "invalid_changes"),  # neznámé pole – id se měnit nedá
-            ({"transaction_type": "gift"}, "invalid_changes"),
+            ({"hours": 30}, "invalid_changes"),
         ]
         for changes, code in cases:
             with self.subTest(changes=changes), self.assertRaises(ms.MutationRefused) as ctx:
-                ms.resolve_mutation(self.db, "finance_transaction", "update", {"id": 1}, changes)
+                ms.resolve_mutation(self.db, "work_session", "update", {"id": 1}, changes)
             self.assertEqual(ctx.exception.code, code)
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "update", {"id": 1}, {"amount": 300})
+            ms.resolve_mutation(self.db, "work_session", "update", {"id": 1}, {"hours": 3})
         self.assertEqual(ctx.exception.code, "no_change")
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "delete", {"id": 1}, {"amount": 5})
+            ms.resolve_mutation(self.db, "work_session", "delete", {"id": 1}, {"hours": 5})
         self.assertEqual(ctx.exception.code, "invalid_changes")
 
     def test_unsupported_entity_and_action(self):
@@ -146,8 +143,30 @@ class ResolveTestCase(MutationTestBase):
             ms.resolve_mutation(self.db, "notification", "delete", {"id": 1})
         self.assertEqual(ctx.exception.code, "unsupported_entity")
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "complete", {"id": 1})
+            ms.resolve_mutation(self.db, "work_session", "complete", {"id": 1})
         self.assertEqual(ctx.exception.code, "unsupported_action")
+
+    def test_finance_transaction_is_not_an_ai_entity(self):
+        """MRK-60: AI Finance transakce nenajde ani nezmění – ani přes id, ani textem."""
+        self.db.add(FinanceTransaction(amount=320, category="Jídlo", description="oběd", transaction_type="expense"))
+        self.db.commit()
+        self.assertNotIn("finance_transaction", ms.ENTITIES)
+        self.assertNotIn("finance", ms.UNDO_AREAS)
+        for target in ({"id": 1}, {"text": "oběd"}):
+            with self.subTest(target=target), self.assertRaises(ms.MutationRefused) as ctx:
+                ms.resolve_mutation(self.db, "finance_transaction", "update", target, {"amount": 1})
+            self.assertEqual(ctx.exception.code, "unsupported_entity")
+            self.assertNotIn("oběd", ctx.exception.detail)
+
+    def test_goal_computed_from_finance_is_not_a_target(self):
+        """MRK-60: automatický cíl z Finance (bilance) AI nenajde ani podle id."""
+        self.db.add(Goal(area="finance", title="Spořit", status="active", tracking_type="automatic",
+                         source="finance_balance", target_value=1000))
+        self.db.commit()
+        for target in ({"id": 1}, {"text": "spořit"}):
+            with self.subTest(target=target), self.assertRaises(ms.MutationRefused) as ctx:
+                ms.resolve_mutation(self.db, "goal", "update", target, {"priority": "low"})
+            self.assertEqual(ctx.exception.code, "target_not_found")
 
     def test_complete_assignment_by_subject_name(self):
         self.seed_school()
@@ -202,9 +221,9 @@ class ResolveTestCase(MutationTestBase):
         self.assertEqual(ctx.exception.code, "ambiguous_target")
 
     def test_batch_only_where_supported(self):
-        self.seed_finance()
+        self.seed_work()
         with self.assertRaises(ms.MutationRefused) as ctx:
-            ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "oběd", "all_matching": True})
+            ms.resolve_mutation(self.db, "work_session", "delete", {"text": "workshop", "all_matching": True})
         self.assertEqual(ctx.exception.code, "batch_not_supported")
 
     def test_batch_cap(self):
@@ -218,16 +237,16 @@ class ResolveTestCase(MutationTestBase):
         self.assertEqual(ctx.exception.code, "too_many_targets")
 
     def test_resolution_does_not_mutate(self):
-        self.seed_finance()
-        ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "testovací"})
-        self.assertEqual(self.fresh().query(FinanceTransaction).count(), 4)
+        self.seed_work()
+        ms.resolve_mutation(self.db, "work_session", "delete", {"text": "testovací"})
+        self.assertEqual(self.fresh().query(WorkSession).count(), 4)
 
     def test_automatic_goal_progress_cannot_be_set(self):
-        self.db.add(Goal(area="finance", title="Spořit", status="active", tracking_type="automatic",
-                         source="finance_balance", target_value=1000))
+        self.db.add(Goal(area="work", title="Odpracovat", status="active", tracking_type="automatic",
+                         source="work_month_hours", target_value=100))
         self.db.commit()
         with self.assertRaises(ms.MutationRefused):
-            ms.resolve_mutation(self.db, "goal", "update", {"text": "spořit"}, {"progress": 50})
+            ms.resolve_mutation(self.db, "goal", "update", {"text": "odpracovat"}, {"progress": 50})
 
 
 class ApplyTestCase(MutationTestBase):
@@ -235,60 +254,64 @@ class ApplyTestCase(MutationTestBase):
         return self.fresh().query(ActivityLog).order_by(ActivityLog.id).all()
 
     def test_confirmed_edit_changes_exactly_the_target(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "update",
-                                   {"text": "oběd", "latest": True}, {"amount": 450})
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "update", {"text": "workshop", "latest": True}, {"hours": 4})
         target_id = plan["targets"][0]["id"]
         result = ms.apply_mutation_plan(json.loads(json.dumps(plan)), user_context="ai_confirm")
         self.assertEqual(result["ids"], [target_id])
         db = self.fresh()
-        amounts = {t.id: t.amount for t in db.query(FinanceTransaction).all()}
-        self.assertEqual(amounts[target_id], 450)
-        self.assertEqual(sorted(v for k, v in amounts.items() if k != target_id), [1, 300, 9000])
+        hours = {s.id: s.hours for s in db.query(WorkSession).all()}
+        self.assertEqual(hours[target_id], 4)
+        self.assertEqual(sorted(v for k, v in hours.items() if k != target_id), [1, 3, 8])
         log = self._logs()[-1]
         self.assertEqual((log.area, log.action_type, log.entity_id, log.user_context),
-                         ("finance", "update", target_id, "ai_confirm"))
-        self.assertEqual(json.loads(log.delta_json)["amount"], {"old": 320.0, "new": 450.0})
+                         ("work", "update", target_id, "ai_confirm"))
+        self.assertEqual(json.loads(log.delta_json)["hours"], {"old": 3.5, "new": 4.0})
 
     def test_confirmed_delete_and_audit(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "testovací"})
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "delete", {"text": "testovací"})
         ms.apply_mutation_plan(plan, user_context="ai_confirm")
         db = self.fresh()
-        self.assertEqual(db.query(FinanceTransaction).count(), 3)
-        self.assertIsNone(db.get(FinanceTransaction, plan["targets"][0]["id"]))
+        self.assertEqual(db.query(WorkSession).count(), 3)
+        self.assertIsNone(db.get(WorkSession, plan["targets"][0]["id"]))
         self.assertEqual(self._logs()[-1].action_type, "delete")
 
-    def test_delete_unlinks_work_session_like_rest(self):
+    def test_finance_plan_is_rejected_before_touching_db(self):
+        """MRK-60: plán s entitou Finance (např. pending akce z doby před MRK-60) se neprovede."""
         tx = FinanceTransaction(amount=1000, category="work", description="Work: X", transaction_type="income")
         self.db.add(tx)
         self.db.flush()
         self.db.add(WorkSession(date=date(2026, 10, 1), hours=4, project="X", hourly_rate=250,
                                 finance_transaction_id=tx.id))
         self.db.commit()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "delete", {"id": tx.id})
-        ms.apply_mutation_plan(plan)
-        self.assertIsNone(self.fresh().query(WorkSession).one().finance_transaction_id)
+        plan = {"version": 1, "entity": "finance_transaction", "action": "delete",
+                "targets": [{"id": tx.id, "snapshot": {}}], "changes": {}}
+        with self.assertRaises(ValueError):
+            ms.apply_mutation_plan(plan)
+        db = self.fresh()
+        self.assertEqual(db.query(FinanceTransaction).count(), 1)
+        self.assertEqual(db.query(WorkSession).one().finance_transaction_id, tx.id)
 
     def test_stale_target_fails_without_mutation(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "update", {"text": "testovací"}, {"amount": 5})
-        tx = self.db.get(FinanceTransaction, plan["targets"][0]["id"])
-        tx.amount = 2  # někdo záznam mezitím změnil
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "update", {"text": "testovací"}, {"hours": 2})
+        ws = self.db.get(WorkSession, plan["targets"][0]["id"])
+        ws.hours = 1.5  # někdo záznam mezitím změnil
         self.db.commit()
-        tx_id = tx.id
+        ws_id = ws.id
         with self.assertRaises(ms.StaleTarget):
             ms.apply_mutation_plan(plan)
-        self.assertEqual(self.fresh().get(FinanceTransaction, tx_id).amount, 2)
+        self.assertEqual(self.fresh().get(WorkSession, ws_id).hours, 1.5)
 
     def test_deleted_target_fails_safely(self):
-        self.seed_finance()
-        plan = ms.resolve_mutation(self.db, "finance_transaction", "delete", {"text": "testovací"})
-        self.db.delete(self.db.get(FinanceTransaction, plan["targets"][0]["id"]))
+        self.seed_work()
+        plan = ms.resolve_mutation(self.db, "work_session", "delete", {"text": "testovací"})
+        self.db.delete(self.db.get(WorkSession, plan["targets"][0]["id"]))
         self.db.commit()
         with self.assertRaises(ms.StaleTarget):
             ms.apply_mutation_plan(plan)
-        self.assertEqual(self.fresh().query(FinanceTransaction).count(), 3)
+        self.assertEqual(self.fresh().query(WorkSession).count(), 3)
 
     def test_batch_complete_success(self):
         self.seed_school()
@@ -330,7 +353,8 @@ class ApplyTestCase(MutationTestBase):
             ms.apply_mutation_plan(plan)
         self.assertEqual(self.fresh().query(Assignment).filter(Assignment.status == "done").count(), 1)
 
-    def test_work_session_edit_updates_linked_income(self):
+    def test_work_session_edit_keeps_historical_linked_income(self):
+        """MRK-60: úprava hodin už nepřepisuje navázaný historický příjem; vazba zůstává."""
         tx = FinanceTransaction(amount=1000, category="work", description="Work: X", transaction_type="income")
         self.db.add(tx)
         self.db.flush()
@@ -339,11 +363,15 @@ class ApplyTestCase(MutationTestBase):
         self.db.commit()
         tx_id = tx.id
         plan = ms.resolve_mutation(self.db, "work_session", "update", {"text": "servind"}, {"hours": 6})
-        self.assertIn("1 500 Kč", plan["preview"]["warnings"][0])
-        ms.apply_mutation_plan(plan)
+        self.assertEqual(plan["preview"]["warnings"], ["Navázaný příjem ve financích se nezmění."])
+        self.assertNotIn("1 000", json.dumps(plan, ensure_ascii=False))
+        result = ms.apply_mutation_plan(plan)
         db = self.fresh()
-        self.assertEqual(db.query(WorkSession).one().hours, 6)
-        self.assertEqual(db.get(FinanceTransaction, tx_id).amount, 1500)
+        ws = db.query(WorkSession).one()
+        self.assertEqual((ws.hours, ws.finance_transaction_id), (6, tx_id))
+        self.assertEqual(db.get(FinanceTransaction, tx_id).amount, 1000)
+        self.assertFalse(any(lg.area == "finance" for lg in db.query(ActivityLog).all()))
+        self.assertNotIn("linked_income", json.dumps(result["undo"]))
 
     def test_goal_complete_sets_progress_for_manual_goal(self):
         self.db.add(Goal(area="personal", title="Přečíst knihu", status="active", progress=40, tracking_type="manual"))
@@ -380,19 +408,19 @@ class ApplyTestCase(MutationTestBase):
         self.assertEqual(db.query(WotGrind).one().xp_remaining, 12000)
 
     def test_invalid_plans_are_rejected_before_touching_db(self):
-        self.seed_finance()
+        self.seed_work()
         bad = [
             {}, {"version": 2},
-            {"version": 1, "entity": "finance_transaction", "action": "complete", "targets": [{"id": 1}]},
-            {"version": 1, "entity": "finance_transaction", "action": "update", "targets": [],
-             "changes": {"amount": 1}},
-            {"version": 1, "entity": "finance_transaction", "action": "update",
+            {"version": 1, "entity": "work_session", "action": "complete", "targets": [{"id": 1}]},
+            {"version": 1, "entity": "work_session", "action": "update", "targets": [],
+             "changes": {"hours": 1}},
+            {"version": 1, "entity": "work_session", "action": "update",
              "targets": [{"id": 1, "snapshot": {}}], "changes": {"evil": 1}},
         ]
         for plan in bad:
             with self.subTest(plan=plan), self.assertRaises(ValueError):
                 ms.apply_mutation_plan(plan)
-        self.assertEqual(sorted(t.amount for t in self.fresh().query(FinanceTransaction).all()), [1, 300, 320, 9000])
+        self.assertEqual(sorted(s.hours for s in self.fresh().query(WorkSession).all()), [1, 3, 3.5, 8])
 
 
 if __name__ == "__main__":

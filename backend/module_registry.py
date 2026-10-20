@@ -106,7 +106,10 @@ MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
               api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
-    ModuleDef("finance", "Finance", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
+    # MRK-60: Finance bez `ai_context` – žádná CURRENT STATE sekce ani AI tooly. `context_areas` zůstává, aby gate
+    # oblasti „finance" patřil Finance (bez něj by ji ModuleAccess bral jako jádro a povolil).
+    ModuleDef("finance", "Finance", default_enabled=True, implemented=True,
+              capabilities=ALL_CAPABILITIES - {"ai_context"},
               entity_types=frozenset({"transaction"}), context_areas=frozenset({"finance"}),
               api_prefixes=("/finance",), quick_add_kinds=("finance",), integrations=finance_integrations.INTEGRATIONS),
     ModuleDef("goals", "Cíle", default_enabled=True, implemented=True,

@@ -38,7 +38,7 @@ MEMORY_CHARS = 140
 # Oblasti, na které se odkazují globální pravidla níže (implikované oblasti, ořez). Data a klíčová slova oblastí
 # dodávají moduly (MRK-20: `ModuleIntegrations.context` v <modul>_integrations.py, jádro v core_integrations.py).
 AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS = "school", "goals", "notifications"
-AREA_FINANCE, AREA_WORK, AREA_WOT, AREA_MEMORY = "finance", "work", "wot", "memory"
+AREA_WORK, AREA_WOT, AREA_MEMORY = "work", "wot", "memory"
 AREA_MFF = "mff"
 AREA_REMINDERS = "reminders"
 
@@ -47,8 +47,8 @@ _WEEKDAYS = WEEKDAYS_CZ_SHORT
 # Klíčová slova (bez diakritiky, podřetězce) → oblasti.
 _TIME_PLAN_WORDS = ("zitra", "dnes", "dneska", "tyden", "tydnu", "vikend", "pondeli", "utery", "streda", "ctvrtek",
                     "patek", "sobota", "nedele", "datum", "co mam", "plan", "priorit", "myslet", "program", "agenda")
-# Plánovací záměr („co mám dělat", plán, priority): planner řadí i finance a práci → bez nich v kontextu
-# by si je model vždy dočítal extra tool kolem.
+# Plánovací záměr („co mám dělat", plán, priority): planner řadí i práci → bez ní v kontextu
+# by si ji model vždy dočítal extra tool kolem. Finance do AI nejde vůbec (MRK-60, finance_ai_policy.py).
 _PLAN_INTENT_WORDS = ("delat", "plan", "priorit", "agenda", "program", "zamer", "soustred")
 _OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", " stav", "jak se mi dari", "co je noveho")
 # Statické tabulky ze VŠECH registrovaných oblastí (routing toolů běží i bez DB a stavu modulů; vypnutý modul
@@ -120,12 +120,10 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     if _has(t, _TIME_PLAN_WORDS):
         areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_REMINDERS}
     if _has(t, _PLAN_INTENT_WORDS):
-        areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_WORK, AREA_FINANCE}
+        areas |= {AREA_SCHOOL, AREA_GOALS, AREA_NOTIFICATIONS, AREA_WORK}
     if _has(t, _OVERVIEW_WORDS):
-        areas |= {AREA_GOALS, AREA_NOTIFICATIONS, AREA_SCHOOL, AREA_WORK, AREA_FINANCE}
+        areas |= {AREA_GOALS, AREA_NOTIFICATIONS, AREA_SCHOOL, AREA_WORK}
     if AREA_WORK in areas:
-        areas |= {AREA_FINANCE, AREA_GOALS}
-    if AREA_FINANCE in areas:
         areas.add(AREA_GOALS)
     return frozenset(areas)
 

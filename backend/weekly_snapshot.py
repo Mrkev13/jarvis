@@ -11,10 +11,10 @@ Vše, co jde spočítat, se spočítá tady – LLM jen vybírá, řadí a formu
 - `forecasts`: kandidáti odhadů s pevně danou jistotou a podkladem (LLM si jistotu nevymýšlí),
 - `next_week`: známé závazky příštího týdne.
 Bez syrových dumpů, bez promptu v DB. Velikost hlídají stropy sekcí a tokenový strop.
+Finance tu není ani nepřímo (MRK-60: do LLM nejde – finance_ai_policy.py).
 """
 from __future__ import annotations
 
-import calendar
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -23,10 +23,11 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy.orm import Session
 
 from briefing_snapshot import Item, meaningful_activity
+from finance_ai_policy import is_finance_activity, is_finance_goal
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from models import (
-    ActivityLog, Assignment, Exam, FinanceTransaction, Goal, GoalProgressHistory, Notification, Reminder,
+    ActivityLog, Assignment, Exam, Goal, GoalProgressHistory, Notification, Reminder,
     WorkSession,
 )
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
@@ -37,22 +38,20 @@ MAX_SNAPSHOT_TOKENS = 2200
 QUIET_MIN_SIGNALS = 4  # méně datových bodů → deterministický „málo dat" přehled bez LLM
 MIN_MONEY_DELTA = 200.0  # menší změny v Kč = „beze změny" (nepřehánět drobné částky)
 MIN_PCT_BASE = 500.0  # procenta jen nad rozumným základem
-CATEGORY_MIN_DELTA = 500.0
 STALL_DAYS = 14
 GOAL_FORECAST_DAYS = 28
 
-SECTION_ORDER = ("school", "goals", "finance", "reminders", "activity", "next_week")
+SECTION_ORDER = ("school", "goals", "reminders", "activity", "next_week")
 SECTION_TITLES = {
     "school": "ŠKOLA",
     "goals": "CÍLE",
-    "finance": "FINANCE – KATEGORIE VÝDAJŮ",
     "reminders": "PŘIPOMÍNKY",
     "activity": "AKTIVITA (výběr)",
     "next_week": "PŘÍŠTÍ TÝDEN",
 }
-SECTION_CAPS = {"school": 10, "goals": 8, "finance": 3, "reminders": 3, "activity": 4, "next_week": 10}
+SECTION_CAPS = {"school": 10, "goals": 8, "reminders": 3, "activity": 4, "next_week": 10}
 # Ořez na rozpočet: nejdřív detaily s nejmenší hodnotou; termíny příštího týdne a metriky až nakonec.
-TRIM_ORDER = ("activity", "finance", "reminders", "goals", "school", "next_week")
+TRIM_ORDER = ("activity", "reminders", "goals", "school", "next_week")
 
 CONFIDENCE_TEXT = {"high": "vysoká", "moderate": "střední", "low": "nízká"}
 _GOAL_INACTIVE = GOAL_INACTIVE_STATUSES
@@ -283,9 +282,10 @@ class WeeklySnapshot:
 # ===== dílčí výpočty =====
 
 def _activity(db: Session, p: Period) -> list[ActivityLog]:
-    return meaningful_activity(db.query(ActivityLog)
+    logs = meaningful_activity(db.query(ActivityLog)
                                .filter(ActivityLog.timestamp >= p.start, ActivityLog.timestamp < p.end)
                                .order_by(ActivityLog.timestamp.desc()).all())
+    return [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type)]
 
 
 def _delta_status(log: ActivityLog) -> str | None:
@@ -325,31 +325,6 @@ def _work(db: Session, first: date, last: date) -> tuple[float, float, int]:
         income += float(s.hours or 0) * float(s.hourly_rate or 0)
         count += 1
     return round(hours, 2), round(income, 2), count
-
-
-def _finance(db: Session, p: Period) -> dict:
-    work_tx = {tid for (tid,) in db.query(WorkSession.finance_transaction_id)
-               .filter(WorkSession.finance_transaction_id.isnot(None)).all()}
-    out = {"income": 0.0, "expense": 0.0, "work_income": 0.0, "count": 0, "categories": {}}
-    for tx in db.query(FinanceTransaction).filter(FinanceTransaction.created_at >= p.start,
-                                                  FinanceTransaction.created_at < p.end).all():
-        amount = float(tx.amount or 0)
-        out["count"] += 1
-        if (tx.transaction_type or "").lower() == "income":
-            out["income"] += amount
-            if tx.id in work_tx:
-                out["work_income"] += amount
-        else:
-            out["expense"] += amount
-            cat = (tx.category or "jiné").strip() or "jiné"
-            out["categories"][cat] = out["categories"].get(cat, 0.0) + amount
-    return out
-
-
-def _expenses_between(db: Session, start: datetime, end: datetime) -> float:
-    return sum(float(tx.amount or 0) for tx in db.query(FinanceTransaction)
-               .filter(FinanceTransaction.created_at >= start, FinanceTransaction.created_at < end).all()
-               if (tx.transaction_type or "").lower() != "income")
 
 
 def _goal_history(db: Session, goal_id: int) -> list[GoalProgressHistory]:
@@ -454,28 +429,9 @@ def build_weekly_snapshot(db: Session, week_start: date, cutoff_utc: datetime, *
         metrics.append(Metric("work_income", "Výdělek z práce", income, p_income, unit="Kč", polarity="up_good",
                               min_delta=MIN_MONEY_DELTA, url="/work"))
 
-    # --- finance ---
-    fin, p_fin = _finance(db, cur), _finance(db, prev)
-    if fin["count"] or p_fin["count"]:
-        note = f"z toho práce {_fmt(fin['work_income'], 'Kč')}" if fin["work_income"] else ""
-        metrics.append(Metric("finance_income", "Příjmy", fin["income"], p_fin["income"], unit="Kč",
-                              polarity="up_good", min_delta=MIN_MONEY_DELTA, note=note, url="/finance"))
-        metrics.append(Metric("finance_expense", "Výdaje", fin["expense"], p_fin["expense"], unit="Kč",
-                              polarity="down_good", min_delta=MIN_MONEY_DELTA, url="/finance"))
-        metrics.append(Metric("finance_net", "Bilance týdne", fin["income"] - fin["expense"],
-                              p_fin["income"] - p_fin["expense"], unit="Kč", polarity="up_good",
-                              min_delta=MIN_MONEY_DELTA, url="/finance"))
-    changes = []
-    for cat in set(fin["categories"]) | set(p_fin["categories"]):
-        c, pc = fin["categories"].get(cat, 0.0), p_fin["categories"].get(cat, 0.0)
-        if abs(c - pc) >= CATEGORY_MIN_DELTA and (pc == 0 or abs(c - pc) / pc >= 0.3):
-            changes.append((abs(c - pc), cat, c, pc))
-    for i, (_d, cat, c, pc) in enumerate(sorted(changes, reverse=True)[:SECTION_CAPS["finance"]], start=1):
-        metrics.append(Metric(f"expense_cat_{i}", f"Výdaje – {_short(cat, 30)}", c, pc, unit="Kč",
-                              polarity="down_good", min_delta=MIN_MONEY_DELTA, url="/finance"))
-
     # --- cíle ---
-    goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in _GOAL_INACTIVE]
+    goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in _GOAL_INACTIVE
+             and not is_finance_goal(g.source)]
     progressed = p_progressed = 0
     goal_items: list[Item] = []
     goal_paces: dict[int, tuple[float, int, int]] = {}
@@ -517,7 +473,7 @@ def build_weekly_snapshot(db: Session, week_start: date, cutoff_utc: datetime, *
                 goal_paces[g.id] = (round(pace, 1), span, p_now)
     for gid in _goal_completed_ids(logs_cur):
         g = db.get(Goal, gid)
-        if g is not None:
+        if g is not None and not is_finance_goal(g.source):
             goal_items.insert(0, Item(f"goal:{g.id}", "goal", _short(g.title), "splněno tento týden", None, "/goals"))
     if goals and (progressed or p_progressed):
         metrics.append(Metric("goals_progressed", "Cíle s posunem", progressed, p_progressed, polarity="up_good",
@@ -559,7 +515,7 @@ def build_weekly_snapshot(db: Session, week_start: date, cutoff_utc: datetime, *
             continue  # už je ve škole / cílech
         snap.sections["activity"].append(Item(f"activity:{lg.id}", "activity", _short(lg.summary, 60), "", None,
                                               "/activity"))
-    signals += len(logs_cur)  # uživatelské změny (škola, práce, finance, cíle, připomínky…) bez šumu
+    signals += len(logs_cur)  # uživatelské změny (škola, práce, cíle, připomínky…) bez šumu
 
     # --- příští týden (jen známé závazky) ---
     nws, nwe = week_start + timedelta(days=7), week_start + timedelta(days=13)
@@ -640,29 +596,6 @@ def _forecasts(db, snap, cur, deadlines, per_day, busiest, this_week_deadlines, 
     elif not deadlines and this_week_deadlines >= 2:
         out.append(Forecast("deadline_light", "Příští týden zatím nemá žádné termíny úkolů ani zkoušek.", "high",
                             ["metric:next_week_deadlines"], "známé termíny v kalendáři"))
-
-    # tempo výdajů v měsíci
-    local_end = to_local(cur.end).replace(tzinfo=None)
-    month_start = local_end.date().replace(day=1)
-    elapsed = (local_end - datetime.combine(month_start, time.min)).total_seconds() / 86400
-    days_in_month = calendar.monthrange(month_start.year, month_start.month)[1]
-    prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
-    if elapsed >= 7:
-        mtd = _expenses_between(db, local_to_utc(datetime.combine(month_start, time.min)), cur.end)
-        last = _expenses_between(db, local_to_utc(datetime.combine(prev_month_start, time.min)),
-                                 local_to_utc(datetime.combine(month_start, time.min)))
-        projected = mtd / elapsed * days_in_month
-        if last >= 1000 and projected >= last * 1.1 and mtd >= 500:
-            snap.metrics.append(Metric("month_expense_pace", "Výdaje od začátku měsíce", round(mtd), round(last),
-                                       unit="Kč", polarity="down_good", min_delta=MIN_MONEY_DELTA,
-                                       prev_label="celý minulý měsíc", url="/finance",
-                                       note=f"{int(elapsed)} z {days_in_month} dní, tempem ~{_fmt(projected, 'Kč')}"))
-            out.append(Forecast(
-                "spending_pace",
-                f"Pokud výdaje poběží dosavadním tempem ({_fmt(mtd, 'Kč')} za {int(elapsed)} dní), měsíc může "
-                f"skončit kolem {_fmt(projected, 'Kč')}, tedy nad minulým měsícem ({_fmt(last, 'Kč')}).",
-                "moderate" if elapsed >= 14 else "low", ["metric:month_expense_pace"],
-                "lineární tempo výdajů v měsíci"))
 
     # trend hodin práce (tři po sobě jdoucí změny stejným směrem, ≥ 25 %)
     seq = history_hours[1:] + [hours]  # w-2, w-1, tento týden

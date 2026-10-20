@@ -48,7 +48,7 @@ import briefing_service
 import weekly_review_service
 from tool_router import detect_write_intent
 from activity_service import log_activity, delta_dict
-from text_utils import finance_summary_cz, format_czk_cz, format_hours_cz, planner_action_line
+from text_utils import finance_summary_cz, format_hours_cz, planner_action_line
 from time_utils import utc_now
 from env_config import env_bool
 from module_registry import all_contributions, current_access
@@ -361,7 +361,8 @@ class WorkSessionRequest(BaseModel):
     project: str = ""
     description: str = ""
     hourly_rate: float = 0
-    sync_to_finance: bool = True
+    # MRK-60: přijímá se jen kvůli starším klientům a ignoruje se – práce Finance nezapisuje.
+    sync_to_finance: bool = False
 
 class MffCharacterRequest(BaseModel):
     name: str
@@ -1651,26 +1652,12 @@ def add_work_session(request: WorkSessionRequest):
             project=request.project,
             description=request.description,
             hourly_rate=request.hourly_rate,
-            sync_to_finance=request.sync_to_finance,
+            sync_to_finance=False,  # MRK-60: příjem z práce do Finance nejde (skutečný cashflow = Finance import)
         )
         db.add(item)
         db.flush()
 
         earnings = round(item.hours * item.hourly_rate, 2)
-        finance_item = None
-        if earnings > 0 and request.sync_to_finance and item.finance_transaction_id is None:
-            description = f"Work: {item.project or 'Práce'}"
-            if item.description:
-                description = f"{description} – {item.description}"
-            finance_item = FinanceTransaction(
-                amount=earnings,
-                category="work",
-                description=description,
-                transaction_type="income",
-            )
-            db.add(finance_item)
-            db.flush()
-            item.finance_transaction_id = finance_item.id
 
         work_summary = f"Práce {format_hours_cz(request.hours)}"
         if request.project:
@@ -1683,17 +1670,6 @@ def add_work_session(request: WorkSessionRequest):
             delta=delta_dict(None, item, ["date", "hours", "project", "description", "hourly_rate", "sync_to_finance"]),
             user_context="manual"
         )
-
-        if finance_item is not None:
-            fin_summary = f"Zapsáno z Práce: příjem {format_czk_cz(earnings)}"
-            if request.description:
-                fin_summary = f"{fin_summary} – {request.description}"
-            log_activity(
-                db, "finance", "sync", fin_summary,
-                entity_type="FinanceTransaction", entity_id=finance_item.id,
-                delta=delta_dict(None, finance_item, ["amount", "category", "description", "transaction_type"]),
-                user_context="manual"
-            )
 
         db.commit()
         db.refresh(item)

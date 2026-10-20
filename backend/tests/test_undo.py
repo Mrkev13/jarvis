@@ -51,11 +51,11 @@ class UndoTestBase(unittest.TestCase):
         law, math = Subject(name="Právo"), Subject(name="Matematika")
         db.add_all([law, math])
         db.flush()
+        # MRK-60: obecné undo se ověřuje na práci (Finance už AI entita není).
         db.add_all([
-            FinanceTransaction(amount=300, category="Jídlo", description="oběd", transaction_type="expense",
-                               created_at=datetime(2026, 10, 1, 10, 0)),
-            FinanceTransaction(amount=1, category="Ostatní", description="testovací výdaj",
-                               transaction_type="expense", created_at=datetime(2026, 10, 2, 11, 0)),
+            WorkSession(date=date(2026, 10, 1), hours=3, project="Servind", hourly_rate=300, description="workshop"),
+            WorkSession(date=date(2026, 10, 2), hours=1, project="Ostatní", hourly_rate=0,
+                        description="testovací směna"),
             Assignment(title="Esej o ústavě", subject_id=law.id, status="todo", due_date=date(2026, 10, 3)),
             Assignment(title="Sada příkladů", subject_id=math.id, status="in_progress", due_date=date(2026, 10, 3)),
             Goal(area="personal", title="Přečíst knihu", status="active", progress=40, tracking_type="manual"),
@@ -112,8 +112,23 @@ class UndoTestBase(unittest.TestCase):
     def status_of(self, pid):
         return self.q(lambda db: db.get(PendingAction, int(pid)).status)
 
-    def amounts(self):
-        return self.q(lambda db: {t.description: t.amount for t in db.query(FinanceTransaction).all()})
+    def hours(self):
+        return self.q(lambda db: {s.description: s.hours for s in db.query(WorkSession).all()})
+
+    def linked_session(self, project, amount=1000):
+        """Historický pracovní záznam s navázaným příjmem ve Finance (z doby před MRK-60)."""
+        db = self.Session()
+        tx = FinanceTransaction(amount=amount, category="work", description=f"Work: {project}",
+                                transaction_type="income", created_at=datetime(2026, 10, 1, 8, 0))
+        db.add(tx)
+        db.flush()
+        ws = WorkSession(date=date(2026, 10, 1), hours=4, project=project, hourly_rate=250,
+                         finance_transaction_id=tx.id)
+        db.add(ws)
+        db.commit()
+        ids = ws.id, tx.id
+        db.close()
+        return ids
 
     def assignment_statuses(self):
         return self.q(lambda db: {a.title: a.status for a in db.query(Assignment).all()})
@@ -121,29 +136,29 @@ class UndoTestBase(unittest.TestCase):
 
 class UndoFlowTestCase(UndoTestBase):
     def test_confirm_reports_undo_available_and_stores_record(self):
-        pid, outcome = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, outcome = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.assertTrue(outcome["result"]["undo_available"])
         self.assertNotIn("undo", outcome["result"], "řádková data pro undo se do UI neposílají")
         stored = self.q(lambda db: json.loads(db.get(PendingAction, int(pid)).arguments))
         record = stored["undo"]
         self.assertTrue(record["supported"])
-        self.assertEqual(record["items"][0]["before"]["amount"], 300.0)
-        self.assertEqual(record["items"][0]["after"]["amount"], 450.0)
+        self.assertEqual(record["items"][0]["before"]["hours"], 3.0)
+        self.assertEqual(record["items"][0]["after"]["hours"], 4.5)
         self.assertIn("plan", stored, "původní plán zůstává")
 
     def test_undo_edit_restores_previous_values(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450, "category": "Restaurace"})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5, "project": "Contoso"})
         proposal = ai.propose_undo_action(pid)
         preview = proposal["pending_action"]["preview"]
         self.assertEqual(preview["kind"], "undo")
         self.assertEqual({c["label"]: (c["old"], c["new"]) for c in preview["items"][0]["changes"]},
-                         {"Částka": ("450 Kč", "300 Kč"), "Kategorie": ("Restaurace", "Jídlo")})
-        self.assertEqual(self.amounts()["oběd"], 450, "návrh undo nic nemění")
+                         {"Hodiny": ("4,5", "3"), "Projekt": ("Contoso", "Servind")})
+        self.assertEqual(self.hours()["workshop"], 4.5, "návrh undo nic nemění")
         outcome = ai.execute_confirm_action(proposal["pending_action"]["id"])
         self.assertTrue(outcome["ok"], outcome)
         self.assertFalse(outcome["result"].get("undo_available", False))
-        tx = self.q(lambda db: db.query(FinanceTransaction).filter_by(description="oběd").one())
-        self.assertEqual((tx.amount, tx.category), (300, "Jídlo"))
+        ws = self.q(lambda db: db.query(WorkSession).filter_by(description="workshop").one())
+        self.assertEqual((ws.hours, ws.project), (3, "Servind"))
         self.assertEqual(self.status_of(pid), "undone")
 
     def test_undo_complete_restores_status_and_goal_progress(self):
@@ -161,99 +176,127 @@ class UndoFlowTestCase(UndoTestBase):
         self.assertEqual(self.assignment_statuses(), {"Esej o ústavě": "todo", "Sada příkladů": "in_progress"})
 
     def test_undo_delete_restores_row_with_original_id_and_links(self):
-        db = self.Session()
-        tx = FinanceTransaction(amount=1000, category="work", description="Work: X", transaction_type="income",
-                                created_at=datetime(2026, 10, 1, 8, 0))
-        db.add(tx)
-        db.flush()
-        db.add(WorkSession(date=date(2026, 10, 1), hours=4, project="X", hourly_rate=250, finance_transaction_id=tx.id))
-        db.commit()
-        tx_id = tx.id
-        db.close()
-        pid, _ = self.execute("finance_transaction", "delete", {"id": tx_id})
-        self.assertIsNone(self.q(lambda db: db.get(FinanceTransaction, tx_id)))
+        ws_id, tx_id = self.linked_session("Xeon")
+        pid, _ = self.execute("work_session", "delete", {"id": ws_id})
+        self.assertIsNone(self.q(lambda db: db.get(WorkSession, ws_id)))
+        self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 1000, "příjem zůstává")
         self.propose_and_confirm_undo(pid)
-        restored = self.q(lambda db: db.get(FinanceTransaction, tx_id))
-        self.assertEqual((restored.amount, restored.description, restored.created_at),
-                         (1000, "Work: X", datetime(2026, 10, 1, 8, 0)))
-        self.assertEqual(self.q(lambda db: db.query(WorkSession).one().finance_transaction_id), tx_id)
+        restored = self.q(lambda db: db.get(WorkSession, ws_id))
+        self.assertEqual((restored.hours, restored.project, restored.finance_transaction_id), (4, "Xeon", tx_id))
 
     def test_undo_soft_delete_of_memory(self):
         pid, _ = self.execute("memory", "delete", {"text": "VZ.55"})
         self.propose_and_confirm_undo(pid)
         self.assertTrue(self.q(lambda db: db.query(Memory).one().active))
 
-    def test_undo_work_edit_restores_linked_income(self):
-        db = self.Session()
-        tx = FinanceTransaction(amount=1000, category="work", description="Work: Servind", transaction_type="income")
-        db.add(tx)
-        db.flush()
-        db.add(WorkSession(date=date(2026, 10, 1), hours=4, project="Servind", hourly_rate=250,
-                           finance_transaction_id=tx.id))
-        db.commit()
-        tx_id = tx.id
-        db.close()
-        pid, _ = self.execute("work_session", "update", {"text": "servind"}, {"hours": 6})
-        self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 1500)
+    def test_undo_work_edit_leaves_historical_income_untouched(self):
+        """MRK-60: úprava ani její vrácení navázaný historický příjem nemění."""
+        ws_id, tx_id = self.linked_session("Xeon")
+        pid, _ = self.execute("work_session", "update", {"id": ws_id}, {"hours": 6})
+        self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 1000)
         self.propose_and_confirm_undo(pid)
-        self.assertEqual(self.q(lambda db: db.query(WorkSession).one().hours), 4)
+        self.assertEqual(self.q(lambda db: db.get(WorkSession, ws_id).hours), 4)
         self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 1000)
 
+    def test_legacy_work_edit_with_linked_income_still_undoes_consistently(self):
+        """Undo záznam z doby před MRK-60 (úprava práce tehdy změnila i příjem) se vrátí celý, nebo vůbec."""
+        ws_id, tx_id = self.linked_session("Xeon")
+        pid, _ = self.execute("work_session", "update", {"id": ws_id}, {"hours": 6})
+
+        def make_legacy(db):
+            pa = db.get(PendingAction, int(pid))
+            args = json.loads(pa.arguments)
+            args["undo"]["items"][0]["linked_income"] = {"id": tx_id, "before": 1000.0, "after": 1500.0}
+            pa.arguments = json.dumps(args)
+            db.get(FinanceTransaction, tx_id).amount = 1500
+            db.commit()
+        self.q(make_legacy)
+        self.propose_and_confirm_undo(pid)
+        self.assertEqual(self.q(lambda db: db.get(WorkSession, ws_id).hours), 4)
+        self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 1000)
+
+    def test_legacy_finance_change_is_not_undoable_by_ai(self):
+        """MRK-60: provedená AI změna transakce z doby před MRK-60 se už přes AI nevrací (ani jako kandidát)."""
+        def store(db):
+            tx = FinanceTransaction(amount=450, category="Jídlo", description="oběd", transaction_type="expense")
+            db.add(tx)
+            db.flush()
+            record = {"version": 1, "supported": True, "entity": "finance_transaction", "action": "update",
+                      "title": "Upraveno: oběd", "executed_at": ms.utc_now().isoformat(),
+                      "items": [{"id": tx.id, "before": {"amount": 300.0}, "after": {"amount": 450.0}}]}
+            pid = ai._store_pending_action(db, "modify_records", {"plan": {}, "undo": record}, ttl_minutes=30)
+            db.get(PendingAction, int(pid)).status = "executed"
+            db.commit()
+            return pid, tx.id
+        pid, tx_id = self.q(store)
+        out = ai.propose_undo_action(pid)
+        self.assertEqual((out["ok"], out["error"]), (False, "unsupported"))
+        with self.assertRaises(ms.MutationRefused) as ctx:
+            self.q(lambda db: ms.resolve_undo(db, latest=True))
+        self.assertEqual(ctx.exception.code, "target_not_found")
+        tampered = {"version": 1, "kind": "undo", "original_action_id": int(pid), "entity": "finance_transaction",
+                    "action": "update"}
+        with self.assertRaises(ms.StaleTarget):
+            ms.apply_undo_plan(tampered)
+        self.assertEqual(self.q(lambda db: db.get(FinanceTransaction, tx_id).amount), 450)
+        self.assertEqual(self.status_of(pid), "executed")
+
     def test_second_undo_is_refused(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.propose_and_confirm_undo(pid)
         again = ai.propose_undo_action(pid)
         self.assertEqual((again["ok"], again["error"]), (False, "already_undone"))
 
     def test_two_open_undo_proposals_execute_at_most_once(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         first = ai.propose_undo_action(pid)["pending_action"]["id"]
         second = ai.propose_undo_action(pid)["pending_action"]["id"]
         self.assertTrue(ai.execute_confirm_action(first)["ok"])
-        self.amounts()  # stav po prvním undo
+        self.hours()  # stav po prvním undo
         db = self.Session()
-        tx = db.query(FinanceTransaction).filter_by(description="oběd").one()
-        tx.amount = 450  # i kdyby se stav náhodou shodoval se snímkem PO, druhé undo nesmí proběhnout
+        ws = db.query(WorkSession).filter_by(description="workshop").one()
+        ws.hours = 4.5  # i kdyby se stav náhodou shodoval se snímkem PO, druhé undo nesmí proběhnout
         db.commit()
         db.close()
         outcome = ai.execute_confirm_action(second)
         self.assertFalse(outcome["ok"])
-        self.assertEqual(self.amounts()["oběd"], 450)
+        self.assertEqual(self.hours()["workshop"], 4.5)
         self.assertEqual(self.status_of(second), "failed")
 
     def test_stale_target_refused_at_proposal_and_at_confirm(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         proposal = ai.propose_undo_action(pid)  # návrh ještě platný
         db = self.Session()
-        db.query(FinanceTransaction).filter_by(description="oběd").one().amount = 500  # ruční změna po AI změně
+        db.query(WorkSession).filter_by(description="workshop").one().hours = 5  # ruční změna po AI změně
         db.commit()
         db.close()
         outcome = ai.execute_confirm_action(proposal["pending_action"]["id"])
         self.assertFalse(outcome["ok"])
         self.assertEqual(outcome["error"], "execution_failed")
-        self.assertEqual(self.amounts()["oběd"], 500)
+        self.assertEqual(self.hours()["workshop"], 5)
         self.assertEqual(self.status_of(pid), "executed", "nepovedené undo nepřepne původní akci")
         refused = ai.propose_undo_action(pid)
         self.assertEqual((refused["ok"], refused["error"]), (False, "stale_target"))
 
     def test_rejected_undo_causes_no_mutation(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         proposal = ai.propose_undo_action(pid)
         db = self.Session()
         try:
             ai.reject_pending(db, proposal["pending_action"]["id"])
         finally:
             db.close()
-        self.assertEqual(self.amounts()["oběd"], 450)
+        self.assertEqual(self.hours()["workshop"], 4.5)
         self.assertEqual(self.status_of(pid), "executed")
         self.assertFalse(ai.execute_confirm_action(proposal["pending_action"]["id"])["ok"])
-        self.assertEqual(self.amounts()["oběd"], 450)
+        self.assertEqual(self.hours()["workshop"], 4.5)
 
     def test_wrong_missing_or_unsuitable_original_ids(self):
         rejected_pid = self.q(lambda db: ai._store_pending_action(db, "modify_records", {"plan": {}}, ttl_minutes=30))
         self.q(lambda db: ai.reject_pending(db, rejected_pid))
         create_pid = self.q(lambda db: ai._store_pending_action(
-            db, "add_finance_transaction", {"amount": 5, "category": "x", "transaction_type": "expense"}, ttl_minutes=30))
+            db, "add_work_session", {"date_value": "2026-10-03", "hours": 1, "project": "x", "hourly_rate": 0},
+            ttl_minutes=30))
         ai.execute_confirm_action(create_pid)
         cases = [("999", "target_not_found"), ("abc", "invalid_target"), (rejected_pid, "not_executed"),
                  (create_pid, "target_not_found")]
@@ -270,7 +313,7 @@ class UndoFlowTestCase(UndoTestBase):
         self.assertEqual(out["error"], "unsupported")
 
     def test_undo_window(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         later = ms.utc_now() + timedelta(hours=ms.UNDO_WINDOW_HOURS + 1)
         with patch.object(ms, "utc_now", lambda: later):
             self.assertEqual(ai.propose_undo_action(pid)["error"], "expired")
@@ -296,12 +339,12 @@ class UndoFlowTestCase(UndoTestBase):
         self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="undo").count()), 0)
 
     def test_audit_links_undo_to_original_action(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.propose_and_confirm_undo(pid)
         logs = self.q(lambda db: db.query(ActivityLog).filter_by(action_type="undo").order_by(ActivityLog.id).all())
         item_log, summary_log = logs
         self.assertEqual((item_log.area, item_log.entity_type, item_log.user_context),
-                         ("finance", "FinanceTransaction", "ai_confirm"))
+                         ("work", "WorkSession", "ai_confirm"))
         self.assertEqual(json.loads(item_log.delta_json)["undo_of_action"], int(pid))
         self.assertEqual((summary_log.area, summary_log.entity_type, summary_log.entity_id),
                          ("ai", "PendingAction", int(pid)))
@@ -309,13 +352,13 @@ class UndoFlowTestCase(UndoTestBase):
         self.assertIn("undone_at", stored["undo"])
 
     def test_unknown_or_tampered_undo_plans_fail_before_mutation(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         bad = [{}, {"version": 1, "kind": "undo"}, {"version": 1, "kind": "undo", "original_action_id": "x"},
                {"version": 1, "kind": "undo", "original_action_id": int(pid), "entity": "goal", "action": "update"}]
         for plan in bad:
             with self.subTest(plan=plan), self.assertRaises((ValueError, ms.StaleTarget)):
                 ms.apply_undo_plan(plan)
-        self.assertEqual(self.amounts()["oběd"], 450)
+        self.assertEqual(self.hours()["workshop"], 4.5)
         self.assertEqual(self.status_of(pid), "executed")
 
 
@@ -327,23 +370,23 @@ class UndoViaAiTestCase(UndoTestBase):
         return result
 
     def test_vrat_posledni_zmenu_creates_undo_pending(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         result = self._ask("vrať poslední změnu", [
             _message(tool_calls=[_call("undo_change", {"latest": True})]),
             _message(content="Připraveno."),
         ])
         self.assertEqual({t["function"]["name"] for t in self.calls[0]["tools"]} & {"undo_change", "modify_records",
-                                                                                   "add_finance_transaction"},
+                                                                                   "add_work_session"},
                          {"undo_change"})
         pending = result["pending_actions"][0]
         self.assertEqual((pending["tool"], pending["preview"]["kind"]), ("undo_change", "undo"))
         self.assertEqual(pending["arguments"]["plan"]["original_action_id"], int(pid))
-        self.assertEqual(self.amounts()["oběd"], 450)
+        self.assertEqual(self.hours()["workshop"], 4.5)
         self.assertTrue(ai.execute_confirm_action(pending["id"])["ok"])
-        self.assertEqual(self.amounts()["oběd"], 300)
+        self.assertEqual(self.hours()["workshop"], 3)
 
     def test_ambiguous_undo_without_latest_asks(self):
-        self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.execute("school_assignment", "complete", {"text": "právo"})
         result = self._ask("vrať tu změnu", [
             _message(tool_calls=[_call("undo_change", {})]),
@@ -354,11 +397,11 @@ class UndoViaAiTestCase(UndoTestBase):
         self.assertEqual((tool_result["status"], tool_result["error"]), ("not_prepared", "ambiguous_target"))
         self.assertEqual(len(tool_result["candidates"]), 2)
 
-    def test_area_filter_picks_the_finance_change(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+    def test_area_filter_picks_the_work_change(self):
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.execute("school_assignment", "complete", {"text": "právo"})
-        result = self._ask("vrať poslední změnu ve financích", [
-            _message(tool_calls=[_call("undo_change", {"area": "finance"})]),
+        result = self._ask("vrať poslední změnu v práci", [
+            _message(tool_calls=[_call("undo_change", {"area": "work"})]),
             _message(content="Připraveno."),
         ])
         self.assertEqual(result["pending_actions"][0]["arguments"]["plan"]["original_action_id"], int(pid))
@@ -395,16 +438,16 @@ class UndoEndpointAuthTestCase(UndoTestBase):
         self.client = TestClient(main.app)
 
     def test_undo_endpoint_requires_session_and_then_proposes_only(self):
-        pid, _ = self.execute("finance_transaction", "update", {"text": "oběd"}, {"amount": 450})
+        pid, _ = self.execute("work_session", "update", {"text": "workshop"}, {"hours": 4.5})
         self.assertEqual(self.client.post("/actions/undo", json={"action_id": pid}).status_code, 401)
         self.assertEqual(self.client.post("/auth/login", json={"pin": "4821"}).status_code, 200)
         body = self.client.post("/actions/undo", json={"action_id": pid}).json()
         self.assertTrue(body["ok"])
         self.assertEqual(body["pending_action"]["preview"]["kind"], "undo")
-        self.assertEqual(self.amounts()["oběd"], 450, "endpoint jen navrhuje, nevrací")
+        self.assertEqual(self.hours()["workshop"], 4.5, "endpoint jen navrhuje, nevrací")
         confirm = self.client.post("/actions/confirm", json={"action_id": body["pending_action"]["id"]}).json()
         self.assertTrue(confirm["ok"])
-        self.assertEqual(self.amounts()["oběd"], 300)
+        self.assertEqual(self.hours()["workshop"], 3)
 
 
 if __name__ == "__main__":

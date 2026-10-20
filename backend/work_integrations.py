@@ -156,7 +156,7 @@ def parse_work(t, d, now_utc: datetime, ctx: dict):
         t.take(km)
     project = t.rest()
     if rate is None:
-        d.warnings.append("Bez hodinové sazby – výdělek 0 Kč, do Financí se nic nezapíše.")
+        d.warnings.append("Bez hodinové sazby – výdělek 0 Kč.")
     if confidence == "medium":
         d.warnings.append("Rozpoznáno jako práce podle hodin – zkontroluj.")
     d.fields = {
@@ -164,7 +164,6 @@ def parse_work(t, d, now_utc: datetime, ctx: dict):
         "hours": hours,
         "project": project,
         "hourly_rate": rate or 0,
-        "sync_to_finance": True,
     }
     validate_work(d.fields, d, today)
 
@@ -181,7 +180,7 @@ def work_tool_call(f: dict, d, today, now_utc, db) -> tuple[str, dict]:
     validate_work(clean, d, today)
     return "add_work_session", {
         "date_value": clean["date"], "hours": clean["hours"], "project": clean["project"],
-        "hourly_rate": clean["hourly_rate"], "description": "", "sync_to_finance": bool(f.get("sync_to_finance", True)),
+        "hourly_rate": clean["hourly_rate"], "description": "",  # MRK-60: bez zápisu do Finance
     }
 
 

@@ -112,7 +112,7 @@ RESPONSE_SCHEMA = {
     },
 }
 
-_strip_refs = make_ref_stripper(("assignment", "exam", "reminder", "goal", "notification", "finance", "activity",
+_strip_refs = make_ref_stripper(("assignment", "exam", "reminder", "goal", "notification", "activity",
                                  "metric", "forecast"))
 # Témata, o kterých data nic neříkají – v přehledu nikdy (fakta ani odhady).
 _BANNED_RE = re.compile(
