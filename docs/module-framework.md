@@ -81,7 +81,7 @@ Numeric orders in use (keep gaps for new modules):
 |---|---|---|---|---|---|---|---|---|---|
 | search source order | 10 | 40 | – | 70 | 50 | 60 | 80 | 90 | 100 |
 | Today source order | 20 | 10 | – | – | – | – | – | – | – |
-| CURRENT STATE order | 10 | 20 | 30 | 40 | 50 | 60 | – | 70 | (no section) |
+| CURRENT STATE order | 10 | 20 | 30 | 40 | 50 | (keywords only, MRK-60) | – | 70 | (no section) |
 | Quick Add rule priority | 20 exam, 30 assignment | 10 keyword, 60 time | – | – | 40 keyword/rate, 50 hours | 70 money/keyword, 80 bare number | – | – | – |
 
 The orders reproduce the old hard-coded sequences exactly. A golden comparison against `main` on the same seeded DB
@@ -116,7 +116,8 @@ Runtime flags come from `GET /modules` (MRK-18). `ModuleAccess` filters all of t
 - Core contributions: reminders, memory, notifications (`core_integrations.py`); core pages (Řídicí centrum, Dnes,
   Týdenní přehled, Plánovač, Aktivita, Paměť, AI, Nastavení).
 - Aggregator policy (§3 last column). The cross-area **implied rules** in `context_service.classify_areas` ("plán",
-  "přehled", work → finance + goals) are global policy that names areas, not module data.
+  "přehled", work → goals) are global policy that names areas, not module data. Finance is never implied and has
+  no AI context or tools (MRK-60, [finance.md](finance.md)).
 - Infrastructure jobs: notifications generation, backups, monitoring, reminder delivery, Daily Briefing / Weekly
   Review jobs (`scheduler_service`).
 - Auth, the module REST gate (`require_module_available`), `GET /modules`.
@@ -146,7 +147,7 @@ line of defence.
 | `briefing_snapshot.py`, `weekly_snapshot.py` (+ `_strip_refs` lists in `briefing_service` / `weekly_review_service`) | school, reminders, goals, finance, work | One monolithic snapshot with cross-module caps, grounding and forecasts. No clean, low-risk provider contract yet. **Not gated by module state** (pre-existing, same as on `main` before MRK-20). | `briefing_sources` / `weekly_sources` with refs; gate by `today` / new `briefing` capability |
 | `planner_service.py`, `notifications_service.py` | school, goals, work, finance | Deterministic candidate rules per type, used by planner, Today, dashboard and notifications | `planner_sources`, `notification_types` |
 | `POST /today/actions/prepare` + reminder/assignment branches in `useTodayActions` | school, reminders | Legacy pending-action flows. **New modules declare `MODULE_UI.todayActions`** and call their own endpoint (MRK-21). | migrate when those flows are touched |
-| `mutation_service` EntityDefs | school, finance, work, goals, wot, mff | AI modify/undo definitions | contribute EntityDefs per module |
+| `mutation_service` EntityDefs | school, work, goals, wot, mff (no finance – MRK-60) | AI modify/undo definitions | contribute EntityDefs per module |
 | `ai.py` system prompt | names modules | static prompt text | generate the module list from available modules |
 | Frontend `lib/areas.ts` (`AREA_STYLES`) | all + memory labels | area colours/labels also label memories and goals. **New modules: `MODULE_UI.area` + module label fallback** (MRK-21). | tone tokens (Visual Refresh) |
 | Frontend `CORE_WIDGETS` + `components/dashboard/widgets.tsx` | goals, school, work, finance, wot, mff | Legacy widgets with persisted ids. **New modules use `MODULE_UI.widgets` + `modules/registry.tsx`** (MRK-21). | move legacy widgets when touched |

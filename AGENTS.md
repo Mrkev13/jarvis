@@ -63,6 +63,8 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
 - **Deterministicky před AI:** co jde spočítat bez LLM, počítá kód; LLM dostává jen výsledek.
 - **Čas:** v DB naive UTC (`time_utils.utc_now()`), „dnes“ a rozvrhy v Europe/Prague.
   Nikdy `datetime.now()` / `date.today()` bez zóny.
+- **Finance do AI nejde** (MRK-60): žádná data, agregáty ani tooly Finance pro LLM; filtry jen přes
+  `finance_ai_policy.py`. Práce do Finance nezapisuje. Detaily: [docs/finance.md](docs/finance.md).
 - **Kanonické moduly:** stavy `statuses.py`, env `env_config.py`, AI tooly `tool_registry.py`,
   frontend API `lib/api.ts`. Nic z toho nekopíruj lokálně.
 - **Obří soubory** (`backend/main.py`, `backend/ai.py`): nepřidávej do nich podstatnou novou logiku.

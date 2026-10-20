@@ -5,7 +5,7 @@ import os
 import sys
 import types
 import unittest
-from datetime import date, datetime
+from datetime import date
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
@@ -26,7 +26,7 @@ import main  # noqa: E402
 import mutation_service  # noqa: E402
 import tools  # noqa: E402
 from database import Base  # noqa: E402
-from models import ActivityLog, Assignment, FinanceTransaction, PendingAction, Subject  # noqa: E402
+from models import ActivityLog, Assignment, FinanceTransaction, PendingAction, Subject, WorkSession  # noqa: E402
 
 
 def _message(content=None, tool_calls=None):
@@ -53,13 +53,13 @@ class AiMutationFlowTestCase(unittest.TestCase):
         law, math = Subject(name="Právo"), Subject(name="Matematika")
         db.add_all([law, math])
         db.flush()
+        # MRK-60: obecný AI mutační tok se ověřuje na práci (Finance už AI entita není).
         db.add_all([
-            FinanceTransaction(amount=300, category="Jídlo", description="oběd", transaction_type="expense",
-                               created_at=datetime(2026, 10, 1, 10, 0)),
-            FinanceTransaction(amount=320, category="Jídlo", description="oběd s kolegy",
-                               transaction_type="expense", created_at=datetime(2026, 10, 2, 10, 0)),
-            FinanceTransaction(amount=1, category="Ostatní", description="testovací výdaj",
-                               transaction_type="expense", created_at=datetime(2026, 10, 2, 11, 0)),
+            WorkSession(date=date(2026, 10, 1), hours=3, project="Servind", hourly_rate=300, description="workshop"),
+            WorkSession(date=date(2026, 10, 2), hours=3.5, project="Servind", hourly_rate=300,
+                        description="workshop s kolegy"),
+            WorkSession(date=date(2026, 10, 2), hours=1, project="Ostatní", hourly_rate=0,
+                        description="testovací směna"),
             Assignment(title="Esej o ústavě", subject_id=law.id, status="todo", due_date=date(2026, 10, 3)),
             Assignment(title="Sada příkladů", subject_id=math.id, status="todo", due_date=date(2026, 10, 3)),
             Assignment(title="Projekt", subject_id=math.id, status="todo", due_date=date(2026, 10, 10)),
@@ -96,10 +96,10 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertEqual(self.script, [], "nevyužité odpovědi fake modelu")
         return result
 
-    def _amounts(self):
+    def _hours(self):
         db = self.Session()
         try:
-            return {t.description: t.amount for t in db.query(FinanceTransaction).all()}
+            return {s.description: s.hours for s in db.query(WorkSession).all()}
         finally:
             db.close()
 
@@ -114,9 +114,9 @@ class AiMutationFlowTestCase(unittest.TestCase):
         return json.loads(self.calls[-1]["messages"][-1]["content"])
 
     def _propose_edit(self):
-        result = self._ask("změň poslední výdaj za oběd na 450 Kč", [
-            _modify(entity="finance_transaction", action="update",
-                    target={"text": "oběd", "type": "expense", "latest": True}, changes={"amount": 450}),
+        result = self._ask("změň poslední práci na Servind na 4,5 hodiny", [
+            _modify(entity="work_session", action="update",
+                    target={"text": "workshop", "latest": True}, changes={"hours": 4.5}),
             _message(content="Připravil jsem změnu k potvrzení."),
         ])
         self.assertEqual(len(result["pending_actions"]), 1)
@@ -129,14 +129,14 @@ class AiMutationFlowTestCase(unittest.TestCase):
         preview = pending["preview"]
         self.assertEqual(preview["kind"], "update")
         self.assertEqual(preview["count"], 1)
-        self.assertIn("oběd s kolegy", preview["items"][0]["label"])
-        self.assertEqual(preview["items"][0]["changes"][0]["old"], "320 Kč")
-        self.assertEqual(preview["items"][0]["changes"][0]["new"], "450 Kč")
+        self.assertIn("3,5 h", preview["items"][0]["label"])
+        self.assertEqual(preview["items"][0]["changes"][0]["old"], "3,5")
+        self.assertEqual(preview["items"][0]["changes"][0]["new"], "4,5")
         self.assertIn("plan", pending["arguments"])
-        self.assertEqual(self._amounts()["oběd s kolegy"], 320, "nic se nesmí provést před potvrzením")
+        self.assertEqual(self._hours()["workshop s kolegy"], 3.5, "nic se nesmí provést před potvrzením")
         self.assertEqual(self._last_tool_result()["status"], "confirmation_required")
         self.assertIn("modify_records", {t["function"]["name"] for t in self.calls[0]["tools"]})
-        self.assertNotIn("add_finance_transaction", {t["function"]["name"] for t in self.calls[0]["tools"]})
+        self.assertNotIn("add_work_session", {t["function"]["name"] for t in self.calls[0]["tools"]})
 
     def test_confirm_audit_text_is_human_readable(self):
         """Roadmap 4C: Aktivita ukazuje „Upravená data (AI): …", ne „Potvrzena akce modify_records (plan=…)"."""
@@ -156,7 +156,7 @@ class AiMutationFlowTestCase(unittest.TestCase):
         pending = self._propose_edit()
         first = ai.execute_confirm_action(pending["id"])
         self.assertTrue(first["ok"], first)
-        self.assertEqual(self._amounts(), {"oběd": 300, "oběd s kolegy": 450, "testovací výdaj": 1})
+        self.assertEqual(self._hours(), {"workshop": 3, "workshop s kolegy": 4.5, "testovací směna": 1})
         second = ai.execute_confirm_action(pending["id"])
         self.assertFalse(second["ok"])
         self.assertEqual(second["error"], "action_already_processed")
@@ -169,23 +169,23 @@ class AiMutationFlowTestCase(unittest.TestCase):
             ai.reject_pending(db, pending["id"])
         finally:
             db.close()
-        self.assertEqual(self._amounts()["oběd s kolegy"], 320)
+        self.assertEqual(self._hours()["workshop s kolegy"], 3.5)
         self.assertEqual(self._pending_rows()[0][2], "rejected")
         after = ai.execute_confirm_action(pending["id"])
         self.assertFalse(after["ok"])
-        self.assertEqual(self._amounts()["oběd s kolegy"], 320)
+        self.assertEqual(self._hours()["workshop s kolegy"], 3.5)
 
     def test_delete_pending_and_confirm(self):
-        result = self._ask("smaž poslední testovací výdaj", [
-            _modify(entity="finance_transaction", action="delete", target={"text": "testovací", "latest": True}),
+        result = self._ask("smaž poslední testovací směnu v práci", [
+            _modify(entity="work_session", action="delete", target={"text": "testovací", "latest": True}),
             _message(content="Připravil jsem smazání k potvrzení."),
         ])
         pending = result["pending_actions"][0]
         self.assertEqual(pending["preview"]["kind"], "delete")
-        self.assertIn("testovací výdaj", pending["preview"]["items"][0]["label"])
-        self.assertIn("testovací výdaj", self._amounts())
+        self.assertIn("Ostatní", pending["preview"]["items"][0]["label"])
+        self.assertIn("testovací směna", self._hours())
         self.assertTrue(ai.execute_confirm_action(pending["id"])["ok"])
-        self.assertNotIn("testovací výdaj", self._amounts())
+        self.assertNotIn("testovací směna", self._hours())
 
     def test_complete_assignment_by_subject(self):
         result = self._ask("označ úkol z práva jako hotový", [
@@ -203,22 +203,38 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertEqual(statuses, {"Esej o ústavě": "done", "Sada příkladů": "todo", "Projekt": "todo"})
 
     def test_ambiguous_target_creates_no_pending_action(self):
-        result = self._ask("smaž ten výdaj", [
-            _modify(entity="finance_transaction", action="delete", target={"type": "expense"}),
-            _message(content="Který výdaj myslíš?"),
+        result = self._ask("smaž ten záznam práce", [
+            _modify(entity="work_session", action="delete", target={"date_from": "2026-09-01"}),
+            _message(content="Který záznam myslíš?"),
         ])
         self.assertEqual(result["pending_actions"], [])
         self.assertEqual(self._pending_rows(), [])
         tool_result = self._last_tool_result()
         self.assertEqual((tool_result["status"], tool_result["error"]), ("not_prepared", "ambiguous_target"))
         self.assertEqual(len(tool_result["candidates"]), 3)
-        self.assertEqual(len(self._amounts()), 3)
+        self.assertEqual(len(self._hours()), 3)
+
+    def test_finance_entity_from_model_is_refused(self):
+        """MRK-60: model, který si Finance entitu vymyslí, nedostane pending akci ani data transakcí."""
+        db = self.Session()
+        db.add(FinanceTransaction(amount=320, category="Jídlo", description="oběd", transaction_type="expense"))
+        db.commit()
+        db.close()
+        result = self._ask("smaž ten záznam práce", [
+            _modify(entity="finance_transaction", action="delete", target={"text": "oběd"}),
+            _message(content="To nejde."),
+        ])
+        self.assertEqual(result["pending_actions"], [])
+        tool_result = self._last_tool_result()
+        self.assertEqual((tool_result["status"], tool_result["error"]), ("not_prepared", "unsupported_entity"))
+        self.assertNotIn("oběd", json.dumps(tool_result, ensure_ascii=False))
+        self.assertEqual(self._pending_rows(), [])
 
     def test_wrong_or_missing_id_creates_no_pending_action(self):
         for target in ({"id": 999}, {"id": "x"}):
             with self.subTest(target=target):
-                result = self._ask("smaž ten výdaj", [
-                    _modify(entity="finance_transaction", action="delete", target=target),
+                result = self._ask("smaž ten záznam práce", [
+                    _modify(entity="work_session", action="delete", target=target),
                     _message(content="Ten záznam nevidím."),
                 ])
                 self.assertEqual(result["pending_actions"], [])
@@ -226,8 +242,8 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertEqual(self._pending_rows(), [])
 
     def test_malformed_arguments_create_no_pending_action(self):
-        result = self._ask("smaž ten výdaj", [
-            _modify(entity="finance_transaction"),  # chybí action i target
+        result = self._ask("smaž ten záznam práce", [
+            _modify(entity="work_session"),  # chybí action i target
             _message(content="Upřesni prosím."),
         ])
         self.assertEqual(result["pending_actions"], [])
@@ -237,15 +253,15 @@ class AiMutationFlowTestCase(unittest.TestCase):
         pending = self._propose_edit()
         db = self.Session()
         try:
-            tx = db.query(FinanceTransaction).filter(FinanceTransaction.description == "oběd s kolegy").one()
-            tx.amount = 999
+            ws = db.query(WorkSession).filter(WorkSession.description == "workshop s kolegy").one()
+            ws.hours = 9
             db.commit()
         finally:
             db.close()
         outcome = ai.execute_confirm_action(pending["id"])
         self.assertFalse(outcome["ok"])
         self.assertEqual(outcome["error"], "execution_failed")
-        self.assertEqual(self._amounts()["oběd s kolegy"], 999)
+        self.assertEqual(self._hours()["workshop s kolegy"], 9)
         self.assertEqual(self._pending_rows()[0][2], "failed")
 
     def test_batch_complete_success_and_reject(self):
@@ -279,18 +295,19 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertEqual(done, ["Esej o ústavě", "Sada příkladů"])
 
     def test_mutation_tool_not_routed_without_write_intent_is_refused(self):
-        result = self._ask("kolik jsem utratil za oběd?", [
-            _modify(entity="finance_transaction", action="delete", target={"text": "oběd", "latest": True}),
-            _message(content="Utratil jsi 620 Kč."),
+        result = self._ask("kolik hodin jsem odpracoval?", [
+            _modify(entity="work_session", action="delete", target={"text": "workshop", "latest": True}),
+            _message(content="Odpracoval jsi 7,5 h."),
         ])
         self.assertEqual(result["pending_actions"], [])
         self.assertEqual(self._last_tool_result()["error"], "write_not_available")
         self.assertEqual(self._pending_rows(), [])
 
     def test_create_behaviour_unchanged(self):
-        args = {"amount": 120, "category": "Jídlo", "transaction_type": "expense", "description": "káva"}
-        result = self._ask("přidej výdaj 120 Kč za kávu", [
-            _message(tool_calls=[_call("add_finance_transaction", args)]),
+        args = {"date_value": "2026-10-03", "hours": 2, "project": "Contoso", "hourly_rate": 300,
+                "description": "nový"}
+        result = self._ask("zapiš práci 2 hodiny na Contoso za 300 Kč/h", [
+            _message(tool_calls=[_call("add_work_session", args)]),
             _message(content="Připravil jsem změnu k potvrzení."),
         ])
         pending = result["pending_actions"][0]
@@ -299,7 +316,12 @@ class AiMutationFlowTestCase(unittest.TestCase):
         self.assertNotIn("modify_records", {t["function"]["name"] for t in self.calls[0]["tools"]})
         outcome = ai.execute_confirm_action(pending["id"])
         self.assertTrue(outcome["ok"])
-        self.assertEqual(self._amounts()["káva"], 120)
+        self.assertEqual(self._hours()["nový"], 2)
+        db = self.Session()
+        try:
+            self.assertEqual(db.query(FinanceTransaction).count(), 0, "MRK-60: práce Finance nezapisuje")
+        finally:
+            db.close()
 
     def test_audit_log_for_confirmed_mutation(self):
         pending = self._propose_edit()
@@ -309,13 +331,13 @@ class AiMutationFlowTestCase(unittest.TestCase):
             logs = db.query(ActivityLog).order_by(ActivityLog.id).all()
         finally:
             db.close()
-        item_log = next(lg for lg in logs if lg.area == "finance")
+        item_log = next(lg for lg in logs if lg.area == "work")
         self.assertEqual((item_log.action_type, item_log.user_context), ("update", "ai_confirm"))
         self.assertTrue(item_log.summary.startswith("Upraveno (AI): "), item_log.summary)  # akce z Dnes = „(Dnes)"
-        self.assertEqual(json.loads(item_log.delta_json)["amount"], {"old": 320.0, "new": 450.0})
+        self.assertEqual(json.loads(item_log.delta_json)["hours"], {"old": 3.5, "new": 4.5})
         approve = next(lg for lg in logs if lg.area == "ai")
         self.assertEqual(approve.action_type, "approve")
-        self.assertIn("Upravit: transakce", approve.summary)
+        self.assertIn("Upravit: pracovní záznam", approve.summary)
         self.assertLessEqual(len(approve.summary), 500)
 
     # ---- odpověď u návrhu nesmí tvrdit, že se změna už stala (regrese live Phase B C) ----
@@ -328,30 +350,31 @@ class AiMutationFlowTestCase(unittest.TestCase):
             self.assertNotIn(claim, result["answer"].lower())
 
     def test_create_proposal_cannot_claim_execution(self):
-        args = {"amount": 120, "category": "Jídlo", "transaction_type": "expense", "description": "káva"}
-        result = self._ask("přidej výdaj 120 Kč za kávu", [
-            _message(tool_calls=[_call("add_finance_transaction", args)]),
-            _message(content="Výdaj 120 Kč za kávu byl uložen."),
+        args = {"date_value": "2026-10-03", "hours": 2, "project": "Contoso", "hourly_rate": 300,
+                "description": "nový"}
+        result = self._ask("zapiš práci 2 hodiny na Contoso za 300 Kč/h", [
+            _message(tool_calls=[_call("add_work_session", args)]),
+            _message(content="Práce 2 h na Contoso byla uložena."),
         ])
         self._assert_waiting_answer(result)
-        self.assertNotIn("káva", self._amounts())
+        self.assertNotIn("nový", self._hours())
 
     def test_edit_proposal_cannot_claim_execution(self):
-        result = self._ask("změň výdaj za oběd s kolegy na 450 Kč", [
-            _modify(entity="finance_transaction", action="update", target={"text": "oběd s kolegy"},
-                    changes={"amount": 450}),
-            _message(content="Změnil jsem částku na 450 Kč."),
+        result = self._ask("změň práci workshop s kolegy na 4,5 hodiny", [
+            _modify(entity="work_session", action="update", target={"text": "workshop s kolegy"},
+                    changes={"hours": 4.5}),
+            _message(content="Změnil jsem hodiny na 4,5."),
         ])
         self._assert_waiting_answer(result)
-        self.assertEqual(self._amounts()["oběd s kolegy"], 320)
+        self.assertEqual(self._hours()["workshop s kolegy"], 3.5)
 
     def test_delete_proposal_cannot_claim_execution(self):
-        result = self._ask("smaž testovací výdaj", [
-            _modify(entity="finance_transaction", action="delete", target={"text": "testovací"}),
-            _message(content="Testovací výdaj byl smazán."),
+        result = self._ask("smaž testovací směnu v práci", [
+            _modify(entity="work_session", action="delete", target={"text": "testovací"}),
+            _message(content="Testovací směna byla smazána."),
         ])
         self._assert_waiting_answer(result)
-        self.assertIn("testovací výdaj", self._amounts())
+        self.assertIn("testovací směna", self._hours())
 
     def test_complete_proposal_cannot_claim_execution(self):
         result = self._ask("označ úkol z práva jako hotový", [
@@ -373,12 +396,12 @@ class AiMutationFlowTestCase(unittest.TestCase):
 
     def test_answer_without_pending_action_is_kept(self):
         # Odmítnutý/nejednoznačný návrh (žádná pending akce) → doptání modelu zůstává beze změny.
-        result = self._ask("smaž ten výdaj", [
-            _modify(entity="finance_transaction", action="delete", target={}),
-            _message(content="Který výdaj myslíš?"),
+        result = self._ask("smaž ten záznam práce", [
+            _modify(entity="work_session", action="delete", target={}),
+            _message(content="Který záznam myslíš?"),
         ])
         self.assertEqual(result["pending_actions"], [])
-        self.assertEqual(result["answer"], "Který výdaj myslíš?")
+        self.assertEqual(result["answer"], "Který záznam myslíš?")
 
     def test_success_is_reported_normally_after_actual_confirmation(self):
         result = self._ask("označ úkol z práva jako hotový", [
@@ -412,10 +435,10 @@ class MutationEndpointAuthTestCase(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
         db = self.Session()
-        db.add(FinanceTransaction(amount=1, category="Ostatní", description="testovací výdaj",
-                                  transaction_type="expense"))
+        db.add(WorkSession(date=date(2026, 10, 2), hours=1, project="Ostatní", hourly_rate=0,
+                           description="testovací směna"))
         db.commit()
-        plan = mutation_service.resolve_mutation(db, "finance_transaction", "delete", {"text": "testovací"})
+        plan = mutation_service.resolve_mutation(db, "work_session", "delete", {"text": "testovací"})
         self.pending_id = ai._store_pending_action(db, "modify_records", {"plan": plan}, ttl_minutes=30)
         db.close()
         self._patches = [
@@ -439,7 +462,7 @@ class MutationEndpointAuthTestCase(unittest.TestCase):
     def _count(self):
         db = self.Session()
         try:
-            return db.query(FinanceTransaction).count()
+            return db.query(WorkSession).count()
         finally:
             db.close()
 

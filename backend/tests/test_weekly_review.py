@@ -41,14 +41,14 @@ MON_NEXT = datetime(2026, 10, 12, 6, 0)  # pondělí 8:00 Praha (další týden)
 
 def answer(**over):
     data = {
-        "headline": "Dokončený úkol, vyšší výdaje",
-        "summary": "Tento týden jsi dokončil jeden úkol a cíl se posunul. Výdaje byly vyšší než minulý týden.",
+        "headline": "Dokončený úkol, nižší výdělek",
+        "summary": "Tento týden jsi dokončil jeden úkol a cíl se posunul. Výdělek byl nižší než minulý týden.",
         "wins": [{"ref": "metric:assignments_completed", "text": "Dokončen 1 úkol"},
                  {"ref": "goal:1", "text": "Cíl spoření se posunul z 6 % na 10 %"}],
-        "concerns": [{"ref": "metric:finance_expense", "text": "Výdaje 1 500 Kč, minulý týden 400 Kč"},
+        "concerns": [{"ref": "metric:work_income", "text": "Výdělek 1 400 Kč, minulý týden 2 200 Kč"},
                      {"ref": "assignment:1", "text": "Sada je stále po termínu"}],
         "comparisons": [{"ref": "metric:work_hours", "text": "Práce 7 h místo 11 h"},
-                        {"ref": "metric:finance_expense", "text": "Výdaje +1 100 Kč"}],
+                        {"ref": "metric:work_income", "text": "Výdělek −800 Kč"}],
         "next_week": [{"ref": "assignment:3", "text": "Projekt v úterý 13. 10."},
                       {"ref": "metric:next_week_deadlines", "text": "4 termíny, nejvíc ve středu"}],
         "forecasts": [{"ref": "forecast:deadline_load", "statement": "Příští týden může být náročnější: 4 termíny."}],
@@ -199,8 +199,11 @@ class SnapshotTestCase(WeeklyTestBase):
         self.assertTrue(snap.is_quiet)
         self.assertEqual(snap.signals, 0)
         self.assertIn("ODHADY: žádné", snap.render())
-        self.add(*[ActivityLog(timestamp=SUN19 - timedelta(hours=i + 1), area="finance", action_type="create",
-                               summary=f"Výdaj {i}", dedupe_key=f"q{i}") for i in range(wsn.QUIET_MIN_SIGNALS - 1)])
+        self.add(*[ActivityLog(timestamp=SUN19 - timedelta(hours=i + 1), area="school", action_type="create",
+                               summary=f"Úkol {i}", dedupe_key=f"q{i}") for i in range(wsn.QUIET_MIN_SIGNALS - 1)])
+        # MRK-60: změny ve Finance se do týdenního přehledu (vstup LLM) nepočítají ani jako datový bod
+        self.add(*[ActivityLog(timestamp=SUN19 - timedelta(minutes=i + 1), area="finance", action_type="create",
+                               summary=f"Výdaj {i} Kč", dedupe_key=f"f{i}") for i in range(5)])
         self.assertTrue(self.snap().is_quiet, "3 datové body = pořád málo dat")
         self.add(ActivityLog(timestamp=SUN19 - timedelta(hours=9), area="work", action_type="create",
                              summary="Práce", dedupe_key="q9"))
@@ -216,11 +219,9 @@ class SnapshotTestCase(WeeklyTestBase):
         self.assertEqual(m["work_hours"].pct, -36)
         self.assertEqual(m["work_hours"].trend, "down", "hodiny nemají polaritu dobré/špatné")
         self.assertEqual((m["work_income"].cur, m["work_income"].prev), (1400, 2200))
-        self.assertEqual((m["finance_expense"].cur, m["finance_expense"].prev, m["finance_expense"].trend),
-                         (1500, 400, "worse"))
-        self.assertEqual(m["finance_net"].cur, -100)
-        self.assertEqual((m["expense_cat_1"].label, m["expense_cat_1"].cur, m["expense_cat_1"].prev),
-                         ("Výdaje – Jídlo", 1200, 400))
+        # MRK-60: seed má transakce ve Finance, ale týdenní snímek (vstup LLM) z nich nic nepočítá
+        self.assertFalse({k for k in m if k.startswith(("finance", "expense", "month_expense"))}, sorted(m))
+        self.assertNotIn("1 500", snap.render())
         self.assertEqual((m["goals_progressed"].cur, m["goals_progressed"].prev), (1, 0))
         self.assertEqual((m["next_week_deadlines"].cur, m["next_week_deadlines"].prev), (4, 1))
         self.assertIn("nejvíc středa 14. 10. (2)", m["next_week_deadlines"].note)
@@ -235,16 +236,17 @@ class SnapshotTestCase(WeeklyTestBase):
 
     def test_previous_week_comparison_is_like_for_like(self):
         prev_cut = SUN19 - timedelta(days=7)
-        self.add(FinanceTransaction(amount=300, category="Jídlo", transaction_type="expense",
-                                    created_at=prev_cut - timedelta(hours=1)),
-                 FinanceTransaction(amount=5000, category="Jídlo", transaction_type="expense",
-                                    created_at=prev_cut + timedelta(hours=1)),  # minulá neděle po 19:00
-                 FinanceTransaction(amount=700, category="Jídlo", transaction_type="expense",
-                                    created_at=SUN19 - timedelta(hours=2)))
+
+        def created(at, entity_id):
+            return ActivityLog(timestamp=at, area="school", action_type="create", entity_type="Assignment",
+                               entity_id=entity_id, summary=f"Úkol přidán {entity_id}", dedupe_key=f"c{entity_id}")
+        self.add(created(prev_cut - timedelta(hours=1), 1),
+                 created(prev_cut + timedelta(hours=1), 2),  # minulá neděle po 19:00
+                 created(SUN19 - timedelta(hours=2), 3))
         m = {x.key: x for x in self.snap().metrics}
-        self.assertEqual((m["finance_expense"].cur, m["finance_expense"].prev), (700, 300))
+        self.assertEqual((m["assignments_created"].cur, m["assignments_created"].prev), (1, 1))
         m = {x.key: x for x in self.snap(cutoff=datetime(2026, 10, 13)).metrics}  # celý týden (catch-up)
-        self.assertEqual(m["finance_expense"].prev, 5300)
+        self.assertEqual(m["assignments_created"].prev, 2)
 
     def test_technical_activity_is_filtered(self):
         noise = [dict(area="goals", action_type="snapshot", summary="Snapshot"),
@@ -284,9 +286,8 @@ class SnapshotTestCase(WeeklyTestBase):
         self.q(link_work_income)
         m = {x.key: x for x in self.snap().metrics}
         self.assertEqual(m["assignments_completed"].cur, 1)
-        self.assertEqual(m["finance_income"].cur, 1400, "příjem z práce v financích jen jednou")
-        self.assertEqual(m["finance_income"].note, "z toho práce 1 400 Kč")
-        self.assertEqual(m["work_income"].cur, 1400)
+        self.assertNotIn("finance_income", m, "MRK-60: Finance do týdenního přehledu nejde")
+        self.assertEqual(m["work_income"].cur, 1400, "výdělek z práce jen jednou, z práce")
 
     def test_next_week_contains_only_known_open_commitments(self):
         self.seed_normal()
@@ -328,15 +329,13 @@ class SnapshotTestCase(WeeklyTestBase):
         self.assertEqual((m.prev, m.cur, m.trend), (3, 2, "better"))
 
     def test_small_money_changes_are_not_trends(self):
-        self.add(FinanceTransaction(amount=400, category="Jídlo", transaction_type="expense",
-                                    created_at=SUN19 - timedelta(days=1)),
-                 FinanceTransaction(amount=300, category="Jídlo", transaction_type="expense",
-                                    created_at=SUN19 - timedelta(days=8)))
+        self.add(WorkSession(date=date(2026, 10, 10), hours=2, hourly_rate=200),
+                 WorkSession(date=date(2026, 10, 3), hours=1.5, hourly_rate=200))
         snap = self.snap()
         m = {x.key: x for x in snap.metrics}
-        self.assertEqual(m["finance_expense"].trend, "same")
-        self.assertIsNone(m["finance_expense"].pct, "procenta jen nad rozumným základem")
-        self.assertNotIn("expense_cat_1", m)
+        self.assertEqual((m["work_income"].cur, m["work_income"].prev), (400, 300))
+        self.assertEqual(m["work_income"].trend, "same")
+        self.assertIsNone(m["work_income"].pct, "procenta jen nad rozumným základem")
 
     def test_goal_stagnation_and_forecast_rules(self):
         def go(db):
@@ -354,7 +353,7 @@ class SnapshotTestCase(WeeklyTestBase):
         self.assertEqual(wr._tone(snap, item.ref), "negative")
         self.assertEqual(snap.forecasts, [], "bez podložených dat žádný odhad")
 
-    def test_work_trend_and_spending_pace_forecasts(self):
+    def test_work_trend_forecast_and_no_spending_pace(self):
         def go(db):
             for d, h in [(date(2026, 9, 22), 12), (date(2026, 9, 29), 8), (date(2026, 10, 6), 5)]:
                 db.add(WorkSession(date=d, hours=h, hourly_rate=0))
@@ -368,8 +367,9 @@ class SnapshotTestCase(WeeklyTestBase):
         f = {x.key: x for x in snap.forecasts}
         self.assertEqual(f["work_trend_down"].confidence, "low")
         self.assertIn("12 h → 8 h → 5 h", f["work_trend_down"].statement)
-        self.assertEqual(f["spending_pace"].confidence, "low", "méně než 14 dní měsíce → nízká jistota")
-        self.assertEqual(f["spending_pace"].basis, ["metric:month_expense_pace"])
+        # MRK-60: tempo výdajů je Finance agregát → žádný odhad ani metrika, i když transakce existují
+        self.assertNotIn("spending_pace", f)
+        self.assertNotIn("month_expense_pace", {x.key for x in snap.metrics})
         for fc in snap.forecasts:
             self.assertIsNone(wr._BANNED_RE.search(fc.statement))
 
@@ -433,7 +433,7 @@ class GenerateTestCase(WeeklyTestBase):
         self.assertEqual(row.period_end, SUN19)
         c = self.content()
         self.assertEqual([w["ref"] for w in c["wins"]], ["metric:assignments_completed", "goal:1"])
-        self.assertEqual([x["ref"] for x in c["concerns"]], ["metric:finance_expense", "assignment:1"])
+        self.assertEqual([x["ref"] for x in c["concerns"]], ["metric:work_income", "assignment:1"])
         self.assertEqual(c["comparisons"][0]["metric"]["delta_text"], "−4 h (−36 %)")
         [fc] = c["forecasts"]
         self.assertEqual((fc["confidence"], fc["confidence_text"], fc["kind"]), ("high", "vysoká", "forecast"))
@@ -448,7 +448,7 @@ class GenerateTestCase(WeeklyTestBase):
     def test_unknown_duplicate_and_wrong_tone_refs_are_dropped(self):
         self.seed_normal()
         self.gen(FakeLLM(answer(
-            wins=[{"ref": "metric:finance_expense", "text": "Výdaje"},  # horší ≠ úspěch
+            wins=[{"ref": "metric:work_income", "text": "Výdělek"},  # horší ≠ úspěch
                   {"ref": "assignment:999", "text": "Vymyšlený úkol"},
                   {"ref": "metric:assignments_completed", "text": "Dokončen 1 úkol"},
                   {"ref": "metric:assignments_completed", "text": "Znovu"}],
@@ -466,7 +466,7 @@ class GenerateTestCase(WeeklyTestBase):
             summary="Výdaje vzrostly kvůli nákupům na 9 999 Kč.",
             wins=[{"ref": "goal:1", "text": "Cíl se posunul (goal:1) díky šetření"}],
             concerns=[{"ref": "assignment:1", "text": "Sada měla termín 20. 10."},
-                      {"ref": "metric:finance_expense", "text": "Výdaje 5 000 Kč (metric:finance_expense)"}],
+                      {"ref": "metric:work_income", "text": "Výdělek 5 000 Kč (metric:work_income)"}],
             next_week=[{"ref": "assignment:3", "text": "Projekt [assignment:3] v úterý 13. 10."}],
         )))
         c = self.content()
@@ -754,7 +754,7 @@ class WeeklyApiTestCase(WeeklyTestBase):
         self.assertEqual((body["regenerated_count"], len(self.llm.calls)), (1, 2))
         items = self.client.get("/weekly-review/history").json()["items"]
         self.assertEqual([(i["week_start"], i["status"]) for i in items], [("2026-10-05", "ready")])
-        self.assertEqual(items[0]["headline"], "Dokončený úkol, vyšší výdaje")
+        self.assertEqual(items[0]["headline"], "Dokončený úkol, nižší výdělek")
         # historický týden: čtení ano, generování ne (endpoint generuje jen aktuální týden)
         self.now = SUN19 + timedelta(days=7)
         old = self.client.get("/weekly-review/week/2026-10-05").json()
