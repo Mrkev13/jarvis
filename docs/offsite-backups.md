@@ -27,7 +27,12 @@
 | Weekly (≥ 7 days since the last prune attempt) | `restic check --read-data-subset 5%`, then **only if it passed** `restic forget --tag standa-hub --group-by host --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune` | `--group-by host`: snapshot paths differ per run, so grouping by paths would never forget anything. A failed prune leaves existing snapshots intact. |
 
 **Concurrency and time bound:**
-- one deadline (`OFFSITE_TIMEOUT_SECONDS`, default 3600) bounds the whole cycle, every restic call included, so an unreachable B2 can never hold the hourly job (and the next local backup) for hours;
+- one deadline (`OFFSITE_TIMEOUT_SECONDS`; code default 3600, **recommended 1200**) bounds the whole cycle, every
+  restic call included, so an unreachable B2 can never hold the hourly job (and the next local backup) for hours.
+  restic keeps retrying an unreachable endpoint until that deadline, so during an outage the hourly job runs for the
+  full timeout. Measured on 2026-10-20: first full upload (36.6 MB) 29.7 s, incremental upload 22.6 s, check with a
+  5 % data read 4.1 s, prune 2.2 s; the whole cycle is under one minute. 1200 s leaves more than 20× headroom, and an
+  interrupted large upload resumes deduplicated on the next cycle;
 - one off-site operation per backend process (lock), and restic's own repository lock;
 - the scheduler has a single owner (MRK-23);
 - a `running` record older than twice the timeout is marked `interrupted` and retried.
@@ -52,6 +57,14 @@ No bucket, endpoint, account, key, password, path or raw output ever appears the
 off-site copy for more than 26 h, a failed repository check, or an unusable configuration** turns the overall status
 `degraded` (HTTP 200). Before the first upload the status is `stale`, which is honest.
 
+**Observed failure/retry behaviour (production acceptance 2026-10-20):**
+- An off-site failure is visible **immediately**: `last_attempt_outcome` (here `timeout`, because restic retried an
+  unresolvable host until the deadline) and an open `ops_alert`.
+- `degraded` stays `false` while the last *successful* copy is under 26 h old. That is by design: one failed attempt
+  isn't stale data.
+- The local backup ran independently during the failure.
+- The next run uploaded the pending local run, resolved the alert and created no duplicate snapshot.
+
 Every failure upserts one bell notification per operation (`offsite:backup|check|prune`, type `ops_alert`, fixed
 Czech text plus the outcome code); the next success resolves it. `ops_alert` is a Web Push deliverable type
 (`OPS_ALERT_PUSH`, default on), so when MRK-24 HTTPS push is live the same alert reaches the phone through the
@@ -62,22 +75,54 @@ existing delivery queue. The MRK-26 monitoring log records only `off_machine` + 
 1. **Bucket:**
    - Private, with a globally unique name.
    - Note its **S3 endpoint** (bucket details, e.g. `s3.<region>.backblazeb2.com`).
-   - **Lifecycle:** *Keep prior versions for this number of days* = **30**. With the S3 API, restic deletes by
-     *hiding* objects, so this keeps every pruned or hidden object recoverable for 30 days, including after a
-     malicious "delete everything" with the upload key.
+   - **Lifecycle (prior versions).** With the S3 API every restic delete is a *hide*. The acceptance confirmed this on
+     a disposable repository: prune produced 12 hide markers and every hidden object kept its data version. What
+     happens to hidden versions is decided by the bucket lifecycle:
+     - **Keep forever** (no lifecycle rules, the B2 default). **This is the current production state (0 rules,
+       verified 2026-10-20).** Nothing restic or a stolen no-delete key does can remove history. Storage grows with
+       every pruned pack, but at about 37 MB plus small daily deltas (+154 KB measured) this stays far inside B2's free
+       10 GB.
+     - **Keep prior versions N days.** Bounded storage, but a recovery window of only N days after a prune or a
+       malicious "hide everything".
+     - **Recommendation: keep forever for now.** Revisit only when the bucket approaches the free tier (then 90+ days
+       rather than 30). Either way, the lifecycle protects history only against keys **without** `deleteFiles`, so
+       the key below is the more important control.
    - **Object Lock: off.** restic over the S3 API with Object Lock is not verified here.
-   - Server-side encryption is optional, since restic already encrypts client-side.
-2. **Upload application key** restricted to that bucket:
-   - Capabilities `listBuckets`, `listAllBucketNames` (needed by bucket-restricted keys), `listFiles`, `readFiles`,
-     `writeFiles`.
-   - **Hardened variant: without `deleteFiles`.** Backblaze documents `writeFiles` for deleting by name (a hide) and
-     `deleteFiles` for deleting a specific version. Whether S3 DeleteObject-by-name works without `deleteFiles` is
-     **verified during production acceptance**: `restic backup`, `unlock` and `forget --prune` must all succeed. If
-     it fails, use the web console's read-and-write key, which includes deletion, and rely on the 30-day lifecycle
-     window.
-   - The web console's key types may not let you leave out `deleteFiles`. The B2 CLI can create a key with an exact
-     capability list (`b2 key create …`; check `--help` for the current syntax).
-   - Copy the **keyID** and **applicationKey** (shown once) only into the local protected file (step 4).
+   - Server-side encryption is optional, since restic already encrypts client-side. Production has SSE-B2.
+2. **Upload application key**, restricted to that bucket:
+   - **Required capabilities** for everything the implementation does (`unlock`, `snapshots`, `backup`,
+     `tag --add complete`, `check [--read-data-subset]`, `forget --prune`, `restore`):
+     - `listBuckets` and `listAllBucketNames`: S3 HeadBucket; a bucket-restricted key needs both;
+     - `listFiles`: ListObjects;
+     - `readFiles`: GetObject / HeadObject, for check, restore and the index;
+     - `writeFiles`: PutObject, plus delete-by-name, i.e. *hide*.
+
+     **That's all.** Every restic delete (lock files, the rewritten snapshot after `tag`, forgotten snapshots, pruned
+     packs) is an S3 DeleteObject **without** a version id, which B2 turns into a hide, as observed in acceptance.
+     Nothing in the workflow deletes a specific version, so `deleteFiles` is **not used**. Bucket-settings
+     capabilities (`writeBuckets`, `writeBucket*`, `readBucket*`, `shareFiles`) are never used.
+   - **Not yet proven:** whether B2's S3 gateway authorizes a by-name DeleteObject with `writeFiles` alone. Backblaze
+     documents `writeFiles` for deleting by name and `deleteFiles` for deleting a version, but also advises including
+     both for DeleteObject. The production key used in acceptance had `deleteFiles`, so acceptance doesn't settle it.
+     **Prove it with the new key before swapping** (below).
+   - **Current production key (2026-10-20): a broad read/write key.** It's restricted to the right bucket but also
+     has `deleteFiles`, `writeBuckets`, `writeBucketLifecycleRules` and other bucket-settings writes. A thief could
+     permanently delete versions *and* change the lifecycle. Replacing it is tracked in Linear.
+   - The web console's key presets don't produce this exact list. Create the key with the B2 CLI and an explicit
+     capability list (`b2 key create …`; check `--help` for the current syntax), restricted to the bucket.
+   - Copy the **keyID** and **applicationKey** (shown once) only into a local protected file (step 4).
+   - **Swap procedure (no downtime, production repository untouched until the end):**
+     1. Put the new key into a *second* protected file, in the same format as `b2.env`, with `RESTIC_REPOSITORY`
+        pointing to a **throwaway prefix** (e.g. `…/<bucket>/key-test`).
+     2. Using that file and a throwaway password file: `restic init`, then `backup` twice, `snapshots`,
+        `forget --keep-last 1 --prune`, `check` and `unlock`. All must succeed and leave no stale lock
+        (`restic list locks` is empty).
+     3. If they do, put the new keyID and applicationKey into `b2.env` (repository line unchanged) and run
+        `python -m offsite_restic --env-file <env> check`. Then revoke the old key in B2.
+     4. If deletes are refused without `deleteFiles`, recreate the key with `deleteFiles` added but **still without**
+        any `writeBucket*` or `writeBuckets` capability. The thief can then delete versions but can't change the
+        lifecycle; keep "keep forever".
+     5. The throwaway prefix stays as hidden objects (a few KB); delete it via the B2 web UI if wanted.
 3. **Separate maintenance credential: not needed by default.** Because prune only *hides* objects, the automated key
    can't destroy history. Real deletion happens only through the bucket lifecycle rule or your own account login,
    which never lives on this machine. If you want prune on a different key anyway, set
@@ -103,15 +148,34 @@ existing delivery queue. The MRK-26 monitoring log records only `off_machine` + 
    OFFSITE_RESTIC_PATH=C:\Program Files\WinGet\Packages\restic.restic_Microsoft.Winget.Source_8wekyb3d8bbwe\restic_<version>_windows_amd64.exe
    OFFSITE_SECRETS_FILE=C:\ProgramData\StandaHub\offsite\b2.env
    OFFSITE_RESTIC_PASSWORD_FILE=C:\ProgramData\StandaHub\offsite\restic-password.txt
-   # optional: OFFSITE_TIMEOUT_SECONDS=3600, OFFSITE_MAINTENANCE_SECRETS_FILE=…, OPS_ALERT_PUSH=true
+   OFFSITE_TIMEOUT_SECONDS=1200   # recommended (code default 3600)
+   # optional: OFFSITE_MAINTENANCE_SECRETS_FILE=…, OPS_ALERT_PUSH=true
    ```
 
    `production.py` refuses an off-site setup that isn't absolute and separate, or that has no local backup
    (`BACKUP_ENABLED`). restic is installed machine-wide (`winget install --id restic.restic --source winget --scope
    machine`) under `C:\Program Files\WinGet\Packages`, where only SYSTEM/Administrators can write and SYSTEM can
    execute. Use the absolute path, because the task runs as SYSTEM.
-6. **Create the repository once:** `python -m offsite_restic --env-file <env> init` (it refuses an existing
-   repository). Then restart `StandaHub-Backend`.
+6. **Create the repository once:** `python -m offsite_restic --env-file <env> init`. On an already initialised
+   repository restic refuses and the CLI reports `restic_failed`, so nothing is recreated. In production (2026-10-20)
+   a probe (`restic cat config`) answered `repository_missing` (exit 10) first, and after `init` the config was
+   readable. Then restart `StandaHub-Backend`.
+
+### Production state and acceptance (2026-10-20)
+
+- **Deployed:** main `adf0d4c` (PR #33), migration `0024_offsite_backup_runs`, restic 0.19.1 machine-wide.
+  `OFFSITE_*` paths are in `.env.production`; secrets are only in `C:\ProgramData\StandaHub\offsite` (SYSTEM +
+  Administrators, owner Administrators).
+- **First upload:** the scheduler started it by itself right after startup. Source = local backup 19, 62 files,
+  36.6 MB, 29.7 s. The sampled data check and prune then ran (with one snapshot, prune can't remove anything).
+- **Idempotency:** the CLI rerun returned `already_uploaded`. A direct lookup bypassing the DB found the `complete`
+  snapshot and skipped the upload.
+- **Simulated failure** (one-shot runner pointing at a non-existent host, real secret files untouched): local backup
+  20 succeeded independently, the off-site attempt was recorded as `timeout` with an alert, and the retry uploaded
+  run 20 (+154 KB deduplicated) and resolved the alert.
+- **Result:** **two snapshots, both `complete`** (one per local run). `/health.offsite` was `fresh`.
+- **Real restore from B2:** see the drill table in [backups.md](backups.md#restore-drill).
+- **Open hardening:** a least-privilege key (above) and the lifecycle decision (currently keep forever).
 
 ### Operator CLI (elevated, in `C:\StandaHub\backend`)
 
