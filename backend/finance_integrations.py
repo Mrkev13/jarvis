@@ -9,9 +9,11 @@ import quick_add_text as qt
 from goal_history_service import compute_goal_progress_and_value
 from models import FinanceTransaction, Goal
 from module_contracts import (
-    ChangeSource, activity_changes,
-    ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
+    ChangeSource, activity_changes, event_changes,
+    ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, ScheduledStep, SearchSource,
 )
+from modules.finance.importing import core as import_core
+from modules.finance.router import router as finance_router
 from modules.finance.money import minor_to_decimal
 from modules.finance.service import active_transactions, month_totals_minor, totals_minor
 from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_num_cz, join_parts
@@ -190,6 +192,7 @@ def finance_display(f: dict, ctx: dict, today) -> dict:
 
 INTEGRATIONS = ModuleIntegrations(
     changes=(ChangeSource("finance", areas=frozenset({"finance"}),
+                          from_event=event_changes({"import": "/finance"}, {"finance.import.completed": "Import výpisu"}),
                           from_activity=activity_changes({"finance_transaction": "/finance?transaction={id}"}, "/finance")),),
     search=(SearchSource("finance", 60, search_finance),),
     dashboard=(DashboardSection("finance", lambda db, access: get_finance_with_goal(db)),),
@@ -204,4 +207,7 @@ INTEGRATIONS = ModuleIntegrations(
         QuickAddRule(80, "finance", detect_bare_number),
     ),
     quick_add_kinds=(QuickAddKind("finance", parse_finance, finance_tool_call, finance_display),),
+    # MRK-62: import výpisů (REST) + hodinový úklid propadlých náhledů a dočasných souborů
+    routers=(finance_router,),
+    hourly=(ScheduledStep("finance import cleanup", import_core.cleanup_expired),),
 )
