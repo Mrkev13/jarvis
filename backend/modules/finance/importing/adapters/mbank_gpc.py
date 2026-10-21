@@ -72,6 +72,15 @@ class MbankGpcAdapter:
         return bool(first) and len(first) == RECORD_LENGTH and first.startswith("074") \
             and first[3:19].isdigit() and BANK_MARKER in first[_MARKER_SLICE].lower()
 
+    def statement_account(self, head: bytes) -> str | None:
+        """Vlastní účet z hlavičky 074 („předčíslí-číslo“) – jádro z něj drží jen masku + otisk."""
+        first = _decode(head.split(b"\n", 1)[0]) or ""
+        account = first[3:19] if first.startswith("074") else ""
+        if not account.isdigit() or not account.strip("0"):
+            return None
+        prefix, number = account[:6].lstrip("0"), account[6:].lstrip("0")
+        return f"{prefix}-{number}" if prefix else number
+
     def parse(self, stream: BinaryIO) -> Iterator[ParsedRow]:
         own_account = None
         for row_no, raw in enumerate(stream, start=1):

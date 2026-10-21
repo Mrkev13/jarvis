@@ -195,3 +195,25 @@ def test_other_account_currency_and_privacy(db, account, caplog):
              json.dumps([e.payload for e in db.query(DomainEvent)], ensure_ascii=False)]
     assert all("KANARKOV" not in t for t in texts)
     assert db.query(FinanceImport).one().adapter == "mbank_gpc"
+
+
+def test_statement_binds_account_and_rejects_other_accounts(db, account):
+    """Review MRK-63: formát nemá měnu na řádku → měnu určuje vybraný účet; výpis cizího účtu musí skončit chybou."""
+    run(db, account, statement(*BASIC))
+    db.refresh(account)
+    assert account.masked_identifier == "…0001" and len(account.identifier_hash) == 64
+    other_own = "0000009999999999"
+    for target, data in ((account, statement(tx(6001, -100, D1, own=other_own), own=other_own)),
+                         (fs.create_account(db, name="Jiný", kind="current"), statement(tx(6002, -100, D1)))):
+        db.commit()
+        with pytest.raises(ImportFailure) as exc:
+            run(db, target, data)
+        assert exc.value.code == "account_mismatch"
+    assert len(imported(db)) == 6 and list(storage.upload_dir().iterdir()) == []
+
+
+def test_statement_without_own_account_is_refused(db, account):
+    zeros = "0" * 16
+    with pytest.raises(ImportFailure) as exc:
+        run(db, account, statement(tx(7001, -100, D1, own=zeros), own=zeros))
+    assert exc.value.code == "statement_account_missing" and imported(db) == []

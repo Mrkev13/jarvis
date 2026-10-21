@@ -135,6 +135,12 @@ HTML/PDF stay fallbacks only; encrypted PDFs are not handled.
 - `bank_txn_id` = document number → `txn_key bank:mbank:<id>`; booking date = `booked_on`; transaction date →
   `extra.executed_on`; `currency=None` → the core uses the **account currency** (no guessing);
 - counterparty account (when non-zero) → masked `…1234/0800` + hash only; the holder name in `074` is never read.
+- **statement ↔ account binding:** the adapter reports the statement's own account (`statement_account`, from `074`);
+  the core keeps only its mask + hash. The first committed import binds the Hub account to it; a statement of a
+  different account (or one already bound to another Hub account) is refused with `account_mismatch`, and a statement
+  without an own account with `statement_account_missing`. Since GPC has no per-row currency, this is what makes the
+  account currency trustworthy: currency comes from the account the user configured, never from a silent guess, and a
+  file can't land in an account with the wrong currency after binding.
 
 **Dedupe implications.** All mBank rows have bank IDs: same file → `already_imported`; overlapping exports dedupe by
 ID (verified on real data with two overlapping slices: 0 duplicates); identical payments stay distinct; a changed row

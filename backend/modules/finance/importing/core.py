@@ -34,6 +34,7 @@ from modules.finance.importing.rows import (
 from modules.finance.legacy_compat import builtin_category_id, category_name, minor_to_legacy, search_text_of
 from modules.finance.models import FinanceAccount, FinanceImport, FinanceImportIssue, FinanceTransactionRevision
 from modules.finance.money import CURRENCIES, MAX_ABS_MINOR
+from modules.finance.service import account_identifier
 from time_utils import utc_now
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,29 @@ def _looks_like_existing(db: Session, account_id: int, row: NormalizedRow, fp: s
     return q.first() is not None
 
 
+# ---------- výpis patří k účtu (MRK-63) ----------
+
+def _statement_identity(db: Session, account: FinanceAccount, adapter: ImportAdapter, path: Path):
+    """(maska, otisk) účtu, který výpis sám uvádí (adaptér s `statement_account`), nebo None.
+    Výpis jiného účtu = `account_mismatch`: vybraný účet určuje měnu (formát bez měny na řádku), takže nesoulad musí
+    být chyba, ne tichý odhad. Účet bez identity se navážou při prvním commitu; plné číslo se nikdy neukládá."""
+    reader = getattr(adapter, "statement_account", None)
+    if reader is None:
+        return None
+    with open(path, "rb") as fh:
+        raw = reader(fh.read(HEAD_BYTES))
+    masked, digest = account_identifier(raw)
+    if digest is None:
+        raise ImportFailure(422, "statement_account_missing")
+    if account.identifier_hash not in (None, digest):
+        raise ImportFailure(409, "account_mismatch")
+    owner = db.query(FinanceAccount.id).filter(FinanceAccount.identifier_hash == digest,
+                                               FinanceAccount.id != account.id).first()
+    if owner is not None:
+        raise ImportFailure(409, "account_mismatch")  # výpis patří jinému účtu v Hubu
+    return masked, digest
+
+
 # ---------- náhled ----------
 
 def _account(db: Session, account_id: int) -> FinanceAccount:
@@ -260,6 +284,7 @@ def preview_import(db: Session, *, account_id: int, upload: Path, now: datetime 
         if not head:
             raise ImportFailure(400, "file_empty")
         adapter = REGISTRY.select(head)
+        _statement_identity(db, account, adapter, upload)
         sha, size = storage.sha256_of(upload), upload.stat().st_size
         imp = db.query(FinanceImport).filter_by(account_id=account.id, file_sha256=sha).one_or_none()
         if imp is not None and imp.status == "committed":
@@ -356,11 +381,14 @@ def commit_import(db: Session, token: str, *, skip_invalid: bool = False, catego
         _close(db, imp, "cancelled", now)
         raise ImportFailure(409, "file_changed")
     account = _account(db, imp.account_id)
+    identity = _statement_identity(db, account, adapter, path)
     plan = build_plan(db, account, adapter, path)  # přepočet proti aktuální DB (mezitím mohl proběhnout jiný import)
     if plan.counts["invalid"] and not skip_invalid:
         raise ImportFailure(409, "invalid_rows_need_consent")
     import_id = imp.id
     try:
+        if identity is not None and account.identifier_hash is None:
+            account.masked_identifier, account.identifier_hash = identity  # první import naváže účet na výpis
         for row, key, fp, review in plan.inserts:
             _new_transaction(db, imp, adapter, row, key, fp, review, categorize(db, row, account.id))
         for tx_id, row, fp in plan.updates:

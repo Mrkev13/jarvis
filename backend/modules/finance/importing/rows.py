@@ -72,6 +72,9 @@ class ImportAdapter(Protocol):
 
     def parse(self, stream: BinaryIO) -> Iterator[ParsedRow]: ...
 
+    # Volitelné (MRK-63): `statement_account(head) -> str | None` – číslo účtu, který výpis uvádí; jádro z něj
+    # drží jen masku + otisk a odmítne výpis jiného účtu (`account_mismatch`).
+
 
 class AdapterRegistry:
     """Výběr adaptéru podle podpisu souboru. Žádná nebo víc shod = `unknown_format` – nikdy se nehádá."""
