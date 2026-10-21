@@ -99,8 +99,61 @@ use the synthetic format in `tests/finance_fakes.py` (not a real bank format).
 - **Privacy**: responses, issues, events, Activity and logs never contain row values, account/card numbers,
   counterparty names, filenames or file contents (canary test). Stored descriptions mask digit runs ≥ 12 as „…1234“.
 
+## mBank adapter (MRK-63): GPC/ABO is the primary format
+
+Decided on a real mBank export pair (CSV + GPC, same account and period) profiled **structurally only** – no value was
+printed, stored or committed. Both files held the same transactions in the same order (same signed amounts, same
+booking dates).
+
+| criterion | GPC (ABO family) | CSV |
+|---|---|---|
+| stable bank-native transaction ID | **yes** – 13-digit document number, unique per transaction | **no** (fingerprint only) |
+| structure | fixed width, 128 chars, records `074` header / `075` transaction | `;` CSV with a free-form preamble and a trailing empty column |
+| encoding | cp1250 | cp1250 |
+| dates | booking (92–97) + transaction date (123–128), `DDMMYY` | booking + transaction date, `DD-MM-YYYY` |
+| amount / sign | integer haléře + posting code (1 debit, 2 credit, 4/5 reversals) | signed decimal comma |
+| currency per row | **no** – mBank reuses the slot (119–122) for its transaction type code | no (in the preamble) |
+| counterparty name / message | **no** – 20-char text (transaction type + start of detail) | yes |
+| counterparty account, VS/KS/SS | fields present | columns present |
+| bank signature | „mBank“ in the `074` filler | label header only |
+| running balance | header only (opening/closing) | per row |
+
+**Decision: GPC.** Selection rule = strongest stable identity + most deterministic structure first. GPC has a
+bank-native ID per transaction (exact dedupe, corrections become revisions, identical payments stay distinct without
+heuristics) and a rigid fixed-width layout with an explicit bank marker. **Trade-off:** GPC has no counterparty name or
+payment message – rows carry only the 20-char text and the type code (`extra.type_code`). Categorization (MRK-65)
+therefore relies on type code + text + amount, and Search by counterparty is limited.
+**CSV is deferred** (no transaction ID; adding it later would need explicit cross-format identity – see below).
+HTML/PDF stay fallbacks only; encrypted PDFs are not handled.
+
+**Adapter** (`modules/finance/importing/adapters/mbank_gpc.py`, id `mbank_gpc`, family `mbank`, version `1`):
+- detection: first record `074`, exactly 128 chars, numeric account, „mBank“ in the filler → anything else
+  (other banks' GPC, the mBank CSV, changed layouts) is `unknown_format`;
+- per record: `075` → row; `076`/`078`/`079` extension records skipped; other record types, lines longer than 128,
+  undecodable bytes, a different own account than the header, zero/invalid document number, amount, posting code,
+  dates or type code → row issue (row + code + field, never a value);
+- `bank_txn_id` = document number → `txn_key bank:mbank:<id>`; booking date = `booked_on`; transaction date →
+  `extra.executed_on`; `currency=None` → the core uses the **account currency** (no guessing);
+- counterparty account (when non-zero) → masked `…1234/0800` + hash only; the holder name in `074` is never read.
+
+**Dedupe implications.** All mBank rows have bank IDs: same file → `already_imported`; overlapping exports dedupe by
+ID (verified on real data with two overlapping slices: 0 duplicates); identical payments stay distinct; a changed row
+with the same ID is a correction with a revision (manual category kept). Because the fingerprint near-duplicate check
+only covers ID-less rows, MRK-63 adds one for **bank-ID rows against manual / work_sync rows** (same account and
+amount ±3 days) → `possible_duplicate` review flag, never a merge.
+
+**Cross-format dedupe (decision D):** v1 supports **one mBank format (GPC)**. The CSV export is rejected as
+`unknown_format`, so fingerprint-only mBank rows never exist next to bank-ID rows. A future CSV adapter must not
+reuse the GPC family without a canonical identity bridge (or must link CSV rows to GPC rows explicitly, with review on
+ambiguity) – recorded on the CSV follow-up.
+
+**Real-data rules.** Real statements live only in a local folder outside the repo; profiling and acceptance print
+counts and booleans only; acceptance runs against a scratch DB that is deleted afterwards; the import core always gets
+a copy (the original file is never moved). The committed fixture `backend/tests/fixtures/finance/mbank-synthetic-statement.gpc`
+is generated from `tests/mbank_gpc_fixture.py` with invented values only.
+
 ## Next
 
-mBank adapter (MRK-63), import UI (MRK-64),
+Import UI (MRK-64),
 transactions/categories/rules (MRK-65), overview/Search/What Changed (MRK-66), real-data acceptance (MRK-68).
 Real bank files are never committed, logged or put into fixtures.

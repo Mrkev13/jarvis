@@ -12,6 +12,7 @@ from module_contracts import (
     ChangeSource, activity_changes, event_changes,
     ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, ScheduledStep, SearchSource,
 )
+from modules.finance.importing.adapters import register_production_adapters
 from modules.finance.importing import core as import_core
 from modules.finance.router import router as finance_router
 from modules.finance.money import minor_to_decimal
@@ -20,6 +21,8 @@ from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz,
 from time_utils import today_local
 
 ROW_LIMIT = 500
+
+register_production_adapters()  # MRK-63: mBank GPC – jediný produkční formát výpisu ve Finance v1
 MAX_AMOUNT = 10_000_000
 
 # ---------- vyhledávání ----------

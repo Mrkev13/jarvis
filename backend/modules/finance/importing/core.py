@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -127,6 +127,8 @@ def build_plan(db: Session, account: FinanceAccount, adapter: ImportAdapter, pat
             if isinstance(row, RowError):
                 plan.issues.append(_safe_issue(row))
                 continue
+            if row.currency is None:  # MRK-63: formát bez měny na řádku – měna účtu, ne odhad adaptéru
+                row = replace(row, currency=account.currency)
             error = _validate(row, account)
             if error is not None:
                 plan.issues.append(error)
@@ -151,8 +153,10 @@ def build_plan(db: Session, account: FinanceAccount, adapter: ImportAdapter, pat
         seen_keys.add(key)
         current = existing.get(key)
         if current is None:
-            plan.inserts.append((row, key, fp, False))
-            plan.counts["new"] += 1
+            # MRK-63: řádek s bankovním ID podobný ručnímu/pracovnímu zápisu → ke kontrole (nikdy nesloučit)
+            review = _looks_like_existing(db, account.id, row, fp, non_import_only=True)
+            plan.inserts.append((row, key, fp, review))
+            plan.counts["possible_duplicate" if review else "new"] += 1
         elif all(getattr(current, k) == v for k, v in _imported_values(row).items()):
             plan.counts["duplicate"] += 1
         else:
@@ -182,15 +186,21 @@ def _chunked(db: Session, column, values: list[str], account_id: int, size: int 
                                                        column.in_(values[i:i + size])).all()
 
 
-def _looks_like_existing(db: Session, account_id: int, row: NormalizedRow, fp: str) -> bool:
-    """Možná duplicita: stejný účet a částka ±3 dny, jiný otisk (text), aktivní řádek. Nikdy se neslučuje."""
+def _looks_like_existing(db: Session, account_id: int, row: NormalizedRow, fp: str, *,
+                         non_import_only: bool = False) -> bool:
+    """Možná duplicita: stejný účet a částka ±3 dny, jiný otisk (text), aktivní řádek. Nikdy se neslučuje.
+    `non_import_only` (řádky s bankovním ID): porovnává se jen s ručními/pracovními zápisy – importované řádky
+    stejné banky identifikuje bankovní ID."""
     window = timedelta(days=NEAR_DUPLICATE_DAYS)
-    return db.query(FinanceTransaction.id).filter(
+    q = db.query(FinanceTransaction.id).filter(
         FinanceTransaction.account_id == account_id, FinanceTransaction.amount_minor == row.amount_minor,
         FinanceTransaction.booked_on >= row.booked_on - window, FinanceTransaction.booked_on <= row.booked_on + window,
         FinanceTransaction.voided_at.is_(None),
         (FinanceTransaction.fingerprint.is_(None)) | (FinanceTransaction.fingerprint != fp),
-    ).first() is not None
+    )
+    if non_import_only:
+        q = q.filter(FinanceTransaction.source != "import")
+    return q.first() is not None
 
 
 # ---------- náhled ----------
