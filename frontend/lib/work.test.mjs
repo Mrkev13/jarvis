@@ -34,10 +34,10 @@ test("empty input gives no days", () => {
 });
 
 test("finance sync label", () => {
-  assert.equal(financeSyncMeta({ finance_transaction_id: 3, sync_to_finance: true, earnings: 10 }).tone, "success");
-  assert.equal(financeSyncMeta({ finance_transaction_id: null, sync_to_finance: true, earnings: 10 }).tone, "warning");
-  assert.equal(financeSyncMeta({ finance_transaction_id: null, sync_to_finance: true, earnings: 0 }), null);
-  assert.equal(financeSyncMeta({ finance_transaction_id: null, sync_to_finance: false, earnings: 10 }), null);
+  assert.equal(financeSyncMeta({ finance_transaction_id: 3 }).tone, "success");
+  // MRK-60: starý příznak sync_to_finance bez vazby už nic nehlásí (práce Finance nezapisuje)
+  assert.equal(financeSyncMeta({ finance_transaction_id: null, sync_to_finance: true, earnings: 10 }), null);
+  assert.equal(financeSyncMeta({ finance_transaction_id: null }), null);
 });
 
 test("earnings estimate", () => {

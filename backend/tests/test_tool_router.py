@@ -15,6 +15,7 @@ import tool_registry as reg  # noqa: E402
 from llm_budget import estimate_fixed_overhead  # noqa: E402
 from llm_config import DEFAULT_MAX_FIXED_TOKENS, load_llm_settings  # noqa: E402
 from tool_router import (  # noqa: E402
+    REASON_AREAS,
     REASON_DISABLED,
     REASON_FALLBACK,
     REASON_GENERIC,
@@ -87,7 +88,8 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertEqual(_names(route_tools(["co se naposledy změnilo"])), {"get_recent_activity"})
         school = _names(route_tools(["jaké mám zkoušky z matiky?"]))
         self.assertEqual(school, {"get_school_subjects", "get_school_assignments", "get_school_exams"})
-        self.assertIn("get_finance_transactions", _names(route_tools(["Ukaž mi posledních 5 finančních transakcí"])))
+        # MRK-60: Finance nemá AI tooly – dotaz na ni nedostane ani obecnou sadu všech read toolů
+        self.assertEqual(_names(route_tools(["Ukaž mi posledních 5 finančních transakcí"])), set())
 
     def test_no_write_tools_without_write_intent(self):
         for msg in ("kolik jsem utratil za jídlo?", "co mám zítra", "jak jsem na tom", "Kolik stál oběd za 300 Kč?",
@@ -107,10 +109,30 @@ class RouteSelectionTestCase(unittest.TestCase):
             with self.subTest(msg):
                 self.assertFalse(detect_write_intent(msg))
 
-    def test_finance_write_exposes_only_finance_write_tool(self):
-        route = route_tools([REPRESENTATIVE["finance_write"]])
-        self.assertEqual(route.reason, REASON_WRITE)
-        self.assertEqual(_names(route) & WRITE_NAMES, {"add_finance_transaction"})
+    def test_other_toolless_areas_keep_create_tools(self):
+        """MRK-60 review: pravidlo „žádné náhradní write tooly“ platí jen pro Finance, ne pro kalendář/návyky/fitness
+        (tam model dál smí nabídnout např. připomínku – stejně jako před MRK-60)."""
+        for msg in ("přidej do kalendáře schůzku zítra v 10", "přidej návyk čtení", "zapiš trénink dnes"):
+            with self.subTest(msg):
+                route = route_tools([msg])
+                self.assertEqual(route.reason, REASON_WRITE_UNKNOWN)
+                self.assertIn("add_reminder", route.names)
+                self.assertFalse({n for n in route.names if "finance" in n})
+
+    def test_finance_requests_expose_no_tools(self):
+        """MRK-60: čtení, zápis, úprava ani vrácení Finance – žádný tool (ani náhradní write tool jiné oblasti)."""
+        for msg in (REPRESENTATIVE["finance"], REPRESENTATIVE["finance_write"], "utratil jsem 200 za kafe",
+                    "změň poslední výdaj za oběd na 450 Kč", "jaká je moje bilance?"):
+            with self.subTest(msg):
+                route = route_tools([msg])
+                self.assertEqual(route.names, (), msg)
+                self.assertEqual(route.reason, REASON_AREAS)
+        self.assertFalse({s.name for s in reg.TOOL_SPECS if "finance" in s.name or "finance" in s.areas})
+        # „vrať změnu ve financích" zmiňuje Aktivitu → undo_change, ale ten Finance nevrací (oblast ani entita)
+        undo = reg.TOOLS_BY_NAME["undo_change"].schema["function"]["parameters"]["properties"]["area"]["enum"]
+        self.assertNotIn("finance", undo)
+        entities = reg.TOOLS_BY_NAME["modify_records"].schema["function"]["parameters"]["properties"]["entity"]["enum"]
+        self.assertNotIn("finance_transaction", entities)
 
     def test_memory_write_exposes_only_save_memory(self):
         route = route_tools(["pamatuj si, že chci šetřit na auto"])
@@ -136,8 +158,8 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertNotIn("add_reminder", names)  # úprava existující, ne nová připomínka
 
     def test_named_reminder_never_removes_other_write_tools(self):
-        # Připomínka nazvaná „oběd" nesmí výdaji za oběd vzít modify_records.
-        names = _names(route_tools(["změň výdaj za oběd na 450 Kč"], named_areas=frozenset({"reminders"})))
+        # Připomínka nazvaná „Servind" nesmí úpravě práce vzít modify_records.
+        names = _names(route_tools(["změň práci na Servind na 5 hodin"], named_areas=frozenset({"reminders"})))
         self.assertIn("modify_records", names)
         self.assertIn("manage_reminder", names)
 
@@ -148,8 +170,7 @@ class RouteSelectionTestCase(unittest.TestCase):
 
     def test_mutation_intent_exposes_modify_records_only(self):
         for msg, area_tool in (
-            ("změň poslední výdaj za oběd na 450 Kč", "get_finance_transactions"),
-            ("smaž poslední testovací výdaj", "get_finance_transactions"),
+            ("změň poslední práci na Servind na 5 hodin", "get_work_sessions"),
             ("označ úkol z práva jako hotový", "get_school_assignments"),
             ("označ všechny dnešní úkoly jako hotové", "get_school_assignments"),
             ("úkol z práva je hotový", "get_school_assignments"),
@@ -167,15 +188,15 @@ class RouteSelectionTestCase(unittest.TestCase):
                 self.assertNotIn("modify_records", route_tools([msg]).names)
 
     def test_create_and_mutation_verbs_together_expose_both(self):
-        names = _names(route_tools(["smaž ten výdaj za kávu a přidej nový za 120 Kč"]))
-        self.assertTrue({"modify_records", "add_finance_transaction"} <= names)
+        names = _names(route_tools(["smaž ten úkol z práva a přidej nový na pondělí"]))
+        self.assertTrue({"modify_records", "add_school_assignment"} <= names)
 
     def test_undo_intent_exposes_only_undo_tool(self):
-        for msg in ("vrať poslední změnu", "undo", "vrať poslední změnu ve financích", "můžeš to vrátit?",
+        for msg in ("vrať poslední změnu", "undo", "vrať poslední změnu v práci", "můžeš to vrátit?",
                     "vezmi to zpět"):
             with self.subTest(msg):
                 self.assertEqual(_names(route_tools([msg])) & WRITE_NAMES, {"undo_change"})
-        self.assertIn("get_finance_transactions", route_tools(["vrať poslední změnu ve financích"]).names)
+        self.assertIn("get_work_sessions", route_tools(["vrať poslední změnu v práci"]).names)
 
     def test_undo_tool_not_exposed_without_undo_intent(self):
         for msg in ("vrátil jsem knihu do knihovny", "kolik jsem utratil?", "změň poslední výdaj na 450 Kč",
@@ -189,23 +210,23 @@ class RouteSelectionTestCase(unittest.TestCase):
         self.assertIn("get_goals", _names(route_tools(["zapiš to"])))  # upsert_goal → get_goals
 
     def test_summary_tools_skipped_only_for_implied_areas_covered_by_context(self):
-        covered = frozenset({"get_finance_summary", "get_work_summary", "get_goals_summary",
+        covered = frozenset({"get_work_summary", "get_goals_summary",
                              "get_notification_summary", "get_memories", "get_goals",
                              "get_school_assignments", "get_school_exams"})
         plan = route_tools(["co mám dělat tento týden"], covered_tools=covered)
-        self.assertFalse(_names(plan) & {"get_finance_summary", "get_work_summary", "get_goals_summary",
+        self.assertFalse(_names(plan) & {"get_work_summary", "get_goals_summary",
                                          "get_notification_summary", "get_memories"})
         self.assertLessEqual(len(plan.names), 7)
-        # Výslovný dotaz na finance: souhrn zůstává, i když ho kontext pokrývá.
-        self.assertIn("get_finance_summary", route_tools(["kolik mám peněz?"], covered_tools=covered).names)
+        # Výslovný dotaz na práci: souhrn zůstává, i když ho kontext pokrývá.
+        self.assertIn("get_work_summary", route_tools(["kolik hodin mám v práci?"], covered_tools=covered).names)
 
     def test_planner_required_tools_present_when_not_covered(self):
         route = route_tools(["co mám dělat tento týden"])
         self.assertTrue({"get_goals", "get_memories"} <= _names(route))
 
     def test_short_follow_up_uses_one_previous_user_turn(self):
-        route = route_tools(["přidej výdaj 300 Kč za oběd", "a ještě 120 za kávu"])
-        self.assertIn("add_finance_transaction", route.names)
+        route = route_tools(["zapiš mi 4 hodiny na Servind", "a ještě 2 hodiny"])
+        self.assertIn("add_work_session", route.names)
         self.assertEqual(_names(route_tools(["kolik mám kreditů ve WoT?", "a gold?"])) & READ_NAMES,
                          {"get_wot_resources", "get_wot_grinds"})
 
@@ -220,7 +241,7 @@ class RouteSelectionTestCase(unittest.TestCase):
         read_only = widen_route(route_tools(["kolik mám kreditů ve WoT?"]))
         self.assertEqual(read_only.reason, REASON_FALLBACK)
         self.assertEqual(_names(read_only), READ_NAMES)
-        with_write = widen_route(route_tools(["přidej výdaj 300 Kč za oběd"]))
+        with_write = widen_route(route_tools(["zapiš mi 4 hodiny na Servind"]))
         self.assertEqual(_names(with_write), READ_NAMES | WRITE_NAMES)
         disabled = route_tools(["x"], enabled=False)
         self.assertIs(widen_route(disabled), disabled)

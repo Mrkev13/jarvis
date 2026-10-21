@@ -32,9 +32,9 @@ test("Czech numbers", () => {
 test("fields round-trip through the form", () => {
   const form = fieldsToForm("work", { hours: 6.5, project: "Workshop", hourly_rate: 375, date: "2026-10-03" });
   assert.equal(form.hours, "6,5");
-  assert.equal(form.sync_to_finance, true, "výchozí synchronizace do Financí");
+  assert.equal("sync_to_finance" in form, false, "MRK-60: práce už nenabízí zápis do Financí");
   assert.deepEqual(formToFields("work", form), {
-    hours: 6.5, project: "Workshop", hourly_rate: 375, date: "2026-10-03", sync_to_finance: true,
+    hours: 6.5, project: "Workshop", hourly_rate: 375, date: "2026-10-03",
   });
   const exam = formToFields("exam", fieldsToForm("exam", { title: "Test", subject_id: 3, exam_date: "2026-10-18", exam_type: "test" }));
   assert.equal(exam.subject_id, 3);

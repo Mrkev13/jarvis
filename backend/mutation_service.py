@@ -20,16 +20,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
-from sqlalchemy import text as _sql_text
 from sqlalchemy import update as _sql_update
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
 from database import SessionLocal
+from finance_ai_policy import is_finance_goal
 from models import Assignment, Exam, FinanceTransaction, Goal, Memory, PendingAction, WorkSession, WotGrind
 from statuses import ASSIGNMENT_DONE_STATUSES
 from time_utils import to_local, utc_now
-from text_utils import clip, finance_category_cz, fold_text, format_num_cz
+from text_utils import clip, fold_text, format_num_cz
 
 ACTION_UPDATE, ACTION_DELETE, ACTION_COMPLETE = "update", "delete", "complete"
 MAX_BATCH = 20
@@ -212,12 +212,6 @@ class EntityDef:
     snapshot_attrs: tuple[str, ...] = ()
 
 
-def _finance_desc(t: FinanceTransaction) -> str:
-    sign = "+" if (t.transaction_type or "") == "income" else "−"
-    desc = f" ({_short(t.description, 40)})" if t.description else ""
-    return f"{sign}{_num(t.amount)} Kč {finance_category_cz(t.category)}{desc} · {_d(t.created_at)}"
-
-
 def _work_desc(s: WorkSession) -> str:
     return f"{_d(s.date)} · {_num(s.hours)} h · {s.project or '–'} · {_num(s.hourly_rate)} Kč/h"
 
@@ -254,24 +248,9 @@ def _fmt_money(v) -> str:
     return f"{_num(v)} Kč"
 
 
+# MRK-60: Finance (finance_transaction) tu záměrně není – AI ji nesmí číst ani měnit (finance_ai_policy.py).
+# Starší provedené AI změny transakcí se proto už nevracejí (resolve_undo → unsupported).
 ENTITIES: dict[str, EntityDef] = {
-    "finance_transaction": EntityDef(
-        name="finance_transaction", model=FinanceTransaction, area="finance", label="transakce",
-        entity_type="FinanceTransaction",
-        fields={
-            "amount": FieldDef("amount", "Částka", _v_num(strict_positive=True), _fmt_money),
-            "category": FieldDef("category", "Kategorie", _v_str(required=True, max_len=100)),
-            "description": FieldDef("description", "Popis", _v_str(max_len=255)),
-            "transaction_type": FieldDef("transaction_type", "Typ", _v_enum("income", "expense")),
-        },
-        actions=frozenset({ACTION_UPDATE, ACTION_DELETE}),
-        text_of=lambda t: f"{t.description or ''} {t.category or ''}",
-        describe=_finance_desc,
-        date_of=lambda t: to_local(t.created_at).date() if t.created_at else None,
-        type_of=lambda t: t.transaction_type or "",
-        order_key=lambda t: (t.created_at or datetime.min, t.id),
-        snapshot_attrs=("amount", "category", "description", "transaction_type"),
-    ),
     "work_session": EntityDef(
         name="work_session", model=WorkSession, area="work", label="pracovní záznam", entity_type="WorkSession",
         fields={
@@ -338,6 +317,7 @@ ENTITIES: dict[str, EntityDef] = {
         describe=_goal_desc,
         date_of=lambda g: g.target_date,
         type_of=lambda g: g.area or "",
+        base_filter=lambda g: not is_finance_goal(g.source),  # MRK-60: cíl počítaný z Finance AI nevidí
         complete_changes={"status": "completed"},
         is_completed=lambda g: (g.status or "").lower() == "completed",
         snapshot_attrs=("area", "title", "description", "status", "priority", "progress", "target_date",
@@ -530,9 +510,8 @@ def _warnings(entity: EntityDef, action: str, objs: list, changes: dict) -> list
             if action == ACTION_DELETE:
                 notes.append("Navázaný příjem ve financích zůstane (stejně jako při mazání v aplikaci).")
             elif {"hours", "hourly_rate"} & set(changes):
-                hours = changes.get("hours", s.hours)
-                rate = changes.get("hourly_rate", s.hourly_rate)
-                notes.append(f"Navázaný příjem ve financích se změní na {_num(round(hours * rate, 2))} Kč.")
+                # MRK-60: práce už Finance nemění – historická transakce zůstane, jak je.
+                notes.append("Navázaný příjem ve financích se nezmění.")
     if entity.name == "goal" and "progress" in changes:
         if any((g.tracking_type or "manual").lower() != "manual" for g in objs):
             raise MutationRefused("invalid_changes", "Automatický cíl má progres počítaný z dat – nelze ho nastavit.")
@@ -654,14 +633,6 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
         delta = {attr: {"old": _plain(getattr(obj, attr, None)), "new": None} for attr in ent.snapshot_attrs}
         if ent.name != "memory":
             effects["row"] = _row_dump(obj)
-        if ent.name == "finance_transaction":
-            effects["unlinked_work_sessions"] = [
-                sid for (sid,) in db.query(WorkSession.id).filter(WorkSession.finance_transaction_id == obj.id).all()
-            ]
-            db.execute(
-                _sql_text("UPDATE work_sessions SET finance_transaction_id = NULL WHERE finance_transaction_id = :tid"),
-                {"tid": obj.id},
-            )
         if ent.name == "memory":
             obj.active = False  # soft delete jako DELETE /memory/{id}
             delta = {"active": {"old": True, "new": False}}
@@ -682,18 +653,7 @@ def _apply_one(db: Session, ent: EntityDef, action: str, obj, changes: dict, use
         old_values.setdefault("progress", _plain(obj.progress))
         obj.progress = 100
         changes = {**changes, "progress": 100}
-    if ent.name == "work_session" and {"hours", "hourly_rate"} & set(changes) and obj.finance_transaction_id:
-        tx = db.get(FinanceTransaction, obj.finance_transaction_id)
-        if tx is not None:
-            new_amount = round(float(obj.hours) * float(obj.hourly_rate), 2)
-            if float(tx.amount or 0) != new_amount:
-                log_activity(db, "finance", "update",
-                             _short(f"Příjem z práce upraven ({_origin(user_context)}): {_num(tx.amount)} → {_num(new_amount)} Kč", 480),
-                             entity_type="FinanceTransaction", entity_id=tx.id,
-                             delta={"amount": {"old": float(tx.amount or 0), "new": new_amount}},
-                             user_context=user_context)
-                effects["linked_income"] = {"id": tx.id, "before": float(tx.amount or 0), "after": new_amount}
-                tx.amount = new_amount
+    # MRK-60: úprava hodin/sazby už nepřepisuje navázaný historický příjem ve Finance.
     delta = {k: {"old": old_values.get(k), "new": _plain(v)} for k, v in changes.items()}
     verb = "Dokončeno" if action == ACTION_COMPLETE else "Upraveno"
     log_activity(db, ent.area, "complete" if action == ACTION_COMPLETE else "update",
@@ -739,7 +699,7 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
             undo_items.append(item)
         undo = build_undo_record(plan, ent, action, undo_items)
         db.commit()
-        if ent.name in ("finance_transaction", "work_session"):
+        if ent.name == "work_session":
             try:
                 _refresh_auto_goals(db, {"finance_balance", "work_month_hours"}, user_context)
             except Exception as exc:  # noqa: BLE001 - změna je už uložená; snímek cíle se dopočítá později
@@ -765,7 +725,6 @@ def apply_mutation_plan(plan: dict, user_context: str = "manual") -> dict:
 UNDO_WINDOW_HOURS = 24
 UNDO_STATUS = "undone"
 UNDO_SUPPORTED = frozenset({
-    ("finance_transaction", ACTION_UPDATE), ("finance_transaction", ACTION_DELETE),
     ("work_session", ACTION_UPDATE), ("work_session", ACTION_DELETE),
     ("school_assignment", ACTION_UPDATE), ("school_assignment", ACTION_DELETE),
     ("school_assignment", ACTION_COMPLETE),
@@ -840,24 +799,17 @@ def _undo_item(db: Session, ent: EntityDef, action: str, item: dict, *, apply: b
                 raise StaleTarget("Předmět záznamu mezitím zmizel.")
         if ent.name == "wot_grind" and db.query(WotGrind).filter(WotGrind.tank == row.get("tank")).first():
             raise StaleTarget(f"Grind '{row.get('tank')}' mezitím vznikl znovu.")
-        sessions = []
-        for sid in item.get("unlinked_work_sessions") or []:
-            sess = db.get(WorkSession, int(sid))
-            if sess is None or sess.finance_transaction_id is not None:
-                raise StaleTarget("Pracovní záznam navázaný na transakci se mezitím změnil.")
-            sessions.append(sess)
         if apply:
             restored = model(**{k: _coerce_column(model, k, v) for k, v in row.items()})
             db.add(restored)
             db.flush()
-            for sess in sessions:
-                sess.finance_transaction_id = restored.id
         return [{"label": "Záznam", "old": "smazán", "new": "obnoven"}]
 
     if obj is None:
         raise StaleTarget(f"{ent.label} (id {item['id']}) mezitím zmizel – nic jsem nevrátil.")
     if _snapshot(ent, obj) != item.get("after"):
         raise StaleTarget(f"{ent.label} (id {item['id']}) se od změny upravil – nic jsem nevrátil.")
+    # Jen starší záznamy (před MRK-60 úprava práce měnila navázaný příjem); nové plány linked_income nemají.
     linked = item.get("linked_income")
     tx = None
     if linked:
@@ -967,7 +919,9 @@ def resolve_undo(db: Session, action_id=None, area: str | None = None, latest: b
             )
         pa, rec = candidates[0]
 
-    ent = ENTITIES[rec["entity"]]
+    ent = ENTITIES.get(rec.get("entity"))
+    if ent is None:  # MRK-60: např. starší změna Finance transakce – AI ji už nevrací
+        raise MutationRefused("unsupported", "Tuto změnu už AI vrátit nemůže.")
     items = []
     try:
         for item in rec.get("items") or []:
@@ -1026,7 +980,9 @@ def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
         if flipped.rowcount != 1:
             raise StaleTarget("Tahle změna už byla vrácena (nebo není provedená).")
 
-        ent = ENTITIES[rec["entity"]]
+        ent = ENTITIES.get(rec.get("entity"))
+        if ent is None:
+            raise StaleTarget("Tuto změnu už AI vrátit nemůže.")
         _require_module_at_apply(ent)
         ids = []
         for item in rec.get("items") or []:
@@ -1049,7 +1005,7 @@ def apply_undo_plan(plan: dict, user_context: str = "manual") -> dict:
         args["undo"] = {**rec, "undone_at": utc_now().isoformat()}
         pa.arguments = _json.dumps(args, ensure_ascii=False, default=str)
         db.commit()
-        if ent.name in ("finance_transaction", "work_session"):
+        if ent.name == "work_session":
             try:
                 _refresh_auto_goals(db, {"finance_balance", "work_month_hours"}, user_context)
             except Exception as exc:  # noqa: BLE001

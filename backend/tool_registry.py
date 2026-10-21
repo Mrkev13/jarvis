@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from tools import get_wot_resources, get_wot_grinds
-from tools import get_finance_summary
 from tools import get_school_subjects
 from tools import get_work_summary
 from tools import get_mff_summary, get_mff_characters
@@ -41,9 +40,10 @@ from reminder_actions import (
     propose_manage_reminder,
     query_reminders,
 )
+from finance_ai_policy import is_finance_goal, is_finance_notification
+from models import Goal
 from modules.school.reading import ReadingError, find_materials, read_material
 from read_queries import (
-    query_finance_transactions,
     query_goals,
     query_recent_activity,
     query_school_assignments,
@@ -69,7 +69,7 @@ class ToolSpec:
     schema: dict
     func: Callable
     # Souhrn, který CURRENT STATE sekce oblasti nahrazuje: router ho nepošle, když kontext oblast pokryl
-    # a uživatel se na oblast výslovně neptá (jen implikovaná oblast, např. finance u plánování týdne).
+    # a uživatel se na oblast výslovně neptá (jen implikovaná oblast, např. práce u plánování týdne).
     covered_by_context: bool = False
     requires: tuple[str, ...] = ()  # tooly, bez kterých tento nejde smysluplně použít
     takes_db: bool = False  # funkce dostane db session AI requestu jako první argument
@@ -140,26 +140,26 @@ def _read_study_material(db, material_id: int, query: str | None = None):
     return read_material(db, material_id, query=query)
 
 
+# MRK-60: notifikace a historie cílů, které nesou Finance data, AI nedostane (finance_ai_policy.py).
+def _ai_notifications(unread_only: bool = False, severity: str | None = None, area: str | None = None,
+                      include_resolved: bool = False):
+    rows = get_notifications(unread_only=unread_only, severity=severity, area=area, include_resolved=include_resolved)
+    return [n for n in rows if not is_finance_notification(n.get("area"), n.get("notification_type"))]
+
+
+def _ai_goal_progress_history(db, goal_id: int):
+    goal = db.get(Goal, goal_id)
+    if goal is not None and is_finance_goal(goal.source):
+        return {"error": "not_available", "detail": "Finance data are not available to the assistant."}
+    return get_goal_progress_history(goal_id)
+
+
 TOOL_SPECS: tuple[ToolSpec, ...] = (
     # ===== READ =====
     _read("get_wot_resources", "WoT resources: credits, gold, bonds, free XP.",
           func=get_wot_resources, areas=[AREA_WOT], covered=True),
     _read("get_wot_grinds", "WoT tank grinds: XP remaining, priority, status.",
           func=get_wot_grinds, areas=[AREA_WOT]),
-    _read("get_finance_summary", "Finance totals: income, expenses, balance, transaction count.",
-          func=get_finance_summary, areas=[AREA_FINANCE], covered=True),
-    _read(
-        "get_finance_transactions",
-        "Finance transactions, newest first.",
-        {
-            "limit": _LIMIT,
-            "transaction_type": {"type": "string", "enum": ["income", "expense"]},
-            "category": _STR,
-            "date_from": _DATE,
-            "date_to": _DATE,
-        },
-        func=query_finance_transactions, areas=[AREA_FINANCE], takes_db=True,
-    ),
     _read("get_school_subjects", "School subjects with IDs (source of subject_id).",
           func=get_school_subjects, areas=[AREA_SCHOOL], explicit_only=True),
     _read(
@@ -240,12 +240,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "area": _STR,
             "include_resolved": _BOOL,
         },
-        func=get_notifications, areas=[AREA_NOTIFICATIONS],
+        func=_ai_notifications, areas=[AREA_NOTIFICATIONS],
     ),
     _read("get_notification_summary", "Notification counters by severity and unread.",
           func=get_notification_summary, areas=[AREA_NOTIFICATIONS], covered=True),
     _read("get_goal_progress_history", "Progress snapshots of one goal.", {"goal_id": _INT}, ["goal_id"],
-          func=get_goal_progress_history, areas=[AREA_GOALS], requires=["get_goals"], explicit_only=True),
+          func=_ai_goal_progress_history, areas=[AREA_GOALS], requires=["get_goals"], explicit_only=True,
+          takes_db=True),
     _read(
         "get_recent_activity",
         "Recent app changes (activity log), newest first.",
@@ -271,19 +272,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
         ["date_value", "hours", "project", "hourly_rate"],
         func=add_work_session, areas=[AREA_WORK],
-    ),
-    _write(
-        "add_finance_transaction",
-        "Add an income or expense; infer the type from context. Unclear expense category: "
-        "Doprava, Jídlo, Zábava, else Ostatní.",
-        {
-            "amount": {"type": "number", "description": "CZK, positive"},
-            "category": _STR,
-            "transaction_type": {"type": "string", "enum": ["income", "expense"]},
-            "description": _STR,
-        },
-        ["amount", "category", "transaction_type"],
-        func=add_finance_transaction, areas=[AREA_FINANCE],
     ),
     _write(
         "add_school_subject",
@@ -425,7 +413,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "properties": {
                     "id": _INT,
                     "text": {"type": "string", "description": "words from title/description/category/subject"},
-                    "type": {"type": "string", "description": "income/expense, exam type, assignment status, area"},
+                    "type": {"type": "string", "description": "exam type, assignment status, area"},
                     "date": _DATE,
                     "date_from": _DATE,
                     "date_to": _DATE,
@@ -436,8 +424,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             },
             "changes": {
                 "type": "object",
-                "description": "update only. finance: amount,category,description,transaction_type; work: date,"
-                               "hours,project,hourly_rate,description; assignment: title,description,due_date,"
+                "description": "update only. work: date,hours,project,hourly_rate,description; assignment: title,description,due_date,"
                                "priority,status; exam: title,exam_type,exam_date,status,notes; goal: title,"
                                "description,status,priority,progress,target_date; wot_grind: xp_remaining,priority,"
                                "status; memory: content,importance,category,area",
@@ -445,7 +432,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
         ["entity", "action", "target"],
         func=execute_modify_records, resolver=propose_modify_records, write_intent="mutate",
-        areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
+        areas=[AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
     ),
     _write(
         "add_reminder",
@@ -495,8 +482,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "latest": {"type": "boolean", "description": "most recent, only if the user said so"},
         },
         func=execute_undo, resolver=propose_undo, write_intent="undo",
-        areas=[AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
+        areas=[AREA_WORK, AREA_SCHOOL, AREA_GOALS, AREA_WOT, AREA_MEMORY],
     ),
+)
+
+# MRK-60: WRITE tooly jen pro ruční zdroje (Rychlé přidání). Model je nevidí (nejsou v TOOL_SPECS → ani ve schématech,
+# routeru a TOOLS_BY_NAME) a potvrzení je pustí jen u pending akce s ručním zdrojem (ai.execute_confirm_action).
+MANUAL_ONLY_SPECS: tuple[ToolSpec, ...] = (
+    _write("add_finance_transaction", "Add an income or expense (manual Quick Add only).",
+           func=add_finance_transaction, areas=[AREA_FINANCE]),
 )
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
@@ -514,6 +508,8 @@ def schemas(names) -> list[dict]:
 def _validate() -> None:
     if len(TOOLS_BY_NAME) != len(TOOL_SPECS):
         raise RuntimeError("tool_registry: duplicitní název toolu")
+    if any(spec.name in TOOLS_BY_NAME or not spec.is_write for spec in MANUAL_ONLY_SPECS):
+        raise RuntimeError("tool_registry: ruční tool musí být WRITE a mimo AI registr")
     for spec in TOOL_SPECS:
         if spec.kind not in (READ, WRITE) or spec.schema["function"]["name"] != spec.name:
             raise RuntimeError(f"tool_registry: nekonzistentní spec {spec.name}")

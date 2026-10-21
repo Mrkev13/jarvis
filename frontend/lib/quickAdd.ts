@@ -108,7 +108,6 @@ export const FIELD_DEFS: Record<QuickAddKind, FieldDef[]> = {
     { key: "project", label: "Projekt", type: "text" },
     { key: "hourly_rate", label: "Sazba", type: "number", step: "1", suffix: "Kč/h" },
     { key: "date", label: "Datum", type: "date", required: true },
-    { key: "sync_to_finance", label: "Zapsat výdělek do Financí", type: "checkbox" },
   ],
   exam: [
     { key: "title", label: "Název", type: "text", required: true },

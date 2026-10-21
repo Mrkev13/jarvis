@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import quick_add_text as qt
 import reminder_service as rs
 from context_format import MAX_ITEMS, WEEKDAYS, list_or_none, short
+from finance_ai_policy import is_finance_notification
 from models import Memory, Notification, Reminder
 from module_contracts import (
     TimelineItem, TimelineSource,
@@ -167,6 +168,7 @@ def context_notifications(req: ContextRequest) -> list[str]:
         .order_by(Notification.created_at.desc())
         .all()
     )
+    rows = [n for n in rows if not is_finance_notification(n.area, n.notification_type)]  # MRK-60
     return [f"Důležitá nepřečtená upozornění: {list_or_none([short(n.title, 60) for n in rows[:MAX_ITEMS]], len(rows))}"]
 
 

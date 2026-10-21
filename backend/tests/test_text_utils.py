@@ -148,8 +148,7 @@ class ActivityTextTestCase(unittest.TestCase):
         nb = "\u00a0"
         self.assertEqual(self._summaries(), [
             f"Práce 0,5{nb}h – ABC",
-            f"Práce 6,5{nb}h – XYZ (Workshop)",
-            f"Zapsáno z Práce: příjem 2{nb}437,50{nb}Kč – Workshop",
+            f"Práce 6,5{nb}h – XYZ (Workshop)",  # MRK-60: žádný „Zapsáno z Práce" do Finance
             f"Smazáno: práce 0,5{nb}h – ABC",
         ])
 

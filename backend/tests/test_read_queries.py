@@ -48,33 +48,23 @@ class ReadQueriesTestCase(unittest.TestCase):
         self.db.add_all(rows)
         self.db.commit()
 
-    def test_finance_default_cap_newest_first_and_envelope(self):
-        self._finance()
-        r = rq.query_finance_transactions(self.db)
-        self.assertEqual(r["total"], 26)
+    def test_finance_has_no_ai_read_query(self):
+        """MRK-60: Finance transakce AI nečte – žádný read dotaz pro AI tooly neexistuje."""
+        self.assertFalse(hasattr(rq, "query_finance_transactions"))
+
+    def test_default_cap_and_envelope(self):
+        self.db.add_all([WorkSession(date=date(2026, 9, 1 + i), hours=1, project=f"p{i}", hourly_rate=100)
+                         for i in range(25)])
+        self.db.commit()
+        r = rq.query_work_sessions(self.db)
+        self.assertEqual(r["total"], 25)
         self.assertEqual(r["returned"], rq.DEFAULT_LIMIT)
         self.assertTrue(r["truncated"])
-        self.assertEqual(r["items"][0]["amount"], 9000)
-        dates = [i["created_at"] for i in r["items"]]
-        self.assertEqual(dates, sorted(dates, reverse=True))
-        self.assertEqual(set(r["items"][0]), {"id", "amount", "category", "description", "transaction_type", "created_at"})
-
-    def test_finance_filters(self):
-        self._finance()
-        r = rq.query_finance_transactions(self.db, transaction_type="income")
-        self.assertEqual([i["amount"] for i in r["items"]], [9000])
-        self.assertFalse(r["truncated"])
-        r = rq.query_finance_transactions(self.db, category="jídlo", limit=500)
-        self.assertEqual(r["total"], 12)
-        self.assertTrue(all(i["category"] == "Jídlo" for i in r["items"]))
-        self.assertEqual(r["filters"]["limit"], rq.MAX_LIMIT)
-        # Pražské kalendářní dny: 2026-09-03 10:00 UTC patří do 3. 9.
-        r = rq.query_finance_transactions(self.db, date_from="2026-09-03", date_to="2026-09-04")
-        self.assertEqual(sorted(i["description"] for i in r["items"]), ["t2", "t3"])
+        self.assertEqual(rq.query_work_sessions(self.db, limit=500)["filters"]["limit"], rq.MAX_LIMIT)
 
     def test_invalid_date_raises_readable_error(self):
         with self.assertRaises(ValueError):
-            rq.query_finance_transactions(self.db, date_from="zítra")
+            rq.query_work_sessions(self.db, date_from="zítra")
 
     def test_work_sessions_filters(self):
         self.db.add_all([
@@ -88,6 +78,18 @@ class ReadQueriesTestCase(unittest.TestCase):
         self.assertEqual(r["items"][0]["earnings"], 1200)
         r = rq.query_work_sessions(self.db, date_from="2026-09-08")
         self.assertEqual(r["total"], 3)
+
+    def test_work_sessions_hide_finance_link(self):
+        """MRK-60: AI vidí výdělek z práce, ale ne vazbu na Finance ani starý příznak synchronizace."""
+        self._finance()
+        tx = self.db.query(FinanceTransaction).filter_by(transaction_type="income").one()
+        self.db.add(WorkSession(date=date(2026, 9, 30), hours=4, project="Servind", hourly_rate=300,
+                                finance_transaction_id=tx.id, sync_to_finance=True))
+        self.db.commit()
+        [item] = rq.query_work_sessions(self.db)["items"]
+        self.assertEqual(item["earnings"], 1200)
+        self.assertNotIn("finance_transaction_id", item)
+        self.assertNotIn("sync_to_finance", item)
 
     def test_school_assignments_open_by_default(self):
         s = Subject(name="Matematika")
@@ -132,49 +134,88 @@ class ReadQueriesTestCase(unittest.TestCase):
             self.assertEqual([g["title"] for g in rq.query_goals(self.db, status="open")["items"]], ["Spořit"])
             self.assertEqual([g["title"] for g in rq.query_goals(self.db, area="school")["items"]], ["Zkouška"])
 
+    def test_goals_computed_from_finance_are_hidden(self):
+        """MRK-60: automatický cíl počítaný z Finance (bilance) je Finance agregát → AI ho nevidí."""
+        self._finance()
+        self.db.add_all([
+            Goal(area="finance", title="Rezerva", status="active", tracking_type="automatic",
+                 source="finance_balance", target_value=100000),
+            Goal(area="finance", title="Ruční cíl", status="active", progress=10),
+        ])
+        self.db.commit()
+        with patch.object(tools, "SessionLocal", self.Session):
+            items = rq.query_goals(self.db)["items"]
+        self.assertEqual([g["title"] for g in items], ["Ruční cíl"])
+
     def test_recent_activity_window_and_area(self):
         now = datetime(2026, 10, 3, 12, 0)
         self.db.add_all([
-            ActivityLog(timestamp=datetime(2026, 10, 2, 9, 0), area="finance", action_type="create", summary="Výdaj"),
+            ActivityLog(timestamp=datetime(2026, 10, 2, 9, 0), area="school", action_type="create", summary="Úkol"),
             ActivityLog(timestamp=datetime(2026, 10, 1, 9, 0), area="work", action_type="create", summary="Směna",
                         delta_json='{"x": 1}'),
-            ActivityLog(timestamp=datetime(2026, 8, 1, 9, 0), area="finance", action_type="create", summary="Stará"),
+            ActivityLog(timestamp=datetime(2026, 8, 1, 9, 0), area="school", action_type="create", summary="Stará"),
         ])
         self.db.commit()
         r = rq.query_recent_activity(self.db, now_utc=now)
-        self.assertEqual([i["summary"] for i in r["items"]], ["Výdaj", "Směna"])
+        self.assertEqual([i["summary"] for i in r["items"]], ["Úkol", "Směna"])
         self.assertNotIn("delta_json", r["items"][0])
-        r = rq.query_recent_activity(self.db, area="finance", days=90, now_utc=now)
-        self.assertEqual([i["summary"] for i in r["items"]], ["Výdaj", "Stará"])
+        r = rq.query_recent_activity(self.db, area="school", days=90, now_utc=now)
+        self.assertEqual([i["summary"] for i in r["items"]], ["Úkol", "Stará"])
         self.assertEqual(rq.query_recent_activity(self.db, days=1000, now_utc=now)["filters"]["days"], rq.MAX_ACTIVITY_DAYS)
+
+    def test_recent_activity_never_returns_finance_rows(self):
+        """MRK-60: souhrny Finance v Aktivitě nesou částky → AI je nedostane (ani s filtrem area=finance)."""
+        now = datetime(2026, 10, 3, 12, 0)
+        self.db.add_all([
+            ActivityLog(timestamp=datetime(2026, 10, 2, 9, 0), area="finance", action_type="create",
+                        summary="Výdaj 120 Kč"),
+            ActivityLog(timestamp=datetime(2026, 10, 2, 9, 5), area="work", action_type="sync",
+                        entity_type="FinanceTransaction", entity_id=1, summary="Zapsáno z Práce: příjem 1 200 Kč"),
+            ActivityLog(timestamp=datetime(2026, 10, 2, 9, 10), area="work", action_type="create", summary="Směna"),
+        ])
+        self.db.commit()
+        self.assertEqual([i["summary"] for i in rq.query_recent_activity(self.db, now_utc=now)["items"]], ["Směna"])
+        r = rq.query_recent_activity(self.db, area="finance", now_utc=now)
+        self.assertEqual((r["items"], r["total"]), ([], 0))
 
 
     def test_timestamps_are_prague_local_with_offset(self):
         """Follow-up z A5: AI ukazovala UTC (05:12) místo pražského času (07:12)."""
         self.db.add_all([
-            FinanceTransaction(amount=10, category="Jídlo", transaction_type="expense",
-                               created_at=datetime(2026, 10, 3, 5, 12, 51)),  # SELČ
-            FinanceTransaction(amount=20, category="Jídlo", transaction_type="expense",
-                               created_at=datetime(2026, 12, 3, 6, 0)),  # SEČ
-            ActivityLog(timestamp=datetime(2026, 10, 3, 5, 12), area="finance", action_type="create", summary="X"),
+            ActivityLog(timestamp=datetime(2026, 10, 3, 5, 12), area="school", action_type="create", summary="X"),  # SELČ
+            ActivityLog(timestamp=datetime(2026, 12, 3, 6, 0), area="school", action_type="create", summary="Y"),  # SEČ
         ])
         self.db.commit()
-        stamps = sorted(i["created_at"] for i in rq.query_finance_transactions(self.db)["items"])
-        self.assertEqual(stamps, ["2026-10-03T07:12:51+02:00", "2026-12-03T07:00:00+01:00"])
-        [act] = rq.query_recent_activity(self.db, now_utc=datetime(2026, 10, 3, 12, 0))["items"]
-        self.assertEqual(act["timestamp"], "2026-10-03T07:12:00+02:00")
+        stamps = sorted(i["timestamp"] for i in rq.query_recent_activity(
+            self.db, days=90, now_utc=datetime(2026, 12, 3, 12, 0))["items"])
+        self.assertEqual(stamps, ["2026-10-03T07:12:00+02:00", "2026-12-03T07:00:00+01:00"])
 
     def test_ai_tool_call_runs_filtered_query_on_request_session(self):
-        """get_finance_transactions z LLM běží přes read_queries se session AI requestu a s filtry."""
-        self._finance()
+        """get_work_sessions z LLM běží přes read_queries se session AI requestu a s filtry."""
+        self.db.add_all([WorkSession(date=date(2026, 9, d), hours=2, project="Servind" if d % 2 else "Jiný",
+                                     hourly_rate=300) for d in range(1, 5)])
+        self.db.commit()
         call = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(
-            name="get_finance_transactions", arguments=json.dumps({"transaction_type": "income", "limit": 5}),
+            name="get_work_sessions", arguments=json.dumps({"project": "servind", "limit": 5}),
         ))
         tool_messages, pending = ai._run_tool_calls(self.db, [call])
         self.assertEqual(pending, [])
         result = json.loads(tool_messages[0]["content"])
-        self.assertEqual([i["amount"] for i in result["items"]], [9000])
+        self.assertEqual([i["date"] for i in result["items"]], ["2026-09-03", "2026-09-01"])
         self.assertEqual(result["filters"]["limit"], 5)
+
+    def test_ai_finance_read_call_is_unknown_and_returns_no_data(self):
+        """MRK-60: vymyšlené volání bývalého Finance toolu skončí jako unknown_tool, bez dat."""
+        self._finance()
+        tool_messages = []
+        for i, name in enumerate(("get_finance_transactions", "get_finance_summary")):
+            call = types.SimpleNamespace(id=f"c{i}", function=types.SimpleNamespace(name=name, arguments="{}"))
+            msgs, pending = ai._run_tool_calls(self.db, [call])
+            self.assertEqual(pending, [])
+            tool_messages += msgs
+        for msg in tool_messages:
+            self.assertEqual(json.loads(msg["content"])["error"], "unknown_tool")
+            self.assertNotIn("9000", msg["content"])
 
     def test_bad_filter_value_becomes_tool_error_not_crash(self):
         call = types.SimpleNamespace(id="c1", function=types.SimpleNamespace(

@@ -396,7 +396,7 @@ class ToolCallValidationTestCase(unittest.TestCase):
         tool, args = self.call("work", {"date": "2026-10-03", "hours": 6.5, "project": "Workshop", "hourly_rate": 375})
         self.assertEqual(tool, "add_work_session")
         self.assertEqual(args, {"date_value": "2026-10-03", "hours": 6.5, "project": "Workshop", "hourly_rate": 375.0,
-                                "description": "", "sync_to_finance": True})
+                                "description": ""})  # MRK-60: bez sync_to_finance
         self.assertIn("hours", self.invalid("work", {"date": "2026-10-03", "hours": 40}))
         self.assertIn("hours", self.invalid("work", {"date": "2026-10-03", "hours": 0}))
         self.assertIn("hourly_rate", self.invalid("work", {"date": "2026-10-03", "hours": 2, "hourly_rate": -1}))
@@ -527,8 +527,8 @@ class QuickAddApiTestCase(unittest.TestCase):
         self.login()
         db = self.Session()
         try:
-            pending = ai.prepare_write_action(db, "add_finance_transaction", {
-                "amount": 5, "category": "Ostatní", "transaction_type": "expense", "description": "podvrh",
+            pending = ai.prepare_write_action(db, "add_work_session", {
+                "date_value": "2026-10-03", "hours": 1, "project": "podvrh", "hourly_rate": 100,
                 "_source": "quick_add"})
         finally:
             db.close()
@@ -541,7 +541,23 @@ class QuickAddApiTestCase(unittest.TestCase):
         finally:
             db.close()
         self.assertIn(("ai", "ai_confirm"), contexts)
-        self.assertNotIn(("finance", "quick_add"), contexts)
+        self.assertNotIn(("work", "quick_add"), contexts)
+
+    def test_ai_finance_pending_action_is_never_executed(self):
+        """MRK-60: add_finance_transaction je jen pro Rychlé přidání – pending akce od AI (i podvržená `_source`,
+        i starší z doby před MRK-60) se při potvrzení odmítne a nic nezapíše."""
+        self.login()
+        db = self.Session()
+        try:
+            pending = ai.prepare_write_action(db, "add_finance_transaction", {
+                "amount": 5, "category": "Ostatní", "transaction_type": "expense", "description": "podvrh",
+                "_source": "quick_add"})
+        finally:
+            db.close()
+        r = self.client.post("/actions/confirm", json={"action_id": pending["id"]})
+        self.assertFalse(r.json().get("ok"), r.text)
+        self.assertEqual(r.json().get("error"), "unknown_write_tool")
+        self.assertEqual(self.count(FinanceTransaction), 0)
 
     def test_finance_end_to_end_source_label(self):
         self.login()
@@ -558,7 +574,8 @@ class QuickAddApiTestCase(unittest.TestCase):
         finally:
             db.close()
 
-    def test_work_end_to_end_syncs_finance(self):
+    def test_work_end_to_end_never_writes_finance(self):
+        """MRK-60: práce Finance nezapisuje – ani se starým polem sync_to_finance od klienta."""
         self.login()
         self.prepare_and_confirm("work", {"date": "2026-10-03", "hours": 6.5, "project": "Workshop",
                                           "hourly_rate": 375, "sync_to_finance": True})
@@ -566,7 +583,9 @@ class QuickAddApiTestCase(unittest.TestCase):
         try:
             ws = db.query(WorkSession).one()
             self.assertEqual((ws.hours, ws.project), (6.5, "Workshop"))
-            self.assertEqual(db.query(FinanceTransaction).one().amount, 2437.5)
+            self.assertEqual((ws.finance_transaction_id, ws.sync_to_finance), (None, False))
+            self.assertEqual(db.query(FinanceTransaction).count(), 0)
+            self.assertFalse(any(lg.area == "finance" for lg in db.query(ActivityLog).all()))
         finally:
             db.close()
 

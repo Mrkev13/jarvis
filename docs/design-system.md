@@ -204,7 +204,7 @@ is shown as delivered — fix copy at the source.
   (entity types) — never dropped, never "undefined".
 - **Free text the user typed is data, not an internal value** (e.g. a finance category "food" typed by the user is
   translated in the UI for convenience, but kept as typed in backend activity text). System-generated values
-  (category `work` from the Work → Finance sync) are named in Czech at the source.
+  (category `work` from the historical Work → Finance sync, turned off in MRK-60) are named in Czech at the source.
 - **Backend copy** (activity summaries, planner reasons, notifications) is built with `backend/text_utils.py`:
   `format_num_cz`, `format_hours_cz`, `format_czk_cz`, `finance_summary_cz`, `memory_count_cz`, `plural_cz`,
   `format_date_cz` — decimal comma, correct plurals, no ISO dates, no English module names. Existing audit rows keep

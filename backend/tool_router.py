@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 
 from context_service import classify_areas, fold_text, is_planner_like
+from finance_ai_policy import AI_EXCLUDED_AREAS
 from module_registry import current_access
 from planner_guard import PLANNER_REQUIRED_TOOLS
 from tool_registry import (
@@ -238,6 +239,11 @@ def route_tools(
         names |= {t for t in PLANNER_REQUIRED_TOOLS if t not in covered_tools}
 
     reason = REASON_AREAS
+    # MRK-60: zápis výslovně jen do oblasti vyloučené z AI („přidej výdaj 300 Kč") nedostane náhradní write tooly
+    # jiných oblastí – model odpoví, že to nejde, místo aby změnu zapsal jinam. Ostatní oblasti bez vlastních toolů
+    # (kalendář, návyky, fitness) se chovají jako dřív.
+    if write_intent and explicit and explicit <= AI_EXCLUDED_AREAS:
+        write_intent = False
     if write_intent:
         folded = fold_text(text)
         mutate = detect_mutation_intent(text)

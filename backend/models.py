@@ -356,7 +356,7 @@ class WorkSession(Base):
         ForeignKey("finance_transactions.id"),
         nullable=True
     )
-    sync_to_finance = Column(Boolean, default=True)
+    sync_to_finance = Column(Boolean, default=False)  # MRK-60: jen historie; práce už Finance nezapisuje
 
 
 class MffCharacter(Base):

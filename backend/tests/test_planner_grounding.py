@@ -113,9 +113,11 @@ class PlannerGroundingTestCase(unittest.TestCase):
 
     def test_invented_numeric_targets_are_removed_but_derived_values_kept(self):
         result = self._ask([
-            _tools_round("get_goals", "get_memories", "get_finance_summary", "get_work_sessions"),
+            _tools_round("get_goals", "get_memories", "get_work_sessions"),
             _plan_answer("Ušetři 10 000 Kč měsíčně.", [
-                ("finance", "Zkontrolovat cíl Našetřit 150 000 Kč", "Do cíle zbývá 141 000 Kč."),
+                ("finance", "Zkontrolovat cíl Našetřit 150 000 Kč", "Cíl je na 6 %."),
+                # MRK-60: bilance z Finance (9 000 Kč) model nevidí → ani z ní odvozená částka neprojde
+                ("finance", "Doplnit 141 000 Kč do cíle", "Do cíle zbývá 141 000 Kč."),
                 ("finance", "Ušetřit 10 000 Kč do konce října", "Urychlí to cíl."),
                 ("work", "Odpracovat 5 hodin freelance designu v pondělí", "Zvýší příjem."),
                 ("work", "Zapsat odpracované hodiny na Servind", "Sazba 325 Kč/h, 7,5 h = 2 437,5 Kč."),
@@ -126,6 +128,7 @@ class PlannerGroundingTestCase(unittest.TestCase):
         self.assertEqual(titles, ["Zkontrolovat cíl Našetřit 150 000 Kč", "Zapsat odpracované hodiny na Servind"])
         self.assertEqual([a["priority"] for a in plan["actions"]], [1, 2])
         self.assertNotIn("10 000", result["answer"])
+        self.assertNotIn("141 000", result["answer"])
         self.assertNotIn("freelance", result["answer"])
 
     def test_plan_with_only_invented_actions_shows_note_instead_of_card(self):
@@ -155,7 +158,7 @@ class PlannerGroundingTestCase(unittest.TestCase):
 
     def test_planner_without_get_goals_is_nudged_once_to_call_required_tools(self):
         result = self._ask([
-            _tools_round("get_finance_summary"),
+            _tools_round("get_work_summary"),
             _plan_answer("PRVNI", [("finance", "Zkontrolovat cíl Našetřit 150 000 Kč", "Cíl je na 6 %.")]),
             _tools_round("get_goals"),
             _plan_answer("DRUHY", [("wot", "Pokračovat ve VZ.55 před CS linií", "Plán z paměti.")]),
@@ -168,11 +171,11 @@ class PlannerGroundingTestCase(unittest.TestCase):
         self.assertEqual(self._final_plan(result)["summary"], "DRUHY")
 
     def test_nudge_happens_at_most_once(self):
-        # Viděl jen get_finance_summary → akce musí stát jen na těchto datech (bilance 9 000 Kč).
+        # Viděl jen get_work_sessions → akce musí stát jen na těchto datech (Servind, 7,5 h).
         result = self._ask([
-            _tools_round("get_finance_summary"),
-            _plan_answer("PRVNI", [("finance", "Zkontrolovat bilanci 9 000 Kč", "Je to aktuální stav.")]),
-            _plan_answer("DRUHY", [("finance", "Zkontrolovat bilanci 9 000 Kč", "Je to aktuální stav.")]),
+            _tools_round("get_work_sessions"),
+            _plan_answer("PRVNI", [("work", "Zapsat odpracované hodiny na Servind", "Naposledy 7,5 h.")]),
+            _plan_answer("DRUHY", [("work", "Zapsat odpracované hodiny na Servind", "Naposledy 7,5 h.")]),
         ])
         self.assertEqual(len(self.sent_messages), 3)
         self.assertEqual(self._final_plan(result)["summary"], "DRUHY")

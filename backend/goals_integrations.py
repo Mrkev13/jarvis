@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, short
+from finance_ai_policy import is_finance_goal
 from goal_history_service import compute_goal_progress_and_value, ensure_goal_progress_snapshot_for_all_active_automatic_goals
 from models import Goal
 from module_contracts import (
@@ -90,7 +91,9 @@ def dashboard_goals(db, access):
 
 def context_goals(req: ContextRequest) -> list[str]:
     db, today = req.db, req.today
-    goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in GOAL_INACTIVE_STATUSES]
+    # MRK-60: cíl počítaný z Finance (bilance, měsíční příjmy/výdaje) je Finance agregát → do AI kontextu nejde.
+    goals = [g for g in db.query(Goal).all() if (g.status or "").strip().lower() not in GOAL_INACTIVE_STATUSES
+             and not is_finance_goal(g.source)]
     goals.sort(key=lambda g: (PRIORITY_RANK.get((g.priority or "").lower(), 3), g.target_date or date.max))
     items = []
     for g in goals[:MAX_ITEMS]:

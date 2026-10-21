@@ -1,17 +1,16 @@
 """Příspěvky modulu Finance do globálních agregátorů (MRK-20) – přesunuto beze změny chování ze search_service,
-main (GET /dashboard „finance"), context_service a quick_add_service."""
+main (GET /dashboard „finance") a quick_add_service. AI kontext Finance nemá (MRK-60)."""
 from __future__ import annotations
 
 import re
 from datetime import date, datetime
 
 import quick_add_text as qt
-from context_format import fmt_num
 from goal_history_service import compute_goal_progress_and_value
 from models import FinanceTransaction, Goal
 from module_contracts import (
     ChangeSource, activity_changes,
-    ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
+    ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
 )
 from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_num_cz, join_parts
 from time_utils import local_month_bounds_utc, today_local
@@ -84,28 +83,6 @@ def get_finance_with_goal(db, today: date | None = None):
         "transactions_count": len(transactions),
         "goal": active_goal,
     }
-
-
-# ---------- AI kontext ----------
-
-
-def context_finance(req: ContextRequest) -> list[str]:
-    start_utc, end_utc = local_month_bounds_utc(req.today)
-    income = expenses = total_income = total_expenses = 0.0
-    for t in req.db.query(FinanceTransaction).all():
-        amount = float(t.amount or 0)
-        is_income = (t.transaction_type or "").lower() == "income"
-        in_month = t.created_at is not None and start_utc <= t.created_at < end_utc
-        if is_income:
-            total_income += amount
-            income += amount if in_month else 0
-        else:
-            total_expenses += amount
-            expenses += amount if in_month else 0
-    return [
-        f"Finance tento měsíc: příjmy {fmt_num(income)} Kč, výdaje {fmt_num(expenses)} Kč; "
-        f"celková bilance {fmt_num(total_income - total_expenses)} Kč"
-    ]
 
 
 # ---------- Rychlé přidání ----------
@@ -223,10 +200,11 @@ INTEGRATIONS = ModuleIntegrations(
                           from_activity=activity_changes({"finance_transaction": "/finance?transaction={id}"}, "/finance")),),
     search=(SearchSource("finance", 60, search_finance),),
     dashboard=(DashboardSection("finance", lambda db, access: get_finance_with_goal(db)),),
+    # MRK-60: jen klíčová slova (bez `build` – žádná data, žádné pokryté tooly). Finanční dotaz se tak pozná jako
+    # oblast bez AI toolů a router nesáhne po obecné sadě všech read toolů; Finance do AI nejde (finance_ai_policy.py).
     context=(
         ContextSection("finance", ("penez", "penize", "financ", "vydaj", "prijem", "prijm", "utrat", "bilanc", "uspor",
-                                   "setr", "rozpoc", " kc", "korun", "money", "zustatek"),
-                       order=60, build=context_finance, covered_tools=("get_finance_summary",)),
+                                   "setr", "rozpoc", " kc", "korun", "money", "zustatek")),
     ),
     quick_add_rules=(
         QuickAddRule(70, "finance", detect_finance),

@@ -24,7 +24,7 @@ import ai  # noqa: E402
 import tool_registry as reg  # noqa: E402
 import tools  # noqa: E402
 from database import Base  # noqa: E402
-from models import FinanceTransaction, PendingAction  # noqa: E402
+from models import FinanceTransaction, PendingAction, WorkSession  # noqa: E402
 
 WRITE_NAMES = {s.name for s in reg.WRITE_SPECS}
 READ_NAMES = {s.name for s in reg.READ_SPECS}
@@ -95,13 +95,13 @@ class AskAiRoutingTestCase(unittest.TestCase):
 
     def test_routed_tool_set_is_fixed_for_all_rounds(self):
         with self.assertLogs("standa_hub.llm", "INFO") as logs:
-            self._ask("Ukaž mi posledních 5 finančních transakcí", [
-                _message(tool_calls=[_call("get_finance_transactions", {"limit": 5})]),
-                _message(content="Žádné transakce."),
+            self._ask("Ukaž mi posledních 5 pracovních směn", [
+                _message(tool_calls=[_call("get_work_sessions", {"limit": 5})]),
+                _message(content="Žádné směny."),
             ])
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.calls[0]["tools"], self.calls[1]["tools"])
-        self.assertIn("get_finance_transactions", self._tool_names(self.calls[0]))
+        self.assertIn("get_work_sessions", self._tool_names(self.calls[0]))
         self.assertFalse(self._tool_names(self.calls[0]) & WRITE_NAMES)
         summary = next(line for line in logs.output if "request calls=" in line)
         self.assertRegex(summary, r"tools_exposed=[1-7] tool_schema_tokens=\d+ tool_route=areas route_widened=False")
@@ -116,33 +116,54 @@ class AskAiRoutingTestCase(unittest.TestCase):
         self.assertIs(self.calls[0]["tools"], ai.TOOLS)
 
     def test_unrouted_write_tool_is_refused_and_creates_no_pending_action(self):
-        result = self._ask("kolik jsem utratil za jídlo?", [
-            _message(tool_calls=[_call("add_finance_transaction",
-                                       {"amount": 300, "category": "Jídlo", "transaction_type": "expense"})]),
+        result = self._ask("kolik hodin jsem odpracoval?", [
+            _message(tool_calls=[_call("add_work_session", {"date_value": "2026-10-03", "hours": 2,
+                                                            "project": "Servind", "hourly_rate": 300})]),
             _message(content="Nic jsem nezměnil."),
         ])
         self.assertEqual(result["pending_actions"], [])
         db = self.Session()
         try:
             self.assertEqual(db.query(PendingAction).count(), 0)
-            self.assertEqual(db.query(FinanceTransaction).count(), 0)
+            self.assertEqual(db.query(WorkSession).count(), 0)
         finally:
             db.close()
         tool_msg = self.calls[1]["messages"][-1]
         self.assertEqual(json.loads(tool_msg["content"])["error"], "write_not_available")
 
     def test_routed_write_tool_creates_pending_action_only(self):
-        result = self._ask("přidej výdaj 300 Kč za oběd", [
-            _message(tool_calls=[_call("add_finance_transaction",
-                                       {"amount": 300, "category": "Jídlo", "transaction_type": "expense"})]),
+        result = self._ask("zapiš práci 2 hodiny na Servind za 300 Kč/h", [
+            _message(tool_calls=[_call("add_work_session", {"date_value": "2026-10-03", "hours": 2,
+                                                            "project": "Servind", "hourly_rate": 300})]),
             _message(content="Připravil jsem změnu k potvrzení."),
         ])
-        self.assertIn("add_finance_transaction", self._tool_names(self.calls[0]))
-        self.assertEqual([p["tool"] for p in result["pending_actions"]], ["add_finance_transaction"])
+        self.assertIn("add_work_session", self._tool_names(self.calls[0]))
+        self.assertEqual([p["tool"] for p in result["pending_actions"]], ["add_work_session"])
         db = self.Session()
         try:
             self.assertEqual(db.query(PendingAction).filter(PendingAction.status == "pending").count(), 1)
-            self.assertEqual(db.query(FinanceTransaction).count(), 0, "zápis až po potvrzení")
+            self.assertEqual(db.query(WorkSession).count(), 0, "zápis až po potvrzení")
+        finally:
+            db.close()
+
+    def test_finance_tools_are_never_offered_and_a_finance_call_is_refused(self):
+        """MRK-60: Finance nemá AI tooly – ani výslovná žádost je nevystaví a vymyšlené volání nic nepřipraví."""
+        result = self._ask("přidej výdaj 300 Kč za oběd a ukaž mi transakce", [
+            _message(tool_calls=[
+                _call("add_finance_transaction", {"amount": 300, "category": "Jídlo", "transaction_type": "expense"}),
+                _call("get_finance_transactions", {"limit": 5}, call_id="c2"),
+            ]),
+            _message(content="Finance nemám k dispozici."),
+        ])
+        offered = self._tool_names(self.calls[0])
+        self.assertFalse({n for n in offered if "finance" in n}, offered)
+        self.assertEqual(result["pending_actions"], [])
+        errors = [json.loads(m["content"])["error"] for m in self.calls[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual(errors, ["unknown_tool", "unknown_tool"])
+        db = self.Session()
+        try:
+            self.assertEqual(db.query(PendingAction).count(), 0)
+            self.assertEqual(db.query(FinanceTransaction).count(), 0)
         finally:
             db.close()
 
