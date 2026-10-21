@@ -8,6 +8,8 @@ they filter it with the predicates below so the rule lives in one place. Determi
 from __future__ import annotations
 
 FINANCE_AREA = "finance"
+# Oblasti, které AI záměrně nevidí: dotaz jen na ně nedostane žádné tooly (ani náhradní z jiných oblastí).
+AI_EXCLUDED_AREAS = frozenset({FINANCE_AREA})
 _FINANCE_ENTITY_TYPES = frozenset({"FinanceTransaction"})
 _FINANCE_NOTIFICATION_TYPES = frozenset({"finance_goal_stagnation"})
 

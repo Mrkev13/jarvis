@@ -109,6 +109,16 @@ class RouteSelectionTestCase(unittest.TestCase):
             with self.subTest(msg):
                 self.assertFalse(detect_write_intent(msg))
 
+    def test_other_toolless_areas_keep_create_tools(self):
+        """MRK-60 review: pravidlo „žádné náhradní write tooly“ platí jen pro Finance, ne pro kalendář/návyky/fitness
+        (tam model dál smí nabídnout např. připomínku – stejně jako před MRK-60)."""
+        for msg in ("přidej do kalendáře schůzku zítra v 10", "přidej návyk čtení", "zapiš trénink dnes"):
+            with self.subTest(msg):
+                route = route_tools([msg])
+                self.assertEqual(route.reason, REASON_WRITE_UNKNOWN)
+                self.assertIn("add_reminder", route.names)
+                self.assertFalse({n for n in route.names if "finance" in n})
+
     def test_finance_requests_expose_no_tools(self):
         """MRK-60: čtení, zápis, úprava ani vrácení Finance – žádný tool (ani náhradní write tool jiné oblasti)."""
         for msg in (REPRESENTATIVE["finance"], REPRESENTATIVE["finance_write"], "utratil jsem 200 za kafe",

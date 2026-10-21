@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 
 from context_service import classify_areas, fold_text, is_planner_like
+from finance_ai_policy import AI_EXCLUDED_AREAS
 from module_registry import current_access
 from planner_guard import PLANNER_REQUIRED_TOOLS
 from tool_registry import (
@@ -89,8 +90,6 @@ _INTENT_WORDS = {
                     "co se delo", "posledni zmen"),
 }
 _WRITE_AREAS = frozenset(a for s in WRITE_SPECS for a in s.areas)
-# Oblasti, které mají aspoň jeden AI tool. Oblast poznaná jen podle slov (MRK-60: Finance) žádný nemá.
-_TOOL_AREAS = frozenset(a for s in TOOL_SPECS for a in s.areas)
 
 
 @dataclass(frozen=True)
@@ -240,9 +239,10 @@ def route_tools(
         names |= {t for t in PLANNER_REQUIRED_TOOLS if t not in covered_tools}
 
     reason = REASON_AREAS
-    # MRK-60: zápis výslovně jen do oblasti bez AI toolů („přidej výdaj 300 Kč") nedostane náhradní write tooly
-    # jiných oblastí – model odpoví, že to nejde, místo aby změnu zapsal jinam.
-    if write_intent and explicit and not explicit & _TOOL_AREAS:
+    # MRK-60: zápis výslovně jen do oblasti vyloučené z AI („přidej výdaj 300 Kč") nedostane náhradní write tooly
+    # jiných oblastí – model odpoví, že to nejde, místo aby změnu zapsal jinam. Ostatní oblasti bez vlastních toolů
+    # (kalendář, návyky, fitness) se chovají jako dřív.
+    if write_intent and explicit and explicit <= AI_EXCLUDED_AREAS:
         write_intent = False
     if write_intent:
         folded = fold_text(text)
