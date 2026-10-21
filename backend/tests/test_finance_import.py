@@ -332,3 +332,37 @@ def test_rest_preview_commit_limits_and_errors(api, account, monkeypatch):
     r = api.post("/finance/imports/999-0000000000000000/commit")
     assert r.status_code == 404
     assert staged_files() == []
+
+
+# ---------- review hardening (adaptér je kód třetí strany vůči jádru) ----------
+
+def test_adapter_codes_and_extra_are_allowlisted(db, account):
+    from modules.finance.importing.rows import RowError
+
+    class Leaky(SyntheticAdapter):
+        id, family = "synthetic_leaky", "leaky"
+
+        def detect(self, head):
+            return head.startswith(b"#leaky")
+
+        def parse(self, stream):
+            stream.read()
+            yield RowError(2, f"bad value {CANARY}", f"field {CANARY}")  # chybný adaptér vloží hodnotu do kódu
+            yield NormalizedRow(row_no=3, booked_on=date(2026, 10, 1), amount_minor=-100, currency="CZK",
+                                extra=(("channel", "card"), ("raw_line", CANARY)))
+    REGISTRY.register(Leaky())
+    try:
+        result = run_import(db, account, b"#leaky\nx\n", skip_invalid=True)
+    finally:
+        REGISTRY.unregister("synthetic_leaky")
+    assert CANARY not in json.dumps(result)
+    [issue] = db.query(FinanceImportIssue).all()
+    assert (issue.code, issue.field) == ("row_invalid", None)
+    [tx] = ledger(db)
+    assert json.loads(tx.extra) == {"channel": "card"}
+
+
+def test_non_ascii_digit_token_is_not_found(db, account):
+    with pytest.raises(ImportFailure) as exc:
+        core.commit_import(db, "²-0000000000000000", now=NOW)
+    assert exc.value.code == "preview_not_found"

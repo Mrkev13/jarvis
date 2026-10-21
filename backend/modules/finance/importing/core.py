@@ -14,6 +14,7 @@ the import `failed` in a separate transaction. The raw file is deleted after com
 from __future__ import annotations
 
 import json
+import re
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -39,6 +40,8 @@ log = logging.getLogger(__name__)
 
 NEAR_DUPLICATE_DAYS = 3
 MAX_ISSUES_RETURNED = 200
+EXTRA_VALUE_MAX = 100
+_IDENT = re.compile(r"[a-z][a-z0-9_]{0,39}")
 COUNT_KEYS = ("new", "duplicate", "changed", "pending_skipped", "invalid", "possible_duplicate")
 # Pole, která import vlastní; oprava se stejným bankovním ID je přepíše (staré hodnoty → revize).
 IMPORTED_FIELDS = ("booked_on", "value_on", "amount_minor", "currency", "counterparty_name",
@@ -93,6 +96,19 @@ def _validate(row, account: FinanceAccount) -> RowError | None:
     return None
 
 
+def _safe_issue(error: RowError) -> RowError:
+    """Kód a pole od adaptéru jdou do odpovědi i DB → jen tvar identifikátoru, nikdy text z řádku."""
+    code = str(error.code) if _IDENT.fullmatch(str(error.code)) else "row_invalid"
+    field_name = str(error.field) if error.field is not None and _IDENT.fullmatch(str(error.field)) else None
+    return RowError(int(error.row_no), code, field_name)
+
+
+def _safe_extra(adapter: ImportAdapter, row: NormalizedRow) -> str | None:
+    """Jen klíče z adapter.extra_allowlist, krátké hodnoty; JSON nebo None."""
+    kept = {str(k): str(v)[:EXTRA_VALUE_MAX] for k, v in row.extra if k in adapter.extra_allowlist}
+    return json.dumps(kept, ensure_ascii=False, sort_keys=True) if kept else None
+
+
 # ---------- plán (deterministický, jen čte DB) ----------
 
 def _imported_values(row: NormalizedRow) -> dict:
@@ -109,7 +125,7 @@ def build_plan(db: Session, account: FinanceAccount, adapter: ImportAdapter, pat
     with open(path, "rb") as stream:
         for row in adapter.parse(stream):
             if isinstance(row, RowError):
-                plan.issues.append(RowError(int(row.row_no), str(row.code)[:40], (str(row.field)[:40] if row.field else None)))
+                plan.issues.append(_safe_issue(row))
                 continue
             error = _validate(row, account)
             if error is not None:
@@ -261,7 +277,7 @@ def preview_import(db: Session, *, account_id: int, upload: Path, now: datetime 
 
 def _load_preview(db: Session, token: str, now: datetime) -> FinanceImport:
     head, _, sha_prefix = str(token or "").partition("-")
-    if not head.isdigit():
+    if not (head.isascii() and head.isdigit() and len(head) <= 18):  # „²“.isdigit() je True, int() by spadl
         raise ImportFailure(404, "preview_not_found")
     imp = db.get(FinanceImport, int(head))
     if imp is None or not imp.file_sha256.startswith(sha_prefix) or len(sha_prefix) != 16:
@@ -282,15 +298,15 @@ def _close(db: Session, imp: FinanceImport, status: str, now: datetime) -> None:
     db.commit()
 
 
-def _new_transaction(db: Session, imp: FinanceImport, row: NormalizedRow, key: str, fp: str, review: bool,
-                     category_id: int | None) -> FinanceTransaction:
+def _new_transaction(db: Session, imp: FinanceImport, adapter: ImportAdapter, row: NormalizedRow, key: str, fp: str,
+                     review: bool, category_id: int | None) -> FinanceTransaction:
     connection = db.connection()
     system = category_id or builtin_category_id(connection, "uncategorized")
     values = _imported_values(row)
     tx = FinanceTransaction(
         account_id=imp.account_id, import_id=imp.id, source="import", direction=row.direction,
         transaction_type="income" if row.direction == "in" else "expense", amount=minor_to_legacy(row.amount_minor),
-        txn_key=key, fingerprint=fp, review_flag=review, extra=json.dumps(dict(row.extra)) if row.extra else None,
+        txn_key=key, fingerprint=fp, review_flag=review, extra=_safe_extra(adapter, row),
         system_category_id=system, effective_category_id=system, category_source="rule" if category_id else "none",
         category=category_name(connection, system) or "Nezařazeno", **values)
     tx.search_text = search_text_of(values["description"], row.counterparty_name, tx.category)
@@ -336,7 +352,7 @@ def commit_import(db: Session, token: str, *, skip_invalid: bool = False, catego
     import_id = imp.id
     try:
         for row, key, fp, review in plan.inserts:
-            _new_transaction(db, imp, row, key, fp, review, categorize(db, row, account.id))
+            _new_transaction(db, imp, adapter, row, key, fp, review, categorize(db, row, account.id))
         for tx_id, row, fp in plan.updates:
             _apply_correction(db, imp, tx_id, row, fp, categorize)
         db.query(FinanceImportIssue).filter_by(import_id=imp.id).delete()
