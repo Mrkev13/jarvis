@@ -239,7 +239,7 @@ class AccountsAndCategoriesTestCase(LedgerTestBase):
         account = fs.create_account(self.db, name="Běžný účet", kind="current", institution="Banka",
                                     identifier="123456789/0100")
         self.db.commit()
-        self.assertEqual(account.masked_identifier, "…0100")
+        self.assertEqual(account.masked_identifier, "…6789/0100")
         self.assertEqual(len(account.identifier_hash), 64)
         self.assertNotIn("123456789", str(fs.account_dict(account)))
         with self.assertRaises(fs.FinanceError) as ctx:

@@ -32,7 +32,7 @@ class NormalizedRow:
     row_no: int
     booked_on: date
     amount_minor: int
-    currency: str
+    currency: str | None  # None = formát nemá měnu na řádku (mBank GPC) → jádro použije měnu účtu
     status: str = "booked"  # booked / pending (blokace se neimportují)
     value_on: date | None = None
     bank_txn_id: str | None = None
@@ -71,6 +71,9 @@ class ImportAdapter(Protocol):
     def detect(self, head: bytes) -> bool: ...
 
     def parse(self, stream: BinaryIO) -> Iterator[ParsedRow]: ...
+
+    # Volitelné (MRK-63): `statement_account(head) -> str | None` – číslo účtu, který výpis uvádí; jádro z něj
+    # drží jen masku + otisk a odmítne výpis jiného účtu (`account_mismatch`).
 
 
 class AdapterRegistry:

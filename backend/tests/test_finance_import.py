@@ -286,7 +286,7 @@ def test_event_activity_and_no_row_values_anywhere(db, account, caplog):
     for text in texts:
         assert CANARY not in text and "123456789" not in text
     [tx] = ledger(db)
-    assert tx.counterparty_account_masked == "…0100" and "123456789" not in (tx.description or "")
+    assert tx.counterparty_account_masked == "…6789/0100" and "123456789" not in (tx.description or "")
     assert tx.description == "platba CANARY7Q …3456"  # uložený popis: dlouhé číslo zamaskované
 
 

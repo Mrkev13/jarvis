@@ -1,3 +1,5 @@
 *.sh text eol=lf
 # Synthetic Calendar fixtures are byte-exact test input (stored with LF); never convert line endings on checkout.
 backend/tests/fixtures/calendar/*.ics -text
+# MRK-63: syntetický mBank GPC (cp1250, pevná délka) – bajtově přesný vstup testů, žádné převody konců řádků.
+backend/tests/fixtures/finance/*.gpc -text

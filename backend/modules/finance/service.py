@@ -45,8 +45,9 @@ def account_identifier(raw: str | None) -> tuple[str | None, str | None]:
     normalized = re.sub(r"[\s-]", "", raw or "").upper()
     if not normalized:
         return None, None
-    digits = "".join(_DIGITS.findall(normalized))
-    masked = f"…{(digits or normalized)[-4:]}"
+    number, _, bank = normalized.partition("/")  # české „číslo/kód banky“: konec čísla + veřejný kód banky
+    digits = "".join(_DIGITS.findall(number))
+    masked = f"…{(digits or number)[-4:]}" + (f"/{bank[:4]}" if bank else "")
     return masked, hashlib.sha256((_IDENTIFIER_SALT + normalized).encode()).hexdigest()
 
 
