@@ -2,7 +2,6 @@ from datetime import date
 
 from database import SessionLocal
 from models import WotResource, WotGrind
-from models import FinanceTransaction
 from time_utils import today_local, utc_now
 import wot_service
 from models import Subject, Assignment, Exam
@@ -17,7 +16,7 @@ from models import (
     parse_legacy_uru_state,
 )
 from activity_service import log_activity, delta_dict
-from text_utils import finance_summary_cz, format_date_cz, format_hours_cz
+from text_utils import format_date_cz, format_hours_cz
 
 
 def get_wot_resources():
@@ -50,56 +49,19 @@ def get_wot_grinds():
         db.close()
 
 def get_finance_summary():
+    """GET /finance/summary (legacy tvar v korunách). MRK-61: součet z amount_minor, bez zrušených řádků."""
+    from modules.finance.legacy_compat import minor_to_legacy
+    from modules.finance.service import totals_minor
+
     db = SessionLocal()
-
     try:
-        transactions = db.query(FinanceTransaction).all()
-
-        income = sum(
-            item.amount
-            for item in transactions
-            if item.transaction_type == "income"
-        )
-
-        expenses = sum(
-            item.amount
-            for item in transactions
-            if item.transaction_type == "expense"
-        )
-
+        t = totals_minor(db)
         return {
-            "income": income,
-            "expenses": expenses,
-            "balance": income - expenses,
-            "transactions_count": len(transactions)
+            "income": minor_to_legacy(t["income_minor"]),
+            "expenses": minor_to_legacy(t["expenses_minor"]),
+            "balance": float(t["income_minor"] - t["expenses_minor"]) / 100,
+            "transactions_count": t["count"],
         }
-
-    finally:
-        db.close()
-
-
-def get_finance_transactions():
-    db = SessionLocal()
-
-    try:
-        items = (
-            db.query(FinanceTransaction)
-            .order_by(FinanceTransaction.created_at.desc())
-            .all()
-        )
-
-        return [
-            {
-                "id": item.id,
-                "amount": item.amount,
-                "category": item.category,
-                "description": item.description,
-                "transaction_type": item.transaction_type,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-            }
-            for item in items
-        ]
-
     finally:
         db.close()
 
@@ -334,63 +296,20 @@ def add_finance_transaction(
     description: str = "",
     user_context: str = "manual",
 ):
+    """Executor potvrzeného Rychlého přidání (MRK-60: AI ho nevidí). MRK-61: zápis přes modules.finance.service."""
+    from modules.finance import service as finance_service
+    from modules.finance.legacy_compat import legacy_request_minor
+
     db = SessionLocal()
-
     try:
-        item = FinanceTransaction(
-            amount=amount,
-            category=category,
-            description=description,
-            transaction_type=transaction_type,
-        )
-
-        db.add(item)
-        db.flush()
-
-        summary = finance_summary_cz(transaction_type, amount, category, description)
-        log_activity(
-            db, "finance", "create", summary,
-            entity_type="FinanceTransaction", entity_id=item.id,
-            delta=delta_dict(None, item, ["amount", "category", "description", "transaction_type"]),
-            user_context=user_context
-        )
-
+        item = finance_service.create_manual_transaction(
+            db, amount_minor=legacy_request_minor(amount), direction="in" if transaction_type == "income" else "out",
+            category=category, description=description, user_context=user_context)
         db.commit()
         db.refresh(item)
-
-        from goal_history_service import ensure_goal_progress_snapshot, compute_goal_progress_and_value
-
-        goals = (
-            db.query(Goal)
-            .filter((Goal.tracking_type == "automatic") | (Goal.tracking_type == "Automatic"))
-            .filter(Goal.source == "finance_balance")
-            .all()
-        )
-        changed = 0
-        for g in goals:
-            before_pct, _ = compute_goal_progress_and_value(db, g)
-            if ensure_goal_progress_snapshot(db, g):
-                after_pct, _ = compute_goal_progress_and_value(db, g)
-                if before_pct != after_pct:
-                    log_activity(
-                        db, "goals", "snapshot",
-                        f"Cíl '{g.title}' {before_pct}% → {after_pct}%",
-                        entity_type="Goal", entity_id=g.id,
-                        user_context=user_context
-                    )
-                changed += 1
-        if changed:
-            db.commit()
-
-        return {
-            "id": item.id,
-            "amount": item.amount,
-            "category": item.category,
-            "description": item.description,
-            "transaction_type": item.transaction_type,
-            "created_at": item.created_at.isoformat() if item.created_at else None,
-        }
-
+        finance_service.refresh_finance_goals(db, user_context)
+        return {**finance_service.transaction_dict(item),
+                "created_at": item.created_at.isoformat() if item.created_at else None}
     finally:
         db.close()
 

@@ -64,6 +64,8 @@ STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
 STEP_0021_EXTRA = {"study_courses", "study_materials"}  # MRK-42
 STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
 STEP_0024_EXTRA = {"offsite_backup_runs"}  # MRK-57 off-machine backup history
+STEP_0025_EXTRA = {"finance_accounts", "finance_categories", "finance_imports", "finance_import_issues",
+                   "finance_rules", "finance_transaction_revisions"}  # MRK-61 Finance ledger
 
 
 def _sqlite_tables(conn):
@@ -172,7 +174,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -407,6 +409,103 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.upgrade(self.cfg, "head")
         self.assertIn("offsite_backup_runs", inspect(self.conn).get_table_names())
 
+    def _seed_legacy_finance(self):
+        """Syntetické legacy řádky (žádná reálná data): výdaje, příjem, příjem z práce, prázdný created_at."""
+        rows = [  # (amount, category, type, created_at UTC)
+            (189.9, "Jídlo", "expense", "2026-10-31 23:30:00"),  # v Praze už 1. 11.
+            (1250.5, "Doprava", "expense", "2026-10-02 10:00:00"),
+            (9000.0, "Výplata", "income", "2026-10-01 08:00:00"),
+            (2437.5, "work", "income", "2026-10-03 09:00:00"),
+            (33.33, "něco svého", "expense", None),
+        ]
+        for amount, category, tx_type, created in rows:
+            self.conn.execute(text(
+                "INSERT INTO finance_transactions (amount, category, description, transaction_type, created_at) "
+                "VALUES (:a, :c, 'syntetický', :t, :d)"), {"a": amount, "c": category, "t": tx_type, "d": created})
+        self.conn.execute(text(
+            "INSERT INTO work_sessions (date, hours, project, description, hourly_rate, finance_transaction_id, "
+            "sync_to_finance) VALUES ('2026-10-03', 6.5, 'Synthetic', '', 375, 4, 1)"))
+        self.conn.commit()
+
+    def test_0025_ledger_backfills_legacy_rows_and_keeps_links(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0024_offsite_backup_runs")
+        self._seed_legacy_finance()
+        before = self.conn.execute(text(
+            "SELECT transaction_type, SUM(amount), COUNT(*) FROM finance_transactions GROUP BY transaction_type")).all()
+        alembic_cmd.upgrade(self.cfg, "0025_finance_ledger")
+        rows = {r.id: r for r in self.conn.execute(text(
+            "SELECT t.id, t.amount, t.category, t.created_at, t.account_id, t.source, t.booked_on, t.amount_minor, "
+            "t.currency, t.direction, t.review_flag, c.key AS cat, t.category_source, a.key AS account "
+            "FROM finance_transactions t JOIN finance_categories c ON c.id = t.effective_category_id "
+            "JOIN finance_accounts a ON a.id = t.account_id")).all()}
+        self.assertEqual(len(rows), 5)
+        self.assertEqual({r.account for r in rows.values()}, {"manual_cash"})
+        self.assertEqual({r.currency for r in rows.values()}, {"CZK"})
+        # stejné součty po typu: Σ amount_minor / 100 = původní Σ amount
+        for tx_type, total, count in before:
+            direction = "in" if tx_type == "income" else "out"
+            minor = [r.amount_minor for r in rows.values() if r.direction == direction]
+            self.assertEqual(len(minor), count)
+            self.assertAlmostEqual(abs(sum(minor)) / 100, total, places=2)
+        self.assertEqual((rows[1].amount_minor, rows[1].booked_on, rows[1].cat), (-18990, "2026-11-01", "restaurants"))
+        self.assertEqual((rows[2].amount_minor, rows[2].cat), (-125050, "transport"))
+        self.assertEqual((rows[3].amount_minor, rows[3].cat, rows[3].source), (900000, "salary", "manual"))
+        self.assertEqual((rows[4].cat, rows[4].source), ("salary", "work_sync"), "propojení s prací → work_sync")
+        self.assertEqual((rows[5].cat, rows[5].amount_minor, rows[5].created_at), ("other", -3333, None))
+        self.assertIsNotNone(rows[5].booked_on, "chybějící created_at → den migrace, created_at zůstává NULL")
+        self.assertEqual({r.category_source for r in rows.values()}, {"legacy"})
+        self.assertEqual({r.category for r in rows.values()},
+                         {"Jídlo", "Doprava", "Výplata", "work", "něco svého"}, "legacy sloupce beze změny")
+        self.assertEqual(self.conn.execute(text("SELECT finance_transaction_id FROM work_sessions")).scalar(), 4)
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM finance_categories")).scalar(), 15)
+        idx = {i["name"] for i in inspect(self.conn).get_indexes("finance_transactions")}
+        self.assertTrue({"ix_finance_transactions_id", "ix_finance_transactions_account_booked",
+                         "ix_finance_transactions_booked_on", "ix_finance_transactions_category_booked",
+                         "ix_finance_transactions_fingerprint"} <= idx)
+        # round trip: bez nových dat jde downgrade čistě a legacy řádky zůstanou
+        alembic_cmd.downgrade(self.cfg, "0024_offsite_backup_runs")
+        cols = {c["name"] for c in inspect(self.conn).get_columns("finance_transactions")}
+        self.assertEqual(cols, {"id", "amount", "category", "description", "transaction_type", "created_at"})
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM finance_transactions")).scalar(), 5)
+        self.assertFalse(STEP_0025_EXTRA & set(inspect(self.conn).get_table_names()))
+        alembic_cmd.upgrade(self.cfg, "head")
+        self.assertEqual(self.conn.execute(text(
+            "SELECT COUNT(*) FROM finance_transactions WHERE amount_minor IS NOT NULL")).scalar(), 5)
+
+    def test_0025_constraints_and_downgrade_guard(self):
+        from sqlalchemy.exc import IntegrityError
+
+        alembic_cmd.upgrade(self.cfg, "0024_offsite_backup_runs")
+        self._seed_legacy_finance()
+        alembic_cmd.upgrade(self.cfg, "0025_finance_ledger")
+        bad = [  # znaménko neodpovídá směru, neznámý zdroj, chybějící účet
+            "UPDATE finance_transactions SET amount_minor = 100 WHERE id = 1",
+            "UPDATE finance_transactions SET source = 'scraped' WHERE id = 1",
+            "UPDATE finance_transactions SET account_id = NULL WHERE id = 1",
+        ]
+        for sql in bad:
+            with self.subTest(sql=sql), self.assertRaises(IntegrityError):
+                self.conn.execute(text(sql))
+            self.conn.rollback()
+        self.conn.execute(text("UPDATE finance_transactions SET voided_at = CURRENT_TIMESTAMP WHERE id = 2"))
+        self.conn.commit()
+        with self.assertRaises(Exception) as ctx:
+            alembic_cmd.downgrade(self.cfg, "0024_offsite_backup_runs")  # zrušený řádek by po downgrade ožil
+        self.assertIn("voided rows", str(ctx.exception))
+        self.conn.rollback()
+        self.conn.execute(text("UPDATE finance_transactions SET voided_at = NULL WHERE id = 2"))
+        self.conn.execute(text(
+            "INSERT INTO finance_accounts (name, kind, currency, created_at) VALUES ('Účet', 'current', 'CZK', "
+            "CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        with self.assertRaises(Exception) as ctx:
+            alembic_cmd.downgrade(self.cfg, "0024_offsite_backup_runs")
+        self.assertIn("user accounts", str(ctx.exception))
+        self.conn.rollback()
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM finance_accounts")).scalar(), 2)
+
     def test_0023_allows_export_source_keeps_rows_and_guards_downgrade(self):
         from sqlalchemy import inspect
         from sqlalchemy.exc import IntegrityError
@@ -624,7 +723,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA)
 
             db = main.SessionLocal()
             try:

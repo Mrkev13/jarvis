@@ -54,7 +54,8 @@ class DeletedRecordHistoryTestCase(unittest.TestCase):
             with self.subTest(field=key):
                 self.assertEqual(delta[key], {"old": expected, "new": None})
 
-    def test_finance_delete_preserves_original_date_and_unlinks_work(self):
+    def test_finance_delete_voids_and_keeps_the_row_and_work_link(self):
+        """MRK-61: DELETE zruší (voided_at) – řádek, původní datum i vazba z práce zůstávají v historii."""
         tx = FinanceTransaction(amount=400, category="work", transaction_type="income", description="Recorded work", created_at=datetime(2026, 9, 7, 10))
         self.db.add(tx)
         self.db.flush()
@@ -62,14 +63,21 @@ class DeletedRecordHistoryTestCase(unittest.TestCase):
         self.db.add(work)
         self.db.commit()
         tx_id, work_id = tx.id, work.id
-        self.assertTrue(main.delete_finance_transaction(tx_id)["deleted"])
+        result = main.delete_finance_transaction(tx_id)
+        self.assertTrue(result["deleted"] and result["voided"])
         delta = self.deleted_delta("FinanceTransaction", tx_id)
-        self.assertEqual(delta["created_at"], {"old": "2026-09-07T10:00:00", "new": None})
-        self.assertEqual(delta["amount"]["old"], 400)
-        self.assertIsNone(self.db.get(FinanceTransaction, tx_id))
+        self.assertIsNone(delta["voided_at"]["old"])
+        self.assertTrue(delta["voided_at"]["new"])
+        kept = self.db.get(FinanceTransaction, tx_id)
+        self.assertIsNotNone(kept.voided_at)
+        self.assertEqual((kept.created_at, kept.amount_minor, kept.booked_on), (datetime(2026, 9, 7, 10), 40000, date(2026, 9, 7)))
         surviving = self.db.get(WorkSession, work_id)
-        self.assertIsNone(surviving.finance_transaction_id)
+        self.assertEqual(surviving.finance_transaction_id, tx_id)
         self.assertEqual((surviving.date, surviving.hours), (date(2026, 9, 7), 2))
+        self.assertEqual(main.finance_transactions(), [], "zrušený řádek se nenabízí")
+        with self.assertRaises(main.HTTPException) as ctx:
+            main.delete_finance_transaction(tx_id)  # podruhé už neexistuje
+        self.assertEqual(ctx.exception.status_code, 404)
 
     def test_work_delete_preserves_finance_link_without_deleting_income(self):
         tx = FinanceTransaction(amount=400, category="work", transaction_type="income")
@@ -88,20 +96,27 @@ class DeletedRecordHistoryTestCase(unittest.TestCase):
         self.assertEqual(self.db.get(FinanceTransaction, tx_id).amount, 400)
 
     def test_delete_and_audit_rollback_together_on_failure(self):
-        cases = [(MffCharacter(name="Rollback build", status="built"), main.delete_mff_character), (FinanceTransaction(amount=1, category="test", transaction_type="expense"), main.delete_finance_transaction), (WorkSession(date=date(2026, 10, 7), hours=1), main.delete_work_session)]
+        from modules.finance import service as finance_service
+        cases = [(MffCharacter(name="Rollback build", status="built"), main.delete_mff_character, main),
+                 (FinanceTransaction(amount=1, category="test", transaction_type="expense"), main.delete_finance_transaction,
+                  finance_service),  # MRK-61: zrušení i audit píše služba
+                 (WorkSession(date=date(2026, 10, 7), hours=1), main.delete_work_session, main)]
         original_log = main.log_activity
         def fail_after_audit(*args, **kwargs):
             original_log(*args, **kwargs)
             args[0].flush()  # The audit INSERT has executed before the simulated failure.
             raise RuntimeError("Simulated write failure")
-        for obj, delete in cases:
+        for obj, delete, owner in cases:
             with self.subTest(record=type(obj).__name__):
                 self.db.add(obj)
                 self.db.commit()
                 item_id = obj.id
-                with patch.object(main, "log_activity", side_effect=fail_after_audit):
+                with patch.object(owner, "log_activity", side_effect=fail_after_audit):
                     with self.assertRaisesRegex(RuntimeError, "Simulated write failure"):
                         delete(item_id)
                 self.db.expire_all()
-                self.assertIsNotNone(self.db.get(type(obj), item_id))
+                kept = self.db.get(type(obj), item_id)
+                self.assertIsNotNone(kept)
+                if isinstance(kept, FinanceTransaction):
+                    self.assertIsNone(kept.voided_at, "zrušení se vrátilo spolu s auditem")
                 self.assertEqual(self.db.query(ActivityLog).count(), 0)

@@ -12,8 +12,10 @@ from module_contracts import (
     ChangeSource, activity_changes,
     ContextSection, DashboardSection, ModuleIntegrations, QuickAddKind, QuickAddRule, SearchSource,
 )
+from modules.finance.money import minor_to_decimal
+from modules.finance.service import active_transactions, month_totals_minor, totals_minor
 from text_utils import finance_category_label_cz, format_czk_cz, format_date_cz, format_num_cz, join_parts
-from time_utils import local_month_bounds_utc, today_local
+from time_utils import today_local
 
 ROW_LIMIT = 500
 MAX_AMOUNT = 10_000_000
@@ -22,11 +24,16 @@ MAX_AMOUNT = 10_000_000
 
 
 def search_finance(db, q):
-    for t in db.query(FinanceTransaction).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(ROW_LIMIT).all():
-        kind = "Příjem" if t.transaction_type == "income" else "Výdaj"
+    # MRK-61: jen nezrušené řádky; částka z amount_minor, datum = den zaúčtování
+    rows = (active_transactions(db)
+            .order_by(FinanceTransaction.booked_on.desc(), FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc())
+            .limit(ROW_LIMIT).all())
+    for t in rows:
+        kind = "Příjem" if t.direction == "in" else "Výdaj"
         category = finance_category_label_cz(t.category)
         title = t.description or category or kind
-        sub = join_parts(kind, format_czk_cz(t.amount), category if t.description else "", format_date_cz(t.created_at) if t.created_at else "")
+        sub = join_parts(kind, format_czk_cz(minor_to_decimal(abs(t.amount_minor))), category if t.description else "",
+                         format_date_cz(t.booked_on))
         yield "transaction", t.id, title, sub, f"{category} {t.category or ''} {kind}", "finance", f"/finance?transaction={t.id}"
 
 
@@ -34,25 +41,11 @@ def search_finance(db, q):
 
 
 def get_finance_with_goal(db, today: date | None = None):
-    transactions = db.query(FinanceTransaction).all()
-    income = 0.0
-    expenses = 0.0
+    # MRK-61: součty v haléřích (amount_minor) bez zrušených řádků; měsíc = pražský den zaúčtování.
     today = today or today_local()
-    # created_at je naive UTC → porovnání s pražským měsícem převedeným do UTC.
-    month_start_utc, month_end_utc = local_month_bounds_utc(today)
-    this_month_income = 0.0
-    this_month_expenses = 0.0
-    for t in transactions:
-        amt = float(t.amount or 0.0)
-        in_this_month = t.created_at is not None and month_start_utc <= t.created_at < month_end_utc
-        if (t.transaction_type or "").lower() == "income":
-            income += amt
-            if in_this_month:
-                this_month_income += amt
-        else:
-            expenses += amt
-            if in_this_month:
-                this_month_expenses += amt
+    total, month = totals_minor(db), month_totals_minor(db, today)
+    income, expenses = total["income_minor"] / 100, total["expenses_minor"] / 100  # jen tvar odpovědi API
+    this_month_income, this_month_expenses = month["income_minor"] / 100, month["expenses_minor"] / 100
     goal_row = (
         db.query(Goal)
         .filter(Goal.source == "finance_balance")
@@ -80,7 +73,7 @@ def get_finance_with_goal(db, today: date | None = None):
         "expenses": round(expenses, 2),
         "this_month_income": round(this_month_income, 2),
         "this_month_expenses": round(this_month_expenses, 2),
-        "transactions_count": len(transactions),
+        "transactions_count": total["count"],
         "goal": active_goal,
     }
 
