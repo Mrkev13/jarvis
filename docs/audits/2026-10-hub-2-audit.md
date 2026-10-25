@@ -35,7 +35,7 @@ reálných dat nebo zařízení, je označené **(ověřit lokálně)**.
 6. **Předměty nejdou upravit ani archivovat.** Existuje jen `GET /school/subjects` a `POST /school/subject`
    (`backend/main.py:1468,1472`); sloupec `Subject.active` používá jen Rychlé přidání (`backend/school_integrations.py:259`) (Z5).
 7. **Tři překrývající se „denní" obrazovky, žádná neukazuje vše podstatné.** Řídicí centrum nemá „co hoří", změny ani
-   další volný blok; Dnes je má, ale nikdo ho neotevírá; `recent_activity` v `/dashboard` frontend vůbec nečte (Z8).
+   další volný blok; Dnes je má, ale nikdo ho neotevírá; `recent_activity` v `/dashboard` frontend vůbec nečte; výchozí pořadí dává nahoru nepoužívané Klíčová čísla (Z8, Z28).
 8. **Navigace má 19 plochých položek a žádný způsob „schovat, ale nechat zapnuté"** (`frontend/lib/navigation.ts:11-37`,
    `frontend/components/Sidebar.tsx:26-60`) (Z9).
 9. **Opakovaná připomínka může přijít potichu.** Tag oznámení je na připomínku, ne na výskyt
@@ -70,7 +70,7 @@ Legenda: ✅ funguje · 🟡 částečně · ❌ chybí. „Testy" = backend `ba
 
 | Plocha | Stav | Důkaz |
 |---|---|---|
-| Řídicí centrum (`/`) | 🟡 widgety: briefing, weekly, „Dnes" (= jen 3 akce planneru), pozornost (= jen notifikace), cíle, upcoming, hry, rychlé akce; **chybí co hoří / změny / volný blok / kalendář** | `frontend/lib/dashboardLayout.ts:63-74`, `frontend/components/dashboard/widgets.tsx:364-391`, `backend/main.py:2460-2527` |
+| Řídicí centrum (`/`) | 🟡 rozložení upravitelné, ale jen v `localStorage` zařízení (Z28); widgety: briefing, weekly, „Dnes" (= jen 3 akce planneru), pozornost (= jen notifikace), cíle, upcoming, hry, rychlé akce; **chybí co hoří / změny / volný blok / kalendář** | `frontend/lib/dashboardLayout.ts:63-74`, `frontend/components/dashboard/widgets.tsx:364-391`, `backend/main.py:2460-2527` |
 | Dnes (`/today`) | ✅ timeline (připomínky, škola, návyky, fitness, kalendář, další volný blok), pozornost (max 8), priority, nadcházející (max 3) | `backend/today_service.py:33-34,231-276` |
 | Týdenní přehled (`/review`) | ✅ AI shrnutí týdne nad deterministickým snapshotem | `backend/weekly_snapshot.py:44-52` |
 | Plánovač (`/planner`) | 🟡 max 5 akcí z termínů a stagnace cílů; bez opakování a závislostí; **neřeší dostupnost modulů** | `backend/planner_service.py:415-416`, `backend/main.py:2304-2311` |
@@ -128,6 +128,7 @@ Závažnost: **blokující** (bez toho nemá smysl ladit další) · **vysoká**
 | Z24 | nízká | Paměť bez dedupe a bez expirace/druhu (trvalé vs. dočasné vs. rozhodnutí) | `backend/models.py:203-221`, `backend/tools.py:1218-1250` | uložit stejnou paměť 2× | šum v promptu (max 3 položky) |
 | Z25 | nízká | Fitness/Rehab zápis po jednotlivých sériích, bez šablon a „zopakovat minulý trénink" | `frontend/modules/fitness/SessionForm.tsx:34-51`, `docs/fitness.md:38` | zapsat 6 rehab cviků | modul se nepoužívá |
 | Z26 | nízká | UI cílů nenabízí 3 existující automatické zdroje (`work_total_hours`, `finance_total_balance`, `school_exams_passed`); `GoalRequest.source` bez allowlistu | `frontend/lib/goals.ts:22-33`, `backend/main.py:388-399` | – | nekonzistence |
+| Z28 | střední | Řídicí centrum ve výchozím pořadí dává nahoru nepoužívané karty (Klíčová čísla = Odpracováno, Výdělek, Bilance, Výdaje, pořadí 50) před Cíle (60), Nadcházející (70) a Hry (100); vlastní rozložení se ukládá jen do `localStorage` jednoho zařízení | `frontend/lib/dashboardLayout.ts:64-74,89`, `frontend/hooks/useDashboardLayout.ts:17,33,64` | otevřít `/` na telefonu po úpravě rozložení na PC → výchozí pořadí | více než polovina obrazovky jsou nepoužívané oblasti (vstup z používání); úpravu je nutné dělat na každém zařízení zvlášť |
 | Z27 | nízká | Chybí bezpečná cesta pro jednorázové souhrnné dotazy nad produkcí (statistiky ze vstupu) | žádný read-only endpoint/skript; `/scheduler/*`, `/backup/*` jsou provozní (`backend/main.py:2705-2741`) | – | statistiky používání nejdou získat bez změny ACL env souboru |
 
 **Ověřené hranice (bez porušení):**
@@ -414,7 +415,9 @@ Z8 + vstup z používání: Dnes a Týdenní přehled duplikují Řídicí centr
 - Řídicí centrum (`/`) převezme jádro `/today`: co hoří (overdue + testy do 7 dní), dnešní timeline, další volný blok,
   „od včera se změnilo" (top 5 z `/changes`), připomínky dnes.
 - Využít existující `/today` a `/changes` API; odstranit mrtvý `recent_activity` z `/dashboard`.
-- `/today` a `/review` zůstanou dostupné jako odkazy, ne položky hlavní navigace (M4.2).
+- `/today` a `/review` zůstanou dostupné jako odkazy z karet („Otevřít →"), ne položky hlavní navigace (M4.2).
+- Nové výchozí pořadí karet: co hoří / Nadcházející testy, Cíle, WoT nahoře; Klíčová čísla dolů (Z28).
+- Rozložení dashboardu uložit na server (např. jako uživatelské nastavení), aby platilo na telefonu i PC (Z28).
 
 ## Mimo scope
 - Nové datové zdroje; AI generování obsahu obrazovky.
@@ -422,13 +425,14 @@ Z8 + vstup z používání: Dnes a Týdenní přehled duplikují Řídicí centr
 ## Akceptační kritéria
 - [ ] Na 390 px je první obrazovka bez scrollu: co hoří + další položka dne.
 - [ ] Žádný blok se neopakuje dvakrát na téže obrazovce.
+- [ ] Rozložení upravené na PC platí i na telefonu; existující `localStorage` rozložení se při prvním načtení převezme.
 - [ ] Prázdné, chybové a načítací stavy podle `docs/design-system.md`.
 
 ## Jak ověřit
 ui-check (desktop + 390 px) s mock API; Standa týden reálného používání.
 
 ## Odkazy
-Z8; příloha A, B4 a B12.
+Z8, Z28; příloha A, B4 a B12.
 
 ### M4.2 Narrow navigation, System group and module parking
 
@@ -448,6 +452,7 @@ Z9: 19 položek. Vstup z používání určuje denně používané plochy.
 ## Akceptační kritéria
 - [ ] Na 390 px hlavní menu ≤ 8 položek; skupiny jsou rozbalitelné.
 - [ ] Vypnutý modul zmizí ze všech skupin; zapnutý ve „Další" funguje beze změny.
+- [ ] Zaparkovaný modul zmizí i z karet Řídicího centra (Klíčová čísla, Hry) – ověřeno ui-checkem.
 - [ ] `frontend/lib/moduleFramework.test.mjs` a registry parity zůstanou zelené.
 
 ## Jak ověřit
@@ -783,6 +788,26 @@ aplikační kód kromě `next.config.ts`; M3.3 je nezávislé na M3.1/M3.2.
 | Doporučení planneru | ✅ top 3 | ✅ priority | ❌ | ✅ |
 | Co se změnilo | ❌ (`recent_activity` nevyužito) | ❌ | ✅ aktivita | ❌ |
 
+**Mají samostatné stránky obsah navíc oproti kartám?** Ano:
+
+- karta „Dnes" na Řídicím centru jsou jen 3 akce planneru (`frontend/components/dashboard/widgets.tsx:364-391`), stránka
+  `/today` přidává timeline dne, pozornost a další volný blok (`backend/today_service.py:231-276`);
+- karta „Týdenní přehled" je malé shrnutí, stránka `/review` má celý přehled a historii týdnů (`frontend/app/review/page.tsx:34,121`).
+
+Proto je doporučení: stránky ponechat dostupné z odkazu na kartě, odebrat je z hlavní navigace (M4.2) a obsah, který
+na Řídicím centru chybí (timeline, další volný blok, co hoří), převzít do hlavní obrazovky (M4.1).
+
+**Nepoužívané karty na Řídicím centru:**
+
+- „Upravit dashboard" je umí skrýt a přeřadit už dnes, bez vývoje (`frontend/app/page.tsx:43,150`, `visible`/`order`
+  v `frontend/lib/dashboardLayout.ts:92-94`). Rozložení se ale ukládá jen do `localStorage` daného zařízení
+  (`frontend/hooks/useDashboardLayout.ts:17,33,64`), takže telefon a PC je nutné nastavit zvlášť (Z28).
+- Karty vypnutých modulů zmizí samy: `availableWidgets` (`frontend/lib/dashboardLayout.ts:84-85`). Kombinované karty se
+  ořežou po modulech – Klíčová čísla bez Práce ukáží jen Finance a naopak (`frontend/components/dashboard/widgets.tsx:334-341`),
+  Hry bez MFF jen WoT (`:516-525`). Zaparkování Práce, Financí a MFF flagem (M4.2) tedy uvolní horní polovinu obrazovky.
+- Výchozí pořadí dává Klíčová čísla (50) před Cíle (60), Nadcházející (70) a Hry (100) (Z28) → M4.1 změní výchozí
+  pořadí: Nadcházející testy, Cíle, WoT nahoru.
+
 Zdroje: `frontend/lib/dashboardLayout.ts:63-74`, `backend/today_service.py:231-276`, `backend/weekly_snapshot.py:44-52`,
 `backend/planner_service.py:415-416`. Chybí na hlavní obrazovce: co hoří, změny, další volný blok, kalendář → M4.1.
 
@@ -925,7 +950,8 @@ Předpoklad pro všechny scénáře mimo domov: **M2.1** (dnes blokuje vše).
 | Push připomínky se přehlédnou | nepohodlné ovládání | `requireInteraction`, `renotify`, akce, návod | M4.3 |
 | WoT ruční M-ko nenalezeno | nepohodlné ovládání | akce nahoru / Rychlé přidání | S1 |
 | „Nevím, jak to používat" | nepohodlné ovládání | denní scénáře + jedna obrazovka | M4.1, B12 |
-| Duplicita Dnes / Řídicí centrum / Týdenní přehled | nepohodlné ovládání | jedna hlavní obrazovka | M4.1 |
+| Duplicita Dnes / Řídicí centrum / Týdenní přehled | nepohodlné ovládání | stránky mají obsah navíc → z hlavní navigace pryč, dostupné z odkazu na kartě; chybějící obsah do hlavní obrazovky | M4.1, M4.2, B4 |
+| Řídicí centrum ukazuje nepoužívané oblasti | nepohodlné ovládání | dnes jde skrýt přes „Upravit dashboard" (jen na zařízení); karty vypnutých modulů zmizí samy; nové výchozí pořadí + rozložení na serveru | Z28, M4.1, M4.2, B4 |
 | Přeplněná navigace | nepohodlné ovládání | zúžení + skupiny + parkování | M4.2 |
 | AI chat „nevím, na co se ptát" | nepohodlné ovládání | kontextové návrhy | M4.4 |
 | Fitness/Rehab pracné | nepohodlné ovládání | sady cviků nebo zaparkovat | S7 / M4.2, otázka 6 |
@@ -1010,6 +1036,8 @@ Předpoklad pro všechny scénáře mimo domov: **M2.1** (dnes blokuje vše).
 
 ## Příloha E: Metodika
 
+- **Vstup z používání** je podle popisu MRK-69 ve stavu 2026-10-25 21:24 UTC, včetně bodů doplněných během auditu
+  („Řídicí centrum ukazuje nepoužívané oblasti", upřesněná duplicita Dnes / Týdenní přehled).
 - **Zdroj:** `origin/main` @ `e9ce037`. Povinné dokumenty podle MRK-69 přečteny; otevřené issues a milníky projektu
   Standa Hub v Linearu prošly.
 - **Sběr důkazů:** čtyři paralelní čtecí průzkumy (AI + Finance hranice; Paměť / Search / Dnes / Planner / navigace;
