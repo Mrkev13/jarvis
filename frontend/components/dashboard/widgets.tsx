@@ -83,13 +83,15 @@ type FinanceQuick = {
 };
 
 type UpcomingItem = {
-  type: "assignment" | "exam" | "goal_target";
+  type: "assignment" | "exam" | "goal_target" | "calendar_event";
   id: number;
+  key?: string;            // MRK-76: Moodle událost (opakovaná má víc výskytů)
   title: string;
   area: string;
   date: string;
   days_left: number;
   overdue: boolean;
+  subject_name?: string;   // MRK-76: předmět Moodle termínu
 };
 
 type TodayAction = {
@@ -425,18 +427,19 @@ function UpcomingWidget({ data, loading, index }: WidgetProps) {
             const label = upcomingLabel(u);
             return (
               <EntityRow
-                key={`${u.type}-${u.id}`}
+                key={`${u.type}-${u.key ?? u.id}`}
                 tone={u.overdue ? "danger" : "neutral"}
                 badges={
                   <>
                     {u.type === "assignment" ? <StatusBadge>Úkol</StatusBadge> : null}
                     {u.type === "exam" ? <StatusBadge tone="info">Zkouška</StatusBadge> : null}
                     {u.type === "goal_target" ? <AreaBadge area={u.area} /> : null}
+                    {u.type === "calendar_event" ? <StatusBadge tone="info">Moodle</StatusBadge> : null}
                     <StatusBadge tone={label.tone}>{label.text}</StatusBadge>
                   </>
                 }
                 title={u.title}
-                meta={formatDate(u.date)}
+                meta={u.subject_name ? `${u.subject_name} · ${formatDate(u.date)}` : formatDate(u.date)}
               />
             );
           })}

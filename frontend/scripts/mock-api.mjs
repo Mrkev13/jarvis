@@ -34,6 +34,7 @@ const GET_ROUTES = {
   "/mff/summary": () => fixture("mff-summary"),
   "/school/assignments": () => schoolState.assignments,
   "/school/exams": () => schoolState.exams,
+  "/school/moodle-deadlines": () => fixture("school-moodle-deadlines"),  // MRK-76: Moodle termíny u předmětu
   // MRK-42: studijní materiály (syntetické, žádná URL Moodlu ani token)
   "/school/materials": () => fixture("school-materials"),
   "/__mock/materials/imports": () => materialImports,  // MRK-56: velikosti přijatých ZIPů (kontrola UI)

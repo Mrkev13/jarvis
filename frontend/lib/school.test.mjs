@@ -128,3 +128,14 @@ test("subjectPatch posílá jen změny a odmítne neplatný formulář", async (
   assert.equal(subjectPatch(s, { ...subjectDraftFrom(s), credits: "100" }), null);
   assert.equal(subjectPatch(s, { ...subjectDraftFrom(s), credits: "2.5" }), null);
 });
+
+// MRK-76: Moodle termíny – jen platné položky s odkazem do Kalendáře
+test("moodleDeadlines bere jen platné položky", async () => {
+  const { moodleDeadlines } = await import("./school.ts");
+  const ok = { key: "7", event_id: 7, title: "Test 1", date: "2026-10-14", time: "22:00", all_day: false,
+    subject_id: 1, subject_name: "Právo", href: "/calendar?event=7" };
+  assert.deepEqual(moodleDeadlines({ items: [ok, { ...ok, href: "https://evil" }, null, { title: 1 }] }), [ok]);
+  assert.deepEqual(moodleDeadlines({ items: [], calendar_enabled: false }), []);
+  assert.deepEqual(moodleDeadlines(null), []);
+  assert.deepEqual(moodleDeadlines("x"), []);
+});

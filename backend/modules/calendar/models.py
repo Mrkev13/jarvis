@@ -78,3 +78,5 @@ class CalendarEvent(Base):
     # MRK-40: NULL = present in the source's latest complete snapshot. Set when a complete snapshot no longer
     # contains the identity (never a deletion); cleared when it reappears. Distinct from STATUS:CANCELLED.
     source_missing_at = Column(UTCDateTime(), nullable=True)
+    # MRK-76: ICS CATEGORIES (Moodle: course short name). Metadata only – matched to a subject at read time.
+    course_ref = Column(String(100), nullable=True)

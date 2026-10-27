@@ -244,6 +244,29 @@ full backend **955 passed, 8 skipped**; frontend **347 passed**; lint,
 TypeScript, pyflakes and production build passed; Alembic head unchanged.
 40 weekly series over 31 days: ~27 ms per query. **Real Groq requests: 0.**
 
+## Moodle events as school deadlines (MRK-76)
+
+- The parser reads `CATEGORIES`. Moodle exports the course short name there. Exactly one distinct value is stored as
+  `calendar_events.course_ref` (migration `0026_calendar_event_course_ref`, additive). None, several or an oversized
+  value → `NULL`, and the event is never dropped because of it. `course_ref` is link metadata: filling or changing it
+  writes no Activity or domain event, so the first sync after the upgrade fills older rows silently.
+- Linking happens at read time in the School-owned bridge `backend/school_moodle.py` (module packages never import
+  each other). `course_ref` must equal a study course's `short_name` (trimmed, case-insensitive), and that course must
+  be mapped to a subject (`StudyCourse.subject_id`, manual mapping on /school/materials). Name similarity is never
+  used. A short name mapped to several different subjects matches nothing. Unmatched events stay ordinary calendar
+  events.
+- Uses:
+  - Škola → Termíny: `GET /school/moodle-deadlines?days=60`, badge "Moodle", link to the Calendar.
+  - Dnes: a school item "Moodle · <předmět>". It has the same ref as the Calendar item, so the global dedupe shows it
+    once.
+  - Dashboard "Nadcházející": up to 7 days.
+  - AI school context: the line "Moodle termíny".
+  - A Moodle event on the same day and subject as a manual exam or assignment is not repeated. With the Calendar
+    module off, none of this is shown.
+- Quiz "opens/closes" pairs stay two separate events until a real export shows a safe way to pair them.
+- Real-export check (prints only counts and value shapes, never the URL or content):
+  `python scripts/check_moodle_ics_categories.py --env-file <protected production env>`.
+
 ## Framework and UI
 
 Backend and frontend manifests register only implemented capabilities: nav,

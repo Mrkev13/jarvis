@@ -375,6 +375,25 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events")).scalar(), 1, "no row lost")
         alembic_cmd.upgrade(self.cfg, "head")
 
+    def test_0026_adds_calendar_course_ref_without_touching_rows(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0025_finance_ledger")
+        self.conn.execute(text("INSERT INTO calendar_sources (kind, name, enabled, timezone, created_at) "
+                               "VALUES ('ics', 'Synthetic', 1, 'Europe/Prague', CURRENT_TIMESTAMP)"))
+        self.conn.execute(text("INSERT INTO calendar_events (source_id, external_uid, recurrence_id, title, starts_at, ends_at, "
+                               "all_day, timezone, status, sequence, imported_at, created_at, updated_at) VALUES (1, 'q@test', '', "
+                               "'Test closes', '2026-10-12 08:00:00', '2026-10-12 08:00:00', 0, 'Europe/Prague', 'active', 0, "
+                               "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        self.conn.commit()
+        alembic_cmd.upgrade(self.cfg, "0026_calendar_event_course_ref")
+        self.assertIn("course_ref", {c["name"] for c in inspect(self.conn).get_columns("calendar_events")})
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events WHERE course_ref IS NULL")).scalar(), 1)
+        alembic_cmd.downgrade(self.cfg, "0025_finance_ledger")
+        self.assertNotIn("course_ref", {c["name"] for c in inspect(self.conn).get_columns("calendar_events")})
+        self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events")).scalar(), 1, "no row lost")
+        alembic_cmd.upgrade(self.cfg, "head")
+
     def test_0021_adds_study_materials_and_downgrades_cleanly(self):
         alembic_cmd.upgrade(self.cfg, "0020_calendar_source_presence")
         self.conn.execute(text("INSERT INTO subjects (name, active) VALUES ('Synthetic subject', 1)"))

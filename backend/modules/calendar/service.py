@@ -136,6 +136,8 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
             # It is not a business change and emits no activity/domain event.
             if _rank(sequence, source_updated) > _rank(row.sequence, row.source_updated_at):
                 row.sequence, row.source_updated_at = sequence, source_updated
+            if incoming.starts_at is not None and row.course_ref != incoming.course_ref:
+                row.course_ref = incoming.course_ref  # MRK-76: link metadata, no activity (first sync fills old rows)
             if restoring:
                 _restore(db, row, source.id, now, stats)
             else:
@@ -147,6 +149,8 @@ def import_ics(db, source: CalendarSource, data: bytes, *, now=None) -> dict:
             db.add(row)
         for name, value in values.items():
             setattr(row, name, value)
+        if incoming.starts_at is not None:  # an identity-only cancellation keeps the known course
+            row.course_ref = incoming.course_ref
         row.sequence = sequence
         row.source_updated_at = source_updated
         row.imported_at = row.updated_at = now
