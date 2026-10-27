@@ -375,7 +375,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         {
             "area": {
                 "type": "string",
-                "enum": ["finance", "school", "work", "wot", "mff", "personal", "travel", "fitness", "hobby"],
+                "enum": ["school", "work", "wot", "mff", "personal", "travel", "fitness", "hobby"],
             },
             "title": _STR,
             "id": _INT,
