@@ -12,6 +12,7 @@ from sqlalchemy import update as _sql_update
 
 from tool_registry import MANUAL_ONLY_SPECS, READ_SPECS, TOOL_SPECS, TOOLS_BY_NAME, WRITE_SPECS
 from activity_service import log_activity
+from finance_ai_policy import FINANCE_AREA
 from database import SessionLocal
 from models import PendingAction
 from time_utils import now_local
@@ -124,6 +125,8 @@ TOOL_FUNCTIONS = {**READ_TOOL_FUNCTIONS, **WRITE_TOOL_FUNCTIONS}
 WRITE_TOOL_NAMES = set(WRITE_TOOL_FUNCTIONS.keys())
 # MRK-60: jen pro pending akce ručních zdrojů (Rychlé přidání); model je nevidí a jeho návrh se neprovede.
 MANUAL_ONLY_TOOL_FUNCTIONS = {s.name: s.func for s in MANUAL_ONLY_SPECS}
+# MRK-71: Finance write tools (incl. manual-only Quick Add) – their failures are logged under Finance.
+FINANCE_WRITE_TOOLS = frozenset(s.name for s in (*WRITE_SPECS, *MANUAL_ONLY_SPECS) if FINANCE_AREA in s.areas)
 
 
 def _store_pending_action(db, tool: str, arguments: dict, *, ttl_minutes: int = 10) -> str:
@@ -955,8 +958,11 @@ def execute_confirm_action(action_id: str):
         except Exception as exc:
             _finalize_pending_status(db, action_id, "failed")
             try:
+                # MRK-71: a failed Finance write (manual Quick Add) can carry amounts in the error text → log it under
+                # Finance, which AI activity/briefing/weekly filters exclude, instead of "system".
+                area = FINANCE_AREA if tool_name in FINANCE_WRITE_TOOLS else ("system" if manual else "ai")
                 log_activity(
-                    db, "system" if manual else "ai", "error" if manual else "reject",
+                    db, area, "error" if manual else "reject",
                     (f"{MANUAL_SOURCES[source]} – {ai_action_label(tool_name)}: {str(exc)[:120]}" if manual
                      else f"Akci AI se nepodařilo provést – {ai_action_label(tool_name)}: {str(exc)[:120]}"),
                     entity_type=tool_name,

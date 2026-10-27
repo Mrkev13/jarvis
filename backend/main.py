@@ -596,7 +596,8 @@ def chat(request: ChatRequest):
         planner_mode, planner_summary_intro = planner_intent
         planner_db = SessionLocal()
         try:
-            plan_payload = generate_plan(planner_db, mode=planner_mode)
+            # MRK-71: the answer is saved to the conversation (LLM history) → no Finance-computed goals
+            plan_payload = generate_plan(planner_db, mode=planner_mode, exclude_finance=True)
             planner_db.commit()
             card_type = (
                 "goal_review" if planner_mode == PLANNER_MODE_GOAL_REVIEW

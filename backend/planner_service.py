@@ -7,6 +7,7 @@ import calendar
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from finance_ai_policy import is_finance_goal
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
 from text_utils import days_left_cz, format_date_cz, format_hours_cz, memory_count_cz
@@ -129,9 +130,15 @@ def _deadline_actions_for_exams(mode: str, db: Session, today: date) -> list[Pla
     return actions
 
 
-def _deadline_actions_for_goals(mode: str, db: Session, today: date) -> list[PlannerActionCandidate]:
+def _goals(query, exclude_finance: bool) -> list[Goal]:
+    """MRK-71: the chat planner's text is stored in the conversation and sent to the LLM later, so it leaves out
+    goals computed from Finance. The /planner page (no LLM) still shows them."""
+    return [g for g in query.all() if not (exclude_finance and is_finance_goal(g.source))]
+
+
+def _deadline_actions_for_goals(mode: str, db: Session, today: date, exclude_finance: bool = False) -> list[PlannerActionCandidate]:
     actions: list[PlannerActionCandidate] = []
-    items = db.query(Goal).filter(Goal.target_date.is_not(None)).all()
+    items = _goals(db.query(Goal).filter(Goal.target_date.is_not(None)), exclude_finance)
 
     for it in items:
         if not it.target_date:
@@ -175,9 +182,9 @@ def _deadline_actions_for_goals(mode: str, db: Session, today: date) -> list[Pla
     return actions
 
 
-def _stagnation_actions(mode: str, db: Session, today: date) -> list[PlannerActionCandidate]:
+def _stagnation_actions(mode: str, db: Session, today: date, exclude_finance: bool = False) -> list[PlannerActionCandidate]:
     actions: list[PlannerActionCandidate] = []
-    goals = db.query(Goal).all()
+    goals = _goals(db.query(Goal), exclude_finance)
     for g in goals:
         status = (g.status or "").lower()
         if status in GOAL_INACTIVE_STATUSES:
@@ -330,7 +337,7 @@ def action_ref(recommendation_key: str | None) -> str | None:
     return f"{kind}:{parts[-1]}" if kind else None
 
 
-def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
+def generate_plan(db: Session, mode: str, today: date | None = None, *, exclude_finance: bool = False) -> dict:
     d = today or today_local()
     now = _now()
     m = (mode or "").strip().lower()
@@ -338,7 +345,7 @@ def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
         m = "weekly"
 
     if m == "goal_review":
-        goals = db.query(Goal).all()
+        goals = _goals(db.query(Goal), exclude_finance)
         items = []
         for g in goals:
             status = (g.status or "").lower()
@@ -404,9 +411,9 @@ def generate_plan(db: Session, mode: str, today: date | None = None) -> dict:
     candidates: list[PlannerActionCandidate] = []
     candidates.extend(_deadline_actions_for_assignments(m, db, d))
     candidates.extend(_deadline_actions_for_exams(m, db, d))
-    candidates.extend(_deadline_actions_for_goals(m, db, d))
+    candidates.extend(_deadline_actions_for_goals(m, db, d, exclude_finance))
     candidates.extend(_work_behind_actions(m, db, d))
-    candidates.extend(_stagnation_actions(m, db, d))
+    candidates.extend(_stagnation_actions(m, db, d, exclude_finance))
 
     candidates.sort(key=lambda c: (c.priority, c.area, c.title))
 
