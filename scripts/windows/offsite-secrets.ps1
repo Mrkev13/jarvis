@@ -90,7 +90,7 @@ try {
         $state.password_filled = ((Get-Item -LiteralPath $password).Length -ge 20)
     }
     foreach ($key in $state.Keys) { Write-Output ("{0}: {1}" -f $key, $state[$key]) }
-    $ready = -not ($state.Values | Where-Object { $_ -eq $false })
+    $ready = -not ($state.Values -contains $false)   # MRK-93: piping to Where-Object yields $false itself, and -not $false is True
     Write-Output ("ready: {0}" -f $ready)
     if ($Mode -eq 'Check' -and -not $ready) { exit 2 }
     exit 0
