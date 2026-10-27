@@ -10,6 +10,7 @@ from modules.school.extract import PAGE_MARK_CLOSE, PAGE_MARK_OPEN
 from module_contracts import ContextRequest, ContextSection, EntityRef, SearchSource
 from modules.school.models import StudyCourse, StudyMaterial
 from modules.school.router import router
+from modules.school.subjects import router as subjects_router
 from time_utils import local_to_utc
 
 SEARCH_LIMIT = 500
@@ -72,4 +73,4 @@ SEARCH = (SearchSource('school_materials', 11, search_materials),)
 CONTEXT = (ContextSection('school_materials', ('materia', 'prezentac', 'skripta', 'podklad', 'studijni', 'moodle', 'slajd', 'pdf', 'kapitol', 'ucit'),
                           order=11, build=context_materials),)
 ENTITY_REFS = (EntityRef('study_material', MATERIAL_HREF),)
-ROUTERS = (router,)
+ROUTERS = (router, subjects_router)  # MRK-75 PATCH /school/subject/{id}

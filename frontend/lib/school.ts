@@ -165,3 +165,44 @@ export function examResultLabel(type: string | null | undefined, value: string |
   if (type === "grade") return `známka ${value}`;
   return value;
 }
+
+// ---------- MRK-75: úprava a archivace předmětů ----------
+
+export type SchoolSubject = {
+  id: number;
+  name: string;
+  code: string;
+  semester: string;
+  credits: number;
+  active: boolean;
+};
+
+export type SubjectDraft = { name: string; code: string; semester: string; credits: string };
+
+/** Předměty, které se nabízejí pro nové úkoly, zkoušky a mapování (archivované ne). */
+export function offeredSubjects<T extends { active?: boolean }>(subjects: T[]): T[] {
+  return subjects.filter((s) => s.active !== false);
+}
+
+/** Seznam v sekci Předměty: aktivní; s přepínačem i archivované (až za aktivními). */
+export function visibleSubjects(subjects: SchoolSubject[], showArchived: boolean): SchoolSubject[] {
+  const active = subjects.filter((s) => s.active);
+  return showArchived ? [...active, ...subjects.filter((s) => !s.active)] : active;
+}
+
+export function subjectDraftFrom(s: SchoolSubject): SubjectDraft {
+  return { name: s.name, code: s.code ?? "", semester: s.semester ?? "", credits: String(s.credits ?? 0) };
+}
+
+/** Jen změněná pole pro PATCH; null = neplatný formulář (prázdný název, kredity mimo 0–99). */
+export function subjectPatch(original: SchoolSubject, draft: SubjectDraft): Partial<SchoolSubject> | null {
+  const name = draft.name.trim();
+  const credits = draft.credits.trim() === "" ? 0 : Number(draft.credits);
+  if (!name || !Number.isInteger(credits) || credits < 0 || credits > 99) return null;
+  const next = { name, code: draft.code.trim(), semester: draft.semester.trim(), credits };
+  const patch: Partial<SchoolSubject> = {};
+  for (const key of ["name", "code", "semester", "credits"] as const) {
+    if (next[key] !== (original[key] ?? (key === "credits" ? 0 : ""))) (patch as Record<string, unknown>)[key] = next[key];
+  }
+  return patch;
+}

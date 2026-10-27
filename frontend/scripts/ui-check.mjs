@@ -2354,6 +2354,55 @@ await wotReset();
   check("škola mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
+// MRK-75 – předměty: úprava, archivace / obnovení, archiv mimo nabídky (stavový mock).
+{
+  const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  await schoolReset();
+  const { ctx, page, errors } = await open("/school", { width: 1366, height: 900 });
+  const list = page.getByRole("list", { name: "Předměty" });
+  const card = (id) => list.locator(`[data-search-target="subject-${id}"]`);
+  const toggle = page.getByLabel(/^Zobrazit archivované/);
+  check("předměty: archivovaný skrytý, přepínač s počtem", (await list.locator("li").count()) === 3 && (await card(4).count()) === 0 && (await toggle.count()) === 1 && (await toggle.locator("..").innerText()).includes("(1)"));
+  await page.getByRole("button", { name: "Přidat zkoušku" }).click().catch(() => undefined);
+  const examSubjects = await page.locator("#school-exam-form select").first().locator("option").allInnerTexts().catch(() => []);
+  check("předměty: archivovaný není ve formuláři", examSubjects.length === 3 && !examSubjects.includes("Právo"), examSubjects.join(", "));
+  await toggle.check();
+  check("předměty: archiv po zapnutí se štítkem a Obnovit", (await card(4).count()) === 1 && (await card(4).innerText()).includes("Archivovaný") && (await card(4).getByRole("button", { name: "Obnovit" }).count()) === 1);
+  await card(3).getByRole("button", { name: "Archivovat" }).click();
+  await page.waitForTimeout(700);
+  check("předměty: Archivovat přesune předmět do archivu", (await card(3).innerText()).includes("Archivovaný") && (await toggle.locator("..").innerText()).includes("(2)"));
+  await card(2).getByRole("button", { name: "Upravit" }).click();
+  const form = page.getByRole("form", { name: "Upravit předmět Fyzika" });
+  await form.getByLabel("Název *").fill("  ");
+  await form.getByRole("button", { name: "Uložit" }).click();
+  check("předměty: prázdný název = chyba, formulář zůstane", (await form.getByRole("alert").count()) === 1);
+  await form.getByLabel("Název *").fill("Fyzika I");
+  await form.getByLabel("Kredity").fill("6");
+  await page.screenshot({ path: `${OUT}school-subjects-edit.png`, fullPage: true });
+  await form.getByRole("button", { name: "Uložit" }).click();
+  await page.waitForTimeout(700);
+  check("předměty: úprava uložena", (await card(2).innerText()).includes("Fyzika I") && (await card(2).innerText()).includes("6 kreditů"));
+  await card(4).getByRole("button", { name: "Obnovit" }).click();
+  await page.waitForTimeout(700);
+  check("předměty: Obnovit vrátí předmět", !(await card(4).innerText()).includes("Archivovaný"));
+  await page.screenshot({ path: `${OUT}school-subjects.png`, fullPage: true });
+  check("předměty: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await schoolReset();
+}
+{
+  const { ctx, page, errors } = await open("/school?subject=4", { width: 390, height: 844 });
+  await page.waitForTimeout(800);
+  const archived = page.locator('[data-search-target="subject-4"]');
+  check("předměty mobil: odkaz z hledání ukáže archivovaný předmět", (await archived.count()) === 1 && (await archived.innerText()).includes("Archivovaný"));
+  check("předměty mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  const b = await archived.getByRole("button", { name: "Obnovit" }).boundingBox();
+  check("předměty mobil: Obnovit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));
+  await page.locator('[data-search-target="subject-2"]').getByRole("button", { name: "Upravit" }).click();
+  await page.screenshot({ path: `${OUT}school-subjects-mobile.png`, fullPage: true });
+  check("předměty mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
 // 30) MRK-16 – Jarvis companion: volné kotvy (nezakrývá obsah), scroll, stavy, chůze, klik, bubliny,
 //     reduced motion, vypnutí, mobil, záloha obrázku, jediný Jarvis na /ai.
 {

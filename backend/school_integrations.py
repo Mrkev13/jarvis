@@ -38,7 +38,8 @@ def search_school(db, q):
     subj = lambda sid: subjects[sid].name if sid in subjects else ""  # noqa: E731
 
     for s in subjects.values():
-        yield "subject", s.id, s.name, join_parts("Předmět", s.code, s.semester), f"{s.code} {s.semester}", "school", f"/school?subject={s.id}"
+        yield ("subject", s.id, s.name, join_parts("Předmět", s.code, s.semester, "archivovaný" if s.active is False else ""),
+               f"{s.code} {s.semester}", "school", f"/school?subject={s.id}")
     for a in db.query(Assignment).order_by(Assignment.due_date.desc()).limit(ROW_LIMIT).all():
         done = is_assignment_done(a.status)
         sub = join_parts("Úkol", subj(a.subject_id), f"termín {format_date_cz(a.due_date)}" if a.due_date else "", "hotovo" if done else "")
@@ -256,7 +257,7 @@ def load_subjects(db) -> list[dict]:
     if db is None:
         return []
     return [{"id": s.id, "name": s.name, "code": s.code or ""} for s in
-            db.query(Subject).filter(Subject.active == True).order_by(Subject.name).limit(200).all()]  # noqa: E712
+            db.query(Subject).filter(Subject.active.isnot(False)).order_by(Subject.name).limit(200).all()]
 
 
 def match_subjects(f: str, subjects: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -384,10 +385,12 @@ INTEGRATIONS = ModuleIntegrations(
     # MRK-28: dokončení/znovuotevření = doménové události, ostatní změny školy z Aktivity
     changes=(ChangeSource(
         "school", areas=frozenset({"school"}),
-        from_event=event_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}", **materials.CHANGE_HREFS},
+        from_event=event_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}",
+                                  "subject": "/school?subject={id}", **materials.CHANGE_HREFS},
                                  {"school.assignment.completed": "Úkol splněn", "school.assignment.reopened": "Úkol znovu otevřen",
                                   "school.exam.closed": "Zkouška uzavřena", "school.exam.reopened": "Zkouška znovu otevřena",
-                                  **materials.CHANGE_TITLES}),
+                                  "school.subject.updated": "Předmět upraven", "school.subject.archived": "Předmět archivován",
+                                  "school.subject.restored": "Předmět obnoven", **materials.CHANGE_TITLES}),
         from_activity=activity_changes({"assignment": "/school?assignment={id}", "exam": "/school?exam={id}",
                                         **materials.CHANGE_HREFS}, "/school"),
     ),),

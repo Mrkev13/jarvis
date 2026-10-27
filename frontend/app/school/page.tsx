@@ -28,7 +28,6 @@ import { formatDate, formatRelativeDays } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
 import {
   assignmentStatusMeta,
-  creditsLabel,
   daysUntil,
   deadlineMeta,
   emptyCloseDraft,
@@ -41,18 +40,14 @@ import {
   examTypeLabel,
   isDoneStatus,
   isExamClosed,
+  offeredSubjects,
   sortByDate,
+  type SchoolSubject,
 } from "@/lib/school";
 import { cx, priorityTone } from "@/lib/ui";
+import { SubjectList } from "@/modules/school/SubjectList";
 
-type Subject = {
-  id: number;
-  name: string;
-  code: string;
-  semester: string;
-  credits: number;
-  active: boolean;
-};
+type Subject = SchoolSubject;
 
 type Assignment = {
   id: number;
@@ -165,7 +160,7 @@ export default function SchoolPage() {
   const loadData = useCallback(async () => {
     try {
       const [subjRes, asRes, examRes] = await Promise.all([
-        apiFetch("/school/subjects"),
+        apiFetch("/school/subjects?include_archived=true"),  // MRK-75: archiv jen v sekci Předměty
         apiFetch("/school/assignments"),
         apiFetch("/school/exams"),
       ]);
@@ -179,16 +174,10 @@ export default function SchoolPage() {
       setAssignments(asgns);
       setExams(exs);
 
-      if (subj.length > 0) {
-        setAssignmentDraft((p) => ({
-          ...p,
-          subject_id: p.subject_id || String(subj[0].id),
-        }));
-        setExamDraft((p) => ({
-          ...p,
-          subject_id: p.subject_id || String(subj[0].id),
-        }));
-      }
+      const offered = offeredSubjects(subj);
+      const keep = (id: string) => (offered.some((s) => String(s.id) === id) ? id : offered[0] ? String(offered[0].id) : "");
+      setAssignmentDraft((p) => ({ ...p, subject_id: keep(p.subject_id) }));
+      setExamDraft((p) => ({ ...p, subject_id: keep(p.subject_id) }));
 
       setError(null);
       setLoadState("ready");
@@ -297,7 +286,7 @@ export default function SchoolPage() {
         due_date: "",
         priority: "medium",
         status: "todo",
-        subject_id: subjects[0] ? String(subjects[0].id) : "",
+        subject_id: offeredSubjects(subjects)[0] ? String(offeredSubjects(subjects)[0].id) : "",
       });
       await loadData();
     } catch (err) {
@@ -340,7 +329,7 @@ export default function SchoolPage() {
         exam_date: "",
         status: "upcoming",
         notes: "",
-        subject_id: subjects[0] ? String(subjects[0].id) : "",
+        subject_id: offeredSubjects(subjects)[0] ? String(offeredSubjects(subjects)[0].id) : "",
       });
       await loadData();
     } catch (err) {
@@ -607,12 +596,12 @@ export default function SchoolPage() {
     </>
   );
 
-  const subjectOptions = subjects.map((s) => (
+  const subjectOptions = offeredSubjects(subjects).map((s) => (
     <option key={s.id} value={String(s.id)}>
       {s.name}
     </option>
   ));
-  const subjectHint = subjects.length === 0 ? "Nejdřív přidej předmět." : undefined;
+  const subjectHint = offeredSubjects(subjects).length === 0 ? "Nejdřív přidej (nebo obnov) předmět." : undefined;
 
   return (
     <ContentContainer>
@@ -967,26 +956,7 @@ export default function SchoolPage() {
               </Card>
             )}
 
-            {subjects.length === 0 ? (
-              <EmptyState compact>Zatím žádné předměty.</EmptyState>
-            ) : (
-              <ul aria-label="Předměty" className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {subjects.map((s) => (
-                  <Card as="li" inset key={s.id} data-search-target={`subject-${s.id}`} className={cx("min-w-0", !s.active && "opacity-70")}>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <h3 className="min-w-0 break-words font-medium text-ink">{s.name}</h3>
-                      {s.code ? <span className="font-mono text-xs text-ink-muted">{s.code}</span> : null}
-                      {!s.active ? <StatusBadge tone="neutral">Neaktivní</StatusBadge> : null}
-                    </div>
-                    {s.semester || s.credits > 0 ? (
-                      <p className="mt-0.5 text-sm text-ink-muted">
-                        {[s.semester, s.credits > 0 ? creditsLabel(s.credits) : ""].filter(Boolean).join(" · ")}
-                      </p>
-                    ) : null}
-                  </Card>
-                ))}
-              </ul>
-            )}
+            <SubjectList subjects={subjects} onChanged={loadData} />
           </PageSection>
         </>
       )}
