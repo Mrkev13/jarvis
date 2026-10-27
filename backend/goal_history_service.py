@@ -7,9 +7,13 @@ import calendar
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam
+from activity_service import log_activity
+from models import Goal, GoalProgressHistory, WorkSession, MffCharacter, Assignment, Exam, WotMilestone
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_PASSED_STATUSES, MFF_BUILT_STATUSES, norm
 from time_utils import today_local
+
+
+WOT_ACE_MASTERY_SOURCE = "wot_ace_mastery_count"
 
 
 def _float_equal(a: float | None, b: float | None) -> bool:
@@ -122,6 +126,15 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
             )
         ), True
 
+    if source == WOT_ACE_MASTERY_SOURCE:
+        # MRK-82: every "Mistr" (ace) record counts, repeated ones on the same tank too (Standa, 2026-10-25)
+        total = (
+            db.query(func.count(WotMilestone.id))
+            .filter(WotMilestone.milestone_type == "mastery", WotMilestone.mastery == "ace")
+            .scalar()
+        )
+        return float(total or 0), True
+
     return 0.0, False
 
 
@@ -178,6 +191,28 @@ def record_goal_progress_snapshot(
 def ensure_goal_progress_snapshot(db: Session, goal: Goal, today: date | None = None) -> bool:
     progress, current_value = compute_goal_progress_and_value(db, goal, today=today)
     return record_goal_progress_snapshot(db, goal.id, progress, current_value)
+
+
+def refresh_automatic_goals(db: Session, sources: set[str], *, user_context: str = "manual") -> None:
+    """Snapshot automatic goals fed by `sources` inside the caller's transaction (caller commits).
+
+    An Activity row is written only when the goal's percentage actually changed.
+    """
+    goals = db.query(Goal).filter(func.lower(Goal.tracking_type) == "automatic", Goal.source.in_(sorted(sources))).all()
+    for g in goals:
+        # The value is computed live, so after the change "before" can only come from the last stored snapshot.
+        last = (
+            db.query(GoalProgressHistory.progress)
+            .filter(GoalProgressHistory.goal_id == g.id)
+            .order_by(GoalProgressHistory.recorded_at.desc(), GoalProgressHistory.id.desc())
+            .first()
+        )
+        before = int(last[0] or 0) if last else 0
+        if ensure_goal_progress_snapshot(db, g):
+            after, _ = compute_goal_progress_and_value(db, g)
+            if before != after:
+                log_activity(db, "goals", "snapshot", f"Cíl '{g.title}' {before}% → {after}%",
+                             entity_type="Goal", entity_id=g.id, user_context=user_context)
 
 
 @dataclass(frozen=True)
