@@ -9,7 +9,7 @@
 - **Frontend**: Next.js 16 App Router (TypeScript) + Tailwind. Port `3000` běží samostatně, komunikuje s BE přes `NEXT_PUBLIC_API_URL` (typicky `http://…:8000`).
 - **Spouštění BE ( produkce )**:
   ```
-  uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+  uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers
   ```
   `--workers 1` je **VYŽADOVÁNO**, protože APScheduler BackgroundScheduler běží per-process (bez DB advisory locku by se hourly job spustil N×).
 

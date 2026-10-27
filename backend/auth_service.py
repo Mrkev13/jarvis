@@ -1,5 +1,6 @@
 import os
 import hashlib
+import ipaddress
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,7 @@ import bcrypt
 
 from database import SessionLocal
 from models import AuthSession
-from env_config import env_bool, env_str
+from env_config import env_bool, env_ip_networks, env_str
 
 
 def _utc_now() -> datetime:
@@ -44,9 +45,15 @@ else:
     AUTH_SESSION_TTL_MINUTES = int(os.environ.get("AUTH_SESSION_TTL_MINUTES", "1440"))  # 24h default
 BCRYPT_ROUNDS = 12
 
+# MRK-73: X-Forwarded-For only from these proxies (IP/CIDR, comma separated). Default empty = trust nobody, the key
+# is the TCP peer. Behind Tailscale Serve the peer is 127.0.0.1, so without this every device shares one limit.
+AUTH_TRUSTED_PROXIES = env_ip_networks("AUTH_TRUSTED_PROXIES")
+
 # Per-IP rate limit (in-memory, restart = reset):
 # failed_attempts[ip] = list of timestamps
 _failed_attempts: dict[str, list[float]] = {}
+FAILED_ATTEMPTS_WINDOW = 3600
+MAX_TRACKED_IPS = 1000  # MRK-73: bound the dict; many keys means an attack, so drop the stalest ones
 LOCKOUT_5_AFTER_N_ATTEMPTS = 5
 LOCKOUT_10_AFTER_N_ATTEMPTS = 10
 LOCKOUT_5_MIN = 300
@@ -75,7 +82,7 @@ def _check_rate_limit(ip: str) -> Tuple[bool, str]:
     now = time.time()
     attempts = _failed_attempts.get(ip, [])
     # Vyčti starší než 1 hod
-    attempts = [a for a in attempts if now - a < 3600]
+    attempts = [a for a in attempts if now - a < FAILED_ATTEMPTS_WINDOW]
     n = len(attempts)
     if n >= LOCKOUT_10_AFTER_N_ATTEMPTS:
         last = attempts[-1]
@@ -92,8 +99,51 @@ def _check_rate_limit(ip: str) -> Tuple[bool, str]:
     _failed_attempts[ip] = attempts
     return True, ""
 
+def _parse_ip(value: str | None):
+    try:
+        return ipaddress.ip_address((value or "").strip())
+    except ValueError:
+        return None
+
+
+def _is_trusted_proxy(addr) -> bool:
+    return addr is not None and any(addr in net for net in AUTH_TRUSTED_PROXIES)
+
+
+def client_ip(peer: str | None, forwarded_for: str | None) -> str:
+    """Rate-limit key for a request (MRK-73).
+
+    X-Forwarded-For is read only when the TCP peer is a trusted proxy, and then from the right: each trusted proxy
+    appends the address it saw, so the first hop that is not a trusted proxy is the client. Anything to its left was
+    sent by the client itself and can be rotated freely.
+    """
+    candidate = (peer or "").strip() or "unknown"
+    if not _is_trusted_proxy(_parse_ip(candidate)):
+        return candidate
+    for hop in reversed((forwarded_for or "").split(",")):
+        addr = _parse_ip(hop)
+        if addr is None:
+            break  # garbage in the chain: stay with the last address a trusted proxy vouched for
+        candidate = str(addr)
+        if not _is_trusted_proxy(addr):
+            break
+    return candidate
+
+
+def _prune_failed_attempts(now: float) -> None:
+    for key in [k for k, ts in _failed_attempts.items() if not ts or now - ts[-1] >= FAILED_ATTEMPTS_WINDOW]:
+        del _failed_attempts[key]
+    overflow = len(_failed_attempts) - MAX_TRACKED_IPS
+    if overflow > 0:
+        for key in sorted(_failed_attempts, key=lambda k: _failed_attempts[k][-1])[:overflow]:
+            del _failed_attempts[key]
+
+
 def _record_failed_attempt(ip: str):
-    _failed_attempts.setdefault(ip, []).append(time.time())
+    now = time.time()
+    _failed_attempts.setdefault(ip, []).append(now)
+    if len(_failed_attempts) > MAX_TRACKED_IPS:
+        _prune_failed_attempts(now)
 
 def _clear_failed_attempts(ip: str):
     _failed_attempts.pop(ip, None)

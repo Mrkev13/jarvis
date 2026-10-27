@@ -59,7 +59,7 @@ klíče nepatří do Gitu nebo CI konfigurace.
 ```bash
 cd backend
 python -m alembic upgrade head
-python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload --no-proxy-headers
 ```
 
 API dokumentace: http://127.0.0.1:8000/docs. Startup standardně také provede
@@ -100,7 +100,7 @@ npm start
 Backend pro produkci spusť z `backend/` bez reloadu:
 
 ```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers
 ```
 
 Produkční konfigurace musí výslovně mířit na produkční PostgreSQL, mít
