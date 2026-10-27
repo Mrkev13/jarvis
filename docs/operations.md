@@ -272,13 +272,30 @@ Health mismatch is a stop signal. Avoid parallel backend instances during recove
 powershell -ExecutionPolicy Bypass -File C:\StandaHub\scripts\windows\update.ps1
 ```
 
-1. **Preconditions, nothing changed yet:** elevated shell, no locally modified tracked files, `/health` reports a
-   **fresh** backup (`-AllowStaleBackup` only when you hold another backup), no scheduler job running (the hourly
-   backup/off-site job runs relative to backend start, so the script waits for it). Already at `origin/main` →
+**First run (bootstrap).** A production checkout older than this script (e.g. `f3da60e`) does not contain
+`update.ps1` yet. Run the reviewed copy from `origin/main` once, without touching the tracked tree: it is written to the
+elevated user's own `%TEMP%` (not readable or writable by other users) and pointed at the installation. The script is
+ASCII-only, so this copy is byte-exact; later runs use the in-repo path above.
+
+```powershell
+git -C C:\StandaHub fetch origin
+git -C C:\StandaHub show origin/main:scripts/windows/update.ps1 | Set-Content -Encoding ASCII "$env:TEMP\standahub-update.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\standahub-update.ps1" -ProjectDirectory C:\StandaHub
+Remove-Item "$env:TEMP\standahub-update.ps1"
+```
+
+1. **Preconditions, nothing changed yet:** elevated shell, no locally modified tracked files, the running commit is
+   contained in the target (`git merge-base --is-ancestor`, so a local commit is never silently dropped), `/health`
+   reports a **fresh** backup (`-AllowStaleBackup` only when you hold another backup), no scheduler job running (the
+   hourly job runs relative to backend start, so the script waits for it). Already at `origin/main` →
    "Already up to date", exit 0, Hub untouched.
-2. **Update:** pause `StandaHub-Heartbeat` (MRK-90) → stop both tasks → `git checkout --detach <target>` →
+2. **Update:** write the MRK-90 maintenance marker → stop both tasks → `git checkout --detach <target>` →
    `pip install -r backend/requirements.txt` → `npm ci` → frontend build → `production --check` → migration →
-   start backend (waits for `/health` with migrations `current`) → start frontend (`/login`) → resume heartbeat.
+   start backend (waits for `/health` with migrations `current`) → start frontend (`/login`) → remove the marker.
+   The marker (`C:\ProgramData\StandaHub\heartbeat\maintenance-until.txt`, protected folder) makes the heartbeat
+   report "up" during the planned outage. It holds an expiry 45 minutes ahead and the heartbeat ignores anything
+   further than 2 hours away, so an interrupted update (crash, power loss) cannot silence monitoring for longer; no
+   scheduled task is ever disabled. The script waits for a heartbeat run already in progress before stopping the Hub.
    Everything that can fail runs **before** the migration; `alembic/env.py` runs all pending migrations in one
    transaction, so a failed migration leaves the schema as it was.
 3. **Failure:** the script reads the live schema revision.

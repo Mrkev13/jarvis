@@ -62,3 +62,12 @@ def test_task_runs_as_system_every_five_minutes_without_overlap():
     assert "$TaskName = 'StandaHub-Heartbeat'" in TEXT
     # Check must not report ready for a registered but disabled task (review on PR #41).
     assert "$state.task_enabled = [bool]$task -and ($task.State -ne 'Disabled')" in TEXT
+
+
+def test_planned_maintenance_reports_up_only_until_a_near_expiry():
+    # MRK-92: update.ps1 marks a planned outage; an expired, far-future or unreadable marker is ignored.
+    assert "$serves = $maintenance -or (Test-HubServes)" in TEXT
+    assert "Join-Path $Dir 'maintenance-until.txt'" in TEXT and 'Test-Maintenance $Directory' in TEXT
+    assert "($until -gt $now) -and (($until - $now).TotalHours -le 2)" in TEXT
+    assert '} catch { return $false }' in TEXT, 'unparsable marker = no maintenance'
+    assert "if ($maintenance) { 'maintenance' }" in TEXT
