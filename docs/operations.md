@@ -263,6 +263,51 @@ Do not blindly downgrade business data. Use reviewed migration downgrade or a
 verified backup restore into a separate scratch DB first; see [backups](backups.md).
 Health mismatch is a stop signal. Avoid parallel backend instances during recovery.
 
+### One-command update (MRK-92)
+
+`scripts/windows/update.ps1` runs the update and rollback above as one operator command. It is started by a person
+(elevated PowerShell); nothing pulls or rebuilds on its own.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\StandaHub\scripts\windows\update.ps1
+```
+
+**First run (bootstrap).** A production checkout older than this script (e.g. `f3da60e`) does not contain
+`update.ps1` yet. Run the reviewed copy from `origin/main` once, without touching the tracked tree: it is written to the
+elevated user's own `%TEMP%` (not readable or writable by other users) and pointed at the installation. The script is
+ASCII-only, so this copy is byte-exact; later runs use the in-repo path above.
+
+```powershell
+git -C C:\StandaHub fetch origin
+git -C C:\StandaHub show origin/main:scripts/windows/update.ps1 | Set-Content -Encoding ASCII "$env:TEMP\standahub-update.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\standahub-update.ps1" -ProjectDirectory C:\StandaHub
+Remove-Item "$env:TEMP\standahub-update.ps1"
+```
+
+1. **Preconditions, nothing changed yet:** elevated shell, no locally modified tracked files, the running commit is
+   contained in the target (`git merge-base --is-ancestor`, so a local commit is never silently dropped), `/health`
+   reports a **fresh** backup (`-AllowStaleBackup` only when you hold another backup), no scheduler job running (the
+   hourly job runs relative to backend start, so the script waits for it). Already at `origin/main` →
+   "Already up to date", exit 0, Hub untouched.
+2. **Update:** write the MRK-90 maintenance marker → stop both tasks → `git checkout --detach <target>` →
+   `pip install -r backend/requirements.txt` → `npm ci` → frontend build → `production --check` → migration →
+   start backend (waits for `/health` with migrations `current`) → start frontend (`/login`) → remove the marker.
+   The marker (`C:\ProgramData\StandaHub\heartbeat\maintenance-until.txt`, protected folder) makes the heartbeat
+   report "up" during the planned outage. It holds an expiry 45 minutes ahead and the heartbeat ignores anything
+   further than 2 hours away, so an interrupted update (crash, power loss) cannot silence monitoring for longer; no
+   scheduled task is ever disabled. The script waits for a heartbeat run already in progress before stopping the Hub.
+   Everything that can fail runs **before** the migration; `alembic/env.py` runs all pending migrations in one
+   transaction, so a failed migration leaves the schema as it was.
+3. **Failure:** the script reads the live schema revision.
+   - unchanged → automatic rollback to the previous commit (reinstall, rebuild, start), **exit 1**, nothing lost;
+   - changed (migration succeeded, a later step failed) → no code rollback and no data downgrade; it starts what it
+     can (backend first: reminders and backups keep running) and exits **3**: stop and get help.
+
+Exit codes: `0` updated / already up to date, `1` failed and rolled back, `2` preconditions not met (nothing
+changed), `3` failed after the migration. Output is the script's own fixed messages plus pip/npm/git/Next output;
+the env file is read only inside Python. Gitignored local files (`frontend/public/game-assets`, `.env*`) are left
+alone. Scheduled automatic updates are a separate decision after this script has run cleanly a few times.
+
 ## LOCAL Windows acceptance (not performed in cloud)
 
 1. Verify isolated production DB/config/media/backup/log paths and ACLs; SYSTEM can

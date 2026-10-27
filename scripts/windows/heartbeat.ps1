@@ -47,6 +47,20 @@ function Read-PingUrl([string]$File) {
     return $url.TrimEnd('/')
 }
 
+# MRK-92: update.ps1 writes maintenance-until.txt (a UTC time) before stopping the Hub. Until then a planned outage
+# reports "up" instead of /fail. Honoured only for a near future (max 2 h), so a stale or bogus marker cannot silence
+# monitoring; the marker lives in the same SYSTEM + Administrators folder as the ping URL.
+function Test-Maintenance([string]$Dir) {
+    $marker = Join-Path $Dir 'maintenance-until.txt'
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
+    try {
+        $until = [DateTime]::Parse(([System.IO.File]::ReadAllText($marker)).Trim(), [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+    } catch { return $false }
+    $now = (Get-Date).ToUniversalTime()
+    return ($until -gt $now) -and (($until - $now).TotalHours -le 2)
+}
+
 # True only when the backend answers healthy/degraded and the frontend serves /login. Degraded (e.g. a stale backup)
 # is still "up": the Hub reports those itself via push; this check is about the Hub being reachable at all.
 function Test-HubServes {
@@ -91,7 +105,8 @@ try {
     if ($Mode -eq 'Ping') {
         $url = Read-PingUrl $file
         if (-not $url) { [Console]::Error.WriteLine('Heartbeat: ping URL missing or not https; nothing sent'); exit 2 }
-        $serves = Test-HubServes
+        $maintenance = Test-Maintenance $Directory
+        $serves = $maintenance -or (Test-HubServes)
         $target = if ($serves) { $url } else { $url + '/fail' }
         # Windows PowerShell 5.1 on older .NET defaults may not offer TLS 1.2, which the ping service requires.
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -107,7 +122,7 @@ try {
         }
         $url = $null; $target = $null
         if (-not $sent) { [Console]::Error.WriteLine('Heartbeat: ping not delivered'); exit 1 }
-        Write-Output ('hub=' + $(if ($serves) { 'up' } else { 'down' }) + '; ping=sent')
+        Write-Output ('hub=' + $(if ($maintenance) { 'maintenance' } elseif ($serves) { 'up' } else { 'down' }) + '; ping=sent')
         if (-not $serves) { exit 3 }
         exit 0
     }
