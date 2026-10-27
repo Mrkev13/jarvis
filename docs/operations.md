@@ -63,7 +63,7 @@ Development (working directories matter):
 
 ```sh
 cd backend
-python -m uvicorn main:app --reload
+python -m uvicorn main:app --reload --no-proxy-headers
 # separate terminal
 cd frontend
 npm run dev
@@ -78,7 +78,7 @@ python -m production --env-file /absolute/protected/production.env
 ```
 
 The launcher sets backend cwd and starts exactly:
-`python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1`.
+`python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers`.
 On Windows it waits for the foreground child and propagates its exit code; on
 POSIX it replaces the launcher process. There is **no --reload**. Direct launch with that Uvicorn command is also supported
 with production env already loaded, `APP_ENV=production` and all required keys;
@@ -125,7 +125,10 @@ PowerShell, replace placeholders with locally chosen paths (no real secrets here
 
 Private HTTPS for browsers/PWA/Web Push is Tailscale Serve in front of these ports (tailnet only, never Funnel):
 `scripts/windows/tailscale-serve.ps1`, cutover/rollback and `-BindAddress 127.0.0.1` in
-[https-pwa-push.md](https-pwa-push.md).
+[https-pwa-push.md](https-pwa-push.md). The PIN login rate limit reads `X-Forwarded-For` only from
+`AUTH_TRUSTED_PROXIES` (MRK-73; default: no proxy is trusted, the key is the TCP peer). Every Uvicorn start passes
+`--no-proxy-headers` (`production.py` does it itself): without it Uvicorn rewrites the client address from
+`X-Forwarded-For` for loopback peers before the app sees it.
 
 The backend helper defaults to `<installation>\.venv\Scripts\python.exe`; an
 explicit `-PythonPath` supports other installations. Scripts preserve child exit

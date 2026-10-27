@@ -106,6 +106,10 @@ def test_foreground_exec_one_worker_explicit_cwd(tmp_path, monkeypatch):
     assert '--reload' not in captured['args']
     assert captured['args'][-2:] == ['--workers','1']
     assert captured['args'][1:4] == ['-m','uvicorn','main:app']
+    # MRK-73: Uvicorn must not rewrite the client address from X-Forwarded-For (it trusts 127.0.0.1 by default)
+    from uvicorn.main import main as uvicorn_cli
+    params = uvicorn_cli.make_context('uvicorn', captured['args'][3:]).params
+    assert params['proxy_headers'] is False
 
 
 def test_commit_is_resolved_once_at_start_and_safe_fallback(monkeypatch):

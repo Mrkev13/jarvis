@@ -25,7 +25,7 @@ if exist ".venv\Scripts\python.exe" (
 
 echo Current dir: %CD%
 echo.
-echo Starting uvicorn with --host 0.0.0.0 --port 8000 --reload
+echo Starting uvicorn with --host 0.0.0.0 --port 8000 --reload --no-proxy-headers
 echo.
-"%PYTHON_EXE%" -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+"%PYTHON_EXE%" -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers
 pause

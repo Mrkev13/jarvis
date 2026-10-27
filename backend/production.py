@@ -115,6 +115,11 @@ def resolve_commit():
         return ''
 
 
+# MRK-73: Uvicorn trusts X-Forwarded-For from 127.0.0.1 by default and rewrites the client address before FastAPI
+# sees it, so the app could not tell the real peer. Only the app reads the header (auth_service.AUTH_TRUSTED_PROXIES).
+UVICORN_SAFETY_ARGS = ('--no-proxy-headers',)
+
+
 def run_server(command):
     # Windows exec does not preserve the supervised PID. Keep this launcher alive
     # until Uvicorn exits so PowerShell/Task Scheduler can observe a worker failure.
@@ -152,7 +157,7 @@ def main(argv=None):
             parser.error('Monitoring log configuration unavailable')
     os.chdir(Path(__file__).resolve().parent)
     return run_server([sys.executable, '-m', 'uvicorn', 'main:app', '--host', args.host,
-                             '--port', str(args.port), '--workers', '1'])
+                             '--port', str(args.port), *UVICORN_SAFETY_ARGS, '--workers', '1'])
 
 
 if __name__ == '__main__':

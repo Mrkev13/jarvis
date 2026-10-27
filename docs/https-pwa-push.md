@@ -62,6 +62,12 @@ nothing for existing HTTP access.
    - `AUTH_COOKIE_SECURE=true`. `production.py` refuses an https origin without it, and `true` without any https
      origin.
    - `EXTERNAL_DELIVERY_ENABLED=true` and `REMINDERS_CHECK_ENABLED=true`, with the VAPID keys present (see below).
+   - `AUTH_TRUSTED_PROXIES=127.0.0.1,::1` (MRK-73, optional). Serve connects from loopback and **sets**
+     `X-Forwarded-For` to the tailnet address of the device, so the PIN rate limit is per device. Left blank, the
+     backend trusts no proxy: every login counts against one shared limit (safe, but a wrong PIN on one device
+     locks all of them for 5–10 min). Only list proxies that overwrite or append the header themselves; the backend
+     binds to `127.0.0.1`, so nothing else can reach it from loopback. An invalid value stops the backend at start.
+     Uvicorn's own proxy-header handling is off (`--no-proxy-headers` in `production.py`), so only this setting decides.
 4. **Frontend `.env.production.local`**: `NEXT_PUBLIC_API_URL=https://<host>.<tailnet>.ts.net:8443`. This is the only
    frontend value; never an `http://` URL on an https page.
 5. Stop both tasks, `start-frontend.ps1 -ProjectDirectory C:\StandaHub -Build`, start the backend, then the

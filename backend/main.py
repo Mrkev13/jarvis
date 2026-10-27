@@ -16,6 +16,7 @@ from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 from auth_service import (
     auth_enabled,
     authenticate_pin_and_create_session,
+    client_ip,
     validate_session_token,
     revoke_session_token,
     cookie_params,
@@ -296,15 +297,9 @@ for _owner, _module_router in all_contributions("routers"):
 
 
 def _get_client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",", 1)[0].strip()
-    if hasattr(request.client, "host"):
-        try:
-            return request.client.host
-        except Exception:
-            return "unknown"
-    return "unknown"
+    # MRK-73: X-Forwarded-For counts only from AUTH_TRUSTED_PROXIES (auth_service.client_ip).
+    peer = getattr(request.client, "host", None) if request.client else None
+    return client_ip(peer, request.headers.get("x-forwarded-for"))
 
 
 class ChatMessage(BaseModel):
