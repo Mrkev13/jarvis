@@ -263,6 +263,34 @@ Do not blindly downgrade business data. Use reviewed migration downgrade or a
 verified backup restore into a separate scratch DB first; see [backups](backups.md).
 Health mismatch is a stop signal. Avoid parallel backend instances during recovery.
 
+### One-command update (MRK-92)
+
+`scripts/windows/update.ps1` runs the update and rollback above as one operator command. It is started by a person
+(elevated PowerShell); nothing pulls or rebuilds on its own.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\StandaHub\scripts\windows\update.ps1
+```
+
+1. **Preconditions, nothing changed yet:** elevated shell, no locally modified tracked files, `/health` reports a
+   **fresh** backup (`-AllowStaleBackup` only when you hold another backup), no scheduler job running (the hourly
+   backup/off-site job runs relative to backend start, so the script waits for it). Already at `origin/main` →
+   "Already up to date", exit 0, Hub untouched.
+2. **Update:** pause `StandaHub-Heartbeat` (MRK-90) → stop both tasks → `git checkout --detach <target>` →
+   `pip install -r backend/requirements.txt` → `npm ci` → frontend build → `production --check` → migration →
+   start backend (waits for `/health` with migrations `current`) → start frontend (`/login`) → resume heartbeat.
+   Everything that can fail runs **before** the migration; `alembic/env.py` runs all pending migrations in one
+   transaction, so a failed migration leaves the schema as it was.
+3. **Failure:** the script reads the live schema revision.
+   - unchanged → automatic rollback to the previous commit (reinstall, rebuild, start), **exit 1**, nothing lost;
+   - changed (migration succeeded, a later step failed) → no code rollback and no data downgrade; it starts what it
+     can (backend first: reminders and backups keep running) and exits **3**: stop and get help.
+
+Exit codes: `0` updated / already up to date, `1` failed and rolled back, `2` preconditions not met (nothing
+changed), `3` failed after the migration. Output is the script's own fixed messages plus pip/npm/git/Next output;
+the env file is read only inside Python. Gitignored local files (`frontend/public/game-assets`, `.env*`) are left
+alone. Scheduled automatic updates are a separate decision after this script has run cleanly a few times.
+
 ## LOCAL Windows acceptance (not performed in cloud)
 
 1. Verify isolated production DB/config/media/backup/log paths and ACLs; SYSTEM can
