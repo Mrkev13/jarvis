@@ -6,6 +6,7 @@ import {
   emptyGrindDraft,
   grindBody,
   grindStatusMeta,
+  masterySummary,
   resourceEntries,
 } from "./wot.ts";
 
@@ -138,4 +139,17 @@ test("souhrn hlavičky nepočítá grind, který server právě splnil", () => {
   assert.deepEqual(grindSummary(grinds, 8), { activeCount: 1, remaining: 205988 });
   assert.deepEqual(grindSummary(grinds, null), { activeCount: 2, remaining: 206988 });
   assert.deepEqual(grindSummary([grinds[1]], 8), { activeCount: 0, remaining: 0 });
+});
+
+test("masterySummary počítá každé Mko, i opakované na stejném tanku, a jen Mistr", () => {
+  const m = (tank, mastery, milestone_type = "mastery") => ({ tank, mastery, milestone_type });
+  const summary = masterySummary([
+    m("Kranvagn", "ace"), m("Kranvagn", "ace"), m("Škoda T 56", "ace"), m("Kranvagn", "first"),
+    m("IS-7", null), m("Bat.-Châtillon 25 t", "ace"),
+  ]);
+  assert.equal(summary.total, 4);
+  assert.equal(summary.tanks, 3);
+  assert.deepEqual(summary.byTank[0], { tank: "Kranvagn", count: 2 });
+  assert.deepEqual(summary.byTank.map((t) => t.tank).slice(1), ["Bat.-Châtillon 25 t", "Škoda T 56"]);
+  assert.deepEqual(masterySummary([]), { total: 0, tanks: 0, byTank: [] });
 });
