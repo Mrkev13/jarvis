@@ -23,7 +23,8 @@ from tools import get_notifications, get_notification_summary, get_goal_progress
 from tools import add_work_session, add_finance_transaction
 from tools import add_school_subject, add_school_assignment, add_school_exam
 from tools import update_wot_resource, upsert_wot_grind
-from tools import upsert_mff_character, upsert_goal
+from tools import upsert_mff_character
+from goal_ai_tool import prepare_upsert_goal, run_upsert_goal
 from tools import save_memory
 from mutation_service import (
     ENTITIES as MUTATION_ENTITIES,
@@ -370,7 +371,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "upsert_goal",
-        "Create a goal, or update the goal with the given id.",
+        "Create a goal, or edit the goal with the given id: only the fields you pass change (area stays).",
         {
             "area": {
                 "type": "string",
@@ -385,7 +386,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "target_date": _DATE,
         },
         ["area", "title"],
-        func=upsert_goal, areas=[AREA_GOALS], requires=["get_goals"],
+        func=run_upsert_goal, resolver=prepare_upsert_goal, areas=[AREA_GOALS], requires=["get_goals"],
     ),
     _write(
         "save_memory",

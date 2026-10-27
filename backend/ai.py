@@ -341,8 +341,9 @@ def prepare_write_action(db, fn_name: str, arguments: dict, *, source: str | Non
     spec = TOOLS_BY_NAME.get(fn_name)
     if spec is not None and spec.resolver is not None:
         plan = spec.resolver(db, **arguments)
-        stored_arguments = {"plan": plan}
-        preview = plan.get("preview")
+        if plan is not None:  # MRK-72: None = no plan for this call (upsert_goal create), arguments stored as they are
+            stored_arguments = {"plan": plan}
+            preview = plan.get("preview")
     if source:
         stored_arguments = {**stored_arguments, PENDING_SOURCE_KEY: source}
     action_id = _store_pending_action(db, fn_name, stored_arguments, ttl_minutes=30)
