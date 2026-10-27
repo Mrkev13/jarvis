@@ -32,7 +32,6 @@ const GET_ROUTES = {
   "/memories": () => fixture("memories"),
   "/mff/characters": () => fixture("mff-characters"),
   "/mff/summary": () => fixture("mff-summary"),
-  "/school/subjects": () => fixture("school-subjects"),
   "/school/assignments": () => schoolState.assignments,
   "/school/exams": () => schoolState.exams,
   // MRK-42: studijní materiály (syntetické, žádná URL Moodlu ani token)
@@ -137,7 +136,8 @@ function send(res, req, status, body, extraHeaders = {}) {
 // MRK-14: stavová Škola (splnění / uzavření / znovuotevření); /__mock/school/reset vrátí fixtures.
 const schoolState = {};
 function resetSchool() {
-  Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams") });
+  Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams"),
+    subjects: fixture("school-subjects") });  // MRK-75: id 4 = archivovaný předmět
 }
 resetSchool();
 const SCHOOL_ASSIGNMENT_DONE = ["done", "completed", "hotovo", "closed", "finished"];
@@ -408,6 +408,22 @@ createServer(async (req, res) => {
   if (url.pathname === "/__mock/school/reset") {
     resetSchool();
     return respond(200, { ok: true });
+  }
+  // MRK-75: předměty – archivované jen s ?include_archived=true; PATCH úprava / archivace / obnovení
+  if (url.pathname === "/school/subjects" && req.method === "GET") {
+    const all = url.searchParams.get("include_archived") === "true";
+    return respond(200, schoolState.subjects.filter((s) => all || s.active), 60);
+  }
+  const subjectMatch = /^\/school\/subject\/(\d+)$/.exec(url.pathname);
+  if (subjectMatch && req.method === "PATCH") {
+    const item = schoolState.subjects.find((s) => s.id === Number(subjectMatch[1]));
+    if (!item) return respond(404, { detail: { code: "not_found", message: "Předmět neexistuje." } });
+    const b = body ?? {};
+    if (b.name !== undefined && !String(b.name).trim()) {
+      return respond(422, { detail: { code: "name_required", message: "Název předmětu je povinný." } }, 200);
+    }
+    Object.assign(item, b);
+    return respond(200, item, 300);
   }
   const schoolMatch = /^\/school\/(assignment|exam)\/(\d+)\/(complete|reopen|close)$/.exec(url.pathname);
   if (schoolMatch && req.method === "POST") {

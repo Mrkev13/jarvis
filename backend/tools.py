@@ -66,11 +66,15 @@ def get_finance_summary():
         db.close()
 
 
-def get_school_subjects():
+def get_school_subjects(include_archived: bool = False):
+    """MRK-75: archived subjects (active=False) only on request – the AI and forms get the current ones."""
     db = SessionLocal()
 
     try:
-        items = db.query(Subject).order_by(Subject.name).all()
+        query = db.query(Subject)
+        if not include_archived:
+            query = query.filter(Subject.active.isnot(False))  # NULL in old rows = active
+        items = query.order_by(Subject.name).all()
         return [
             {
                 "id": item.id,

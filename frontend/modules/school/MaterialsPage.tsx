@@ -52,7 +52,10 @@ function CourseMapping({ course, subjects, onSaved }: {
     actions={<div className="flex flex-wrap items-end gap-2">
       <FilterSelect label="Předmět" value={course.subject ? String(course.subject.id) : ''}
         onChange={value => void save(value ? Number(value) : null)}
-        options={[{ value: '', label: 'Bez předmětu' }, ...subjects.map(s => ({ value: String(s.id), label: s.name }))]} />
+        options={[{ value: '', label: 'Bez předmětu' }, ...subjects
+          // MRK-75: archivovaný předmět jen jako současné přiřazení, nikdy jako nová volba
+          .filter(s => s.active !== false || s.id === course.subject?.id)
+          .map(s => ({ value: String(s.id), label: s.active === false ? `${s.name} (archivovaný)` : s.name }))]} />
       {suggestion && !course.subject
         ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save(suggestion.id)}>Použít návrh</Button> : null}
     </div>}>
@@ -111,7 +114,7 @@ export default function MaterialsPage() {
   }
 
   const data = materials.data;
-  const subjectOptions = [{ value: '', label: 'Všechny předměty' }, ...(data?.subjects ?? []).map(s => ({ value: String(s.id), label: s.name }))];
+  const subjectOptions = [{ value: '', label: 'Všechny předměty' }, ...(data?.subjects ?? []).map(s => ({ value: String(s.id), label: s.active === false ? `${s.name} (archivovaný)` : s.name }))];
   const selectedDetail = detail.data;
   return <ContentContainer>
     <PageHeader title="Studijní materiály" subtitle="Soubory z kurzů v Moodlu – prezentace, PDF a dokumenty."

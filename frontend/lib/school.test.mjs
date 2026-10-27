@@ -104,3 +104,27 @@ test("examResultLabel", () => {
   assert.equal(examResultLabel("pass_fail", "passed"), null);
   assert.equal(examResultLabel(null, null), null);
 });
+
+// MRK-75: archivované předměty se nenabízejí, úprava posílá jen změněná pole
+test("offeredSubjects a visibleSubjects skrývají archivované", async () => {
+  const { offeredSubjects, visibleSubjects } = await import("./school.ts");
+  const subjects = [
+    { id: 1, name: "Právo", code: "", semester: "", credits: 0, active: false },
+    { id: 2, name: "Angličtina", code: "", semester: "", credits: 0, active: true },
+  ];
+  assert.deepEqual(offeredSubjects(subjects).map((s) => s.id), [2]);
+  assert.deepEqual(offeredSubjects([{ id: 3, name: "Bez příznaku" }]).map((s) => s.id), [3]);
+  assert.deepEqual(visibleSubjects(subjects, false).map((s) => s.id), [2]);
+  assert.deepEqual(visibleSubjects(subjects, true).map((s) => s.id), [2, 1]);
+});
+
+test("subjectPatch posílá jen změny a odmítne neplatný formulář", async () => {
+  const { subjectDraftFrom, subjectPatch } = await import("./school.ts");
+  const s = { id: 1, name: "Právo", code: "PRA", semester: "ZS", credits: 5, active: true };
+  assert.deepEqual(subjectPatch(s, subjectDraftFrom(s)), {});
+  assert.deepEqual(subjectPatch(s, { ...subjectDraftFrom(s), name: " Právo I ", credits: "6" }), { name: "Právo I", credits: 6 });
+  assert.deepEqual(subjectPatch(s, { ...subjectDraftFrom(s), credits: "" }), { credits: 0 });
+  assert.equal(subjectPatch(s, { ...subjectDraftFrom(s), name: "  " }), null);
+  assert.equal(subjectPatch(s, { ...subjectDraftFrom(s), credits: "100" }), null);
+  assert.equal(subjectPatch(s, { ...subjectDraftFrom(s), credits: "2.5" }), null);
+});

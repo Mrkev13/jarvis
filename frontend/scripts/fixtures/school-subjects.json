@@ -22,5 +22,13 @@
   "semester": "",
   "credits": 0,
   "active": true
+ },
+ {
+  "id": 4,
+  "name": "Právo",
+  "code": "PRA",
+  "semester": "ZS 2025",
+  "credits": 4,
+  "active": false
  }
 ]

@@ -1467,8 +1467,8 @@ def finance_summary():
 # ===== SCHOOL =====
 
 @app.get("/school/subjects")
-def school_subjects():
-    return get_school_subjects()
+def school_subjects(include_archived: bool = False):
+    return get_school_subjects(include_archived=include_archived)
 
 @app.post("/school/subject")
 def add_school_subject(request: SubjectRequest):
