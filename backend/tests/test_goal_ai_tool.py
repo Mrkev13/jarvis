@@ -108,9 +108,61 @@ class GoalAiToolTestCase(unittest.TestCase):
 
     def test_finance_goal_cannot_be_edited_by_ai(self):
         # MRK-60: the goal entity hides finance goals from the AI, so an id from anywhere finds nothing.
-        with self.assertRaises(MutationRefused):
-            self._prepare(area="finance", title="Rezerva", id=self.finance_id, priority="low")
+        with self.assertRaises(MutationRefused) as ctx:
+            self._prepare(area="personal", title="Rezerva", id=self.finance_id, priority="low")
+        self.assertEqual(ctx.exception.code, "finance_goal")
+        self.assertIn("Finanční cíle", ctx.exception.detail, "the AI gets a Czech explanation")
         self.assertEqual(self._goal(self.finance_id)["priority"], "medium")
+
+    def test_ai_cannot_create_a_goal_with_area_finance(self):
+        # MRK-71: refused before any pending action exists, whatever the case of the area.
+        for area in ("finance", " Finance "):
+            with self.assertRaises(MutationRefused) as ctx:
+                self._prepare(area=area, title="Našetřit 10 000")
+            self.assertEqual(ctx.exception.code, "finance_goal")
+        db = self.Session()
+        try:
+            self.assertEqual(db.query(Goal).filter_by(title="Našetřit 10 000").count(), 0)
+        finally:
+            db.close()
+
+    def test_manual_goal_with_area_finance_cannot_be_edited_by_ai(self):
+        db = self.Session()
+        try:
+            manual = Goal(area="finance", title="Splatit půjčku", progress=20)
+            db.add(manual)
+            db.commit()
+            manual_id = manual.id
+        finally:
+            db.close()
+        with self.assertRaises(MutationRefused) as ctx:
+            self._prepare(area="personal", title="Splatit půjčku", id=manual_id, progress=50)
+        self.assertEqual(ctx.exception.code, "finance_goal")
+        self.assertEqual(self._goal(manual_id)["progress"], 20)
+
+    def test_finance_check_runs_again_at_confirmation(self):
+        # Fail-closed: a pending action stored without the resolver (older action) still writes nothing.
+        db = self.Session()
+        try:
+            create_id = ai._store_pending_action(db, "upsert_goal", {"area": "finance", "title": "Rezerva 2"}, ttl_minutes=30)
+            edit_id = ai._store_pending_action(db, "upsert_goal", {"area": "personal", "title": "Přejmenováno",
+                                                                   "id": self.finance_id}, ttl_minutes=30)
+            db.commit()
+        finally:
+            db.close()
+        for action_id in (create_id, edit_id):
+            result = ai.execute_confirm_action(action_id)
+            self.assertFalse(result["ok"], result)
+        db = self.Session()
+        try:
+            self.assertEqual(db.query(Goal).filter_by(title="Rezerva 2").count(), 0)
+            self.assertEqual(db.get(Goal, self.finance_id).title, "Rezerva")
+        finally:
+            db.close()
+
+    def test_schema_does_not_offer_area_finance(self):
+        from tool_registry import TOOLS_BY_NAME
+        self.assertNotIn("finance", TOOLS_BY_NAME["upsert_goal"].schema["function"]["parameters"]["properties"]["area"]["enum"])
 
     def test_create_without_id_is_unchanged(self):
         pending = self._prepare(area="hobby", title="Dokončit model", progress=10)

@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from finance_ai_policy import FINANCE_AREA, is_finance_goal
+from finance_ai_policy import FINANCE_AREA, finance_goal_ids, is_finance_goal
 from models import ActivityLog, Assignment, Exam, Subject, WorkSession
 from time_utils import to_local, utc_now
 
@@ -235,6 +235,10 @@ def query_recent_activity(
     q = db.query(ActivityLog).filter(ActivityLog.timestamp >= since,
                                      func.lower(func.coalesce(ActivityLog.area, "")) != FINANCE_AREA,
                                      func.coalesce(ActivityLog.entity_type, "") != "FinanceTransaction")
+    finance_goals = finance_goal_ids(db)
+    if finance_goals:  # MRK-71: rows about Finance-computed goals are logged under "goals"
+        q = q.filter(~and_(func.coalesce(ActivityLog.entity_type, "") == "Goal",
+                           func.coalesce(ActivityLog.entity_id, -1).in_(sorted(finance_goals))))
     if area and area.strip():
         q = q.filter(func.lower(ActivityLog.area) == area.strip().lower())
     total = q.count()
