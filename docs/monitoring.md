@@ -120,6 +120,46 @@ and disk samples. Verify dedupe and push delivery with test subscriptions; check
 unknown states and restart behavior. Kill Hub to verify independent uptime alert.
 Inspect protected rotated files for secrets using dummy canaries, not real keys.
 
+## External heartbeat on the Windows host (MRK-90)
+
+The Hub cannot report its own outage: Web Push is sent by the Hub itself. So the host **pings out** instead of being
+probed in: `scripts/windows/heartbeat.ps1` runs every 5 minutes as SYSTEM, checks loopback `/health`
+(`healthy`/`degraded` count as up) and `/login`, then calls a [healthchecks.io](https://healthchecks.io) check URL.
+No inbound access, no Funnel, nothing new on the tailnet.
+
+| Situation | What the service sees | Alert |
+|---|---|---|
+| Hub serves | ping every 5 min | none |
+| Backend/frontend down or `unhealthy` | `<url>/fail` | immediately |
+| Host off, asleep, offline, task disabled | no ping | after period + grace (5 + 5 min) |
+| Back up | ping | "up" notification |
+
+`degraded` (e.g. a stale backup) is not an outage here; the Hub reports it through its own push (`OPS_ALERT_PUSH`).
+
+**Secret:** the check URL lets anyone fake "up". It lives only in `C:\ProgramData\StandaHub\heartbeat\ping-url.txt`
+(SYSTEM + Administrators, same ACL policy as `offsite-secrets.ps1`). Never in git, Linear, chat, task arguments or
+logs; the script prints only booleans and `hub=up|down; ping=sent`.
+
+Setup (elevated PowerShell, from `C:\StandaHub`):
+
+1. healthchecks.io: create a check with **Period 5 minutes, Grace 5 minutes**, add the phone integration (their app,
+   email or ntfy). Copy the ping URL (`https://hc-ping.com/<uuid>`).
+2. `powershell -ExecutionPolicy Bypass -File scripts\windows\heartbeat.ps1 -Mode Prepare`
+3. `notepad C:\ProgramData\StandaHub\heartbeat\ping-url.txt` (notepad started from the elevated shell), paste, save.
+4. `powershell -ExecutionPolicy Bypass -File scripts\windows\heartbeat.ps1 -Mode Ping` → `hub=up; ping=sent`; the check
+   turns green on healthchecks.io.
+5. `powershell -ExecutionPolicy Bypass -File scripts\windows\heartbeat.ps1 -Mode Register`, then
+   `Start-ScheduledTask -TaskName StandaHub-Heartbeat`.
+6. `powershell -ExecutionPolicy Bypass -File scripts\windows\heartbeat.ps1 -Mode Check` → `ready: True`.
+
+Exit codes of `-Mode Ping`: `0` up and pinged, `3` Hub down and `/fail` sent, `2` URL missing/not https (nothing
+sent), `1` ping not delivered (no internet: the service alerts after grace). `Check`: `0` ready, `2` not ready.
+
+Acceptance (local, Standa): stop `StandaHub-Backend` → alert within 10 min; restart → "up"; shut the host down or
+unplug the network → alert within 10 min. The task needs `C:\StandaHub` writable only by Administrators/SYSTEM
+(it runs the script as SYSTEM), same as the production tasks. Antivirus "gaming" modes that disable scheduled tasks
+silence the heartbeat too; that then shows up as an alert, not as silence.
+
 ## Cloud verification
 
 Focused regressions cover backup/failure/disk boundaries, unknown observations,
