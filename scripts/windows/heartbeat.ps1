@@ -121,7 +121,9 @@ try {
         $state.url_file_protected = Test-ProtectedAcl $file
         $state.url_is_https = [bool](Read-PingUrl $file)
     }
-    $state.task_registered = [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $state.task_registered = [bool]$task
+    $state.task_enabled = [bool]$task -and ($task.State -ne 'Disabled')   # antivirus "gaming" modes disable tasks
     foreach ($key in $state.Keys) { Write-Output ("{0}: {1}" -f $key, $state[$key]) }
     $ready = -not ($state.Values | Where-Object { $_ -eq $false })
     Write-Output ("ready: {0}" -f $ready)

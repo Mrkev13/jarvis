@@ -60,3 +60,5 @@ def test_task_runs_as_system_every_five_minutes_without_overlap():
     assert '-RepetitionInterval (New-TimeSpan -Minutes 5)' in TEXT
     assert '-MultipleInstances IgnoreNew' in TEXT and '-ExecutionTimeLimit (New-TimeSpan -Minutes 2)' in TEXT
     assert "$TaskName = 'StandaHub-Heartbeat'" in TEXT
+    # Check must not report ready for a registered but disabled task (review on PR #41).
+    assert "$state.task_enabled = [bool]$task -and ($task.State -ne 'Disabled')" in TEXT
