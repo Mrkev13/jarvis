@@ -67,6 +67,7 @@ nothing for existing HTTP access.
      backend trusts no proxy: every login counts against one shared limit (safe, but a wrong PIN on one device
      locks all of them for 5–10 min). Only list proxies that overwrite or append the header themselves; the backend
      binds to `127.0.0.1`, so nothing else can reach it from loopback. An invalid value stops the backend at start.
+     Uvicorn's own proxy-header handling is off (`--no-proxy-headers` in `production.py`), so only this setting decides.
 4. **Frontend `.env.production.local`**: `NEXT_PUBLIC_API_URL=https://<host>.<tailnet>.ts.net:8443`. This is the only
    frontend value; never an `http://` URL on an https page.
 5. Stop both tasks, `start-frontend.ps1 -ProjectDirectory C:\StandaHub -Build`, start the backend, then the

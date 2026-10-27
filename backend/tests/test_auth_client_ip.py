@@ -94,6 +94,37 @@ class LoginRateLimitTestCase(unittest.TestCase):
             # another tailnet device is not locked out by the first one
             self.assertTrue(self._login(PIN, "100.90.1.2").json()["session_set"])
 
+    def _asgi_login_attempts(self, uvicorn_args):
+        """Real Uvicorn CLI parsing + Config.load() middleware stack; the peer is loopback (Tailscale Serve)."""
+        import asyncio
+        import httpx
+        from uvicorn import Config
+        from uvicorn.main import main as uvicorn_cli
+
+        params = uvicorn_cli.make_context("uvicorn", ["main:app", *uvicorn_args]).params
+        config = Config(main.app, proxy_headers=params["proxy_headers"],
+                        forwarded_allow_ips=params["forwarded_allow_ips"], log_config=None)
+        config.load()
+
+        async def run():
+            transport = httpx.ASGITransport(app=config.loaded_app, client=("127.0.0.1", 50000))
+            async with httpx.AsyncClient(transport=transport, base_url="http://hub") as client:
+                for i in range(5):
+                    await client.post("/auth/login", json={"pin": "0000"},
+                                      headers={"X-Forwarded-For": f"198.51.100.{i}"})
+                r = await client.post("/auth/login", json={"pin": PIN}, headers={"X-Forwarded-For": "198.51.100.77"})
+                return r.json()
+        return asyncio.run(run())
+
+    def test_production_uvicorn_flags_keep_the_real_peer(self):
+        import production
+        self.assertIn("Too many failed attempts", self._asgi_login_attempts(production.UVICORN_SAFETY_ARGS)["error"])
+        self.assertEqual(set(auth_service._failed_attempts), {"127.0.0.1"})
+
+    def test_uvicorn_defaults_would_let_rotation_through(self):
+        # Why --no-proxy-headers is required: by default Uvicorn trusts loopback and rewrites the client from the header.
+        self.assertTrue(self._asgi_login_attempts([]).get("session_set"))
+
     def test_attempts_dict_is_bounded(self):
         with patch.object(auth_service, "MAX_TRACKED_IPS", 50):
             for i in range(200):
