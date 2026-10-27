@@ -125,7 +125,8 @@ PowerShell, replace placeholders with locally chosen paths (no real secrets here
 
 Private HTTPS for browsers/PWA/Web Push is Tailscale Serve in front of these ports (tailnet only, never Funnel):
 `scripts/windows/tailscale-serve.ps1`, cutover/rollback and `-BindAddress 127.0.0.1` in
-[https-pwa-push.md](https-pwa-push.md).
+[https-pwa-push.md](https-pwa-push.md). The PIN login rate limit reads `X-Forwarded-For` only from
+`AUTH_TRUSTED_PROXIES` (MRK-73; default: no proxy is trusted, the key is the TCP peer).
 
 The backend helper defaults to `<installation>\.venv\Scripts\python.exe`; an
 explicit `-PythonPath` supports other installations. Scripts preserve child exit
