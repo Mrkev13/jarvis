@@ -155,6 +155,21 @@ class SchoolSubjectsTestCase(unittest.TestCase):
         self.assertIsNone(run(lambda db: materials.course_dict(db.get(StudyCourse, other), {
             s.id: s for s in db.query(Subject).all()}, {}))["suggested_subject_id"])
 
+    def test_legacy_null_active_is_treated_as_active(self):
+        # older rows may carry active = NULL: listed, offered and serialised as active, archivable like any other
+        legacy = self.q(lambda db: (db.add(Subject(name="Starý předmět", code="OLD")), db.flush(),
+                                    db.query(Subject).filter_by(code="OLD").one().id, db.commit())[2])
+        self.q(lambda db: (db.query(Subject).filter_by(id=legacy).update({"active": None}), db.commit()))
+        self.assertIsNone(self.q(lambda db: db.get(Subject, legacy).active))
+        for path in ("/school/subjects", "/school/subjects?include_archived=true"):
+            row = next(s for s in self.client.get(path).json() if s["id"] == legacy)
+            self.assertIs(row["active"], True, path)
+        self.assertIn(legacy, [s["id"] for s in self.q(load_subjects)])
+        hit = self.q(lambda db: next(r for r in search_school(db, "") if r[0] == "subject" and r[1] == legacy))
+        self.assertNotIn("archivovaný", hit[3])
+        self.assertIs(self.patch_subject(legacy, active=False).json()["active"], False)
+        self.assertEqual(self.facts(), ["school.subject.archived"])
+
     def test_requires_session(self):
         self.client.cookies.clear()
         self.assertEqual(self.patch_subject(self.ait, name="X").status_code, 401)

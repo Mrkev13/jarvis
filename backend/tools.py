@@ -82,7 +82,7 @@ def get_school_subjects(include_archived: bool = False):
                 "code": item.code,
                 "semester": item.semester,
                 "credits": item.credits,
-                "active": item.active,
+                "active": item.active is not False,  # MRK-75: NULL in old rows = active (same as the filter)
             }
             for item in items
         ]
