@@ -51,22 +51,14 @@ STEP_0003_EXTRA = {"activity_logs", "pending_actions"}
 STEP_0004_EXTRA = {"activity_logs", "pending_actions"}
 STEP_0005_EXTRA = {"activity_logs", "pending_actions", "backup_logs"}
 STEP_0006_EXTRA = {"activity_logs", "pending_actions", "backup_logs", "auth_sessions"}
-STEP_0009_EXTRA = {"reminders"}
 STEP_0010_EXTRA = {"push_subscriptions", "deliveries"}
-STEP_0011_EXTRA = {"daily_briefings"}
-STEP_0012_EXTRA = {"weekly_reviews"}
 STEP_0013_EXTRA = {"wot_grind_completions", "wot_milestones", "wot_milestone_screenshots"}
-STEP_0014_EXTRA = {"wot_replays"}
 STEP_0016_EXTRA = {"module_settings"}  # MRK-18 A2
 STEP_0017_EXTRA = {"habits", "habit_entries"}  # MRK-21 Návyky
 STEP_0018_EXTRA = {"domain_events"}  # MRK-19
-STEP_0019_EXTRA = {"calendar_sources", "calendar_events"}  # MRK-30/MRK-31
 STEP_0021_EXTRA = {"study_courses", "study_materials"}  # MRK-42
-STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_sets", "fitness_rehab_exercises", "fitness_rehab_sessions", "fitness_rehab_entries"}  # MRK-33
-STEP_0024_EXTRA = {"offsite_backup_runs"}  # MRK-57 off-machine backup history
 STEP_0025_EXTRA = {"finance_accounts", "finance_categories", "finance_imports", "finance_import_issues",
                    "finance_rules", "finance_transaction_revisions"}  # MRK-61 Finance ledger
-STEP_0027_EXTRA = {"ui_preferences"}  # MRK-78
 
 
 def _sqlite_tables(conn):
@@ -74,6 +66,15 @@ def _sqlite_tables(conn):
         text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'alembic_version'")
     ).fetchall()
     return {r[0] for r in rows}
+
+
+def _model_tables():
+    """Tabulky, které má `upgrade head` vytvořit = tabulky modelů (models.py registruje i modely modulů).
+    MRK-96: žádný ručně udržovaný výčet – nová migrace s novým modelem tento test neupravuje; migrace, která
+    tabulku vynechá (nebo přidá navíc), ho dál shodí."""
+    from database import Base
+    import models  # noqa: F401  (registruje tabulky do metadata)
+    return set(Base.metadata.tables)
 
 
 def _make_cfg_for_memory_engine(engine) -> AlembicCfg:
@@ -175,7 +176,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA | STEP_0027_EXTRA)
+        self.assertEqual(tables_first, _model_tables())
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -752,7 +753,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA | STEP_0027_EXTRA)
+            self.assertEqual(tables, _model_tables())
 
             db = main.SessionLocal()
             try:

@@ -1220,7 +1220,7 @@ function countRequests(page) {
   await page.waitForTimeout(100);
   check("dashboard úpravy: režim úprav je zřetelný", (await page.getByRole("note").filter({ hasText: "Režim úprav" }).count()) === 1);
   check("dashboard úpravy: fokus na Hotovo", (await focusedName(page)) === "Hotovo");
-  check("dashboard úpravy: každý widget je pojmenovaná skupina", (await page.getByRole("group", { name: "Finance" }).count()) === 1 && (await page.locator('[role="group"][aria-labelledby^="widget-"]').count()) === 11);
+  check("dashboard úpravy: každý widget je pojmenovaná skupina", (await page.getByRole("group", { name: "Finance" }).count()) === 1 && (await page.locator('[role="group"][aria-labelledby^="widget-"]').count()) === DEFAULT_ORDER.length);
   check(
     "dashboard úpravy: obsah widgetů je neaktivní (inert)",
     await page.evaluate(() => {
@@ -1238,7 +1238,7 @@ function countRequests(page) {
   let order = await widgetOrder(page);
   check("dashboard úpravy: přesun dolů", order[0] === "day" && order[1] === "burning", order.slice(0, 3).join(","));
   check("dashboard úpravy: fokus zůstává na tlačítku", (await focusedName(page)) === "Posunout dolů: Co hoří");
-  check("dashboard úpravy: přesun ohlášen čtečce", /Co hoří: pozice 2 z 11/.test(await page.getByRole("status").filter({ hasText: "pozice" }).innerText().catch(() => "")));
+  check("dashboard úpravy: přesun ohlášen čtečce", new RegExp(`Co hoří: pozice 2 z ${DEFAULT_ORDER.length}`).test(await page.getByRole("status").filter({ hasText: "pozice" }).innerText().catch(() => "")));
   check("dashboard úpravy: uloženo hned", JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "day");
   await page.waitForTimeout(600);
   check("dashboard úpravy: uloženo i na server (verze 2)", (await serverPrefs()).value?.widgets?.[0]?.id === "day" && (await serverPrefs()).value?.version === 2);
