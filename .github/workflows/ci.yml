@@ -114,7 +114,8 @@ jobs:
   # Screenshots (desktop + 390 px) are uploaded as the "ui-check-screenshots" artifact for the PR review.
   ui:
     name: UI checks (ui-check, module flags, changes)
-    runs-on: ubuntu-latest
+    # Playwright 1.56 installs Chromium only on the Ubuntu releases it supports (not yet on 26.04 = ubuntu-latest).
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
       run:
