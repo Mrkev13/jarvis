@@ -48,6 +48,9 @@ def test_alert_url_and_password_never_reach_output_logs_or_task_arguments():
 def test_task_every_ten_minutes_without_overlap_as_the_current_user():
     assert "$TaskName = 'StandaHub-AutoUpdate'" in TEXT
     assert '-RepetitionInterval (New-TimeSpan -Minutes 10)' in TEXT
+    # Review on PR #55: a start boundary in the past + StartWhenAvailable can deploy right at registration.
+    assert '$firstStart = (Get-Date).AddMinutes(15)' in TEXT and '-Once -At $firstStart' in TEXT
+    assert '(Get-Date).Date' not in TEXT
     assert '-MultipleInstances IgnoreNew' in TEXT
     assert "[System.IO.File]::Open((Join-Path $Directory 'run.lock'), 'OpenOrCreate', 'ReadWrite', 'None')" in TEXT, \
         'second run (manual + task) exits instead of deploying twice'

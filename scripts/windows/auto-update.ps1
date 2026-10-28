@@ -138,13 +138,16 @@ try {
         $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 50) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
         # Time-based repetition keeps firing after reboots; no duration = indefinitely (Windows 10/11).
-        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 10)
+        # First start 15 minutes in the FUTURE: a start boundary in the past plus StartWhenAvailable can make Task
+        # Scheduler run the (highest-privileged) deploy right at registration, before the manual first -Mode Run.
+        $firstStart = (Get-Date).AddMinutes(15)
+        $trigger = New-ScheduledTaskTrigger -Once -At $firstStart -RepetitionInterval (New-TimeSpan -Minutes 10)
         # Only paths and the mode: the alert URL stays in the protected file, never in task arguments.
         $taskArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode Run -ProjectDirectory "{1}" -Directory "{2}"' -f $PSCommandPath, $root, $Directory
         $action = New-ScheduledTaskAction -Execute $shell -Argument $taskArgs -WorkingDirectory $root
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -User $cred.UserName -Password $cred.GetNetworkCredential().Password -RunLevel Highest -Force | Out-Null
         $cred = $null
-        Write-Output ('{0} registered (every 10 minutes, as {1}, highest privileges); not started.' -f $TaskName, $user)
+        Write-Output ('{0} registered (every 10 minutes, as {1}, highest privileges); first automatic run at {2}.' -f $TaskName, $user, $firstStart.ToString('HH:mm'))
         exit 0
     }
 

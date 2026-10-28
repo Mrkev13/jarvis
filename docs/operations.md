@@ -337,7 +337,7 @@ $s = 'C:\StandaHub\scripts\windows\auto-update.ps1'
 powershell -ExecutionPolicy Bypass -File $s -Mode Prepare
 # optional: paste the "Hub deploy" ping URL, save, close (never into chat/Linear/git)
 notepad C:\ProgramData\StandaHub\auto-update\deploy-ping-url.txt
-powershell -ExecutionPolicy Bypass -File $s -Mode Register     # asks for the Windows password (not the PIN)
+powershell -ExecutionPolicy Bypass -File $s -Mode Register     # Windows password (not the PIN); first auto run in 15 min
 powershell -ExecutionPolicy Bypass -File $s -Mode Run          # first run by hand: "nothing to do" or a deploy
 powershell -ExecutionPolicy Bypass -File $s -Mode Check        # ready: True, last_result
 ```
