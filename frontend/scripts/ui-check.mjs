@@ -1,6 +1,7 @@
 // Vizuální a přístupnostní kontrola migrovaných stránek (Roadmap 4A–4H, Game Enrichment A–C).
 //
-// Předpoklady: `npm run build`, pak v jiných terminálech
+// Nejjednodušší spuštění (MRK-95): scripts/ui-check-run.sh ui  – build, servery, kontrola i úklid najednou.
+// Ručně: `npm run build`, pak v jiných terminálech
 //   node scripts/mock-api.mjs            (fixtures, žádný Groq)
 //   npx next start -p 3000 -H 127.0.0.1
 // Spuštění: node scripts/ui-check.mjs   (Playwright: PLAYWRIGHT_MODULE=/cesta/k/playwright/index.mjs,
@@ -770,7 +771,11 @@ async function aiSend(page, text) {
   await page.getByRole("region", { name: "Chat" }).getByText("Poslouchám…").waitFor();
   check("jarvis ai: skutečné diktování = listening", (await avatar.getAttribute("data-jarvis-state")) === "listening");
   check("companion ai: skutečné diktování = listening", (await page.getByTestId("jarvis-companion").getAttribute("data-companion-state")) === "listening");
+  // MRK-95: diktování se nesmí samo ukončit hned po startu (úklid při změně stavu volal stop())
+  await page.waitForTimeout(400);
+  check("jarvis ai: diktování po startu běží dál", (await page.getByRole("button", { name: "Zastavit diktování" }).count()) === 1);
   await page.getByRole("button", { name: "Zastavit diktování" }).click();
+  await page.getByRole("button", { name: "Diktovat zprávu (Ctrl+Shift+M)" }).waitFor();
   check("jarvis ai listening: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }

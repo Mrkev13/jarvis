@@ -109,3 +109,39 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run build
+
+  # MRK-95: browser UI checks (mock API from fixtures, never Groq, no network beyond localhost).
+  # Screenshots (desktop + 390 px) are uploaded as the "ui-check-screenshots" artifact for the PR review.
+  ui:
+    name: UI checks (ui-check, module flags, changes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # Playwright is not an app dependency; the checks import it by name (see ui-check.mjs header).
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Run UI checks
+        run: bash scripts/ui-check-run.sh
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-check-screenshots
+          path: frontend/scripts/.ui-check/
+          retention-days: 14
+          if-no-files-found: warn

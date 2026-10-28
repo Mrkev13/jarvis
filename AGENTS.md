@@ -49,8 +49,10 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
 
 - Migrace: CI dělá na PostgreSQL `upgrade head → downgrade -1 → upgrade head` + kontrolu driftu.
   Lokálně opt-in přes `TEST_POSTGRES_URL` (jednorázová DB s `test` v názvu).
-- UI: `frontend/scripts/ui-check.mjs`, `module-flags-check.mjs`, `changes-check.mjs` (návod v hlavičce;
-  mock API z fixtures, žádný Groq) → screenshoty do `frontend/scripts/.ui-check/`. CI je nespouští.
+- UI: `frontend/scripts/ui-check-run.sh [ui|flags|flags-off|changes] [--no-build]` – build, mock API z fixtures
+  (žádný Groq), `next start`, kontroly (`ui-check.mjs`, `module-flags-check.mjs`, `changes-check.mjs`) a úklid
+  serverů → screenshoty do `frontend/scripts/.ui-check/`. CI to spouští (job `ui`) a screenshoty nahraje jako
+  artefakt `ui-check-screenshots`.
 - Než napíšeš „hotovo“, spusť kontroly, kterých se změna týká. Neprošlo = napiš to i s výstupem.
 
 ## Nepřekročitelná pravidla kódu
@@ -86,7 +88,8 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
 4. **Review dělá jiný agent**, než který kód psal (Claude ↔ Codex), např. přes `/code-review`.
    Nálezy autor opraví na téže branch.
 5. PR vyplní šablonu (`.github/pull_request_template.md`). Povinně:
-   - **UI změna** → screenshot desktop (1366 nebo 1920 px) + mobil (390 px);
+   - **UI změna** → screenshot desktop (1366 nebo 1920 px) + mobil (390 px) – stačí odkaz na artefakt
+     `ui-check-screenshots` z CI a názvy souborů, které změnu ukazují;
    - **migrace** → výslovně uvést revizi, co dělá a že prošel upgrade/downgrade;
    - **Groq count** → přesný počet reálných Groq požadavků při práci a ověření (obvykle 0);
    - co bylo ověřeno lokálně na reálné DB/Windows a co jen v cloudu.
