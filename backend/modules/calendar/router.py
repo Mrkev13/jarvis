@@ -73,4 +73,12 @@ def calendar_free_blocks(start: dt.date, end: dt.date,
 
 @router.post('/sync')
 def calendar_sync():
-    return _run(service.sync_moodle)
+    """MRK-77: all configured sources; one failing feed does not stop or undo the others."""
+    return _run(service.sync_all)
+
+
+@router.post('/sync/{key}')
+def calendar_sync_source(key: str):
+    if key not in service.SOURCES:
+        raise HTTPException(status_code=404, detail={'category': 'unknown_source'})
+    return _run(lambda db: service.sync_source(db, key))

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Query
 
 import database
 from models import Assignment, Exam, Subject
-from modules.calendar.models import CalendarEvent
+from modules.calendar.models import CalendarEvent, CalendarSource
 from modules.calendar.occurrences import get_calendar_occurrences, local_window
 from modules.school.models import StudyCourse
 from time_utils import to_local, today_local
@@ -52,8 +52,11 @@ def event_subjects(db, event_ids) -> dict[int, Subject]:
     courses = course_subjects(db)
     if not courses:
         return {}
+    # MRK-77: only the Moodle source – a Google event whose CATEGORIES happens to equal a course short name is not
+    # a school deadline
     rows = (db.query(CalendarEvent.id, CalendarEvent.course_ref)
-            .filter(CalendarEvent.id.in_(ids), CalendarEvent.course_ref.isnot(None)))
+            .join(CalendarSource, CalendarSource.id == CalendarEvent.source_id)
+            .filter(CalendarEvent.id.in_(ids), CalendarEvent.course_ref.isnot(None), CalendarSource.config_key == 'moodle'))
     return {event_id: courses[_key(ref)] for event_id, ref in rows if _key(ref) in courses}
 
 

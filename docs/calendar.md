@@ -244,6 +244,24 @@ full backend **955 passed, 8 skipped**; frontend **347 passed**; lint,
 TypeScript, pyflakes and production build passed; Alembic head unchanged.
 40 weekly series over 31 days: ~27 ms per query. **Real Groq requests: 0.**
 
+## Several read-only sources: Moodle + Google Calendar (MRK-77)
+
+- `modules/calendar/service.SOURCES` is an allowlist in code: `moodle` → `MOODLE_ICS_URL` (alias
+  `CALENDAR_MOODLE_ICS_URL`), `google` → `GOOGLE_ICS_URL`. The key is `CalendarSource.config_key` (≤ 20 chars,
+  `kind='ics'`). No migration is needed. Clients only ever name a key, never a URL or an env variable.
+- Google offers a private, read-only ICS address: Google Kalendář → Nastavení kalendáře → „Tajná adresa ve formátu
+  iCal". It is a secret: keep it in the protected env file only. Writing to Google (OAuth) is a separate issue.
+- Sync endpoints:
+  - `POST /calendar/sync` syncs every configured source, each in its own savepoint. A failing feed neither blocks
+    nor undoes the others. The response holds summed counts plus `sources: {key: counts | {"error": category}}`.
+    `503` only when every source fails, or when none is configured.
+  - `POST /calendar/sync/{key}` syncs one source; an unknown key → `404`.
+- Reconciliation (source-missing) is per source, so a Google snapshot never marks a Moodle event missing.
+- `GET /calendar` lists `available_sources` (names and `configured` flags, never URLs) and a `configured` flag. Each
+  event carries its source name as a badge.
+- Only `moodle` events become school deadlines (MRK-76). A Google event with matching `CATEGORIES` stays an ordinary
+  event.
+
 ## Moodle events as school deadlines (MRK-76)
 
 - The parser reads `CATEGORIES`. Moodle exports the course short name there. Exactly one distinct value is stored as
