@@ -269,7 +269,7 @@ Health mismatch is a stop signal. Avoid parallel backend instances during recove
 ### One-command update (MRK-92)
 
 `scripts/windows/update.ps1` runs the update and rollback above as one operator command. It is started by a person
-(elevated PowerShell); nothing pulls or rebuilds on its own.
+(elevated PowerShell) or, opt-in, by the automatic deploy below; nothing else pulls or rebuilds on its own.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\StandaHub\scripts\windows\update.ps1
@@ -309,7 +309,42 @@ Remove-Item "$env:TEMP\standahub-update.ps1"
 Exit codes: `0` updated / already up to date, `1` failed and rolled back, `2` preconditions not met (nothing
 changed), `3` failed after the migration. Output is the script's own fixed messages plus pip/npm/git/Next output;
 the env file is read only inside Python. Gitignored local files (`frontend/public/game-assets`, `.env*`) are left
-alone. Scheduled automatic updates are a separate decision after this script has run cleanly a few times.
+alone. Automatic runs of this script after a merge are opt-in, see the next section.
+
+### Automatic deploy after merge (MRK-98, opt-in)
+
+`scripts/windows/auto-update.ps1` runs `update.ps1` by itself when `origin/main` moved. All decisions stay in
+`update.ps1`: fresh-backup precondition, maintenance marker, build before migration, health check and rollback. What
+this script adds:
+
+- the task `StandaHub-AutoUpdate` runs every 10 minutes as **your Windows account** with highest privileges, so `git
+  fetch` uses your GitHub login. Windows stores the password for the task; the script never prints or saves it.
+  A changed Windows password means re-running `-Mode Register`;
+- it deploys exactly the commit it looked at (`update.ps1 -Ref <sha>`); only reviewed, CI-green merges reach `main`;
+- a commit whose update failed (exit 1 = rolled back, exit 3 = failed after the migration) is **never retried
+  automatically**. The next automatic attempt is a newer commit, or run `update.ps1` by hand after the fix;
+- exit 2 (nothing changed: backup not fresh yet, local edits, Hub unreachable) is retried on the next run;
+- one run at a time (lock file), one log per attempt in `C:\ProgramData\StandaHub\auto-update\logs` (last 30);
+- optional alert: a second healthchecks.io check "Hub deploy" (period 10 min, grace 30 min). Every finished run pings
+  it, or `/fail` while a failed commit is pending or deploys have not started for 6 hours. Missing pings (task
+  disabled, password changed, git cannot fetch) alert too.
+
+Setup (elevated PowerShell on the Hub host; AVG exclusions for `C:\StandaHub\scripts\windows\*` and
+`C:\ProgramData\StandaHub\*` from MRK-90 already cover these paths):
+
+```powershell
+$s = 'C:\StandaHub\scripts\windows\auto-update.ps1'
+powershell -ExecutionPolicy Bypass -File $s -Mode Prepare
+# optional: paste the "Hub deploy" ping URL, save, close (never into chat/Linear/git)
+notepad C:\ProgramData\StandaHub\auto-update\deploy-ping-url.txt
+powershell -ExecutionPolicy Bypass -File $s -Mode Register     # asks for the Windows password (not the PIN)
+powershell -ExecutionPolicy Bypass -File $s -Mode Run          # first run by hand: "nothing to do" or a deploy
+powershell -ExecutionPolicy Bypass -File $s -Mode Check        # ready: True, last_result
+```
+
+Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `update.ps1` still works),
+`-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
+in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

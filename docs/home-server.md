@@ -103,6 +103,13 @@ Kritické služby se neaktualizují unattended Watchtower-style upgradem. Diun p
 
 Více kritických služeb se neaktualizuje v jednom neoddělitelném kroku.
 
+**Výjimka: kód Standa Hubu po merge (MRK-98, opt-in).** Nasazení vlastního kódu z `main` není upstream upgrade
+neznámé verze. Do `main` jde jen commit po review a zeleném CI. `scripts/windows/auto-update.ps1` ho nasazuje stejným
+řízeným postupem jako ruční `update.ps1`: ověří čerstvou zálohu, migruje až po úspěšném buildu, čeká na health a při
+chybě před migrací vrátí předchozí verzi. Commit, který jednou selhal, se automaticky znovu nezkouší. Zapíná se
+registrací úlohy a dá se pozastavit (`-Mode Pause`). Netýká se to PostgreSQL ani ostatních služeb, ty dál podle
+pravidel výše. Postup: [operations.md](operations.md#automatic-deploy-after-merge-mrk-98-opt-in).
+
 ## 8. Zálohy a obnova
 
 - Systém a databáze jsou na NVMe; velké fotky a média ideálně na samostatném úložišti.
