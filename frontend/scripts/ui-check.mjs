@@ -22,6 +22,16 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright")
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {});
 
 const results = [];
+/** Podmínka, která má platit „brzy" (překreslení, přesun fokusu): zkouší ji do `ms`, pak vrátí poslední výsledek.
+ * Pomalejší CI runner jinak hlásí falešné selhání u stavu, který se jen ještě nestihl vykreslit (MRK-95). */
+async function eventually(fn, ms = 2000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await fn()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return Boolean(await fn());
+}
 function check(name, ok, detail = "") {
   results.push({ name, ok, detail });
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? ` – ${detail}` : ""}`);
@@ -769,8 +779,8 @@ async function aiSend(page, text) {
   const avatar = page.locator('header [data-testid="jarvis-avatar"]');
   await page.getByRole("button", { name: "Diktovat zprávu (Ctrl+Shift+M)" }).click();
   await page.getByRole("region", { name: "Chat" }).getByText("Poslouchám…").waitFor();
-  check("jarvis ai: skutečné diktování = listening", (await avatar.getAttribute("data-jarvis-state")) === "listening");
-  check("companion ai: skutečné diktování = listening", (await page.getByTestId("jarvis-companion").getAttribute("data-companion-state")) === "listening");
+  check("jarvis ai: skutečné diktování = listening", await eventually(async () => (await avatar.getAttribute("data-jarvis-state")) === "listening"));
+  check("companion ai: skutečné diktování = listening", await eventually(async () => (await page.getByTestId("jarvis-companion").getAttribute("data-companion-state")) === "listening"));
   // MRK-95: diktování se nesmí samo ukončit hned po startu (úklid při změně stavu volal stop())
   await page.waitForTimeout(400);
   check("jarvis ai: diktování po startu běží dál", (await page.getByRole("button", { name: "Zastavit diktování" }).count()) === 1);
@@ -2025,7 +2035,7 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
   const box = page.getByTestId("shot-lightbox");
   await box.waitFor({ timeout: 2000 }).catch(() => undefined);
   check("wot B: klik na náhled otevře zvětšení", (await box.count()) === 1 && (await box.getAttribute("role")) === "dialog");
-  check("wot B: zvětšení – fokus na Zavřít", (await focusedLabel(page)) === "Zavřít náhled", await focusedLabel(page));
+  check("wot B: zvětšení – fokus na Zavřít", await eventually(async () => (await focusedLabel(page)) === "Zavřít náhled"), await focusedLabel(page));
   const big = await box.locator("img").evaluate((i) => ({ fit: getComputedStyle(i).objectFit, ok: i.complete && i.naturalWidth > 0 })).catch(() => null);
   check("wot B: zvětšení zachová poměr stran (object-contain)", big?.fit === "contain", JSON.stringify(big));
   check("wot B: zvětšení – popisek a pozice", /Výsledková tabulka/.test(await box.innerText()) && /1 \/ 3/.test(await box.innerText()));

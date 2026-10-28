@@ -144,5 +144,6 @@ jobs:
         with:
           name: ui-check-screenshots
           path: frontend/scripts/.ui-check/
+          include-hidden-files: true  # .ui-check is a dot directory; without this nothing is uploaded
           retention-days: 14
           if-no-files-found: warn

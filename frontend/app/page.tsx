@@ -148,7 +148,8 @@ export default function Home() {
           </HudLabel>
         }
         title="Řídicí centrum"
-        subtitle="Co hoří, co tě dnes čeká a co se změnilo – na jednom místě."
+        // na mobilu bez podtitulku: první obrazovka patří „Co hoří" a další položce dne (MRK-78/95)
+        subtitle={<span className="hidden md:inline">Co hoří, co tě dnes čeká a co se změnilo – na jednom místě.</span>}
         actions={
           editing ? (
             <>
