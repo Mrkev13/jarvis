@@ -140,7 +140,7 @@ try {
     $state.task_registered = [bool]$task
     $state.task_enabled = [bool]$task -and ($task.State -ne 'Disabled')   # antivirus "gaming" modes disable tasks
     foreach ($key in $state.Keys) { Write-Output ("{0}: {1}" -f $key, $state[$key]) }
-    $ready = -not ($state.Values | Where-Object { $_ -eq $false })
+    $ready = -not ($state.Values -contains $false)   # MRK-93: piping to Where-Object yields $false itself, and -not $false is True
     Write-Output ("ready: {0}" -f $ready)
     if (-not $ready) { exit 2 }
     exit 0

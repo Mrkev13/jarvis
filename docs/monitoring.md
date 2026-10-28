@@ -160,6 +160,19 @@ unplug the network → alert within 10 min. The task needs `C:\StandaHub` writab
 (it runs the script as SYSTEM), same as the production tasks. Antivirus "gaming" modes that disable scheduled tasks
 silence the heartbeat too; that then shows up as an alert, not as silence.
 
+**Antivirus (MRK-93):** AVG's behaviour shield treated the SYSTEM task with an outgoing HTTP request as a threat.
+It quarantined `heartbeat.ps1`, deleted the `StandaHub-Heartbeat` task and removed `ping-url.txt`. Two exclusions are
+needed: `C:\StandaHub\scripts\windows\*` and `C:\ProgramData\StandaHub\*`. The simpler option is to keep only the
+built-in Microsoft Defender on the server.
+
+Recovery:
+1. Restore the script from git, not from quarantine: `git checkout -- scripts/windows/heartbeat.ps1`. AVG may block
+   it until its protection is paused for a few minutes.
+2. Run `-Mode Prepare`, paste the URL again, then `-Mode Register` and `-Mode Check`.
+
+`-Mode Check` reports `ready: False` (exit 2) when anything is missing. Before MRK-93 a bug made it print
+`ready: True` regardless.
+
 ## Cloud verification
 
 Focused regressions cover backup/failure/disk boundaries, unknown observations,
