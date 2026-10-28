@@ -88,6 +88,8 @@ def test_deploys_exactly_the_commit_it_evaluated_through_update_ps1():
 
 def test_logs_are_bounded_and_git_runs_without_stderr_redirection():
     assert '$KeepLogs = 30' in TEXT and 'Select-Object -Skip $KeepLogs' in TEXT
-    git = TEXT[TEXT.index('function Git-Line'):TEXT.index('function Remove-OldLogs')]
-    assert '$out = & git -C $root @GitArgs' in git and '2>' not in git
+    git = TEXT[TEXT.index('function Git-Line'):TEXT.index('function Get-Revision')]
+    assert '$out = @(& git -C $root @GitArgs)' in git and '2>' not in git
+    assert "if ($sha -notmatch '^[0-9a-f]{40}$')" in TEXT, 'an empty or odd rev-parse never reaches .Substring()'
+    assert 'ScriptLineNumber' in TEXT
     assert "@('fetch', '--quiet', 'origin')" in TEXT

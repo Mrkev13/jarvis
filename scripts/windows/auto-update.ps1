@@ -100,9 +100,16 @@ function Git-Line([string]$What, [string[]]$GitArgs) {
     # Plain git calls (no stderr redirection: Windows PowerShell 5.1 turns redirected native stderr into a terminating
     # error under $ErrorActionPreference = 'Stop'). The exit code decides. Arguments as an array, so "--quiet" is never
     # read as a PowerShell parameter.
-    $out = & git -C $root @GitArgs
+    $out = @(& git -C $root @GitArgs)
     if ($LASTEXITCODE -ne 0) { throw ($What + ' failed (exit ' + $LASTEXITCODE + ')') }
-    return ([string]($out | Select-Object -Last 1)).Trim()   # [string]$null = '' (git fetch --quiet prints nothing)
+    if ($out.Count -eq 0 -or $null -eq $out[-1]) { return '' }   # git fetch --quiet prints nothing
+    return ([string]$out[-1]).Trim()
+}
+
+function Get-Revision([string]$What, [string[]]$GitArgs) {
+    $sha = Git-Line $What $GitArgs
+    if ($sha -notmatch '^[0-9a-f]{40}$') { throw ($What + ' returned no commit') }
+    return $sha
 }
 
 function Remove-OldLogs {
@@ -186,8 +193,8 @@ try {
             $updateScript = Join-Path $root 'scripts\windows\update.ps1'
 
             Git-Line 'git fetch' @('fetch', '--quiet', 'origin') | Out-Null
-            $current = Git-Line 'git rev-parse HEAD' @('rev-parse', 'HEAD')
-            $target = Git-Line ('git rev-parse ' + $Ref) @('rev-parse', '--verify', '--quiet', ($Ref + '^{commit}'))
+            $current = Get-Revision 'git rev-parse HEAD' @('rev-parse', 'HEAD')
+            $target = Get-Revision ('git rev-parse ' + $Ref) @('rev-parse', '--verify', '--quiet', ($Ref + '^{commit}'))
             $failed = Read-State 'failed-commit.txt'
 
             if ($target -eq $current) {
@@ -269,6 +276,8 @@ try {
     if (-not $ready) { exit 2 }
     exit 0
 } catch {
-    [Console]::Error.WriteLine('[auto-update] ' + $_.Exception.GetType().Name + ': ' + $_.Exception.Message + ' (run elevated; no URL printed)')
+    # Line number only (no values): enough to find a failure reported from the Windows host.
+    [Console]::Error.WriteLine('[auto-update] ' + $_.Exception.GetType().Name + ': ' + $_.Exception.Message +
+        ' (line ' + $_.InvocationInfo.ScriptLineNumber + '; run elevated; no URL printed)')
     exit 1
 }
