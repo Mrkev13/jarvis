@@ -10,6 +10,7 @@ import re
 from datetime import date, datetime, timedelta
 
 import quick_add_text as qt
+import school_moodle
 from context_format import MAX_ITEMS, WINDOW_DAYS, list_or_none, short
 from models import Assignment, Exam, Goal, Subject
 from modules.school import integrations as materials
@@ -118,6 +119,16 @@ def today_school_overdue(c) -> list[TodayItem]:
     return items
 
 
+def today_moodle_timeline(c) -> list[TodayItem]:
+    """MRK-76: Moodle test / uzávěrka u předmětu dnes (stejný ref jako položka Kalendáře → zobrazí se jednou)."""
+    return school_moodle.today_items(c.db, c.today, c.today + timedelta(days=1), c.today)
+
+
+def today_moodle_upcoming(c) -> list[TodayItem]:
+    first = c.today + timedelta(days=1)
+    return school_moodle.today_items(c.db, first, c.today + timedelta(days=UPCOMING_DAYS + 1), first)
+
+
 def today_school_upcoming(c) -> list[TodayItem]:
     subjects = _subjects(c)
     first, last = c.today + timedelta(days=1), c.today + timedelta(days=UPCOMING_DAYS)
@@ -146,6 +157,8 @@ def today_school_closed(c) -> set[str]:
 
 
 # ---------- GET /dashboard: „upcoming" ----------
+
+UPCOMING_MOODLE_DAYS = 7
 
 
 def get_upcoming(db, limit: int = 5, today: date | None = None):
@@ -179,6 +192,21 @@ def get_upcoming(db, limit: int = 5, today: date | None = None):
             "date": it.exam_date.isoformat(),
             "days_left": days,
             "overdue": days < 0,
+        })
+    # MRK-76: Moodle test / uzávěrka u předmětu do 7 dní (bez ručních duplicit); ref = událost Kalendáře
+    for m in school_moodle.school_deadlines(db, today_use, today_use + timedelta(days=UPCOMING_MOODLE_DAYS + 1)):
+        days = (date.fromisoformat(m["date"]) - today_use).days
+        entries.append({
+            "type": "calendar_event",
+            "id": m["event_id"],
+            "key": m["key"],
+            "title": m["title"],
+            "area": "school",
+            "date": m["date"],
+            "days_left": days,
+            "overdue": False,
+            "source": "moodle",
+            "subject_name": m["subject_name"],
         })
     goals = db.query(Goal).filter(Goal.target_date.is_not(None)).all()
     for g in goals:
@@ -239,11 +267,16 @@ def context_school(req: ContextRequest) -> list[str]:
         subj = f", {short(subject.name, 25)}" if subject is not None else ""
         return f"{short(title, 50)}{subj}, {d.isoformat()}"
 
-    return [
+    lines = [
         f"Škola po termínu: {list_or_none([fmt(a.title, a.subject, a.due_date) for a in overdue[:MAX_ITEMS]], len(overdue))}",
         f"Úkoly do {window_end.isoformat()}: {list_or_none([fmt(a.title, a.subject, a.due_date) for a in upcoming[:MAX_ITEMS]], len(upcoming))}",
         f"Zkoušky do {window_end.isoformat()}: {list_or_none([fmt(e.title, e.subject, e.exam_date) for e in exams[:MAX_ITEMS]], len(exams))}",
     ]
+    if school_moodle.calendar_enabled():  # MRK-76: testy a uzávěrky z Moodlu u předmětu
+        moodle = school_moodle.school_deadlines(db, today, window_end + timedelta(days=1))
+        texts = [f"{short(m['title'], 50)}, {short(m['subject_name'], 25)}, {m['date']}" for m in moodle[:MAX_ITEMS]]
+        lines.append(f"Moodle termíny do {window_end.isoformat()}: {list_or_none(texts, len(moodle))}")
+    return lines
 
 
 # ---------- Rychlé přidání: zkouška, úkol ----------
@@ -398,6 +431,8 @@ INTEGRATIONS = ModuleIntegrations(
     today=(
         TodaySource("school", 20, timeline=today_school_timeline, overdue=today_school_overdue,
                     upcoming=today_school_upcoming, closed_refs=today_school_closed),
+        # MRK-76: před Kalendářem (35), aby dedupe ponechal školní verzi Moodle události
+        TodaySource("school_moodle", 21, timeline=today_moodle_timeline, upcoming=today_moodle_upcoming),
     ),
     entity_refs=(
         EntityRef("assignment", "/school?assignment={id}", planner_actions=("complete",), notification_source=True),
@@ -420,5 +455,5 @@ INTEGRATIONS = ModuleIntegrations(
         QuickAddKind("assignment", parse_school, _school_tool_call("assignment"), _school_display("assignment"),
                      context=quick_add_context, output=quick_add_output),
     ),
-    routers=materials.ROUTERS,  # MRK-42 /school/materials
+    routers=(*materials.ROUTERS, school_moodle.router),  # MRK-42 /school/materials, MRK-76 /school/moodle-deadlines
 )

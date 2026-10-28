@@ -2403,6 +2403,32 @@ await wotReset();
   check("předměty mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
+// MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  const { ctx, page, errors } = await open("/school", { width, height });
+  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  const row = openList.locator('[data-search-target="moodle-41"]');
+  await row.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check(`moodle ${label}: termín v otevřených se štítkem a předmětem`, (await row.count()) === 1 && (await row.innerText()).includes("Moodle") && (await row.innerText()).includes("Fyzika"));
+  check(`moodle ${label}: odkaz do Kalendáře`, (await row.getByRole("link", { name: /^V Kalendáři.*Test 1 se zavírá$/ }).getAttribute("href")) === "/calendar?event=41");
+  check(`moodle ${label}: Moodle termín nejde smazat ani splnit`, (await row.getByRole("button").count()) === 0);
+  check(`moodle ${label}: není v hotových`, (await page.getByRole("list", { name: "Hotové úkoly a uzavřené zkoušky" }).locator('[data-search-target^="moodle-"]').count()) === 0);
+  if (width < 500) check("moodle mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await row.scrollIntoViewIfNeeded().catch(() => undefined);
+  await page.screenshot({ path: `${OUT}school-moodle-${label}.png`, fullPage: width < 500 });
+  check(`moodle ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
+  const card = page.locator('[aria-labelledby="upcoming-title"]');
+  await card.waitFor({ timeout: 4000 }).catch(() => undefined);
+  const moodleRow = card.getByRole("listitem").filter({ hasText: "Test 1 se zavírá" });
+  check("moodle hlavní obrazovka: Nadcházející se štítkem Moodle a předmětem", (await moodleRow.count()) === 1 && (await moodleRow.innerText()).includes("Moodle") && (await moodleRow.innerText()).includes("Fyzika"));
+  await card.screenshot({ path: `${OUT}dashboard-upcoming-moodle.png` }).catch(() => undefined);
+  check("moodle hlavní obrazovka: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
 // 30) MRK-16 – Jarvis companion: volné kotvy (nezakrývá obsah), scroll, stavy, chůze, klik, bubliny,
 //     reduced motion, vypnutí, mobil, záloha obrázku, jediný Jarvis na /ai.
 {

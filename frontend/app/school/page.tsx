@@ -40,7 +40,9 @@ import {
   examTypeLabel,
   isDoneStatus,
   isExamClosed,
+  moodleDeadlines,
   offeredSubjects,
+  type MoodleDeadline,
   sortByDate,
   type SchoolSubject,
 } from "@/lib/school";
@@ -79,7 +81,8 @@ type FormKind = "subject" | "assignment" | "exam" | null;
 
 type AgendaItem =
   | { kind: "assignment"; key: string; date: string | null; item: Assignment }
-  | { kind: "exam"; key: string; date: string | null; item: Exam };
+  | { kind: "exam"; key: string; date: string | null; item: Exam }
+  | { kind: "moodle"; key: string; date: string | null; item: MoodleDeadline };
 
 const PRIORITIES = ["low", "medium", "high"];
 const ASSIGNMENT_STATUSES = ["todo", "in_progress", "done"];
@@ -115,6 +118,7 @@ export default function SchoolPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
+  const [moodle, setMoodle] = useState<MoodleDeadline[]>([]);  // MRK-76: testy a uzávěrky z Kalendáře (Moodle)
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [retrying, setRetrying] = useState(false);
 
@@ -173,6 +177,11 @@ export default function SchoolPage() {
       setSubjects(subj);
       setAssignments(asgns);
       setExams(exs);
+      // nepovinné: vypnutý Kalendář nebo chyba = Termíny jen z ručních záznamů
+      apiFetch("/school/moodle-deadlines")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body) => setMoodle(moodleDeadlines(body)))
+        .catch(() => setMoodle([]));
 
       const offered = offeredSubjects(subj);
       const keep = (id: string) => (offered.some((s) => String(s.id) === id) ? id : offered[0] ? String(offered[0].id) : "");
@@ -471,12 +480,37 @@ export default function SchoolPage() {
     ...exams
       .filter((e) => isExamClosed(e.status) === closed)
       .map((e): AgendaItem => ({ kind: "exam", key: `e-${e.id}`, date: e.exam_date, item: e })),
+    ...(closed ? [] : moodle.map((m): AgendaItem => ({ kind: "moodle", key: `m-${m.key}`, date: m.date, item: m }))),
   ];
   const openAgenda = sortByDate(toAgenda(false), (x) => x.date);
   const closedAgenda = sortByDate(toAgenda(true), (x) => x.date, true);
 
   function renderAgendaRow(entry: AgendaItem, idx: number) {
     const stagger = staggerStyle(Math.min(idx, MAX_STAGGER));
+    if (entry.kind === "moodle") {
+      const m = entry.item;
+      return (
+        <EntityRow
+          key={entry.key}
+          searchTarget={`moodle-${m.key}`}
+          style={stagger}
+          className="motion-card"
+          badges={
+            <>
+              <DeadlineBadge date={m.date} kind="exam" closed={false} />
+              <StatusBadge tone="info">Moodle</StatusBadge>
+            </>
+          }
+          title={m.title}
+          meta={`${m.subject_name} · ${formatDate(m.date)}${m.time ? ` ${m.time}` : ""}`}
+          actions={
+            <ButtonLink href={m.href} size="sm" variant="ghost">
+              V Kalendáři<span className="sr-only">: {m.title}</span>
+            </ButtonLink>
+          }
+        />
+      );
+    }
     if (entry.kind === "assignment") {
       const a = entry.item;
       const done = isDoneStatus(a.status);

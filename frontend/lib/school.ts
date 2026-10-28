@@ -206,3 +206,29 @@ export function subjectPatch(original: SchoolSubject, draft: SubjectDraft): Part
   }
   return patch;
 }
+
+// ---------- MRK-76: Moodle termíny u předmětu (Kalendář → Škola) ----------
+
+export type MoodleDeadline = {
+  key: string;
+  event_id: number;
+  title: string;
+  date: string;
+  time: string | null;
+  all_day: boolean;
+  subject_id: number;
+  subject_name: string;
+  href: string;
+};
+
+/** Odpověď GET /school/moodle-deadlines → položky; cokoli jiného (vypnutý Kalendář, chyba) = žádné. */
+export function moodleDeadlines(raw: unknown): MoodleDeadline[] {
+  const items = (raw as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.filter(
+    (i): i is MoodleDeadline =>
+      typeof i === "object" && i !== null && typeof (i as MoodleDeadline).title === "string" &&
+      typeof (i as MoodleDeadline).date === "string" && typeof (i as MoodleDeadline).href === "string" &&
+      (i as MoodleDeadline).href.startsWith("/calendar?event="),
+  );
+}

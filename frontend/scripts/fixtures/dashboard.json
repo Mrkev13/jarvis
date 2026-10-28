@@ -168,6 +168,18 @@
    "overdue": false
   },
   {
+   "type": "calendar_event",
+   "id": 41,
+   "key": "41",
+   "title": "Test 1 se zavírá",
+   "area": "school",
+   "date": "2026-10-04",
+   "days_left": 1,
+   "overdue": false,
+   "source": "moodle",
+   "subject_name": "Fyzika"
+  },
+  {
    "type": "assignment",
    "id": 3,
    "title": "Projekt",
