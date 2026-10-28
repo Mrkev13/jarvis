@@ -15,6 +15,10 @@ const ACTION_DELAY_MS = 700; // akce trvají chvíli, aby byl vidět busy stav
 
 // MRK-56: přijaté importy ZIPu (jen velikosti) – materials-import-check ověřuje, že UI posílá syrový ZIP.
 const materialImports = [];
+// MRK-78: uložené preference (rozložení Řídicího centra) – /__mock/preferences/reset?fail=all|write simuluje výpadek
+const preferences = new Map();
+const preferenceCalls = [];
+const preferenceFail = { mode: null };
 
 const GET_ROUTES = {
   "/dashboard": () => fixture("dashboard"),
@@ -290,6 +294,35 @@ createServer(async (req, res) => {
   if (url.pathname === "/events/stream" && req.method === "GET") return openEventStream(req, res, url);
   if (url.pathname === "/__mock/events") return respond(200, mockEvents);
   if (url.pathname === "/changes" && req.method === "GET") return respond(200, changesResponse(url), 60);
+  // MRK-78: rozložení Řídicího centra na serveru (jako ui_preferences.py: jen povolený klíč, PUT {value}, DELETE)
+  if (url.pathname === "/__mock/preferences/reset") {
+    preferences.clear();
+    preferenceCalls.length = 0;
+    preferenceFail.mode = url.searchParams.get("fail");
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/preferences") return respond(200, { value: preferences.get("dashboard_layout") ?? null, calls: preferenceCalls });
+  if (url.pathname === "/__mock/preferences/seed" && req.method === "POST") {
+    preferences.set("dashboard_layout", body);
+    return respond(200, { ok: true });
+  }
+  const pref = /^\/preferences\/([a-z_]+)$/.exec(url.pathname);
+  if (pref) {
+    if (pref[1] !== "dashboard_layout") return respond(404, { detail: { category: "unknown_preference" } });
+    preferenceCalls.push(req.method);
+    if (preferenceFail.mode === "all" || (preferenceFail.mode === "write" && req.method !== "GET")) return respond(503, { detail: "Server neodpovídá." });
+    if (req.method === "PUT") preferences.set(pref[1], body?.value);
+    if (req.method === "DELETE") preferences.delete(pref[1]);
+    return respond(200, { key: pref[1], value: preferences.get(pref[1]) ?? null, updated_at: null }, 40);
+  }
+  // MRK-78: denní osa (jen volno pro „Můj den"; obsazenost z Kalendáře, 11. 10. 2026)
+  if (url.pathname === "/timeline/day" && req.method === "GET") {
+    return respond(200, { date: url.searchParams.get("date"), all_day_items: [], timed_items: [], truncated: false, free_blocks_from: ["calendar"],
+      free_blocks: [
+        { starts_at: "2026-10-11T05:00:00+00:00", ends_at: "2026-10-11T08:00:00+00:00", local_date: "2026-10-11", local_start: "07:00", local_end: "10:00", duration_minutes: 180 },
+        { starts_at: "2026-10-11T12:00:00+00:00", ends_at: "2026-10-11T16:00:00+00:00", local_date: "2026-10-11", local_start: "14:00", local_end: "18:00", duration_minutes: 240 },
+      ] }, 40);
+  }
   if (url.pathname === "/__mock/changes/calls") return respond(200, changesState.calls);
   if (url.pathname === "/__mock/changes/reset") {
     changesState.items = changesState.items.filter((i) => !i.title.includes("z telefonu"));

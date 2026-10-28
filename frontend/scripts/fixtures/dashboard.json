@@ -233,37 +233,5 @@
   "t4_count": 3,
   "priority_count": 2,
   "average_build_completeness": 35
- },
- "recent_activity": [
-  {
-   "timestamp": "2026-10-11T14:00:00",
-   "area": "school",
-   "action_type": "create",
-   "summary": "Úkol přidán: Laboratorní protokol č. 3"
-  },
-  {
-   "timestamp": "2026-10-11T07:00:00",
-   "area": "finance",
-   "action_type": "create",
-   "summary": "Výdaj 350 Kč: Doprava"
-  },
-  {
-   "timestamp": "2026-10-11T00:00:00",
-   "area": "work",
-   "action_type": "create",
-   "summary": "Práce 5 h – Klient ABC"
-  },
-  {
-   "timestamp": "2026-10-10T17:00:00",
-   "area": "goals",
-   "action_type": "update",
-   "summary": "Cíl upraven: Přečíst 12 knih (pozastaven)"
-  },
-  {
-   "timestamp": "2026-10-10T10:00:00",
-   "area": "reminders",
-   "action_type": "complete",
-   "summary": "Připomínka hotová: Koupit lístky"
-  }
- ]
+ }
 }

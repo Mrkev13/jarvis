@@ -289,6 +289,8 @@ app.add_middleware(
 
 from health_router import router as health_router
 app.include_router(health_router)
+from ui_preferences import router as ui_preferences_router  # MRK-78: rozložení Řídicího centra na serveru
+app.include_router(ui_preferences_router)
 
 # MRK-21: REST modulů z `ModuleIntegrations.routers` (modules/<id>/router.py). Globální dependencies výše (auth,
 # brána vypnutého modulu) platí i pro ně – nový modul do main.py nic nepřidává.
@@ -2497,27 +2499,11 @@ def dashboard_get():
                 logging.getLogger(__name__).exception("dashboard: section %s (%s) failed", sec.key, owner)
                 db.rollback()
 
-        recent_activity_rows = (
-            db.query(ActivityLog)
-            .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc())
-            .limit(5)
-            .all()
-        )
-        recent_activity = [
-            {
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-                "area": r.area,
-                "action_type": r.action_type,
-                "summary": r.summary,
-            }
-            for r in recent_activity_rows
-        ]
-
+        # MRK-78: „recent_activity" odstraněno – frontend ho nečetl; změny ukazuje widget „Od včera" (GET /changes).
         return {
             "today": today,
             "notifications": notifications,
             **sections,
-            "recent_activity": recent_activity,
         }
     finally:
         db.close()

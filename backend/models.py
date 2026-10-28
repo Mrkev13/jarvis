@@ -781,6 +781,16 @@ class ModuleSetting(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class UiPreference(Base):
+    """MRK-78: nastavení vzhledu sdílená mezi zařízeními (rozložení Řídicího centra). Klíč z allowlistu
+    (`ui_preferences.KEYS`), hodnota = ověřený JSON bez osobních dat (jen id widgetů, pořadí, velikosti)."""
+    __tablename__ = "ui_preferences"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ---------- modely modulů v balíčcích modules/<id>/ (Platform 2.0) ----------
 # Jeden řádek na modul: registrace tabulek do Base pro Alembic, create_all v testech a kontrolu driftu schématu.
 from modules.habits.models import Habit, HabitEntry  # noqa: E402

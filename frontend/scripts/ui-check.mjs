@@ -440,24 +440,23 @@ for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   await ctx.close();
 }
 
-// 12) Roadmap 4B.1 – vyvážení dashboardu na širokých displejích (nezávislé na konkrétních datech).
+// 12) Roadmap 4B.1 / MRK-78 – vyvážení dashboardu na širokých displejích (nezávislé na konkrétních datech).
 for (const width of [1920, 1366]) {
   const { ctx, page } = await open("/", { width, height: 1000 });
   const m = await page.evaluate(() => {
-    const card = (id) => document.getElementById(id)?.closest("section, article, div[aria-labelledby]")?.getBoundingClientRect();
-    const [today, attention, goals, upcoming, work, finance, games] =
-      ["today-title", "attention-title", "goals-title", "upcoming-title", "work-title", "finance-title", "games-title"].map(card);
+    const box = (id) => document.querySelector(`[data-widget="${id}"]`)?.getBoundingClientRect();
+    const [burning, day, goals, games, changes, finance, metrics] = ["burning", "day", "goals", "games", "changes", "finance", "key_metrics"].map(box);
     return {
-      topGap: Math.abs(today.bottom - attention.bottom),
-      // sloupec Práce/Finance nesmí trčet nad sousední karty (dřív o ~400 px)
-      stackOverhang: finance.bottom - Math.max(goals.bottom, upcoming.bottom),
-      gamesBelow: games.top >= Math.max(goals.bottom, upcoming.bottom, finance.bottom),
-      workAbove: work.bottom <= finance.top,
+      topGap: Math.abs(burning.top - day.top),
+      secondRow: Math.abs(goals.top - games.top),
+      // sloupec Týden/Práce/Finance nesmí trčet pod Denní přehled + Od včera
+      stackOverhang: finance.bottom - changes.bottom,
+      metricsBelow: metrics.top >= Math.max(changes.bottom, finance.bottom),
     };
   });
-  check(`dashboard @${width}: horní sloupce vyrovnané (< 200 px)`, m.topGap < 200, `${Math.round(m.topGap)} px`);
+  check(`dashboard @${width}: Co hoří a Můj den v jednom řádku nahoře`, m.topGap < 2 && m.secondRow < 2, JSON.stringify(m));
   check(`dashboard @${width}: Práce/Finance nepřečnívá sousedy`, m.stackOverhang <= 40, `${Math.round(m.stackOverhang)} px`);
-  check(`dashboard @${width}: Hry jako pruh pod sloupci`, m.gamesBelow && m.workAbove);
+  check(`dashboard @${width}: Klíčová čísla dole pod sloupci`, m.metricsBelow);
   await ctx.close();
 }
 
@@ -1161,8 +1160,11 @@ async function qaType(page, text) {
 }
 
 // 18) Roadmap 4F – Řídicí centrum na míru: registr widgetů, rozložení v localStorage (klíč verze 1).
+// MRK-78: hlavní denní obrazovka (Co hoří + Můj den nahoře) a rozložení uložené na serveru (/preferences).
 const LAYOUT_KEY = "standa-hub:dashboard-layout:v1";
-const DEFAULT_ORDER = ["daily_briefing", "weekly_review", "today", "attention", "key_metrics", "goals", "upcoming", "work", "finance", "games", "quick_actions"];
+const DEFAULT_ORDER = ["burning", "day", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
+const resetPrefs = (fail = "") => fetch(`http://127.0.0.1:8000/__mock/preferences/reset${fail ? `?fail=${fail}` : ""}`, { method: "POST" });
+const serverPrefs = async () => (await fetch("http://127.0.0.1:8000/__mock/preferences")).json();
 const widgetOrder = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll("[data-widget]")].sort((a, b) => Number(a.style.order) - Number(b.style.order)).map((el) => el.getAttribute("data-widget")),
@@ -1172,20 +1174,31 @@ const focusedName = (page) => page.evaluate(() => document.activeElement?.getAtt
 function countRequests(page) {
   const counts = {};
   page.on("request", (r) => {
+    if (r.url().startsWith(BASE)) return; // jen API (Next sám přednačítá stránky /today, /changes z odkazů)
     const path = new URL(r.url()).pathname;
-    if (["/dashboard", "/briefing/today", "/weekly-review"].includes(path)) counts[path] = (counts[path] || 0) + 1;
+    if (["/dashboard", "/briefing/today", "/weekly-review", "/today", "/changes", "/timeline/day"].includes(path)) counts[path] = (counts[path] || 0) + 1;
   });
   return counts;
 }
 {
+  await resetPrefs();
   let counts = {};
   const { ctx, page, errors } = await open("/", { setup: async (p) => (counts = countRequests(p)) });
   check("dashboard: výchozí pořadí widgetů", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER), (await widgetOrder(page)).join(","));
   check("dashboard: normální režim bez ovládání úprav", (await page.getByRole("button", { name: /^Posunout/ }).count()) === 0 && (await page.getByRole("button", { name: /^Skrýt widget/ }).count()) === 0);
   check("dashboard: bez uloženého rozložení nic v localStorage", (await storedLayout(page)) === null);
   const widths = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-widget]")].map((el) => [el.getAttribute("data-widget"), Math.round(el.getBoundingClientRect().width)])));
-  check("dashboard: výchozí vyvážení (přehled 2/3, týden 1/3, čísla celá šířka)", widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.work === widths.goals, JSON.stringify(widths));
-  check("dashboard: jeden dotaz na každý zdroj", counts["/dashboard"] === 1 && counts["/briefing/today"] === 1 && counts["/weekly-review"] === 1, JSON.stringify(counts));
+  check("dashboard: výchozí vyvážení (Co hoří | Můj den napůl, přehled 2/3, čísla celá šířka)", widths.burning === widths.day && widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.work === widths.goals, JSON.stringify(widths));
+  check("dashboard: jeden dotaz na každý zdroj", ["/dashboard", "/briefing/today", "/weekly-review", "/today", "/changes", "/timeline/day"].every((k) => counts[k] === 1), JSON.stringify(counts));
+  const burning = page.locator('[data-widget="burning"]');
+  check("dashboard: Co hoří – po termínu, pozornost a Moodle test do 7 dní", (await burning.getByText("Sada").count()) === 1 && (await burning.getByText("Test 1 se zavírá").count()) === 1 && (await burning.getByText("Projekt").count()) === 0);
+  const day = page.locator('[data-widget="day"]');
+  check("dashboard: Můj den – další položka, zbytek dne a volno", (await day.getByText("Fyzioterapie").count()) === 1 && (await day.getByText("za 4 h").count()) === 1 && (await day.getByText("Vyndat prádlo").count()) === 1 && (await day.getByText("14:30–18:00").count()) === 1, await day.innerText());
+  const visibleTitles = await page.evaluate(() => [...document.querySelectorAll("[data-widget] li")].map((li) => li.querySelector("p")?.textContent?.trim()).filter(Boolean));
+  check("dashboard: žádný záznam dvakrát", visibleTitles.length === new Set(visibleTitles).size, visibleTitles.join(" | "));
+  check("dashboard: Od včera – nejvýš 5 změn s odkazem na celý přehled", (await page.locator('[data-widget="changes"] li').count()) <= 5 && (await page.locator('[data-widget="changes"] a[href="/changes"]').count()) === 1);
+  check("dashboard: Dnes a Týdenní přehled za odkazy z karet, ne v menu", (await page.locator('main a[href="/today"]').count()) >= 1 && (await page.locator('main a[href="/review"]').count()) === 1 && (await page.locator('nav[aria-label="Hlavní navigace"] a[href="/today"], nav[aria-label="Hlavní navigace"] a[href="/review"]').count()) === 0);
+  check("dashboard: bez starého recent_activity a bez duplicitních bloků", (await page.locator('[data-widget="today"], [data-widget="attention"], [data-widget="upcoming"]').count()) === 0);
   await page.screenshot({ path: `${OUT}dashboard-default.png`, fullPage: true });
 
   await page.getByRole("button", { name: "Upravit dashboard" }).click();
@@ -1196,22 +1209,24 @@ function countRequests(page) {
   check(
     "dashboard úpravy: obsah widgetů je neaktivní (inert)",
     await page.evaluate(() => {
-      const a = document.querySelector('[data-widget="today"] a[href="/planner"]');
+      const a = document.querySelector('[data-widget="goals"] a[href="/goals"]');
       a?.focus();
       return Boolean(a?.closest("[inert]")) && document.activeElement !== a;
     }),
   );
-  check("dashboard úpravy: první nahoru / poslední dolů zakázané", (await page.getByRole("button", { name: "Posunout nahoru: Denní přehled" }).isDisabled()) && (await page.getByRole("button", { name: "Posunout dolů: Rychlé akce" }).isDisabled()));
+  check("dashboard úpravy: první nahoru / poslední dolů zakázané", (await page.getByRole("button", { name: "Posunout nahoru: Co hoří" }).isDisabled()) && (await page.getByRole("button", { name: "Posunout dolů: Rychlé akce" }).isDisabled()));
   check("dashboard úpravy: velikost jen z povolených", JSON.stringify(await page.getByLabel("Velikost: Práce").locator("option").allInnerTexts()) === JSON.stringify(["Malý", "Střední"]));
   await page.screenshot({ path: `${OUT}dashboard-customize.png`, fullPage: true });
 
-  await page.getByRole("button", { name: "Posunout dolů: Denní přehled" }).click();
+  await page.getByRole("button", { name: "Posunout dolů: Co hoří" }).click();
   await page.waitForTimeout(100);
   let order = await widgetOrder(page);
-  check("dashboard úpravy: přesun dolů", order[0] === "weekly_review" && order[1] === "daily_briefing", order.slice(0, 3).join(","));
-  check("dashboard úpravy: fokus zůstává na tlačítku", (await focusedName(page)) === "Posunout dolů: Denní přehled");
-  check("dashboard úpravy: přesun ohlášen čtečce", /Denní přehled: pozice 2 z 11/.test(await page.getByRole("status").filter({ hasText: "pozice" }).innerText().catch(() => "")));
-  check("dashboard úpravy: uloženo hned", JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "weekly_review");
+  check("dashboard úpravy: přesun dolů", order[0] === "day" && order[1] === "burning", order.slice(0, 3).join(","));
+  check("dashboard úpravy: fokus zůstává na tlačítku", (await focusedName(page)) === "Posunout dolů: Co hoří");
+  check("dashboard úpravy: přesun ohlášen čtečce", /Co hoří: pozice 2 z 11/.test(await page.getByRole("status").filter({ hasText: "pozice" }).innerText().catch(() => "")));
+  check("dashboard úpravy: uloženo hned", JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "day");
+  await page.waitForTimeout(600);
+  check("dashboard úpravy: uloženo i na server (verze 2)", (await serverPrefs()).value?.widgets?.[0]?.id === "day" && (await serverPrefs()).value?.version === 2);
 
   await page.getByRole("button", { name: "Skrýt widget: Hry" }).click();
   await page.waitForTimeout(100);
@@ -1225,7 +1240,7 @@ function countRequests(page) {
   const fin = page.locator('[data-widget="finance"]');
   check("dashboard úpravy: změna velikosti hned v rozložení", (await fin.getAttribute("data-size")) === "medium" && Math.round((await fin.boundingBox()).width) > widths.finance * 1.3, String((await fin.boundingBox())?.width));
   await page.screenshot({ path: `${OUT}dashboard-resized.png`, fullPage: true });
-  check("dashboard úpravy: úpravy nic znovu nenačítají", counts["/dashboard"] === 1 && counts["/briefing/today"] === 1 && counts["/weekly-review"] === 1, JSON.stringify(counts));
+  check("dashboard úpravy: úpravy nic znovu nenačítají", ["/dashboard", "/briefing/today", "/weekly-review", "/today", "/changes"].every((k) => counts[k] === 1), JSON.stringify(counts));
 
   await page.getByRole("button", { name: "Hotovo" }).click();
   await page.waitForTimeout(150);
@@ -1246,23 +1261,26 @@ function countRequests(page) {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   order = await widgetOrder(page);
-  check("dashboard: po obnovení stránky rozložení drží", order[0] === "weekly_review" && !order.includes("games") && (await page.locator('[data-widget="finance"]').getAttribute("data-size")) === "medium", order.join(","));
+  check("dashboard: po obnovení stránky rozložení drží", order[0] === "day" && !order.includes("games") && (await page.locator('[data-widget="finance"]').getAttribute("data-size")) === "medium", order.join(","));
 
   await page.getByRole("button", { name: "Upravit dashboard" }).click();
   await page.getByRole("button", { name: "Zobrazit widget: Hry" }).click();
   check("dashboard úpravy: obnova skrytého widgetu", (await widgetOrder(page)).includes("games") && (await focusedName(page)) === "Skrýt widget: Hry");
   await page.getByRole("button", { name: "Obnovit výchozí rozložení" }).click();
   const dlg = page.getByRole("dialog", { name: "Obnovit výchozí rozložení?" });
-  check("dashboard: reset se potvrzuje dialogem", (await dlg.count()) === 1 && JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "weekly_review");
+  check("dashboard: reset se potvrzuje dialogem", (await dlg.count()) === 1 && JSON.parse((await storedLayout(page)) || "{}").widgets?.[0]?.id === "day");
   await dlg.getByRole("button", { name: "Obnovit výchozí" }).click();
   await page.waitForTimeout(150);
   check("dashboard: reset = výchozí pořadí a velikosti", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER) && (await storedLayout(page)) === null && (await page.locator('[data-widget="finance"]').getAttribute("data-size")) === "small");
   check("dashboard: reset tlačítko zakázané u výchozího", await page.getByRole("button", { name: "Obnovit výchozí rozložení" }).isDisabled());
+  await page.waitForTimeout(600);
+  check("dashboard: reset smaže i rozložení na serveru", (await serverPrefs()).value === null && (await serverPrefs()).calls.at(-1) === "DELETE", JSON.stringify(await serverPrefs()));
   check("dashboard: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 // klávesnice: celé úpravy bez myši
 {
+  await resetPrefs();
   const { ctx, page, errors } = await open("/");
   const tabTo = async (name, max = 60) => {
     for (let i = 0; i < max; i++) {
@@ -1281,12 +1299,12 @@ function countRequests(page) {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
   let order = await widgetOrder(page);
-  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 3 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
+  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 7 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
   await page.keyboard.press("Shift+Tab");
   check("klávesnice: posun nahoru", (await focusedName(page)) === "Posunout nahoru: Týdenní přehled");
   await page.keyboard.press("Space");
   await page.waitForTimeout(100);
-  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 2);
+  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 6);
   check("klávesnice: Tab ke Skrýt", await tabTo("Skrýt widget: Týdenní přehled", 6));
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
@@ -1315,6 +1333,7 @@ function countRequests(page) {
 }
 // uložená data: poškozená, neznámá, vše skryté, žádné bliknutí výchozího
 async function openSeeded(value, opts = {}) {
+  await resetPrefs();
   let counts = {};
   const res = await open("/", {
     ...opts,
@@ -1340,7 +1359,7 @@ async function openSeeded(value, opts = {}) {
   await ctx.close();
 }
 {
-  const seeded = JSON.stringify({ version: 1, widgets: [
+  const seeded = JSON.stringify({ version: 2, widgets: [
     { id: "finance", visible: true, order: 10, size: "medium" },
     { id: "zastaraly_widget", visible: true, order: 20, size: "small" },
     { id: "games", visible: false, order: 30, size: "full" },
@@ -1354,18 +1373,98 @@ async function openSeeded(value, opts = {}) {
   await ctx.close();
 }
 {
-  const allHidden = JSON.stringify({ version: 1, widgets: DEFAULT_ORDER.map((id, i) => ({ id, visible: false, order: (i + 1) * 10, size: "full" })) });
+  const allHidden = JSON.stringify({ version: 2, widgets: DEFAULT_ORDER.map((id, i) => ({ id, visible: false, order: (i + 1) * 10, size: "full" })) });
   const { ctx, page, counts } = await openSeeded(allHidden);
   check("dashboard: vše skryté → prázdný stav s cestou zpět", (await page.getByText("Všechny widgety jsou skryté.").count()) === 1 && (await page.getByRole("button", { name: "Upravit dashboard" }).count()) >= 1);
-  check("dashboard: skryté widgety nic nenačítají", !counts["/dashboard"] && !counts["/briefing/today"] && !counts["/weekly-review"], JSON.stringify(counts));
+  check("dashboard: skryté widgety nic nenačítají", !counts["/dashboard"] && !counts["/briefing/today"] && !counts["/weekly-review"] && !counts["/today"] && !counts["/changes"], JSON.stringify(counts));
   await page.getByRole("button", { name: "Upravit dashboard" }).first().click();
   await page.getByRole("button", { name: "Zobrazit widget: Finance" }).click();
   await page.waitForTimeout(400);
-  check("dashboard: zobrazení widgetu načte jen jeho data", counts["/dashboard"] === 1 && !counts["/briefing/today"], JSON.stringify(counts));
+  check("dashboard: zobrazení widgetu načte jen jeho data", counts["/dashboard"] === 1 && !counts["/briefing/today"] && !counts["/today"], JSON.stringify(counts));
+  await ctx.close();
+}
+// MRK-78: rozložení upravené na PC platí v mobilu (jiný prohlížeč = prázdné localStorage), bez bliknutí výchozího
+{
+  await resetPrefs();
+  const pc = await open("/", { width: 1366, height: 900 });
+  await pc.page.getByRole("button", { name: "Upravit dashboard" }).click();
+  await pc.page.getByRole("button", { name: "Skrýt widget: Hry" }).click();
+  await pc.page.getByRole("button", { name: "Posunout dolů: Co hoří" }).click();
+  await pc.page.getByRole("button", { name: "Hotovo" }).click();
+  await pc.page.waitForTimeout(600);
+  await pc.ctx.close();
+  const phone = await open("/", {
+    width: 390,
+    height: 844,
+    setup: (p) =>
+      p.addInitScript(() => {
+        window.__seenGames = false;
+        new MutationObserver(() => {
+          if (document.querySelector('[data-widget="games"]')) window.__seenGames = true;
+        }).observe(document, { subtree: true, childList: true });
+      }),
+  });
+  const order = await widgetOrder(phone.page);
+  check("dashboard PC → mobil: rozložení ze serveru", order[0] === "day" && order[1] === "burning" && !order.includes("games"), order.join(","));
+  check("dashboard PC → mobil: bez bliknutí výchozího", !(await phone.page.evaluate(() => window.__seenGames)));
+  check("dashboard PC → mobil: lokální kopie převzata", JSON.parse((await storedLayout(phone.page)) || "{}").widgets?.[0]?.id === "day");
+  check("dashboard PC → mobil: bez chyb JS", phone.errors.length === 0, phone.errors.join("; "));
+  await phone.ctx.close();
+}
+// MRK-78: starší rozložení (verze 1) z tohoto zařízení se převede a převezme na server; nic není dvakrát
+{
+  const v1 = JSON.stringify({ version: 1, widgets: [
+    { id: "daily_briefing", visible: true, order: 10, size: "large" },
+    { id: "weekly_review", visible: true, order: 20, size: "small" },
+    { id: "today", visible: true, order: 30, size: "large" },
+    { id: "attention", visible: true, order: 40, size: "small" },
+    { id: "key_metrics", visible: true, order: 50, size: "full" },
+    { id: "goals", visible: true, order: 60, size: "medium" },
+    { id: "upcoming", visible: true, order: 70, size: "small" },
+    { id: "finance", visible: false, order: 80, size: "small" },
+  ] });
+  const { ctx, page, errors } = await openSeeded(v1);
+  await page.waitForTimeout(600);
+  const order = await widgetOrder(page);
+  const server = (await serverPrefs()).value;
+  check("dashboard v1 → v2: nové jádro nahoře, nahrazené bloky skryté, volby zachované", order[0] === "burning" && order[1] === "day" && !order.includes("today") && !order.includes("attention") && !order.includes("upcoming") && !order.includes("finance") && (await page.locator('[data-widget="goals"]').getAttribute("data-size")) === "medium", order.join(","));
+  check("dashboard v1 → v2: převzato na server", server?.version === 2 && server.widgets.find((w) => w.id === "today")?.visible === false && server.widgets.find((w) => w.id === "finance")?.visible === false, JSON.stringify(server)?.slice(0, 200));
+  check("dashboard v1 → v2: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// MRK-78: server nedostupný → výchozí / lokální rozložení a srozumitelná hláška s opakováním
+{
+  await resetPrefs("all");
+  const { ctx, page, errors } = await open("/");
+  const note = page.getByRole("status").filter({ hasText: "nepodařilo synchronizovat" });
+  check("dashboard sync chyba: výchozí rozložení + hláška", JSON.stringify(await widgetOrder(page)) === JSON.stringify(DEFAULT_ORDER) && (await note.count()) === 1);
+  await page.screenshot({ path: `${OUT}dashboard-sync-error.png` });
+  await resetPrefs();
+  await note.getByRole("button", { name: "Zkusit znovu" }).click();
+  await page.waitForTimeout(400);
+  check("dashboard sync chyba: Zkusit znovu hlášku odstraní", (await note.count()) === 0);
+  check("dashboard sync chyba: bez chyb JS", errors.filter((e) => !/503|Failed to load resource/.test(e)).length === 0, errors.join("; "));
+  await ctx.close();
+}
+// MRK-78: mobil 390 px – první obrazovka bez posouvání ukáže Co hoří i další položku dne
+{
+  await resetPrefs();
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  const vh = 844;
+  const burningBox = await page.locator('[data-widget="burning"]').boundingBox();
+  const firstBurning = await page.locator('[data-widget="burning"] li').first().boundingBox();
+  const nextBox = await page.locator('[data-widget="day"] a').filter({ hasText: "Další" }).boundingBox();
+  check("dashboard mobil: Co hoří na první obrazovce", Boolean(burningBox && firstBurning && firstBurning.y + firstBurning.height <= vh), JSON.stringify(firstBurning));
+  check("dashboard mobil: další položka dne na první obrazovce", Boolean(nextBox && nextBox.y + nextBox.height <= vh), JSON.stringify(nextBox));
+  check("dashboard mobil: bez přetečení (denní jádro)", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}dashboard-mobile-first-screen.png` });
+  await page.screenshot({ path: `${OUT}dashboard-mobile-full.png`, fullPage: true });
+  check("dashboard mobil: bez chyb JS (denní jádro)", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 // mobil 390 px: úpravy bez tažení, ovládání se vejde, rozložení drží po obnovení
 {
+  await resetPrefs();
   const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
   await page.getByRole("button", { name: "Upravit dashboard" }).tap();
   await page.waitForTimeout(100);
@@ -1393,6 +1492,7 @@ async function openSeeded(value, opts = {}) {
   await page.screenshot({ path: `${OUT}dashboard-mobile.png` });
   check("dashboard mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
+  await resetPrefs(); // další sekce začínají bez uloženého rozložení
 }
 
 // 19) Roadmap 4G – režim Dnes (/today), mock GET /today = odpovědi skutečného today_service.
@@ -1436,7 +1536,8 @@ const serveToday = (body, status = 200) => async (p) =>
   await page.waitForTimeout(400);
   check("dnes: Ctrl+K funguje a najde stránku Dnes", (await search.getByRole("option").first().innerText()).startsWith("Dnes"));
   await page.keyboard.press("Escape");
-  check("dnes: položka v navigaci aktivní", (await page.locator('nav a[href="/today"][aria-current="page"]').count()) >= 1);
+  // MRK-78: Dnes není v hlavní navigaci – je za kartami Řídicího centra, to zůstává zvýrazněné
+  check("dnes: v navigaci aktivní Řídicí centrum, Dnes v menu není", (await page.locator('nav[aria-label="Hlavní navigace"] a[href="/"][aria-current="page"]').count()) >= 1 && (await page.locator('nav[aria-label="Hlavní navigace"] a[href="/today"]').count()) === 0);
 
   await section("attention").getByRole("link", { name: /Sada/ }).click();
   await page.waitForURL("**/school?assignment=1", { timeout: 5000 }).catch(() => undefined);
@@ -2421,10 +2522,11 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
 }
 {
   const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
-  const card = page.locator('[aria-labelledby="upcoming-title"]');
+  // MRK-78: školní termíny do 7 dní ukazuje „Co hoří" (Nadcházející je ve výchozím rozložení skryté)
+  const card = page.locator('[aria-labelledby="burning-title"]');
   await card.waitFor({ timeout: 4000 }).catch(() => undefined);
   const moodleRow = card.getByRole("listitem").filter({ hasText: "Test 1 se zavírá" });
-  check("moodle hlavní obrazovka: Nadcházející se štítkem Moodle a předmětem", (await moodleRow.count()) === 1 && (await moodleRow.innerText()).includes("Moodle") && (await moodleRow.innerText()).includes("Fyzika"));
+  check("moodle hlavní obrazovka: Co hoří se štítkem Moodle a předmětem", (await moodleRow.count()) === 1 && (await moodleRow.innerText()).includes("Moodle") && (await moodleRow.innerText()).includes("Fyzika"));
   await card.screenshot({ path: `${OUT}dashboard-upcoming-moodle.png` }).catch(() => undefined);
   check("moodle hlavní obrazovka: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();

@@ -8,6 +8,10 @@
  * Roadmap 6C: widget může patřit modulům (`modules`). Widget vypnutého modulu se do rozložení vůbec nedostane
  * (nevykreslí se, nic nenačte, není ani mezi „Skrytými"), ale jeho uložený záznam zůstane v úložišti beze změny
  * (`preserveUnavailable`) – po opětovném zapnutí se vrátí na své místo s uloženou viditelností a velikostí.
+ *
+ * MRK-78: Řídicí centrum = jedna hlavní denní obrazovka. Nahoře „Co hoří" a „Můj den" (jádro /today), pak Cíle
+ * a Hry, Klíčová čísla dole. Starší bloky Dnes (plánovač), Vyžaduje pozornost a Nadcházející by ukazovaly totéž
+ * podruhé, proto jsou ve výchozím stavu skryté (dají se vrátit). Rozložení verze 1 se převede (`migrateV1`).
  */
 import { MODULE_UI, MODULES, type ModuleAccess } from "./modules.ts";
 
@@ -31,6 +35,9 @@ export const TABLET_SPAN: Record<WidgetSize, 1 | 2> = { small: 1, medium: 1, lar
 /** Id widgetů JÁDRA a starších modulů (stabilní, ukládají se natrvalo). Komponenty: components/dashboard/widgets.tsx.
  * Widgety modulů z balíčků modules/<id>/ dodává `MODULE_UI.<id>.widgets` (komponenty v modules/registry.tsx). */
 export const WIDGET_IDS = [
+  "burning",
+  "day",
+  "changes",
   "daily_briefing",
   "weekly_review",
   "today",
@@ -58,20 +65,26 @@ export interface WidgetDef {
   usesDashboardData: boolean;
   /** Moduly widgetu (Roadmap 6C): dostupný, když aspoň jeden smí na dashboard. Bez nich = jádro. */
   modules?: string[];
+  /** MRK-78: widget čte GET /today (načte se jednou pro všechny takové widgety). */
+  usesToday?: boolean;
 }
 
 export const CORE_WIDGETS: WidgetDef[] = [
-  { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 10, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
-  { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 20, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
-  { id: "today", title: "Dnes", area: null, defaultVisible: true, defaultOrder: 30, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
-  { id: "attention", title: "Vyžaduje pozornost", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
-  { id: "key_metrics", title: "Klíčová čísla", area: null, defaultVisible: true, defaultOrder: 50, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: true, modules: ["work", "finance"] },
-  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
-  { id: "upcoming", title: "Nadcházející", area: "school", defaultVisible: true, defaultOrder: 70, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["school"] },
+  { id: "burning", title: "Co hoří", area: null, defaultVisible: true, defaultOrder: 10, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, usesToday: true },
+  { id: "day", title: "Můj den", area: null, defaultVisible: true, defaultOrder: 20, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: false, usesToday: true },
+  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 30, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
+  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
+  { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 50, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
+  { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
+  { id: "changes", title: "Od včera", area: null, defaultVisible: true, defaultOrder: 70, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
   { id: "work", title: "Práce", area: "work", defaultVisible: true, defaultOrder: 80, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true, modules: ["work"] },
   { id: "finance", title: "Finance", area: "finance", defaultVisible: true, defaultOrder: 90, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true, modules: ["finance"] },
-  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
+  { id: "key_metrics", title: "Klíčová čísla", area: null, defaultVisible: true, defaultOrder: 100, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: true, modules: ["work", "finance"] },
   { id: "quick_actions", title: "Rychlé akce", area: null, defaultVisible: true, defaultOrder: 110, defaultSize: "full", allowedSizes: ["large", "full"], usesDashboardData: false },
+  // MRK-78: nahrazené bloky – stejný obsah ukazují „Co hoří" a „Můj den"; skryté, ale dají se vrátit
+  { id: "today", title: "Plán dne", area: null, defaultVisible: false, defaultOrder: 120, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true },
+  { id: "attention", title: "Vyžaduje pozornost", area: null, defaultVisible: false, defaultOrder: 130, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true },
+  { id: "upcoming", title: "Nadcházející", area: "school", defaultVisible: false, defaultOrder: 140, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["school"] },
 ];
 
 /** MRK-21: widgety z manifestů modulů (jen implementované moduly). */
@@ -85,7 +98,8 @@ export function availableWidgets(access: ModuleAccess, defs: WidgetDef[] = WIDGE
   return defs.filter((d) => access.allowsAny(d.modules, "dashboard"));
 }
 
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 2;
+/** Klíč zůstává „v1" (verze rozložení je uvnitř hodnoty) – starší uložené rozložení se tak najde a převede. */
 export const LAYOUT_STORAGE_KEY = "standa-hub:dashboard-layout:v1";
 
 export interface WidgetLayout {
@@ -124,6 +138,24 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** MRK-78: bloky, které nové Řídicí centrum nahradilo – při převodu z verze 1 se skryjí (nic se nemaže). */
+export const REPLACED_IN_V2 = ["today", "attention", "upcoming"];
+
+/**
+ * MRK-78: rozložení verze 1 → verze 2. Viditelnost a velikost uložených widgetů zůstanou, pořadí převezme nové
+ * výchozí (Co hoří a Můj den nahoře, Klíčová čísla dole) a nahrazené bloky se skryjí, aby nic nebylo dvakrát.
+ * Neznámá id projdou beze změny (zahodí je až normalizace), nové widgety doplní `normalizeLayout`.
+ */
+export function migrateV1(raw: Record<string, unknown>, defs: WidgetDef[] = WIDGETS): Record<string, unknown> {
+  const order = new Map(defs.map((d) => [d.id, d.defaultOrder]));
+  const widgets = (raw.widgets as unknown[]).map((item, index) => {
+    if (!isRecord(item) || typeof item.id !== "string") return item;
+    const visible = REPLACED_IN_V2.includes(item.id) ? false : item.visible;
+    return { ...item, visible, order: order.get(item.id) ?? 1000 + index };
+  });
+  return { version: LAYOUT_VERSION, widgets };
+}
+
 /**
  * Uložené rozložení → platné rozložení. Nikdy nevyhodí výjimku:
  * - jiná verze / nesmyslná struktura → výchozí rozložení;
@@ -132,6 +164,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * - widget, který v uloženém rozložení chybí (např. nový), se vloží za svého předchůdce ve výchozím pořadí.
  */
 export function normalizeLayout(raw: unknown, defs: WidgetDef[] = WIDGETS): DashboardLayout {
+  if (isRecord(raw) && raw.version === 1 && Array.isArray(raw.widgets)) raw = migrateV1(raw, defs);
   if (!isRecord(raw) || raw.version !== LAYOUT_VERSION || !Array.isArray(raw.widgets)) return defaultLayout(defs);
   const defById = new Map(defs.map((d) => [d.id, d]));
   const seen = new Set<string>();
@@ -250,6 +283,12 @@ export function needsDashboardData(layout: DashboardLayout, defs: WidgetDef[] = 
   return layout.widgets.some((w) => w.visible && uses.has(w.id));
 }
 
+/** MRK-78: GET /today jen když je vidět widget, který ho čte. */
+export function needsToday(layout: DashboardLayout, defs: WidgetDef[] = WIDGETS): boolean {
+  const uses = new Set(defs.filter((d) => d.usesToday).map((d) => d.id));
+  return layout.widgets.some((w) => w.visible && uses.has(w.id));
+}
+
 // ---------- desktopové bloky ----------
 
 export interface DesktopBlock {
@@ -260,9 +299,9 @@ export interface DesktopBlock {
 /**
  * Desktop (6 jednotek): řádky se plní v pořadí; další řádek se NEPŘIDÁ pod ten předchozí jako nový řádek,
  * ale do jeho sloupců, pokud jeho velikosti odpovídají konci předchozího řádku (stejné šířky zprava).
- * Tím vznikne výchozí vyvážení z Roadmap 4B.1: [Denní přehled | Týdenní přehled] + [Dnes | Pozornost] →
- * levý sloupec přehled + Dnes, pravý týden + pozornost; [Cíle | Nadcházející | Práce] + [Finance] → Finance
- * pod Prací. Karty ve sloupci se skládají pod sebe bez děr, nic se neroztahuje.
+ * Výchozí vyvážení (MRK-78): [Co hoří | Můj den], [Cíle | Hry], pak [Denní přehled | Týdenní přehled] +
+ * [Od včera | Práce] + [Finance] → vlevo přehled + změny, vpravo týden, Práce a Finance pod sebou.
+ * Karty ve sloupci se skládají pod sebe bez děr, nic se neroztahuje.
  */
 export function packDesktop(widgets: { id: string; size: WidgetSize }[]): DesktopBlock[] {
   const rows: { id: string; units: number }[][] = [];

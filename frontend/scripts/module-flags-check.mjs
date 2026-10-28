@@ -26,7 +26,8 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const NAV_TOTAL = 17; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28)
+const MENU_HIDDEN = 2; // MRK-78: Dnes a Týdenní přehled jsou za kartami Řídicího centra (Ctrl+K je dál najde)
+const NAV_TOTAL = 19; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28) + Kalendář + Fitness & Rehab
 
 // Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
 await fetch(`${MOCK_API}/__mock/modules/reset`);
@@ -55,7 +56,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
 {
   const { ctx, page, errors } = await open("/");
   const hrefs = await navHrefs(page, "aside");
-  check("navigace desktop: počet odkazů", hrefs.length === NAV_TOTAL - DISABLED.size, String(hrefs.length));
+  check("navigace desktop: počet odkazů", hrefs.length === NAV_TOTAL - MENU_HIDDEN - DISABLED.size, String(hrefs.length));
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`navigace desktop: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
@@ -70,7 +71,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   await page.getByRole("button", { name: "Otevřít menu" }).click();
   await page.waitForTimeout(400);
   const hrefs = await navHrefs(page, "[data-drawer-nav]");
-  check("mobilní menu: počet odkazů", hrefs.length === NAV_TOTAL - DISABLED.size, String(hrefs.length));
+  check("mobilní menu: počet odkazů", hrefs.length === NAV_TOTAL - MENU_HIDDEN - DISABLED.size, String(hrefs.length));
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`mobilní menu: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
@@ -109,8 +110,9 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
 }
 
 // 3) Dashboard: widgety, části smíšených widgetů, uložené rozložení
+await fetch(`${MOCK_API}/__mock/preferences/reset`, { method: "POST" }); // MRK-78: bez rozložení na serveru
 const STORED = {
-  version: 1,
+  version: 2,
   widgets: [
     "daily_briefing", "weekly_review", "today", "attention", "key_metrics", "goals", "upcoming", "work", "finance", "games", "quick_actions",
   ].map((id, i) => ({ id, visible: true, order: (i + 1) * 10, size: { daily_briefing: "large", weekly_review: "small", today: "large", attention: "small", key_metrics: "full", games: "full", quick_actions: "full", finance: "medium" }[id] ?? "small" })),
@@ -146,6 +148,7 @@ const STORED = {
   check("dashboard: bez chyb JS", errors.length === 0, errors.join(" | "));
   await page.screenshot({ path: `${OUT}flags-${MODE}-dashboard-edit.png`, fullPage: true });
   await ctx.close();
+  await fetch(`${MOCK_API}/__mock/preferences/reset`, { method: "POST" });
 }
 
 // 4) Přímá adresa modulu: vypnutý = čistý stav „Modul není dostupný", žádná volání jeho API
@@ -329,7 +332,7 @@ if (!DISABLED.size) {
     setup: (p) => p.route(`${MOCK_API}/modules`, (route) => route.fulfill({ status: 503, body: "{}" })),
   });
   const hrefs = await navHrefs(page, "aside");
-  check("bez /modules: navigace jen jádro", Object.values(MODULE_PAGES).every((h) => !hrefs.includes(h)) && hrefs.includes("/today"), hrefs.join(","));
+  check("bez /modules: navigace jen jádro", Object.values(MODULE_PAGES).every((h) => !hrefs.includes(h)) && hrefs.includes("/planner"), hrefs.join(","));
   await page.goto(`${BASE}/wot`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   check("bez /modules: /wot ukáže chybu, ne obsah", (await page.getByTestId("module-error").count()) === 1 && (await page.locator("h1", { hasText: "World of Tanks" }).count()) === 0);
