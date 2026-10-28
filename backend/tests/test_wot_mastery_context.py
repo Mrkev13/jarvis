@@ -52,10 +52,20 @@ class WotMasteryContextTestCase(unittest.TestCase):
         self.assertIn("WoT poslední M-ko: Škoda T 56 2026-10-25", text)
         self.assertIn("WoT ostatní odznaky zvládnutí: I. třída 1×", text)
 
-    def test_no_aces_says_so(self):
+    def test_no_aces_says_so_and_keeps_other_classes(self):
         self.add("IS-7", "first")
         self.db.commit()
-        self.assertIn("WoT M-ka (odznak Mistr): žádná zapsaná.", self.context())
+        text = self.context()
+        self.assertIn("WoT M-ka (odznak Mistr): žádná zapsaná.", text)
+        self.assertIn("WoT ostatní odznaky zvládnutí: I. třída 1×", text, "review: other classes are not dropped")
+
+    def test_latest_ace_on_the_same_day_is_the_later_entry(self):
+        # review: two aces on one day – the later entry (higher id) wins, whatever order the DB returns rows in
+        self.add("Kranvagn", "ace", date(2026, 10, 25))
+        self.add("Škoda T 56", "ace", date(2026, 10, 25))
+        self.add("IS-7", "ace", date(2026, 10, 24))
+        self.db.commit()
+        self.assertIn("WoT poslední M-ko: Škoda T 56 2026-10-25", self.context())
 
     def test_the_words_for_m_ka_route_to_wot(self):
         for question in ("Jaký tank má nejvíce Mek", "M-ek takhle lepší?", "Kolik mám Mko?", "kolik mám M-ka",

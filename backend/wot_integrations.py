@@ -82,22 +82,24 @@ _MASTERY_CLASS = {"first": "I. třída", "second": "II. třída", "third": "III.
 def _mastery_lines(db) -> list[str]:
     """MRK-94: M-ka (odznak Mistr / ace) spočítaná kódem, stejně jako cíl MRK-82 – opakovaná M na jednom tanku se
     počítají. LLM dostane jen hotový souhrn (počty, pořadí tanků, poslední M-ko)."""
-    rows = db.query(WotMilestone.tank, WotMilestone.mastery, WotMilestone.played_on).filter(
-        WotMilestone.milestone_type == "mastery").all()
+    rows = db.query(WotMilestone.id, WotMilestone.tank, WotMilestone.mastery, WotMilestone.played_on).filter(
+        WotMilestone.milestone_type == "mastery").order_by(WotMilestone.id).all()
     aces = [r for r in rows if r.mastery == "ace"]
     if not aces:
-        return ["WoT M-ka (odznak Mistr): žádná zapsaná."]
-    counts: dict[str, int] = {}
-    for r in aces:
-        counts[r.tank] = counts.get(r.tank, 0) + 1
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
-    top = [f"{short(tank, 25)} {n}×" for tank, n in ranked[:MASTERY_TOP]]
-    lines = [f"WoT M-ka (odznak Mistr): celkem {len(aces)} na {len(counts)} tancích; "
-             f"podle počtu: {list_or_none(top, len(ranked))}"]
-    dated = [r for r in aces if r.played_on]
-    if dated:
-        last = max(dated, key=lambda r: r.played_on)
-        lines.append(f"WoT poslední M-ko: {short(last.tank, 25)} {last.played_on.isoformat()}")
+        lines = ["WoT M-ka (odznak Mistr): žádná zapsaná."]
+    else:
+        counts: dict[str, int] = {}
+        for r in aces:
+            counts[r.tank] = counts.get(r.tank, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
+        top = [f"{short(tank, 25)} {n}×" for tank, n in ranked[:MASTERY_TOP]]
+        lines = [f"WoT M-ka (odznak Mistr): celkem {len(aces)} na {len(counts)} tancích; "
+                 f"podle počtu: {list_or_none(top, len(ranked))}"]
+        dated = [r for r in aces if r.played_on]
+        if dated:
+            # stejný den → později zapsané (vyšší id) je poslední; nezávisí na pořadí řádků z DB
+            last = max(dated, key=lambda r: (r.played_on, r.id))
+            lines.append(f"WoT poslední M-ko: {short(last.tank, 25)} {last.played_on.isoformat()}")
     others = {label: sum(1 for r in rows if r.mastery == key) for key, label in _MASTERY_CLASS.items()}
     if any(others.values()):
         lines.append("WoT ostatní odznaky zvládnutí: " + ", ".join(f"{k} {v}×" for k, v in others.items() if v))
