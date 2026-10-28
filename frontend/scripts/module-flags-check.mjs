@@ -15,6 +15,8 @@ const OUT = fileURLToPath(new URL("./.ui-check/", import.meta.url));
 mkdirSync(OUT, { recursive: true });
 const DISABLED = new Set((process.env.UI_FLAGS_DISABLED || "").split(",").map((s) => s.trim()).filter(Boolean));
 const MODE = DISABLED.size ? `off:${[...DISABLED].join("+")}` : "default";
+// název souboru bez „:" a „+" (CI artefakt i Windows je v cestě odmítnou) – MRK-95
+const FILE_MODE = MODE.replace(/[^a-z0-9_-]+/gi, "-");
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {});
@@ -63,7 +65,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const dead = await page.locator("a[href]").evaluateAll((as, off) => as.map((a) => a.getAttribute("href")).filter((h) => off.some((p) => h === p || h.startsWith(`${p}?`) || h.startsWith(`${p}/`))), [...DISABLED].map((id) => MODULE_PAGES[id]));
   check("dashboard: žádný odkaz na vypnutý modul", dead.length === 0, dead.join(", "));
   check("dashboard: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-dashboard.png`, fullPage: true });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-dashboard.png`, fullPage: true });
   await ctx.close();
 }
 {
@@ -78,7 +80,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check("mobil: bez horizontálního přetečení", overflow <= 0, `${overflow}px`);
   check("mobil: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-mobile-menu.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-mobile-menu.png` });
   await ctx.close();
 }
 
@@ -105,7 +107,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const first = (await dialog.getByRole("option").first().innerText()).split("\n")[0];
   check("hledání: současné moduly beze změny („prace“ → Práce)", first === "Práce", first);
   check("hledání: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-search.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-search.png` });
   await ctx.close();
 }
 
@@ -146,7 +148,7 @@ const STORED = {
   const fin = saved.widgets.find((w) => w.id === "finance");
   check("dashboard: uložený záznam Finance přežije úpravu (velikost i viditelnost)", Boolean(fin && fin.size === "medium" && fin.visible === true), JSON.stringify(fin));
   check("dashboard: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-dashboard-edit.png`, fullPage: true });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-dashboard-edit.png`, fullPage: true });
   await ctx.close();
   await fetch(`${MOCK_API}/__mock/preferences/reset`, { method: "POST" });
 }
@@ -170,7 +172,7 @@ for (const [id, path] of Object.entries(MODULE_PAGES).filter(([m]) => m === "wot
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(`${path} @${width}: bez přetečení`, overflow <= 0, `${overflow}px`);
     check(`${path} @${width}: bez chyb JS`, errors.length === 0, errors.join(" | "));
-    if (width === 390) await page.screenshot({ path: `${OUT}flags-${MODE}${path.replace("/", "-")}-mobile.png` });
+    if (width === 390) await page.screenshot({ path: `${OUT}flags-${FILE_MODE}${path.replace("/", "-")}-mobile.png` });
     await ctx.close();
   }
 }
@@ -193,7 +195,7 @@ for (const [id, path] of Object.entries(MODULE_PAGES).filter(([m]) => m === "wot
   await page.waitForTimeout(500);
   check("quick add: připomínka (jádro) funguje vždy", (await dialog.getByTestId("quick-add-preview").getAttribute("data-kind")) === "reminder");
   check("quick add: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-quick-add.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-quick-add.png` });
   await ctx.close();
 }
 
