@@ -34,6 +34,10 @@ import { staggerStyle } from "@/lib/motion";
 import type { WidgetId } from "@/lib/dashboardLayout";
 import { clampPercent, cx, priorityTone, severityTone, type Tone } from "@/lib/ui";
 import type { WeeklyPayload } from "@/lib/weeklyReview";
+import type { ChangesResponse } from "@/lib/changes";
+import type { FreeBlockLike } from "@/lib/controlCenter";
+import type { TodayPayload } from "@/lib/today";
+import { BurningWidget, ChangesWidget, DayWidget } from "./dailyWidgets";
 
 type NotificationPreview = {
   id: number;
@@ -243,12 +247,19 @@ const QUICK_ACTIONS = [
   { href: "/planner", icon: "clipboard" as IconName, title: "Plánovač", hint: "Den / týden" },
 ];
 
+/** MRK-78: GET /today už převedený přes normalizeToday (jeden dotaz pro „Co hoří" i „Můj den"). */
+export type TodayResource = Omit<ApiResource<unknown>, "data" | "setData"> & { data: TodayPayload | null };
+export type DayTimelinePayload = { free_blocks: FreeBlockLike[]; free_blocks_from: string[] };
+
 export type WidgetProps = {
   data: DashboardPayload | null;
   loading: boolean;
   index?: number;
   briefing: ApiResource<BriefingPayload>;
   weekly: ApiResource<WeeklyPayload>;
+  today: TodayResource;
+  changes: ApiResource<ChangesResponse>;
+  dayTimeline: ApiResource<DayTimelinePayload>;
 };
 
 function DailyBriefingWidget({ briefing, index }: WidgetProps) {
@@ -370,7 +381,7 @@ function TodayWidget({ data, loading, index }: WidgetProps) {
   return (
     <Card index={index} aria-labelledby="today-title">
       <CardHeader
-        title={<span id="today-title">Dnes</span>}
+        title={<span id="today-title">Plán dne</span>}
         icon="sun"
         description={today?.summary}
         actions={<TextLink href="/planner">Plánovač →</TextLink>}
@@ -609,6 +620,9 @@ function QuickActionsWidget({ index }: WidgetProps) {
 
 /** Komponenta pro každé id z registru – `Record<WidgetId, …>` hlídá úplnost už při kompilaci. */
 export const WIDGET_COMPONENTS: Record<WidgetId, (props: WidgetProps) => React.ReactNode> = {
+  burning: BurningWidget,
+  day: DayWidget,
+  changes: ChangesWidget,
   daily_briefing: DailyBriefingWidget,
   weekly_review: WeeklyReviewWidget,
   today: TodayWidget,

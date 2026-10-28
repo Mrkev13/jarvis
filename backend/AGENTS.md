@@ -66,7 +66,12 @@ Pokud insert ActivityLog selže (např. UNIQUE constraint na `dedupe_key`), vyho
 
 - `GET /activity` – filtry `area`, `action_type`, `limit`, `offset`, `from_date`, `to_date`, `q` (full-text LIKE). Vrací stránkovaný seznam.
 - `GET /activity/{id}` – jeden záznam s parsovaným `delta` JSON.
-- `GET /dashboard` – `recent_activity: list[5]` nejnovějších záznamů; **read-only, nevytváří GoalProgressHistory snapshoty**.
+- `GET /dashboard` – **read-only, nevytváří GoalProgressHistory snapshoty**. MRK-78: `recent_activity` odstraněno
+  (frontend ho nečetl); změny na Řídicím centru ukazuje widget „Od včera" z `GET /changes`.
+- `GET/PUT/DELETE /preferences/{key}` (MRK-78, `ui_preferences.py`, tabulka `ui_preferences`, revize
+  `0027_ui_preferences`) – UI preference na serveru, dnes jen `dashboard_layout` (rozložení Řídicího centra, platí
+  na PC i v mobilu). Allowlist klíčů (jinak 404), ověřený tvar a max. 8 KB (422 / 413), nezměněná hodnota nic
+  nezapisuje; uložení i reset jdou do Aktivity (`system`) ve stejné transakci.
 
 ---
 

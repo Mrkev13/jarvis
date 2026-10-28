@@ -66,6 +66,7 @@ STEP_0022_EXTRA = {"fitness_exercises", "fitness_workouts", "fitness_workout_set
 STEP_0024_EXTRA = {"offsite_backup_runs"}  # MRK-57 off-machine backup history
 STEP_0025_EXTRA = {"finance_accounts", "finance_categories", "finance_imports", "finance_import_issues",
                    "finance_rules", "finance_transaction_revisions"}  # MRK-61 Finance ledger
+STEP_0027_EXTRA = {"ui_preferences"}  # MRK-78
 
 
 def _sqlite_tables(conn):
@@ -174,7 +175,7 @@ class AlembicMigrationTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_first = _sqlite_tables(self.conn)
-        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA)
+        self.assertEqual(tables_first, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA | STEP_0027_EXTRA)
 
         alembic_cmd.upgrade(self.cfg, "head")
         tables_second = _sqlite_tables(self.conn)
@@ -392,6 +393,15 @@ class SchemaDriftTestCase(_TempSqliteAlembicMixin, unittest.TestCase):
         alembic_cmd.downgrade(self.cfg, "0025_finance_ledger")
         self.assertNotIn("course_ref", {c["name"] for c in inspect(self.conn).get_columns("calendar_events")})
         self.assertEqual(self.conn.execute(text("SELECT COUNT(*) FROM calendar_events")).scalar(), 1, "no row lost")
+        alembic_cmd.upgrade(self.cfg, "head")
+
+    def test_0027_ui_preferences_round_trip(self):
+        from sqlalchemy import inspect
+
+        alembic_cmd.upgrade(self.cfg, "0027_ui_preferences")
+        self.assertIn("ui_preferences", inspect(self.conn).get_table_names())
+        alembic_cmd.downgrade(self.cfg, "0026_calendar_event_course_ref")
+        self.assertNotIn("ui_preferences", inspect(self.conn).get_table_names())
         alembic_cmd.upgrade(self.cfg, "head")
 
     def test_0021_adds_study_materials_and_downgrades_cleanly(self):
@@ -742,7 +752,7 @@ class StartupSchemaTestCase(unittest.TestCase):
                 version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
                 tables = _sqlite_tables(conn)
             self.assertEqual(version, head)
-            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA)
+            self.assertEqual(tables, BASELINE_TABLES | STEP_0006_EXTRA | STEP_0009_EXTRA | STEP_0010_EXTRA | STEP_0011_EXTRA | STEP_0012_EXTRA | STEP_0013_EXTRA | STEP_0014_EXTRA | STEP_0016_EXTRA | STEP_0017_EXTRA | STEP_0018_EXTRA | STEP_0019_EXTRA | STEP_0021_EXTRA | STEP_0022_EXTRA | STEP_0024_EXTRA | STEP_0025_EXTRA | STEP_0027_EXTRA)
 
             db = main.SessionLocal()
             try:

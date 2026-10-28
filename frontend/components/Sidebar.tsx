@@ -13,7 +13,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
 import { useModuleAccess } from "@/hooks/useModules";
-import { navPagesFor } from "@/lib/navigation";
+import { menuPagesFor } from "@/lib/navigation";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
@@ -25,11 +25,14 @@ interface SidebarProps {
 // Roadmap 6C / MRK-18 A2: jen stránky dostupných modulů podle runtime stavu (desktop i mobilní menu).
 export function useNavLinks(): { href: string; label: string }[] {
   const { access } = useModuleAccess();
-  return navPagesFor(access).map(({ href, label }) => ({ href, label }));
+  return menuPagesFor(access).map(({ href, label }) => ({ href, label }));
 }
 
+/** MRK-78: Dnes a Týdenní přehled nejsou v menu – jsou to podstránky Řídicího centra, to zůstane zvýrazněné. */
+const CONTROL_CENTER_PAGES = ["/", "/today", "/review"];
+
 export function isActiveLink(href: string, pathname: string | null): boolean {
-  return href === "/" ? pathname === "/" : Boolean(pathname?.startsWith(href));
+  return href === "/" ? CONTROL_CENTER_PAGES.includes(pathname ?? "") : Boolean(pathname?.startsWith(href));
 }
 
 export default function Sidebar({ onNavigate }: SidebarProps) {

@@ -440,32 +440,49 @@ which widgets are visible, in what order, at what size. With no customization it
 dashboard.
 
 **Widget registry** (`frontend/lib/dashboardLayout.ts`, `WIDGETS`) – typed, explicit, no runtime discovery:
-`{id, title, area, defaultVisible, defaultOrder, defaultSize, allowedSizes, usesDashboardData}`. Components
+`{id, title, area, defaultVisible, defaultOrder, defaultSize, allowedSizes, usesDashboardData, usesToday?}`. Components
 live in `components/dashboard/widgets.tsx` as `WIDGET_COMPONENTS: Record<WidgetId, …>` (TypeScript fails the
 build if an id has no component). Current ids (stable, persisted – never rename, never reuse):
 
-| id | widget | default | allowed |
-|---|---|---|---|
-| `daily_briefing` | Denní přehled | large | medium, large, full |
-| `weekly_review` | Týdenní přehled | small | small, medium |
-| `today` | Dnes | large | medium, large, full |
-| `attention` | Vyžaduje pozornost | small | small, medium, large |
-| `key_metrics` | Klíčová čísla | full | large, full |
-| `goals` | Cíle | small | small, medium, large |
-| `upcoming` | Nadcházející | small | small, medium, large |
-| `work` | Práce | small | small, medium |
-| `finance` | Finance | small | small, medium |
-| `games` | Hry | full | medium, large, full |
-| `quick_actions` | Rychlé akce | full | large, full |
+MRK-78: the Control Center is the one main daily screen. Default order (top to bottom):
 
-**Layout schema** – `{version: 1, widgets: [{id, visible, order, size}]}`. Semantic only: no pixels, no CSS,
-no per-breakpoint layouts, no free placement.
+| id | widget | default | allowed | visible by default |
+|---|---|---|---|---|
+| `burning` | Co hoří – attention from `/today` + school deadlines ≤ 7 days | medium | medium, large, full | ✓ |
+| `day` | Můj den – next item, rest of today's timeline, next free block | medium | medium, large, full | ✓ |
+| `goals` | Cíle | small | small, medium, large | ✓ |
+| `games` | Hry (WoT, MFF) | large | medium, large, full | ✓ |
+| `daily_briefing` | Denní přehled | large | medium, large, full | ✓ |
+| `weekly_review` | Týdenní přehled (link to `/review`) | small | small, medium | ✓ |
+| `changes` | Od včera se změnilo – top 5 of `/changes` (24 h) | large | medium, large, full | ✓ |
+| `work` | Práce | small | small, medium | ✓ |
+| `finance` | Finance | small | small, medium | ✓ |
+| `key_metrics` | Klíčová čísla | full | large, full | ✓ |
+| `quick_actions` | Rychlé akce | full | large, full | ✓ |
+| `today` | Plán dne (planner priorities) | large | medium, large, full | – |
+| `attention` | Vyžaduje pozornost | small | small, medium, large | – |
+| `upcoming` | Nadcházející | small | small, medium, large | – |
 
-**Persistence** – `localStorage` key `standa-hub:dashboard-layout:v1`. The backend has no user-preference
-storage and a single-user app does not justify a schema change for this; moving to a backend preference later
-only needs a new storage adapter behind `useDashboardLayout`. Reads go through `useSyncExternalStore`: the
-server and the hydration pass render a skeleton, then the *stored* layout appears (no flash of the default,
-no hydration mismatch). Storage unavailable (private window) → layout works in memory until reload.
+The last three show what `burning`/`day` already show, so they start hidden (restorable from "Skryté widgety");
+no record appears twice on the default screen (`lib/controlCenter.ts` drops anything already in today's
+timeline). `/today` and `/review` are not in the main navigation (`menu: false` in `lib/navigation.ts`), they are
+reached from the cards ("Dnes →", "Otevřít →") and Ctrl+K; the "Řídicí centrum" nav item stays active on them.
+On mobile `burning` shows its first three rows (+ link to the rest) so the next item of the day fits on the
+first screen at 390 px.
+
+**Layout schema** – `{version: 2, widgets: [{id, visible, order, size}]}`. Semantic only: no pixels, no CSS,
+no per-breakpoint layouts, no free placement. A version 1 layout is migrated (`migrateV1`): visibility and sizes
+are kept, the order becomes the new default order and the replaced blocks are hidden.
+
+**Persistence** (MRK-78) – the server is the source of truth: `GET/PUT/DELETE /preferences/dashboard_layout`
+(backend `ui_preferences.py`), so a layout edited on the PC applies on the phone. `localStorage` key
+`standa-hub:dashboard-layout:v1` (key name unchanged; the version is inside the value) is a fast local copy for
+the first render. On load the hook pulls the server value; if the server has none and the device has an older
+local layout, that layout is adopted (PUT). Edits are written locally at once and pushed to the server
+(debounced, last value wins); reset = DELETE. Without a local copy the page waits for the server (skeleton, no
+flash of the default). Server unreachable → the local copy (or the default) works and a status line says the
+layout applies only on this device, with "Zkusit znovu". Reads go through `useSyncExternalStore` (no hydration
+mismatch). Storage unavailable (private window) → layout works in memory until reload.
 
 **Validation** (`normalizeLayout`, never throws) – other/missing version or malformed JSON → default layout;
 unknown (obsolete) ids dropped; duplicates keep the first; invalid size → the widget's default size; invalid
@@ -475,8 +492,8 @@ their predecessor in the default order. Valid user choices are always kept.
 **Sizes and responsive behaviour** – one DOM for all widths:
 - desktop (xl): 6 units – small = 1/3, medium = 1/2, large = 2/3, full = whole row. Rows fill in order; a
   following row whose sizes match the end of the previous row stacks into its columns (`packDesktop`). This keeps
-  the 4B.1 balance: Denní přehled + Dnes on the left, Týdenní přehled + Pozornost on the right; Finance under
-  Práce. Cards never stretch; columns stack without holes.
+  the balance: Co hoří | Můj den, Cíle | Hry, then Denní přehled + Od včera on the left and Týdenní přehled +
+  Práce + Finance on the right. Cards never stretch; columns stack without holes.
 - tablet (md): 2 columns, small/medium = half, large/full = whole row, dense packing (small cards pair up).
 - mobile: one column in the stored order.
 Block and column wrappers are `display: contents` below xl and items carry CSS `order`, so nothing is computed

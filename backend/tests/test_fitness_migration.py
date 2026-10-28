@@ -39,7 +39,8 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
     cfg.set_main_option('script_location', str(backend / 'alembic'))
     cfg.set_main_option('version_locations', str(backend / 'alembic/versions'))
     scripts = ScriptDirectory.from_config(cfg)
-    assert scripts.get_heads() == ['0026_calendar_event_course_ref']  # MRK-56, MRK-57, MRK-61, MRK-76 follow Fitness
+    assert scripts.get_heads() == ['0027_ui_preferences']  # MRK-56, MRK-57, MRK-61, MRK-76, MRK-78 follow Fitness
+    assert scripts.get_revision('0027_ui_preferences').down_revision == '0026_calendar_event_course_ref'
     assert scripts.get_revision('0026_calendar_event_course_ref').down_revision == '0025_finance_ledger'
     assert scripts.get_revision('0025_finance_ledger').down_revision == '0024_offsite_backup_runs'
     assert scripts.get_revision('0024_offsite_backup_runs').down_revision == '0023_study_course_export_source'
@@ -90,7 +91,7 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
         assert snapshot() == before
         with engine.connect() as connection:
             ctx = MigrationContext.configure(connection)
-            assert ctx.get_current_revision() == '0026_calendar_event_course_ref'
+            assert ctx.get_current_revision() == '0027_ui_preferences'
             assert compare_metadata(ctx, Base.metadata) == []
     finally:
         engine.dispose()
