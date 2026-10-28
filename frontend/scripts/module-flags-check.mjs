@@ -28,8 +28,12 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const MENU_HIDDEN = 2; // MRK-78: Dnes a Týdenní přehled jsou za kartami Řídicího centra (Ctrl+K je dál najde)
-const NAV_TOTAL = 19; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28) + Kalendář + Fitness & Rehab
+// MRK-96: očekávané počty z registru stránek (lib/navigation.ts), žádné ručně udržované číslo – nová stránka
+// nebo modul tenhle skript neupravuje. Mock /modules má zapnuté všechny implementované moduly, vypnuté jen DISABLED.
+const { NAV_PAGES } = await import("../lib/navigation.ts");
+const availablePages = NAV_PAGES.filter((p) => !p.module || !DISABLED.has(p.module));
+const SEARCH_TOTAL = availablePages.length; // Ctrl+K najde i stránky mimo menu (Dnes, Týdenní přehled)
+const MENU_TOTAL = availablePages.filter((p) => p.menu !== false).length; // MRK-78: hlavní navigace bez `menu: false`
 
 // Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
 await fetch(`${MOCK_API}/__mock/modules/reset`);
@@ -58,7 +62,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
 {
   const { ctx, page, errors } = await open("/");
   const hrefs = await navHrefs(page, "aside");
-  check("navigace desktop: počet odkazů", hrefs.length === NAV_TOTAL - MENU_HIDDEN - DISABLED.size, String(hrefs.length));
+  check("navigace desktop: počet odkazů", hrefs.length === MENU_TOTAL, `${hrefs.length} / ${MENU_TOTAL}`);
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`navigace desktop: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
@@ -73,7 +77,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   await page.getByRole("button", { name: "Otevřít menu" }).click();
   await page.waitForTimeout(400);
   const hrefs = await navHrefs(page, "[data-drawer-nav]");
-  check("mobilní menu: počet odkazů", hrefs.length === NAV_TOTAL - MENU_HIDDEN - DISABLED.size, String(hrefs.length));
+  check("mobilní menu: počet odkazů", hrefs.length === MENU_TOTAL, `${hrefs.length} / ${MENU_TOTAL}`);
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`mobilní menu: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
@@ -91,7 +95,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const dialog = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   const navCount = await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count();
-  check("hledání: navigace bez stránek vypnutých modulů", navCount === NAV_TOTAL - DISABLED.size, String(navCount));
+  check("hledání: navigace bez stránek vypnutých modulů", navCount === SEARCH_TOTAL, `${navCount} / ${SEARCH_TOTAL}`);
   for (const [q, group, module] of [["tvp", "World of Tanks", "wot"], ["obed", "Finance", "finance"], ["luna", "Marvel FF", "mff"]]) {
     await input.fill(q);
     await page.waitForTimeout(600);
