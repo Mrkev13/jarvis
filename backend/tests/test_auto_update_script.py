@@ -74,6 +74,7 @@ def test_failed_commit_is_never_retried_automatically():
     # Up to date (e.g. a manual update.ps1 fixed it) clears the pending failure.
     up_to_date = run[run.index('if ($target -eq $current) {'):run.index("if ($failed -and $failed -eq $target) {")]
     assert "Clear-State 'failed-commit.txt'" in up_to_date
+    assert "Write-Result ('up to date at '" in up_to_date, 'every run leaves a visible last_result (Windows test on PR #55)'
 
 
 def test_deploys_exactly_the_commit_it_evaluated_through_update_ps1():

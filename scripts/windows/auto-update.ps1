@@ -198,9 +198,11 @@ try {
             $failed = Read-State 'failed-commit.txt'
 
             if ($target -eq $current) {
-                # Up to date (also after a manual update.ps1 fixed a failed commit): nothing pending.
+                # Up to date (also after a manual update.ps1 fixed a failed commit): nothing pending. Recorded, so
+                # -Mode Check shows that the task really runs.
                 Clear-State 'failed-commit.txt'
                 Clear-State 'not-started-count.txt'
+                Write-Result ('up to date at ' + $current.Substring(0, 7))
                 Send-Ping $true
                 exit 0
             }
