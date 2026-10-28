@@ -202,3 +202,19 @@ test('MRK-13: DayTimelineList renders mixed modules, all-day section, timed rows
   const busyHtml = renderTimeline({ data: busy, loading: false, error: null });
   assert.match(busyHtml, /Trip/); assert.doesNotMatch(busyHtml, /Během dne/);
 });
+
+// MRK-77: více zdrojů – stav připojení a hláška po synchronizaci (jen názvy zdrojů, nikdy URL ani text chyby)
+test('anySourceConfigured, connectedSources a syncNotice', () => {
+  assert.equal(calendar.anySourceConfigured({ moodle_configured: false, configured: true }), true);
+  assert.equal(calendar.anySourceConfigured({ moodle_configured: true }), true, 'starší backend');
+  const available = [{ key: 'moodle', name: 'Moodle', configured: true }, { key: 'google', name: 'Google Kalendář', configured: true }];
+  assert.equal(calendar.connectedSources({ available_sources: available }), 'Moodle a Google Kalendář');
+  assert.equal(calendar.connectedSources({ available_sources: [available[0], { ...available[1], configured: false }] }), 'Moodle');
+  assert.equal(calendar.connectedSources({}), '');
+  const ok = { created: 3, updated: 1, cancelled: 0, errors: 0 };
+  assert.equal(calendar.syncNotice(ok), 'Přidáno 3, změněno 1, zrušeno 0.');
+  const partial = { ...ok, sources: { moodle: { created: 3 }, google: { error: 'feed_unavailable' } } };
+  assert.equal(calendar.syncNotice(partial, available),
+    'Přidáno 3, změněno 1, zrušeno 0. Nepodařilo se načíst: Google Kalendář (uložené události zůstaly).');
+  assert.ok(!calendar.syncNotice(partial, available).includes('feed_unavailable'));
+});

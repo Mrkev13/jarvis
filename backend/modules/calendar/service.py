@@ -27,9 +27,23 @@ class CalendarSyncError(ValueError):
         super().__init__(self.category)
 
 
-def feed_url():
-    # Preserve the locally established name; optional alias for installations without it.
-    return env_str('MOODLE_ICS_URL') or env_str('CALENDAR_MOODLE_ICS_URL')
+# MRK-77: allowlisted read-only ICS sources. key = CalendarSource.config_key (≤ 20 chars) → (display name, env
+# names; the first set one wins). Clients only ever name a key, never a URL or an env variable.
+SOURCES = {
+    'moodle': ('Moodle', ('MOODLE_ICS_URL', 'CALENDAR_MOODLE_ICS_URL')),
+    'google': ('Google Kalendář', ('GOOGLE_ICS_URL',)),
+}
+STAT_KEYS = ('created', 'updated', 'unchanged', 'cancelled', 'errors', 'missing', 'restored')
+
+
+def feed_url(key='moodle'):
+    # Moodle keeps its locally established name plus an optional alias for installations without it.
+    _name, names = SOURCES[key]
+    return next((value for value in (env_str(name) for name in names) if value), '')
+
+
+def configured_sources():
+    return [key for key in SOURCES if feed_url(key)]
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -198,10 +212,18 @@ def _reconcile(db, source, parsed, now, stats):
 
 
 def sync_moodle(db, *, fetch=None, now=None):
-    url = feed_url()
+    return sync_source(db, 'moodle', fetch=fetch, now=now)
+
+
+def sync_source(db, key, *, fetch=None, now=None):
+    """One allowlisted source: fetch its own feed and reconcile only its own events (`import_ics` is per source)."""
+    if key not in SOURCES:
+        raise CalendarSyncError('invalid_feed_configuration')
+    name, _names = SOURCES[key]
+    url = feed_url(key)
     if not url:
         raise CalendarSyncError('feed_not_configured')
-    source = db.query(CalendarSource).filter_by(config_key='moodle').one_or_none()
+    source = db.query(CalendarSource).filter_by(config_key=key).one_or_none()
     if source is not None and not source.enabled:
         raise CalendarSyncError('source_disabled')
     try:
@@ -213,10 +235,32 @@ def sync_moodle(db, *, fetch=None, now=None):
     if source is None:
         # Conflict-safe bootstrap: concurrent first syncs converge on one source.
         insert = postgres_insert if db.get_bind().dialect.name == 'postgresql' else sqlite_insert
-        db.execute(insert(CalendarSource).values(kind='ics', name='Moodle', config_key='moodle', enabled=True,
+        db.execute(insert(CalendarSource).values(kind='ics', name=name, config_key=key, enabled=True,
                    timezone=APP_TZ.key).on_conflict_do_nothing(index_elements=['config_key']))
-        source = db.query(CalendarSource).filter_by(config_key='moodle').one()
+        source = db.query(CalendarSource).filter_by(config_key=key).one()
     return import_ics(db, source, data, now=now)
+
+
+def sync_all(db, *, fetch=None, now=None):
+    """MRK-77: every configured source in its own savepoint – one failing feed never undoes or blocks another.
+    Returns summed counts (the page's notice) plus a per-source result: counts or an allowlisted error category."""
+    keys = configured_sources()
+    if not keys:
+        raise CalendarSyncError('feed_not_configured')
+    results, failures = {}, 0
+    for key in keys:
+        savepoint = db.begin_nested()
+        try:
+            results[key] = sync_source(db, key, fetch=fetch, now=now)
+            savepoint.commit()
+        except CalendarSyncError as error:
+            savepoint.rollback()
+            results[key] = {'error': error.category}
+            failures += 1
+    if failures == len(keys):
+        raise CalendarSyncError(next(iter(results.values()))['error'] if failures == 1 else 'feed_unavailable')
+    totals = {stat: sum(r.get(stat, 0) for r in results.values()) for stat in STAT_KEYS}
+    return {**totals, 'sources': results}
 
 
 def event_dict(row):
@@ -265,8 +309,12 @@ def list_calendar(db, *, today=None, event_id=None):
     if event_id is not None and not any(o['id'] == event_id for o in occurrences):
         row = db.get(CalendarEvent, event_id)
         selected = event_dict(row) if row is not None else None
-    sources = [{'id': s.id, 'kind': s.kind, 'name': s.name, 'enabled': s.enabled,
-                'configured': bool(feed_url()) if s.config_key == 'moodle' else False}
+    configured = set(configured_sources())
+    sources = [{'id': s.id, 'kind': s.kind, 'name': s.name, 'enabled': s.enabled, 'key': s.config_key,
+                'configured': s.config_key in configured}
                for s in db.query(CalendarSource).order_by(CalendarSource.id).all()]
     return {'today': today.isoformat(), 'events': occurrences, 'history': [event_dict(e) for e in history_rows],
-            'selected': selected, 'sources': sources, 'moodle_configured': bool(feed_url())}
+            'selected': selected, 'sources': sources, 'moodle_configured': 'moodle' in configured,
+            # MRK-77: every allowlisted source and whether it is set up (names only, never a URL)
+            'available_sources': [{'key': k, 'name': SOURCES[k][0], 'configured': k in configured} for k in SOURCES],
+            'configured': bool(configured)}

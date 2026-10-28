@@ -9,7 +9,7 @@ import { CalendarList } from './CalendarList';
 import { DayTimelineCard } from './DayTimelineCard';
 import { FreeBlocksCard } from './FreeBlocksCard';
 import { WeekView } from './WeekView';
-import { groupEvents, type CalendarPayload } from './lib';
+import { anySourceConfigured, connectedSources, groupEvents, syncNotice, type CalendarPayload, type SyncResult } from './lib';
 
 export default function CalendarPage() {
   const selected = useSearchParams().get('event');
@@ -22,8 +22,9 @@ export default function CalendarPage() {
   async function sync() {
     setSyncing(true); setSyncError(null); setNotice(null);
     try {
-      const result = await apiJson<{ created: number; updated: number; cancelled: number; errors: number }>('/calendar/sync', jsonBody('POST', {}));
-      setNotice(`Přidáno ${result.created}, změněno ${result.updated}, zrušeno ${result.cancelled}.${result.errors ? ` ${result.errors} položek se nepodařilo načíst.` : ''}`);
+      // MRK-77: all configured sources at once; one failing feed is reported by name, the others still sync
+      const result = await apiJson<SyncResult>('/calendar/sync', jsonBody('POST', {}));
+      setNotice(syncNotice(result, calendar.data?.available_sources));
       await calendar.reload();
       setWeekRefresh(value => value + 1);
     } catch {
@@ -35,15 +36,18 @@ export default function CalendarPage() {
   const history = data?.history ?? [];
   const selectedEvent = data?.selected && !history.some(h => h.id === data.selected!.id) ? data.selected : null;
   const sources = Object.fromEntries((data?.sources ?? []).map(source => [source.id, source.name]));
+  const configured = data ? anySourceConfigured(data) : false;
+  const connected = data ? connectedSources(data) : '';
   return <ContentContainer>
-    <PageHeader title="Kalendář" subtitle="Události dnes a v příštích týdnech."
-      actions={<Button variant="secondary" busy={syncing} disabled={!data?.moodle_configured} onClick={() => void sync()}>Synchronizovat</Button>} />
+    <PageHeader title="Kalendář"
+      subtitle={connected ? `Události dnes a v příštích týdnech · zdroje: ${connected}.` : 'Události dnes a v příštích týdnech.'}
+      actions={<Button variant="secondary" busy={syncing} disabled={!configured} onClick={() => void sync()}>Synchronizovat</Button>} />
     {notice ? <p role="status" className="text-sm text-ink-muted">{notice}</p> : null}
     {syncError ? <ErrorState message={syncError} /> : null}
     {calendar.loading ? <LoadingState lines={4} /> : null}
     {calendar.error ? <ErrorState message="Kalendář se nepodařilo načíst." onRetry={() => void calendar.reload()} /> : null}
     {data ? <>
-      {!data.moodle_configured ? <EmptyState>Zdroj ještě není připojený. Uložené události můžeš dál prohlížet.</EmptyState> : null}
+      {!configured ? <EmptyState>Zdroj ještě není připojený. Uložené události můžeš dál prohlížet.</EmptyState> : null}
       <Card><CardHeader title="Dnes" icon="calendar" /><CalendarList events={groups.today} sources={sources} empty="Dnes nemáš žádné události." /></Card>
       <WeekView today={data.today} refresh={weekRefresh} />
       <DayTimelineCard today={data.today} />
