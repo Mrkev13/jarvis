@@ -279,7 +279,11 @@ try {
     exit 0
 } catch {
     # Line number only (no values): enough to find a failure reported from the Windows host.
-    [Console]::Error.WriteLine('[auto-update] ' + $_.Exception.GetType().Name + ': ' + $_.Exception.Message +
-        ' (line ' + $_.InvocationInfo.ScriptLineNumber + '; run elevated; no URL printed)')
+    $failure = $_.Exception.GetType().Name + ': ' + $_.Exception.Message + ' (line ' + $_.InvocationInfo.ScriptLineNumber + ')'
+    [Console]::Error.WriteLine('[auto-update] ' + $failure + ' (run elevated; no URL printed)')
+    # A task run has no console: keep the failure where -Mode Check shows it (protected folder, no values).
+    if ($Mode -eq 'Run' -and (Test-Path -LiteralPath $Directory)) {
+        try { Write-State 'last-result.txt' ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') + ' run failed: ' + $failure) } catch { }
+    }
     exit 1
 }

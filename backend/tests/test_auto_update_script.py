@@ -93,4 +93,7 @@ def test_logs_are_bounded_and_git_runs_without_stderr_redirection():
     assert '$out = @(& git -C $root @GitArgs)' in git and '2>' not in git
     assert "if ($sha -notmatch '^[0-9a-f]{40}$')" in TEXT, 'an empty or odd rev-parse never reaches .Substring()'
     assert 'ScriptLineNumber' in TEXT
+    # A failing task run (no console) still shows up in -Mode Check (Windows test on PR #55).
+    tail = TEXT[TEXT.rindex('} catch {'):]
+    assert "if ($Mode -eq 'Run' -and (Test-Path -LiteralPath $Directory))" in tail and "' run failed: '" in tail
     assert "@('fetch', '--quiet', 'origin')" in TEXT
