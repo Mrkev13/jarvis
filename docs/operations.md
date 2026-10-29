@@ -346,6 +346,49 @@ Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `up
 `-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
 in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
 
+### Review gate and auto-merge (MRK-97)
+
+A PR merges by itself when **all CI jobs and the check "Review gate (Codex verdict)" are green**. The gate
+(`.github/workflows/review-gate.yml`) passes only when the newest review **on the PR's current head commit**,
+posted by the repository owner's account, contains the line `Codex-Verdict: MERGE`. `BLOCK` or no verdict fails
+it, and every new push needs a new review. On `MERGE` the workflow turns on GitHub auto-merge (merge commit). With
+the label `manual-merge` nobody auto-merges; Standa merges by hand.
+
+Limitation: Codex CLI posts with the same GitHub account as the agents. The verdict line is a rule in `AGENTS.md`
+(only the reviewer writes it), not an identity check. A separate GitHub account or app for Codex would close that gap.
+
+**GitHub settings (Standa, once):**
+
+1. Repository → *Settings* → *General* → *Pull Requests*: tick **Allow auto-merge** (keep *Allow merge commits*).
+2. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
+   - **Require a pull request before merging**, required approvals **0** (the gate is the review requirement);
+   - **Require status checks to pass before merging**, add these five checks:
+     `Backend tests and pyflakes`, `PostgreSQL migration round-trip`, `Frontend lint, types, tests and build`,
+     `UI checks (ui-check, module flags, changes)`, `Review gate (Codex verdict)`.
+     A check is offered only after it has run once, so add the gate after the MRK-97 PR has run CI;
+   - leave *Require branches to be up to date* **off**. One PR at a time, and the gate is tied to the exact head
+     commit anyway;
+   - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
+3. Check: open a PR, watch "Review gate" fail ("Waiting for a Codex review…"), then pass after a `MERGE` review,
+   and the PR merges by itself. The auto-deploy (above) then ships it.
+
+**Automatic Codex review (Windows, user account with Codex CLI and GitHub CLI):**
+`scripts/windows/codex-review.ps1` runs every 10 minutes as you. For each open, non-draft PR without a verdict on
+its head commit, it checks that commit out in a dedicated clone, runs `codex exec --sandbox read-only` and posts
+Codex's answer with `gh pr review --comment`. Codex itself never touches GitHub or the production checkout. Each
+commit is attempted once. An answer without a verdict line is not posted (see the log). Label `manual-review` skips
+a PR. State and Codex answers are kept in `%LOCALAPPDATA%\StandaHub\codex-review`.
+
+```powershell
+git clone https://github.com/Mrkev13/jarvis C:\StandaHub-review    # review clone, NEVER the production C:\StandaHub
+gh auth login                                                     # once, if `gh auth status` fails
+codex login                                                       # once, if Codex CLI is not logged in
+$s = 'C:\StandaHub\scripts\windows\codex-review.ps1'
+powershell -ExecutionPolicy Bypass -File $s -Mode Register        # Windows password (not the PIN); first run in 15 min
+powershell -ExecutionPolicy Bypass -File $s -Mode Run             # first pass by hand
+powershell -ExecutionPolicy Bypass -File $s -Mode Check           # ready: True, last_result
+```
+
 ## LOCAL Windows acceptance (not performed in cloud)
 
 1. Verify isolated production DB/config/media/backup/log paths and ACLs; SYSTEM can

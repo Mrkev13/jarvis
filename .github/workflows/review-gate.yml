@@ -1,0 +1,81 @@
+name: Review gate
+
+# MRK-97: the PR may merge only after a review verdict for its exact head commit.
+# The reviewer (Codex, never the agent that wrote the code - AGENTS.md workflow step 4) ends its review with one line
+#   Codex-Verdict: MERGE      or      Codex-Verdict: BLOCK
+# This check passes only when the newest verdict review for the CURRENT head commit says MERGE. A new push needs a
+# new review. On MERGE it switches on GitHub auto-merge, so the PR merges by itself once every required check
+# (CI + this gate, see docs/operations.md "Review gate and auto-merge") is green. Label `manual-merge` = merge by hand.
+# Limitation: author and reviewer post with the same GitHub account; the verdict line is a rule, not an identity check.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Review gate (Codex verdict)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      merge: ${{ steps.verdict.outputs.merge }}
+    steps:
+      - id: verdict
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const head = pr.head.sha;
+            const short = head.slice(0, 7);
+            const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 });
+            // Only the repository owner's account (Codex CLI posts as the owner) and only reviews made on this commit.
+            const verdicts = reviews
+              .filter((r) => r.commit_id === head && r.user && r.user.login === owner && r.state !== 'DISMISSED')
+              .map((r) => ({ at: r.submitted_at || '', m: /^Codex-Verdict:\s*(MERGE|BLOCK)\s*$/m.exec(r.body || '') }))
+              .filter((x) => x.m)
+              .sort((a, b) => a.at.localeCompare(b.at));
+            const last = verdicts[verdicts.length - 1];
+            if (!last) {
+              core.setFailed(`Waiting for a Codex review with "Codex-Verdict: MERGE" on commit ${short}.`);
+              return;
+            }
+            if (last.m[1] !== 'MERGE') {
+              core.setFailed(`Codex verdict on ${short}: BLOCK. Fix the findings and push; the new commit gets a new review.`);
+              return;
+            }
+            core.notice(`Codex verdict on ${short}: MERGE.`);
+            core.setOutput('merge', 'true');
+
+  auto-merge:
+    name: Enable auto-merge
+    needs: gate
+    if: >-
+      needs.gate.outputs.merge == 'true' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'manual-merge')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge when all required checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        # Fails softly while "Allow auto-merge" / branch protection are not set up yet (docs/operations.md).
+        run: |
+          gh pr merge "$PR" --repo "$REPO" --auto --merge \
+            || echo "::warning::Auto-merge not enabled (repo setting 'Allow auto-merge' or branch protection missing?). Merge by hand."
