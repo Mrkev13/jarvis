@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+    image: standa-hub-backend:local
+    container_name: standa-hub-backend
+    restart: unless-stopped
+    env_file:
+      - path:  .env.production
+        format: raw
+    command:
+      - python
+      - -m
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-proxy-headers
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - /srv/standa-hub-data/media:/data/media
+      - /srv/standa-hub-data/backups:/data/backups
+    networks:
+      - postgres_net
+
+networks:
+  postgres_net:
+    external: true
+    name: postgres_default
