@@ -1,5 +1,20 @@
 services:
+  migrate:
+    image: standa-hub-backend:local
+    build:
+      context: .
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    env_file:
+      - path: .env.production
+        format: raw
+    networks:
+      - postgres_net
+
   backend:
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     build:
       context: .
     image: standa-hub-backend:local
