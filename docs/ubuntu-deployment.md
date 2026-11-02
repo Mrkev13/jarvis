@@ -258,3 +258,57 @@ Run docker compose config --quiet separately from the backend,
 frontend and postgres directories before starting any service.
 
 Configuration validation does not start containers or modify databases.
+
+## Systemd backup installation
+
+Ubuntu production uses one backup owner: standa-hub-backup.timer.
+
+The application's internal backup scheduler must remain disabled:
+BACKUP_ENABLED=false.
+
+The timer invokes a separate process inside the running backend
+container and enables backup execution only for that process.
+
+### Install
+
+Run from the repository root:
+
+    sudo install -d -m 755 /usr/local/lib/standa-hub
+
+    sudo install -m 755 deploy/scripts/backup.sh /usr/local/lib/standa-hub/backup.sh
+
+    sudo install -m 644 deploy/systemd/standa-hub-backup.service /etc/systemd/system/
+
+    sudo install -m 644 deploy/systemd/standa-hub-backup.timer /etc/systemd/system/
+
+    sudo systemctl daemon-reload
+
+    sudo systemctl enable --now standa-hub-backup.timer
+
+### Verify
+
+    systemctl list-timers standa-hub-backup.timer
+
+    systemctl status standa-hub-backup.timer
+
+    journalctl -u standa-hub-backup.service -n 50 --no-pager
+
+The timer runs daily at 03:00 server local time.
+
+The backend container must be running and connected to PostgreSQL.
+BACKUP_DIR must point to /data/backups inside the container.
+
+Do not enable the application's internal backup scheduling alongside
+the systemd timer.
+
+On a replacement server, install the timer only after validating
+the restored database, media, backend configuration and backup path.
+
+Before the first scheduled run, validate the service explicitly:
+
+    sudo systemctl start standa-hub-backup.service
+
+    sudo systemctl status standa-hub-backup.service
+
+A successful systemd exit must correspond to a successful BackupLog
+record and a verified backup manifest.
