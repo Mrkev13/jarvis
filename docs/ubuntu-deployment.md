@@ -375,3 +375,96 @@ authentication/cookie settings before accepting users.
 
 Tailscale authentication state and tailnet access policies are
 not stored in the application repository.
+
+## Verified PostgreSQL and media recovery drill
+
+Tested on 2026-11-02 using the automatic backup from 03:00 CET.
+
+The recovery scripts are:
+- deploy/scripts/restore-postgres-test.sh
+- deploy/scripts/restore-media.py
+
+### Restore prerequisites
+
+Use a disposable PostgreSQL 18.6 container with:
+- Name: jarvis-mrk101-restore
+- Database: standa_hub_restore
+- User: standa_hub
+- Temporary database storage, never a production volume
+- No published ports
+- No connection to postgres_default
+
+Use the exact backup run manifest and its associated media manifest.
+
+### PostgreSQL recovery
+
+The PostgreSQL restore script validates:
+- Backup run status
+- Archive SHA-256 and size
+- Docker container identity
+- Temporary storage and network isolation
+- Database user and database name
+
+It restores the plain SQL dump using psql with ON_ERROR_STOP
+and a single transaction.
+
+Example, after creating the disposable database container:
+
+    ./deploy/scripts/restore-postgres-test.sh \
+      /srv/standa-hub-data/backups \
+      /srv/standa-hub-data/backups/runs/backup_20261102_020002_673211.json \
+      jarvis-mrk101-restore
+
+Expected result: DATABASE_RESTORE_OK.
+
+### Media recovery
+
+Restore media only into a new empty directory:
+
+    sudo python3 deploy/scripts/restore-media.py \
+      --backup-root /srv/standa-hub-data/backups \
+      --run-manifest /srv/standa-hub-data/backups/runs/backup_20261102_020002_673211.json \
+      --manifest /srv/standa-hub-data/backups/media/manifests/media_20261102_020002_673211.json \
+      --destination /tmp/jarvis-mrk101-media-restore
+
+The script checks the media manifest checksum, individual file
+sizes and SHA-256 values, and refuses an existing destination.
+
+### Verified results
+
+- PostgreSQL restore: successful
+- Database tables: 51
+- Alembic revision: 0027_ui_preferences
+- Media files: 75/75 restored and verified
+- Media bytes: 54,798,363
+- Backend started over restored database and read-only media
+- Backend /health: HTTP 200, healthy
+- Scheduler, delivery and backups: disabled during test
+
+The integration test used APP_ENV=development and a dummy API key.
+It does not prove production deployment on a replacement host.
+
+### Production cutover and rollback
+
+A production cutover must be performed during a maintenance window.
+
+1. Confirm a recent verified backup and a separate off-machine copy.
+2. Stop application traffic and scheduled jobs.
+3. Preserve the existing database and media as rollback sources.
+4. Restore into separate database and media locations.
+5. Validate the restored schema, data, media and backend.
+6. Switch the application configuration only after validation.
+7. Start exactly one backend scheduler owner.
+8. Verify application health and critical user workflows.
+9. Keep previous data intact until the new installation has
+   completed successful backups and sustained monitoring.
+
+Rollback requires stopping the replacement application, restoring
+the original database and media configuration, and verifying health.
+
+Never delete or overwrite the previous database or media as part
+of the initial cutover. Never use the isolated restore-test script
+directly against production PostgreSQL.
+
+Exact production cutover commands are environment-specific and
+must be reviewed before execution.
