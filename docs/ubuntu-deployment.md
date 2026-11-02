@@ -114,3 +114,37 @@ Configure Serve to proxy:
 - HTTPS port 8443 to localhost:8000
 
 Restrict access to the tailnet.
+
+## Verified installation tests (2026-11-02)
+
+The MRK-101 deployment files were tested on the Ubuntu host
+without replacing or restarting the production containers.
+
+- Backend Docker image: build successful.
+- Frontend Docker image: build successful.
+- Frontend /login: HTTP 200 on isolated port 3100.
+- Temporary PostgreSQL 18.6: started on isolated Docker network.
+- Alembic upgrade head: successful.
+- Database schema: 51 tables, revision 0027_ui_preferences.
+- Backend /health: HTTP 200, status healthy.
+- Database: reachable.
+- Migrations: current.
+- Scheduler and backup jobs: disabled during test.
+- Temporary test containers and Docker network: removed.
+
+These tests verify fresh database initialization and HTTP startup.
+They do not constitute a full disaster-recovery test from backup.
+
+## Disaster recovery limitations
+
+The following components require restoration or separate configuration:
+
+- Production PostgreSQL data and credentials.
+- Persistent application media.
+- Production backend environment configuration.
+- Tailscale authentication and Serve configuration.
+- Systemd backup and monitoring units.
+- Scheduled Windows off-machine backup synchronization.
+
+Never overwrite an existing production database during a restore test.
+Restore a verified backup into an isolated database first.

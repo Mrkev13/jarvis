@@ -1,3 +1,11 @@
+> **Current production (November 2026): Ubuntu Server + Docker Compose.**
+> The Windows deployment instructions below describe the previous
+> hosting environment and are retained for historical reference.
+> Do not run Windows auto-update scripts against the Ubuntu server.
+> See [Ubuntu deployment](ubuntu-deployment.md) for the current setup.
+
+---
+
 # Production runtime (MRK-23 v2)
 
 Current target: Windows, native Python/Node processes, one backend scheduler owner.
