@@ -68,8 +68,9 @@ The database must be provisioned before starting the backend.
 Database credentials belong in private environment configuration.
 Do not delete or recreate the production volume during deployment.
 
-The database Compose configuration and initial provisioning
-procedure are not yet included in this repository.
+The PostgreSQL Compose configuration is included in
+postgres/compose.yaml. Provisioning requires a private
+postgres/.env file containing the database password.
 
 ## Tailscale Serve configuration
 
@@ -166,3 +167,38 @@ backup root (/srv/standa-hub-data/backups), not its media subdirectory.
 
 These results establish backup-file integrity. They do not prove
 a complete application restore on a replacement Ubuntu host.
+
+
+## Ubuntu recovery procedure
+
+Use this procedure only on a replacement server or an isolated
+recovery environment. Never run it against the live production database.
+
+1. Install Ubuntu Server, Docker Engine, Docker Compose and Tailscale.
+2. Clone the reviewed application revision into /srv/standa-hub.
+3. Restore private environment files from secure storage.
+4. Create /srv/standa-hub-data/media and backups directories.
+5. Restore a verified backup set into the backups directory.
+6. Start PostgreSQL using the postgres Compose project.
+7. Create a separate empty recovery database.
+8. Restore the PostgreSQL dump into that database.
+9. Verify Alembic revision, table count and application compatibility.
+10. Restore media files into a separate recovery directory.
+11. Verify every restored file against its manifest SHA-256 and size.
+12. Configure the backend to use the restored database and media.
+13. Start backend with scheduler, delivery and backup jobs disabled.
+14. Verify /health and application data before enabling scheduled jobs.
+15. Start frontend, configure Tailscale Serve and monitoring.
+16. Enable scheduled jobs only after validation and confirming
+    exactly one scheduler owner.
+
+The PostgreSQL dump is compressed SQL. Restore with psql,
+not pg_restore. Use gzip -dc to decompress the archive.
+
+The media manifest's archive_path is relative to BACKUP_DIR.
+Restore each file to MEDIA_DIR / relative_path.
+
+See [Backup and restore](backups.md) for integrity requirements,
+rollback principles and the historical recovery drills.
+
+A complete replacement-host recovery remains untested.
