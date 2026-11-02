@@ -148,3 +148,21 @@ The following components require restoration or separate configuration:
 
 Never overwrite an existing production database during a restore test.
 Restore a verified backup into an isolated database first.
+
+## Backup integrity verification (2026-11-02)
+
+The automatic backup from 2026-11-02 03:00 CET was checked:
+
+- Backup run status: success.
+- PostgreSQL gzip archive: integrity check passed.
+- PostgreSQL archive SHA-256: matched the backup run manifest.
+- Media manifest SHA-256: matched the backup run manifest.
+- Media files: 75 of 75 verified by size and SHA-256.
+- Missing or corrupted media files: 0.
+- Verified media size: 54,798,363 bytes.
+
+The media manifest's archive_path values are relative to the
+backup root (/srv/standa-hub-data/backups), not its media subdirectory.
+
+These results establish backup-file integrity. They do not prove
+a complete application restore on a replacement Ubuntu host.
