@@ -312,3 +312,66 @@ Before the first scheduled run, validate the service explicitly:
 
 A successful systemd exit must correspond to a successful BackupLog
 record and a verified backup manifest.
+
+## Tailscale Serve recovery commands
+
+Validated against Tailscale 1.104.4 on 2026-11-02.
+
+Production uses Tailscale Serve, not Funnel.
+Both HTTPS endpoints must remain tailnet-only.
+
+### Provision a replacement Ubuntu server
+
+1. Install Tailscale and authenticate the replacement machine.
+2. Verify that the machine is connected to the correct tailnet.
+3. Start the restored backend and frontend containers.
+4. Confirm local HTTP endpoints work before enabling Serve.
+
+Verify local endpoints:
+
+    curl -f http://127.0.0.1:3000/login
+    curl -f http://127.0.0.1:8000/health
+
+Configure persistent HTTPS proxies:
+
+    sudo tailscale serve --bg --https=443 http://127.0.0.1:3000
+
+    sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
+
+Verify configuration:
+
+    sudo tailscale serve status
+    sudo tailscale funnel status
+
+Expected mappings:
+
+- HTTPS 443 -> http://127.0.0.1:3000
+- HTTPS 8443 -> http://127.0.0.1:8000
+- Both endpoints must display "tailnet only".
+- No endpoint may display "Available on the internet".
+
+Verify access from another authorized tailnet device.
+Check tailnet grants/ACLs in the Tailscale admin console.
+Serve is not a substitute for application authentication.
+
+### Disable individual proxies
+
+    sudo tailscale serve --https=443 off
+    sudo tailscale serve --https=8443 off
+
+### Emergency reset
+
+    sudo tailscale serve reset
+
+WARNING: Reset removes the device's Serve configuration.
+Never execute reset on the working production server merely
+to test recovery instructions.
+
+After reset, restore the two mappings using --bg commands above.
+
+The replacement machine may receive a different MagicDNS hostname.
+Update FRONTEND_ORIGINS, NEXT_PUBLIC_API_URL and relevant
+authentication/cookie settings before accepting users.
+
+Tailscale authentication state and tailnet access policies are
+not stored in the application repository.
