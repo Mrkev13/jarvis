@@ -60,3 +60,6 @@ media/
 /postgres/.env
 
 !/postgres/.env.example
+
+# Public Docker production configuration template
+!/backend/.env.docker.example

@@ -202,3 +202,59 @@ See [Backup and restore](backups.md) for integrity requirements,
 rollback principles and the historical recovery drills.
 
 A complete replacement-host recovery remains untested.
+
+## Docker environment configuration
+
+Never commit backend/.env.production or postgres/.env.
+
+### PostgreSQL
+
+1. Copy postgres/.env.example to postgres/.env.
+2. Set a strong unique POSTGRES_PASSWORD.
+3. Restrict file permissions to the deployment account.
+4. Keep the PostgreSQL Compose project name as postgres.
+
+### Backend
+
+1. Copy backend/.env.docker.example to backend/.env.production.
+2. Replace DATABASE_URL with the correct PostgreSQL credentials.
+   The hostname inside Docker is standa-postgres, not localhost.
+   URL-encode special characters in the database password.
+3. Generate a valid bcrypt AUTH_PIN_HASH.
+4. Configure a real GROQ_API_KEY or OPENAI_API_KEY.
+5. Keep MEDIA_DIR=/data/media and BACKUP_DIR=/data/backups.
+6. Keep RUN_ALEMBIC_UPGRADE_AT_STARTUP=false.
+7. Keep scheduler, delivery and backup jobs disabled during recovery.
+8. Set AUTH_COOKIE_SECURE=true when using Tailscale HTTPS.
+9. Protect the file using chmod 600.
+
+Validate configuration using the backend Docker image:
+
+    cd backend
+    docker compose build backend
+    docker compose run --rm --no-deps --entrypoint python backend -c 'import os; from production import validate_environment; validate_environment(os.environ); print("Production configuration valid")'
+
+This checks production settings without starting Uvicorn or running
+database migrations. It does not require backend Python packages
+on the Ubuntu host.
+
+Do not print or commit validated environment values.
+
+### Frontend
+
+Copy frontend/.env.example to frontend/.env and replace
+NEXT_PUBLIC_API_URL with the actual HTTPS backend URL.
+
+For this installation:
+
+    NEXT_PUBLIC_API_URL=https://standa-server.tail068a4b.ts.net:8443
+
+This variable is read by Docker Compose for both the frontend build
+and runtime configuration.
+
+### Compose validation
+
+Run docker compose config --quiet separately from the backend,
+frontend and postgres directories before starting any service.
+
+Configuration validation does not start containers or modify databases.
