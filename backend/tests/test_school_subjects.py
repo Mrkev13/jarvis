@@ -84,7 +84,7 @@ class SchoolSubjectsTestCase(unittest.TestCase):
         r = self.patch_subject(self.ait, name="  English in IT ", credits=4)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json(), {"id": self.ait, "name": "English in IT", "code": "EIT", "semester": "LS 2026/27",
-                                    "credits": 4, "active": True})
+                                    "credits": 4, "active": True, "absence_limit": None})
         log = self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="Subject", entity_id=self.ait).one())
         self.assertEqual((log.area, log.action_type), ("school", "update"))
         self.assertIn("\"credits\"", log.delta_json)

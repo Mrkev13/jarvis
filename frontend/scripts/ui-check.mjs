@@ -456,16 +456,17 @@ for (const width of [1920, 1366]) {
   const { ctx, page } = await open("/", { width, height: 1000 });
   const m = await page.evaluate(() => {
     const box = (id) => document.querySelector(`[data-widget="${id}"]`)?.getBoundingClientRect();
-    const [burning, day, goals, games, changes, finance, metrics] = ["burning", "day", "goals", "games", "changes", "finance", "key_metrics"].map(box);
+    const [burning, day, habits, goals, changes, finance, metrics] = ["burning", "day", "habits_today", "goals", "changes", "finance", "key_metrics"].map(box);
     return {
       topGap: Math.abs(burning.top - day.top),
-      secondRow: Math.abs(goals.top - games.top),
+      // MRK-104: sloupce se skládají – Návyky pod Co hoří, Cíle pod Můj den
+      secondRow: Math.abs(habits.left - burning.left) + Math.abs(goals.left - day.left) + (habits.top >= burning.bottom && goals.top >= day.bottom ? 0 : 99),
       // sloupec Týden/Práce/Finance nesmí trčet pod Denní přehled + Od včera
       stackOverhang: finance.bottom - changes.bottom,
       metricsBelow: metrics.top >= Math.max(changes.bottom, finance.bottom),
     };
   });
-  check(`dashboard @${width}: Co hoří a Můj den v jednom řádku nahoře`, m.topGap < 2 && m.secondRow < 2, JSON.stringify(m));
+  check(`dashboard @${width}: Co hoří | Můj den nahoře, Návyky | Cíle pod nimi`, m.topGap < 2 && m.secondRow < 2, JSON.stringify(m));
   check(`dashboard @${width}: Práce/Finance nepřečnívá sousedy`, m.stackOverhang <= 40, `${Math.round(m.stackOverhang)} px`);
   check(`dashboard @${width}: Klíčová čísla dole pod sloupci`, m.metricsBelow);
   await ctx.close();
@@ -1011,7 +1012,8 @@ async function qaType(page, text) {
   check("quick add: Ctrl+Shift+K otevře Rychlé přidání", (await dialog.count()) === 1);
   check("quick add: Ctrl+Shift+K neotevře vyhledávání", (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 0);
   const input = dialog.getByLabel("Co chceš přidat?");
-  check("quick add: fokus v poli", await input.evaluate((el) => el === document.activeElement));
+  // fokus se přesouvá po otevření dialogu (animace / requestAnimationFrame) – počkat, ne číst jednou (v CI občas pozdě)
+  check("quick add: fokus v poli", await eventually(() => input.evaluate((el) => el === document.activeElement)));
   check("quick add: prázdný stav s příklady", (await dialog.getByRole("list", { name: "Příklady" }).getByRole("button").count()) >= 5);
   await page.screenshot({ path: `${OUT}quick-add-empty.png` });
 
@@ -1177,7 +1179,7 @@ async function qaType(page, text) {
 // 18) Roadmap 4F – Řídicí centrum na míru: registr widgetů, rozložení v localStorage (klíč verze 1).
 // MRK-78: hlavní denní obrazovka (Co hoří + Můj den nahoře) a rozložení uložené na serveru (/preferences).
 const LAYOUT_KEY = "standa-hub:dashboard-layout:v1";
-const DEFAULT_ORDER = ["burning", "day", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
+const DEFAULT_ORDER = ["burning", "day", "habits_today", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
 const resetPrefs = (fail = "") => fetch(`http://127.0.0.1:8000/__mock/preferences/reset${fail ? `?fail=${fail}` : ""}`, { method: "POST" });
 const serverPrefs = async () => (await fetch("http://127.0.0.1:8000/__mock/preferences")).json();
 const widgetOrder = (page) =>
@@ -1203,7 +1205,7 @@ function countRequests(page) {
   check("dashboard: normální režim bez ovládání úprav", (await page.getByRole("button", { name: /^Posunout/ }).count()) === 0 && (await page.getByRole("button", { name: /^Skrýt widget/ }).count()) === 0);
   check("dashboard: bez uloženého rozložení nic v localStorage", (await storedLayout(page)) === null);
   const widths = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-widget]")].map((el) => [el.getAttribute("data-widget"), Math.round(el.getBoundingClientRect().width)])));
-  check("dashboard: výchozí vyvážení (Co hoří | Můj den napůl, přehled 2/3, čísla celá šířka)", widths.burning === widths.day && widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.work === widths.goals, JSON.stringify(widths));
+  check("dashboard: výchozí vyvážení (Co hoří | Můj den a Návyky | Cíle napůl, Hry a čísla celá šířka, přehled 2/3)", widths.burning === widths.day && widths.habits_today === widths.goals && widths.habits_today === widths.burning && widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.games === widths.key_metrics && widths.work === widths.weekly_review, JSON.stringify(widths));
   check("dashboard: jeden dotaz na každý zdroj", ["/dashboard", "/briefing/today", "/weekly-review", "/today", "/changes", "/timeline/day"].every((k) => counts[k] === 1), JSON.stringify(counts));
   const burning = page.locator('[data-widget="burning"]');
   check("dashboard: Co hoří – po termínu, pozornost a Moodle test do 7 dní", (await burning.getByText("Sada").count()) === 1 && (await burning.getByText("Test 1 se zavírá").count()) === 1 && (await burning.getByText("Projekt").count()) === 0);
@@ -1314,12 +1316,12 @@ function countRequests(page) {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
   let order = await widgetOrder(page);
-  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 7 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
+  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 8 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
   await page.keyboard.press("Shift+Tab");
   check("klávesnice: posun nahoru", (await focusedName(page)) === "Posunout nahoru: Týdenní přehled");
   await page.keyboard.press("Space");
   await page.waitForTimeout(100);
-  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 6);
+  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 7);
   check("klávesnice: Tab ke Skrýt", await tabTo("Skrýt widget: Týdenní přehled", 6));
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
@@ -1382,7 +1384,7 @@ async function openSeeded(value, opts = {}) {
   ] });
   const { ctx, page, errors } = await openSeeded(seeded);
   const order = await widgetOrder(page);
-  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno", order.length === 10 && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
+  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno (Návyky skryté – MRK-104)", order.length === 10 && !order.includes("habits_today") && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
   check("dashboard: uložené rozložení bez bliknutí výchozího", !(await page.evaluate(() => window.__seenGames)));
   check("dashboard: neplatná data bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
@@ -1476,6 +1478,70 @@ async function openSeeded(value, opts = {}) {
   await page.screenshot({ path: `${OUT}dashboard-mobile-full.png`, fullPage: true });
   check("dashboard mobil: bez chyb JS (denní jádro)", errors.length === 0, errors.join("; "));
   await ctx.close();
+}
+// MRK-104: Návyky na Řídicím centru – Splnit / Přeskočit jedním klepnutím (stejné API jako Dnes), žádný návyk dvakrát
+{
+  const base = JSON.parse(readFileSync(new URL("./fixtures/today.json", import.meta.url), "utf8"));
+  const habit = (id, title, measure) => ({ id: `habit:${id}`, type: "habit", title, subtitle: `Návyk · ${measure}`, area: "habits", date: base.date,
+    time: null, status: "open", priority: null, severity: null, href: "/habits", source_id: id, actions: ["complete", "skip"] });
+  for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+    await resetPrefs();
+    const state = { "habit:31": null, "habit:32": null };
+    const posts = [];
+    let failNext = false;
+    const { ctx, page, errors } = await open("/", {
+      width, height,
+      setup: async (p) => {
+        await p.route(/:8000\/today(\?|$)/, (route) => {
+          const timeline = [...base.timeline, habit(31, "Rehab kolene", "20 min"), habit(32, "Čtení", "denně")].map((it) =>
+            state[it.id] ? { ...it, status: "done", actions: [], subtitle: `Návyk · ${state[it.id] === "done" ? "splněno" : "přeskočeno"} · ${it.subtitle.split(" · ")[1]}` } : it);
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...base, timeline }) });
+        });
+        await p.route(/:8000\/habits\/\d+\/entries/, async (route) => {
+          const req = route.request();
+          if (req.method() !== "POST") return route.fallback();
+          const id = `habit:${req.url().match(/habits\/(\d+)/)[1]}`;
+          const body = JSON.parse(req.postData() || "{}");
+          posts.push({ id, state: body.state, today: new URL(req.url()).searchParams.get("source") === "today" });
+          if (failNext) {
+            failNext = false;
+            return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "chyba" }) });
+          }
+          state[id] = body.state;
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+        });
+      },
+    });
+    const widget = page.locator('[data-widget="habits_today"]');
+    await widget.getByRole("button", { name: "Splnit návyk: Rehab kolene" }).waitFor({ timeout: 5000 }).catch(() => {});
+    const order = await widgetOrder(page);
+    check(`dashboard návyky ${label}: widget hned za Můj den`, order.indexOf("habits_today") === order.indexOf("day") + 1, order.join(","));
+    check(`dashboard návyky ${label}: návyk jen jednou na obrazovce`,
+      (await page.locator('[data-widget="day"]').getByText("Rehab kolene").count()) === 0 && (await widget.getByText("Rehab kolene").count()) === 1);
+    const done = widget.getByRole("button", { name: "Splnit návyk: Rehab kolene" });
+    const skip = widget.getByRole("button", { name: "Přeskočit návyk: Čtení" });
+    const sizes = [await done.boundingBox(), await skip.boundingBox()];
+    check(`dashboard návyky ${label}: tlačítka aspoň 44 px`, sizes.every((b) => b && b.height >= 44 && b.width >= 44), JSON.stringify(sizes));
+    await page.screenshot({ path: `${OUT}dashboard-habits-${label}.png`, fullPage: label === "desktop" });
+    // chyba → řádek zůstane s „Zkusit znovu", druhý pokus projde
+    failNext = true;
+    await done.click();
+    const retry = widget.locator('[data-item="habit:31"]').getByRole("button", { name: "Zkusit znovu" });
+    check(`dashboard návyky ${label}: chyba ukáže Zkusit znovu`, await eventually(async () => (await retry.count()) === 1), JSON.stringify(posts));
+    await retry.click();
+    check(`dashboard návyky ${label}: Splnit jedním klepnutím (stejné API jako Dnes)`,
+      await eventually(async () => (await widget.locator('[data-item="habit:31"]').getByText("Splněno", { exact: false }).count()) >= 1 && state["habit:31"] === "done"),
+      JSON.stringify(posts));
+    await skip.click();
+    check(`dashboard návyky ${label}: Přeskočit jedním klepnutím`, await eventually(async () => state["habit:32"] === "skipped"), JSON.stringify(posts));
+    check(`dashboard návyky ${label}: POST /habits/{id}/entries?source=today`,
+      posts.length === 3 && posts.every((x) => x.today) && posts.map((x) => x.state).join(",") === "done,done,skipped", JSON.stringify(posts));
+    check(`dashboard návyky ${label}: postup Dnes splněno`, await eventually(async () => /Dnes splněno\s+1 \/ 2/.test(await widget.innerText())), await widget.innerText());
+    check(`dashboard návyky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await widget.screenshot({ path: `${OUT}dashboard-habits-${label}-after.png` });
+    check(`dashboard návyky ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
+    await ctx.close();
+  }
 }
 // mobil 390 px: úpravy bez tažení, ovládání se vejde, rozložení drží po obnovení
 {
@@ -2519,6 +2585,58 @@ await wotReset();
   check("předměty mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
+// MRK-86 – zápočty a docházka: Byl / Nebyl jedním klepnutím, absence proti limitu, zápočet, chyba zápisu
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  const calls = async () => (await fetch("http://127.0.0.1:8000/__mock/school/progress-calls")).json();
+  const { ctx, page, errors } = await open("/school", { width, height });
+  const section = page.getByRole("list", { name: "Zápočty a docházka" });
+  await section.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const card = (id) => section.locator(`[data-progress-subject="${id}"]`);
+  const fyz = card(2);
+  check(`docházka ${label}: jen aktivní předměty`, (await section.locator("[data-progress-subject]").count()) === 3 && (await card(4).count()) === 0);
+  check(`docházka ${label}: absence proti limitu + varování`, /absence 1 z max\. 2 \(zbývá poslední\)/.test(await fyz.innerText()) && (await fyz.innerText()).includes("zbývá poslední povolená absence"));
+  check(`docházka ${label}: splněný zápočet s datem`, (await card(3).innerText()).includes("Zápočet splněn · 2. 10."));
+  check(`docházka ${label}: souhrn zkoušek`, (await card(3).innerText()).includes("Zkoušky: 1 uzavřená (1 složeno)"));
+  const byl = fyz.getByRole("button", { name: "Byl – Fyzika, Tento týden", exact: true });
+  const nebyl = fyz.getByRole("button", { name: "Nebyl – Fyzika, Tento týden" });
+  const sizes = [await byl.boundingBox(), await nebyl.boundingBox()];
+  check(`docházka ${label}: Byl / Nebyl ≥ 44 px`, sizes.every((b) => b && b.height >= 44), JSON.stringify(sizes));
+  await page.screenshot({ path: `${OUT}school-progress-${label}.png`, fullPage: width < 500 });
+  await byl.click();
+  check(`docházka ${label}: Byl jedním klepnutím`, await eventually(async () => (await byl.getAttribute("aria-pressed")) === "true"), JSON.stringify(await calls()));
+  const c1 = (await calls()).at(-1);
+  check(`docházka ${label}: zápis tohoto týdne`, c1?.kind === "attendance" && c1.body.week_start === "2026-10-05" && c1.body.present === true, JSON.stringify(c1));
+  check(`docházka ${label}: ohlášeno čtečce`, (await page.getByRole("status").filter({ hasText: "týden od 5. 10.: byl" }).count()) === 1);
+  await nebyl.click();
+  check(`docházka ${label}: oprava na Nebyl = vyčerpané absence`, await eventually(async () => /absence 2 z max\. 2 \(už žádná nezbývá\)/.test(await fyz.innerText())), await fyz.innerText());
+  await nebyl.click();
+  check(`docházka ${label}: druhé klepnutí zápis zruší`, await eventually(async () => (await nebyl.getAttribute("aria-pressed")) === "false" && (await calls()).at(-1)?.body.present === null));
+  // chyba zápisu → hláška u předmětu, nic se neztratí
+  await fetch("http://127.0.0.1:8000/__mock/school/fail-next-attendance", { method: "POST" });
+  await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).click();
+  check(`docházka ${label}: chyba = hláška u předmětu`, await eventually(async () => (await card(1).getByRole("alert").count()) === 1));
+  check(`docházka ${label}: po chybě stav beze změny`, (await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).getAttribute("aria-pressed")) === "false");
+  // limit: neplatný → chyba u předmětu; oprava → chyba zmizí a limit se uloží (review MRK-86)
+  const limit = card(1).getByLabel("Limit absencí – Matematika");
+  await limit.fill("53");
+  await card(1).getByRole("button", { name: "Uložit" }).click();
+  check(`docházka ${label}: neplatný limit = hláška`, await eventually(async () => /0–52/.test(await card(1).getByRole("alert").innerText().catch(() => ""))));
+  await limit.fill("3");
+  await card(1).getByRole("button", { name: "Uložit" }).click();
+  check(`docházka ${label}: opravený limit smaže starou chybu`,
+    await eventually(async () => (await card(1).getByRole("alert").count()) === 0 && /z max\. 3/.test(await card(1).innerText())),
+    await card(1).innerText());
+  // zápočet
+  await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
+  check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
+  check(`docházka ${label}: po splnění zápočtu bez varování`, !(await fyz.innerText()).includes("povolená absence"));
+  if (width < 500) check("docházka mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await fyz.screenshot({ path: `${OUT}school-progress-${label}-after.png` });
+  check(`docházka ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
+  await ctx.close();
+}
+await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
 // MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
 for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
   const { ctx, page, errors } = await open("/school", { width, height });
