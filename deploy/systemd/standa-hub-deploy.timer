@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a new Standa Hub commit on main every 10 minutes
+
+[Timer]
+OnBootSec=15min
+OnUnitInactiveSec=10min
+RandomizedDelaySec=30s
+Unit=standa-hub-deploy.service
+
+[Install]
+WantedBy=timers.target

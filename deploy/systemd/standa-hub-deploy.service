@@ -1,0 +1,11 @@
+[Unit]
+Description=Standa Hub - deploy origin/main after a merge (backup, migrations, health check, rollback)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# installed copy, never the file inside /srv/standa-hub (the checkout switches commits during the deploy)
+ExecStart=/usr/bin/bash /usr/local/lib/standa-hub/deploy.sh run
+TimeoutStartSec=60min

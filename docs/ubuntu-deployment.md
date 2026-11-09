@@ -60,7 +60,7 @@ Building does not automatically restart running containers.
 - Document PostgreSQL provisioning.
 - Document Tailscale Serve setup.
 - Validate complete recovery on a separate environment.
-- Implement Linux auto-deploy separately.
+- Linux auto-deploy: see "Automatic deploy (MRK-108)" below.
 
 ## PostgreSQL production configuration
 
@@ -319,6 +319,70 @@ Before the first scheduled run, validate the service explicitly:
 
 A successful systemd exit must correspond to a successful BackupLog
 record and a verified backup manifest.
+
+## Automatic deploy (MRK-108)
+
+`standa-hub-deploy.timer` checks `origin/main` every 10 minutes (first 15 minutes after boot) and runs
+`/usr/local/lib/standa-hub/deploy.sh run` as root. Nothing happens while the checkout already is on `origin/main`.
+When `main` moved (a merged PR), one pass does:
+
+1. **Preconditions** - tracked files in `/srv/standa-hub` are unmodified, the new commit descends from the running one
+   (no rewritten history) and it has not failed before. Otherwise the pass is refused and nothing changes.
+2. **Backup** - `/usr/local/lib/standa-hub/backup.sh` (the same as `standa-hub-backup.service`). No backup = no deploy;
+   the next pass tries again.
+3. **Build** - the running images are tagged `:previous`, the checkout switches to the new commit (`git checkout
+   --detach`, as user `standa`), then `docker compose build` for the backend (with `APP_COMMIT`) and the frontend.
+   A failed build switches the checkout back; the running containers are not touched.
+4. **Start + migrations** - `docker compose up -d` in `backend/`: the `migrate` service (`alembic upgrade head`) runs
+   first, the backend starts only when it succeeded. Then the frontend.
+5. **Health check** (up to 300 s) - `/health` is not `unhealthy` (`degraded` = a scheduler or backup warning is
+   accepted), `migrations.status == current`, `version.commit` is the new commit, and the frontend `/login` returns 200.
+6. **Rollback** when step 4 or 5 fails - the previous commit is checked out, the `:previous` images are tagged
+   `:local` again and the containers are recreated **without** `migrate` (`up --no-deps backend`): the old code does not
+   know the newer Alembic revision. Migrations are additive (AGENTS.md), so the old code runs on the newer schema; its
+   `/health` then reports `migrations: mismatch` (HTTP 503), so the rollback only requires the old commit to answer.
+   **The database is never downgraded automatically** - if the old code cannot work with the new schema, restore the
+   backup from step 2 by hand ("Ubuntu recovery procedure").
+
+A commit that failed (build, migration or health) is never retried - merge a fix and the next commit deploys.
+Every pass writes one line to `/var/lib/standa-hub-deploy/last-result.txt`; a failed pass ends with exit code 1, so
+`systemctl status standa-hub-deploy.service` is red and the journal has the reason. Build and start output is in
+`/var/lib/standa-hub-deploy/{build,up,backup}.log` (Docker output, no `.env` values).
+
+### Status
+
+    sudo /usr/local/lib/standa-hub/deploy.sh check      # names and booleans only; exit 2 = not ready
+    cat /var/lib/standa-hub-deploy/last-result.txt
+    systemctl list-timers standa-hub-deploy.timer
+    journalctl -u standa-hub-deploy.service -n 50 --no-pager
+    curl -s http://127.0.0.1:8000/health | python3 -m json.tool | grep -A2 '"version"'
+
+### One-time server preparation
+
+Do these once, before enabling the timer (the script refuses a modified checkout):
+
+1. **Line endings** - when `git status` shows every file as modified only because of CRLF, confirm that
+   `git --no-pager diff --ignore-cr-at-eol --stat` is empty, then `git checkout -- .` (as `standa`).
+2. **Permissions** - `sudo chmod -R o-rwx /srv/standa-hub` (`.env.production` stays 600).
+3. **Untracked Docker files** - the server copies of `backend/{Dockerfile,compose.yaml,.dockerignore}` and
+   `frontend/{Dockerfile,compose.yaml,.dockerignore}` are now in the repository. Move them aside (e.g. to
+   `/root/standa-hub-pre-mrk101/`) before the checkout switches to a commit that contains them.
+4. **Frontend env** - `cp frontend/.env.example frontend/.env` and set `NEXT_PUBLIC_API_URL` (see "Frontend").
+5. **First deploy by hand** - check out `main`, `docker compose build` + `APP_COMMIT="$(git rev-parse HEAD)" docker
+   compose up -d` in `backend/`, then the frontend, and confirm `/health`. The timer takes over from there.
+
+### Install
+
+    sudo install -m 755 deploy/scripts/deploy.sh /usr/local/lib/standa-hub/deploy.sh
+    sudo install -m 644 deploy/systemd/standa-hub-deploy.service /etc/systemd/system/
+    sudo install -m 644 deploy/systemd/standa-hub-deploy.timer /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo /usr/local/lib/standa-hub/deploy.sh check
+    sudo systemctl enable --now standa-hub-deploy.timer
+
+The unit runs the **installed copy**, never `deploy/scripts/deploy.sh` inside the checkout (the checkout switches
+commits during the deploy). After a change to `deploy/` reinstall it with the same commands. Pause automatic deploys
+with `sudo systemctl disable --now standa-hub-deploy.timer`.
 
 ## Tailscale Serve recovery commands
 
