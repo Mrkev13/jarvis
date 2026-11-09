@@ -2519,6 +2519,48 @@ await wotReset();
   check("předměty mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
+// MRK-86 – zápočty a docházka: Byl / Nebyl jedním klepnutím, absence proti limitu, zápočet, chyba zápisu
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  const calls = async () => (await fetch("http://127.0.0.1:8000/__mock/school/progress-calls")).json();
+  const { ctx, page, errors } = await open("/school", { width, height });
+  const section = page.getByRole("list", { name: "Zápočty a docházka" });
+  await section.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const card = (id) => section.locator(`[data-progress-subject="${id}"]`);
+  const fyz = card(2);
+  check(`docházka ${label}: jen aktivní předměty`, (await section.locator("[data-progress-subject]").count()) === 3 && (await card(4).count()) === 0);
+  check(`docházka ${label}: absence proti limitu + varování`, /absence 1 z max\. 2 \(zbývá poslední\)/.test(await fyz.innerText()) && (await fyz.innerText()).includes("zbývá poslední povolená absence"));
+  check(`docházka ${label}: splněný zápočet s datem`, (await card(3).innerText()).includes("Zápočet splněn · 2. 10."));
+  check(`docházka ${label}: souhrn zkoušek`, (await card(3).innerText()).includes("Zkoušky: 1 uzavřená (1 složeno)"));
+  const byl = fyz.getByRole("button", { name: "Byl – Fyzika, Tento týden" });
+  const nebyl = fyz.getByRole("button", { name: "Nebyl – Fyzika, Tento týden" });
+  const sizes = [await byl.boundingBox(), await nebyl.boundingBox()];
+  check(`docházka ${label}: Byl / Nebyl ≥ 44 px`, sizes.every((b) => b && b.height >= 44), JSON.stringify(sizes));
+  await page.screenshot({ path: `${OUT}school-progress-${label}.png`, fullPage: width < 500 });
+  await byl.click();
+  check(`docházka ${label}: Byl jedním klepnutím`, await eventually(async () => (await byl.getAttribute("aria-pressed")) === "true"), JSON.stringify(await calls()));
+  const c1 = (await calls()).at(-1);
+  check(`docházka ${label}: zápis tohoto týdne`, c1?.kind === "attendance" && c1.body.week_start === "2026-10-05" && c1.body.present === true, JSON.stringify(c1));
+  check(`docházka ${label}: ohlášeno čtečce`, (await page.getByRole("status").filter({ hasText: "týden od 5. 10.: byl" }).count()) === 1);
+  await nebyl.click();
+  check(`docházka ${label}: oprava na Nebyl = vyčerpané absence`, await eventually(async () => /absence 2 z max\. 2 \(už žádná nezbývá\)/.test(await fyz.innerText())), await fyz.innerText());
+  await nebyl.click();
+  check(`docházka ${label}: druhé klepnutí zápis zruší`, await eventually(async () => (await nebyl.getAttribute("aria-pressed")) === "false" && (await calls()).at(-1)?.body.present === null));
+  // chyba zápisu → hláška u předmětu, nic se neztratí
+  await fetch("http://127.0.0.1:8000/__mock/school/fail-next-attendance", { method: "POST" });
+  await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden" }).click();
+  check(`docházka ${label}: chyba = hláška u předmětu`, await eventually(async () => (await card(1).getByRole("alert").count()) === 1));
+  check(`docházka ${label}: po chybě stav beze změny`, (await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden" }).getAttribute("aria-pressed")) === "false");
+  // zápočet
+  await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
+  check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
+  check(`docházka ${label}: po splnění zápočtu bez varování`, !(await fyz.innerText()).includes("povolená absence"));
+  if (width < 500) check("docházka mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await fyz.screenshot({ path: `${OUT}school-progress-${label}-after.png` });
+  check(`docházka ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
+  await ctx.close();
+}
+await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
 // MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
 for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
   const { ctx, page, errors } = await open("/school", { width, height });

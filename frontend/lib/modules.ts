@@ -105,7 +105,7 @@ export const MODULE_UI: Record<string, ModuleUi> = {
   school: {
     nav: { href: "/school", label: "Škola", keywords: ["school", "úkol", "úkoly", "zkouška", "zkoušky", "předmět", "předměty", "termín", "termíny"], order: 20 },
     searchParams: ["subject", "assignment", "exam", "material", "course"], searchGroupOrder: 10,
-    typeLabels: { study_material: "Studijní materiál" },
+    typeLabels: { study_material: "Studijní materiál", subject: "Předmět" },  // subject: varování o absencích v Dnes (MRK-86)
   },
   work: {
     nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },

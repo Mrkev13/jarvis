@@ -48,6 +48,7 @@ import {
 } from "@/lib/school";
 import { cx, priorityTone } from "@/lib/ui";
 import { SubjectList } from "@/modules/school/SubjectList";
+import { ProgressPanel } from "@/modules/school/ProgressPanel";
 
 type Subject = SchoolSubject;
 
@@ -904,6 +905,15 @@ export default function SchoolPage() {
               <EntityList label="Hotové úkoly a uzavřené zkoušky">{closedAgenda.map(renderAgendaRow)}</EntityList>
             </PageSection>
           )}
+
+          {/* ===== ZÁPOČTY A DOCHÁZKA (MRK-86) ===== */}
+          <PageSection
+            labelledBy="school-progress"
+            title="Zápočty a docházka"
+            description="Stav zápočtu, výsledky zkoušek a docházka po týdnech. Byl / Nebyl jedním klepnutím, druhé klepnutí zápis zruší."
+          >
+            <ProgressPanel reloadKey={subjects} />
+          </PageSection>
 
           {/* ===== PŘEDMĚTY ===== */}
           <PageSection

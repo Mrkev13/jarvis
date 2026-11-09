@@ -104,7 +104,7 @@ MODULES: tuple[ModuleDef, ...] = (
                                      "school.material.created", "school.material.updated",
                                      "school.material.source_missing", "school.material.restored",
                                      "school.subject.updated", "school.subject.archived",
-                                     "school.subject.restored"})),
+                                     "school.subject.restored", "school.subject.credit_changed"})),
     ModuleDef("work", "Práce", default_enabled=True, implemented=True, capabilities=ALL_CAPABILITIES,
               entity_types=frozenset({"work_session"}), context_areas=frozenset({"work"}),
               api_prefixes=("/work",), quick_add_kinds=("work",), integrations=work_integrations.INTEGRATIONS),
