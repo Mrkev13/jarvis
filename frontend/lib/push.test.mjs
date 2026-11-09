@@ -64,13 +64,19 @@ test("subscription key is compared byte by byte with the server's current key", 
 });
 
 test("test push results are explained, rejected subscriptions ask to reconnect", () => {
-  assert.deepEqual(testResultText(true, null).stale, false);
-  for (const error of ["http_401", "http_403", "http_404", "http_410", "not_subscribed"]) {
+  assert.equal(testResultText(true, null).state, "on", "a delivered test verifies the subscription");
+  for (const error of ["http_404", "http_410", "not_subscribed"]) {
     const r = testResultText(false, error);
-    assert.equal(r.stale, true, error);
+    assert.equal(r.state, "stale", error);
     assert.match(r.text, /Znovu připojit/);
   }
-  assert.equal(testResultText(false, "http_503").stale, false);
+  // review: 401/403 can be a server-side VAPID problem → never claimed as a proven stale subscription
+  for (const error of ["http_401", "http_403"]) {
+    const r = testResultText(false, error);
+    assert.equal(r.state, "auth_error", error);
+    assert.match(r.text, /Znovu připojit/);
+  }
+  assert.equal(testResultText(false, "http_503").state, null);
   assert.match(testResultText(false, "network").text, /network/);
   assert.match(deviceStateLabel("stale"), /znovu připojit/);
 });
@@ -96,4 +102,18 @@ test("401/403 explain both causes and still offer reconnecting", () => {
     assert.match(r.text, /ověření serveru/);
     assert.match(r.text, /WEB_PUSH_/);
   }
+});
+
+// MRK-102 review: the card's state after the silent sync never claims "Připojeno" for an unknown key.
+test("card state after sync: connected only with a known, matching key", async () => {
+  const { syncedState, deviceStateLabel: label } = await import("./push.ts");
+  assert.equal(syncedState(KEY_A, true, 200), "on");
+  assert.equal(syncedState(KEY_A, false, 200), "stale", "known old key");
+  assert.equal(syncedState(KEY_A, true, 409), "stale", "server refused the key");
+  assert.equal(syncedState(null, false, 200), "unverified", "old subscription, browser hides the key");
+  assert.equal(syncedState(null, false, 409), "stale");
+  assert.equal(syncedState(null, false, 500), "off");
+  assert.doesNotMatch(label("unverified"), /Připojeno/);
+  assert.doesNotMatch(label("auth_error"), /Připojeno|znovu připojit/i);
+  assert.match(label("unverified"), /není ověřené/);
 });

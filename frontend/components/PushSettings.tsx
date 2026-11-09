@@ -14,6 +14,7 @@ import {
   STALE_TEXT,
   subscriptionBody,
   subscriptionServerKey,
+  syncedState,
   testResultText,
   UNSUPPORTED_TEXT,
   UNVERIFIED_TEXT,
@@ -73,7 +74,8 @@ export default function PushSettings() {
       if (sub) {
         // MRK-102: klíč, pro který byl odběr opravdu vytvořen (ne aktuální klíč serveru – ten by starý odběr „potvrdil").
         const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, readRememberedKey());
-        if (usedKey && !serverKeyMatches(urlBase64ToUint8Array(usedKey).buffer, cfg.public_key)) {
+        const keyMatches = usedKey ? serverKeyMatches(urlBase64ToUint8Array(usedKey).buffer, cfg.public_key) === true : false;
+        if (usedKey && !keyMatches) {
           setState("stale");
           setDetail(STALE_TEXT);
           return;
@@ -81,13 +83,9 @@ export default function PushSettings() {
         // Tichá synchronizace se serverem (bez dotazu na oprávnění); neznámý klíč = server_key se neposílá.
         const body = subscriptionBody(sub.toJSON());
         const sync = await postJson("/push/subscriptions", usedKey ? { ...body, server_key: usedKey } : body);
-        if (sync.status === 409) {
-          setState("stale");
-          setDetail(STALE_TEXT);
-          return;
-        }
-        setState(sync.ok ? "on" : "off");
-        setDetail(sync.ok && !usedKey ? UNVERIFIED_TEXT : null);
+        const next = syncedState(usedKey, keyMatches, sync.status);
+        setState(next);
+        setDetail(next === "stale" ? STALE_TEXT : next === "unverified" ? UNVERIFIED_TEXT : null);
         return;
       }
       setState("off");
@@ -161,7 +159,10 @@ export default function PushSettings() {
       const data = (await res.json()) as { ok?: boolean; error?: string | null };
       const result = testResultText(Boolean(data.ok), data.error);
       setMessage(result.text);
-      if (result.stale) setState("stale");
+      if (result.state) {
+        setState(result.state);
+        if (result.state === "on") setDetail(null);
+      }
     } catch {
       setMessage("Test se nepodařilo odeslat.");
     } finally {
@@ -188,21 +189,23 @@ export default function PushSettings() {
   }
 
   const on = state === "on";
+  // odběr existuje, jen není ověřený / push služba odmítla ověření: jde testovat, znovu připojit i vypnout
+  const doubtful = state === "unverified" || state === "auth_error";
   return (
     <Card as="section" aria-busy={busy || state === "checking"} aria-labelledby="push-settings">
       <CardHeader title={<span id="push-settings">Upozornění mimo aplikaci</span>} />
       <div className="-mt-2 mb-3">
-        <StatusBadge tone={on ? "success" : state === "denied" || state === "stale" ? "warning" : "neutral"} dot={on} className="whitespace-normal">
+        <StatusBadge tone={on ? "success" : state === "denied" || state === "stale" || doubtful ? "warning" : "neutral"} dot={on} className="whitespace-normal">
           <span role="status">{deviceStateLabel(state)}</span>
         </StatusBadge>
       </div>
       <div className="flex flex-wrap gap-2">
-        {(state === "off" || state === "stale") && (
-          <Button variant="primary" size="sm" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
-            {state === "stale" ? "Znovu připojit" : "Zapnout na tomto zařízení"}
+        {(state === "off" || state === "stale" || doubtful) && (
+          <Button variant={doubtful ? "secondary" : "primary"} size="sm" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
+            {state === "off" ? "Zapnout na tomto zařízení" : "Znovu připojit"}
           </Button>
         )}
-        {on && (
+        {(on || doubtful) && (
           <>
             <Button size="sm" disabled={busy} onClick={() => void sendTest()}>
               Poslat test

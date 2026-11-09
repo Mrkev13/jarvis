@@ -136,33 +136,49 @@ export function subscriptionBody(json: unknown): { endpoint: string; keys: { p25
   return { endpoint, keys: { p256dh, auth } };
 }
 
-export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on" | "stale";
+// MRK-102: „unverified" = odběr existuje, ale nejde zjistit, ke kterému klíči serveru patří (nic se netvrdí);
+// „auth_error" = push služba odmítla ověření serveru (401/403) – starý odběr NEBO chyba VAPID na serveru.
+export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on" | "stale" | "unverified" | "auth_error";
+
+/**
+ * Stav karty po tiché synchronizaci existujícího odběru (`usedKey` = klíč, se kterým odběr vznikl, nebo null).
+ * „on" jen tehdy, když klíč známe a sedí a server odběr přijal – jinak se připojení netvrdí.
+ */
+export function syncedState(usedKey: string | null, keyMatches: boolean, syncStatus: number): DeviceState {
+  if (usedKey && !keyMatches) return "stale";
+  if (syncStatus === 409) return "stale";
+  if (syncStatus < 200 || syncStatus >= 300) return "off";
+  return usedKey ? "on" : "unverified";
+}
 
 /** MRK-102: vysvětlení stavu „stale" (odběr ke starým klíčům serveru). */
 export const STALE_TEXT =
   "Server má od posledního připojení jiné klíče pro upozornění (např. po přesunu na jiný počítač). " +
   "Starý odběr už nefunguje – klepni na „Znovu připojit“.";
 
-/** Výsledek „Poslat test" → věta pro člověka; `stale` = odběr je potřeba připojit znovu. */
-export function testResultText(ok: boolean, error: string | null | undefined): { text: string; stale: boolean } {
-  if (ok) return { text: "Test odeslán – upozornění by mělo za chvíli přijít.", stale: false };
+/**
+ * Výsledek „Poslat test" → věta pro člověka a nový stav karty (`null` = beze změny). Úspěch odběr ověří („on");
+ * 404/410 = odběr prokazatelně zanikl („stale"); 401/403 = odmítnuté ověření serveru („auth_error") – může jít
+ * o starý odběr i o chybu VAPID na serveru, proto se netvrdí, že je odběr starý.
+ */
+export function testResultText(ok: boolean, error: string | null | undefined): { text: string; state: DeviceState | null } {
+  if (ok) return { text: "Test odeslán – upozornění by mělo za chvíli přijít.", state: "on" };
   switch (error) {
     case "http_401":
     case "http_403":
-      // RFC 8292: odmítnuté ověření serveru – starý odběr NEBO chyba VAPID na serveru (odběr se proto nevypíná)
       return {
-        text: "Push služba odmítla ověření serveru. Buď odběr patří ke starým klíčům – klepni na „Znovu připojit“ –, " +
+        text: "Push služba odmítla ověření serveru. Buď odběr patří ke starým klíčům – zkus „Znovu připojit“ –, " +
           "nebo je na serveru chyba v nastavení klíčů pro upozornění (WEB_PUSH_*, čas serveru).",
-        stale: true,
+        state: "auth_error",
       };
     case "http_404":
     case "http_410":
     case "not_subscribed":
-      return { text: "Push služba tento odběr odmítla. " + STALE_TEXT, stale: true };
+      return { text: "Push služba tento odběr odmítla. " + STALE_TEXT, state: "stale" };
     case "not_configured":
-      return { text: "Server nemá nastavené klíče pro upozornění.", stale: false };
+      return { text: "Server nemá nastavené klíče pro upozornění.", state: null };
     default:
-      return { text: `Test se nepodařilo doručit (${error ?? "neznámá chyba"}). Zkus to za chvíli znovu.`, stale: false };
+      return { text: `Test se nepodařilo doručit (${error ?? "neznámá chyba"}). Zkus to za chvíli znovu.`, state: null };
   }
 }
 
@@ -172,6 +188,10 @@ export function deviceStateLabel(state: DeviceState): string {
       return "Připojeno – připomínky přijdou i mimo aplikaci";
     case "stale":
       return "Je potřeba se znovu připojit";
+    case "unverified":
+      return "Připojení není ověřené – pošli test, nebo se znovu připoj";
+    case "auth_error":
+      return "Push služba odmítla ověření serveru";
     case "off":
       return "Nepřipojeno";
     case "denied":

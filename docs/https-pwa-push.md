@@ -118,8 +118,9 @@ origin.
   - the settings card compares the key the subscription was **really created with** (`subscription.options`,
     or the key the page remembered for that endpoint when it subscribed) with `GET /push/config` and shows *Je
     potřeba se znovu připojit* with a **Znovu připojit** button. It never sends the server's current key in place
-    of an unknown one; when the browser does not reveal the key, no `server_key` is sent and the card says the
-    state is not verified;
+    of an unknown one; when the browser does not reveal the key, no `server_key` is sent and the card shows
+    *Připojení není ověřené* (never *Připojeno*) with *Poslat test* and *Znovu připojit*; a delivered test turns it
+    into *Připojeno*;
   - `POST /push/subscriptions` answers `409 {"category": "stale_key"}` when that key differs from the server's
     (compared as decoded bytes);
   - a 401/403 from the push service is a permanent error of that delivery but **does not disable** the
@@ -154,7 +155,8 @@ origin.
 - **Device stops receiving:** 404/410 from the push service disabled the device (the subscription is gone).
   401/403 means the push service rejected the server's VAPID authentication: either the device holds a
   subscription for old keys (after a move) or the server's `WEB_PUSH_*` / clock is wrong. *Poslat test* explains
-  both; tap *Znovu připojit* on that device, and if it still fails, check the server env.
+  both and the card shows *Push služba odmítla ověření serveru* (not "stale"); tap *Znovu připojit* on that
+  device, and if it still fails, check the server env.
 - **Checking the server without revealing values** (Docker, MRK-101): in the backend container print only whether
   `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` and `WEB_PUSH_CONTACT` are set, plus the values of
   `EXTERNAL_DELIVERY_ENABLED`, `REMINDERS_CHECK_ENABLED` and `SCHEDULER_ENABLED`. `GET /push/config` must answer
