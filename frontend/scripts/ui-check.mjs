@@ -1012,7 +1012,8 @@ async function qaType(page, text) {
   check("quick add: Ctrl+Shift+K otevře Rychlé přidání", (await dialog.count()) === 1);
   check("quick add: Ctrl+Shift+K neotevře vyhledávání", (await page.getByRole("dialog", { name: "Hledat v Standa Hubu" }).count()) === 0);
   const input = dialog.getByLabel("Co chceš přidat?");
-  check("quick add: fokus v poli", await input.evaluate((el) => el === document.activeElement));
+  // fokus se přesouvá po otevření dialogu (animace / requestAnimationFrame) – počkat, ne číst jednou (v CI občas pozdě)
+  check("quick add: fokus v poli", await eventually(() => input.evaluate((el) => el === document.activeElement)));
   check("quick add: prázdný stav s příklady", (await dialog.getByRole("list", { name: "Příklady" }).getByRole("button").count()) >= 5);
   await page.screenshot({ path: `${OUT}quick-add-empty.png` });
 
