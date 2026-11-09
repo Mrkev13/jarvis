@@ -346,20 +346,27 @@ Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `up
 `-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
 in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
 
-### Review gate and auto-merge (MRK-97)
+### Review gate and automatic merge (MRK-97)
 
 A PR merges by itself when **all CI jobs and the status "Review gate (Codex verdict)" are green**. The gate
 (`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head commit**,
 posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`. `BLOCK` makes
-it red, no verdict keeps it pending, and every new push needs a new review. On `MERGE` the gate turns on GitHub
-auto-merge (merge commit). With the label `manual-merge` nobody auto-merges; Standa merges by hand.
+it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending` first and any
+API error ends in `error` (fail closed).
+
+**Who merges:** never GitHub auto-merge (a persistent green status must not authorise a merge after the review
+changed - the gate even switches a leftover auto-merge off). The trusted reviewer host merges: on every timer run
+`codex-review.sh` re-checks, **live, right before merging**, that the newest owner verdict on the current head is
+`MERGE`, that no critical path is touched, and that GitHub reports the PR `CLEAN` (all required checks green,
+mergeable) - then `gh pr merge --merge --match-head-commit <head>`, so a new commit in between makes GitHub refuse.
+Labels `manual-merge`, `needs-human`, `manual-review`, `no-automerge`: no automatic merge; Standa merges by hand.
 
 **The gate is trusted code.** It runs only the copy on `main`: `pull_request_target` (every push / label change)
 runs the base branch's file, after each posted review `codex-review.sh` calls
 `gh workflow run review-gate.yml --ref main -f pr=<n>` (a `workflow_dispatch` from any other ref fails), and a
 `schedule` pass every 10 minutes re-evaluates **all open PRs** - an edited or dismissed review is not an event the
-trusted copy sees, so within 10 minutes the status follows it and auto-merge is switched off when the verdict is
-no longer `MERGE`. It never
+trusted copy sees, so within 10 minutes the status follows it (the merge itself does not rely on it - it re-checks
+live). It never
 checks out or runs PR code. Because `pull_request_target` checks land on the base commit, the result is a **commit
 status** on the PR head with the context `Review gate (Codex verdict)` - that is the required check. After a review
 written by hand, re-run it from *Actions → Review gate → Run workflow* (branch `main`, PR number).
@@ -369,7 +376,7 @@ written by hand, re-run it from *Actions → Review gate → Run workflow* (bran
 reviewed again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MRK-108). Nobody approves their
 own work.
 
-**Critical changes** (manual merge by Standa, the gate adds `manual-merge` and does not enable auto-merge):
+**Critical changes** (manual merge by Standa: the gate adds `manual-merge`, the reviewer host never merges them):
 
 | area | paths |
 |---|---|
@@ -394,7 +401,8 @@ label to let it continue.
 
 **GitHub settings (Standa, once, after the MRK-97 PR is on `main`):**
 
-1. Repository → *Settings* → *General* → *Pull Requests*: tick **Allow auto-merge** (keep *Allow merge commits*).
+1. Repository → *Settings* → *General* → *Pull Requests*: keep *Allow merge commits*; **Allow auto-merge** is not
+   needed (leave it off - the reviewer host merges, see above).
 2. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
    - **Require a pull request before merging**, required approvals **0** (the gate is the review requirement);
    - **Require status checks to pass before merging**, add these five checks:
@@ -405,7 +413,7 @@ label to let it continue.
      commit anyway;
    - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
 3. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), turn green after a `MERGE`
-   review, and the PR merges by itself.
+   review, and within one timer run (10 minutes) the reviewer host merges it.
 
 **Automatic Codex review (Ubuntu host, your user account with Codex CLI and GitHub CLI):**
 `scripts/linux/codex-review.sh` runs every 10 minutes from a systemd user timer:
@@ -413,7 +421,8 @@ label to let it continue.
   **dedicated review clone**, runs `codex exec --sandbox read-only`, posts Codex's answer with
   `gh pr review --comment` and asks the gate (on `main`) to re-evaluate;
 - a verdict by another account or a dismissed one does not count (same trust filter as the gate);
-- Codex itself never touches GitHub, the network or the production checkout, and nothing in the script merges;
+- Codex itself never touches GitHub, the network or the production checkout;
+- after the reviews the script merges ready PRs (live checks above, never critical ones, never with auto-merge);
 - each commit is attempted once. An answer without a verdict line, or one that arrives after a new push, is not
   posted (see the log). Label `manual-review` skips a PR;
 - state, Codex answers and logs: `~/.local/state/standa-hub/codex-review`.
@@ -423,8 +432,8 @@ clone: clones are checked out to PR heads, and a PR must not decide what code ru
 to the scripts on `main`, repeat the `install` lines (and rebuild the sandbox image).
 
 The GitHub token for `gh` (fine-grained, this repository only) needs *Pull requests: Read and write*, **Actions:
-Read and write** (trigger the gate) and **Contents: Read and write** (push automatic fixes) - no admin rights; the
-merge is GitHub auto-merge.
+Read and write** (trigger the gate) and **Contents: Read and write** (merge, push automatic fixes) - no admin
+rights; branch protection still decides whether a merge is allowed.
 
 ```bash
 # once, as your user on the Ubuntu host (not root)
@@ -487,7 +496,8 @@ Code version accepts inside the image (`docker run --rm standa-autofix claude --
 `--permission-mode dontAsk`, `--allowedTools`, `--disallowedTools`, `--max-budget-usd`).
 
 The review gate's periodic pass (every 10 minutes, see above) also catches a review that was edited or dismissed
-after a `MERGE`: the status turns red / pending and auto-merge is switched off again.
+after a `MERGE`: the status turns red / pending. The merge never depends on that status alone - the reviewer host
+re-reads the verdict right before merging.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

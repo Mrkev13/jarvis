@@ -232,6 +232,13 @@ def test_a_leaked_token_is_never_published(env):
     assert remote_head(env) == env['head'], 'not pushed'
     assert 'test-not-a-secret' not in read(env, 'comments.md'), 'not in a comment either'
     assert '--add-label needs-human' in read(env, 'labels') and 'token' in last_result(env)
+    # review MRK-97 P2: not even unreachable git objects or stored logs keep it
+    objects = subprocess.run(['git', 'cat-file', '--batch-all-objects', '--batch'], cwd=env['fix'],
+                             capture_output=True).stdout
+    assert b'test-not-a-secret' not in objects, 'never written into the fix clone'
+    for f in env['state'].rglob('*'):
+        if f.is_file():
+            assert b'test-not-a-secret' not in f.read_bytes(), f
 
 
 def test_output_over_the_cap_is_refused(env):

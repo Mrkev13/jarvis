@@ -58,7 +58,8 @@ def test_gate_runs_only_the_trusted_copy_from_the_default_branch():
 
 def test_least_privilege_and_no_untrusted_text_in_expressions():
     assert GATE['permissions'] == {'contents': 'read'}
-    assert GATE['jobs']['gate']['permissions'] == {'contents': 'write', 'pull-requests': 'write', 'statuses': 'write'}
+    assert GATE['jobs']['gate']['permissions'] == {'contents': 'read', 'pull-requests': 'write', 'statuses': 'write'}
+    assert 'enablePullRequestAutoMerge' not in GATE_TEXT, 'the gate never merges and never enables auto-merge'
     assert set(gate_step()['env']) == {'PR_INPUT'}, 'the dispatch input reaches the script only through env'
     assert 'run:' not in GATE_TEXT, 'no shell step at all'
     for risky in ('pull_request.title', 'pull_request.body', 'review.body', 'head.ref', 'head_ref'):
@@ -77,13 +78,13 @@ const github = {
   paginate: async (fn, args) => fn(args),
   rest: {
     pulls: { get: async (a) => { out.evaluated.push(a.pull_number); return { data: { ...sc.pr, number: a.pull_number } }; },
-             list: async () => sc.open || [], listFiles: list('files'), listReviews: list('reviews') },
+             list: async () => sc.open || [], listFiles: list('files'),
+             listReviews: async () => { if (sc.reviewsFail) throw new Error('API down'); return sc.reviews; } },
     repos: { createCommitStatus: async (a) => { out.statuses.push([a.sha, a.state, a.context]); } },
     issues: { addLabels: async (a) => { out.labels.push(...a.labels); } },
   },
   graphql: async (q) => {
     if (q.includes('disablePullRequestAutoMerge')) { out.automergeOff += 1; return; }
-    if (sc.automergeFails) throw new Error('not allowed');
     out.automerge += 1;
   },
 };
@@ -100,13 +101,13 @@ HEAD = 'a' * 40
 
 
 def run_gate(tmp_path, *, reviews=(), files=('backend/x.py',), labels=(), event='pull_request_target', ref='refs/heads/main',
-             inp='', draft=False, automerge_fails=False, auto_merge=None, open_prs=()):
+             inp='', draft=False, auto_merge=None, open_prs=(), reviews_fail=False):
     import json
     import subprocess
     pr = {'number': 7, 'state': 'open', 'draft': draft, 'node_id': 'PR_x', 'head': {'sha': HEAD},
           'labels': [{'name': n} for n in labels], 'auto_merge': auto_merge}
     scenario = {'pr': pr, 'files': [{'filename': f} for f in files], 'reviews': list(reviews), 'event': event,
-                'ref': ref, 'input': inp, 'automergeFails': automerge_fails,
+                'ref': ref, 'input': inp, 'reviewsFail': reviews_fail,
                 'open': [{'number': n} for n in open_prs]}
     (tmp_path / 'gate.js').write_text(gate_script())
     (tmp_path / 'scenario.json').write_text(json.dumps(scenario))
@@ -125,11 +126,16 @@ MERGE, BLOCK = 'ok\nCodex-Verdict: MERGE', 'no\nCodex-Verdict: BLOCK'
 needs_node = pytest.mark.skipif(__import__('shutil').which('node') is None, reason='needs node')
 
 
+def final(out):
+    """The status a PR ends with (every pass first sets pending)."""
+    return out['statuses'][-1][1]
+
+
 @needs_node
-def test_merge_on_the_head_sets_success_and_enables_auto_merge(tmp_path):
+def test_merge_on_the_head_sets_success_and_never_enables_auto_merge(tmp_path):
     out = run_gate(tmp_path, reviews=[review(MERGE)])
-    assert out['statuses'] == [[HEAD, 'success', 'Review gate (Codex verdict)']]
-    assert out['automerge'] == 1 and out['labels'] == [] and out['failed'] is None
+    assert out['statuses'][0] == [HEAD, 'pending', 'Review gate (Codex verdict)'], 'pending first (fail closed)'
+    assert final(out) == 'success' and out['automerge'] == 0 and out['labels'] == [] and out['failed'] is None
 
 
 @needs_node
@@ -144,71 +150,60 @@ def test_merge_on_the_head_sets_success_and_enables_auto_merge(tmp_path):
 ])
 def test_only_the_owners_newest_live_verdict_on_the_head_counts(tmp_path, reviews, state):
     out = run_gate(tmp_path, reviews=reviews)
-    assert out['statuses'][0][1] == state
-    assert out['automerge'] == (1 if state == 'success' else 0)
+    assert final(out) == state and out['automerge'] == 0
 
 
 @needs_node
 @pytest.mark.parametrize('path', ['backend/alembic/versions/0028_x.py', '.github/workflows/ci.yml', 'frontend/proxy.ts'])
-def test_critical_change_gets_manual_merge_and_no_auto_merge(tmp_path, path):
+def test_critical_change_gets_the_manual_merge_label(tmp_path, path):
     out = run_gate(tmp_path, reviews=[review(MERGE)], files=['frontend/app/page.tsx', path])
-    assert out['statuses'][0][1] == 'success' and out['labels'] == ['manual-merge'] and out['automerge'] == 0
+    assert final(out) == 'success' and out['labels'] == ['manual-merge']
 
 
 @needs_node
-def test_manual_merge_label_and_draft_never_auto_merge(tmp_path):
-    assert run_gate(tmp_path, reviews=[review(MERGE)], labels=['manual-merge'])['automerge'] == 0
-    assert run_gate(tmp_path, reviews=[review(MERGE)], draft=True)['automerge'] == 0
+def test_a_leftover_auto_merge_is_always_switched_off(tmp_path):
+    """Review MRK-97 P1: no persistent status may authorise a merge - GitHub auto-merge is never left on."""
+    for reviews in ([review(MERGE)], [review(BLOCK)], []):
+        out = run_gate(tmp_path, reviews=reviews, auto_merge={'merge_method': 'merge'})
+        assert out['automergeOff'] == 1 and out['automerge'] == 0
+
+
+@needs_node
+def test_edited_or_dismissed_review_turns_the_status_back(tmp_path):
+    assert final(run_gate(tmp_path, reviews=[review(MERGE)])) == 'success'
+    edited = run_gate(tmp_path, reviews=[review(BLOCK)], event='schedule', open_prs=[7])
+    assert edited['evaluated'] == [7] and final(edited) == 'failure'
+    dismissed = run_gate(tmp_path, reviews=[review(MERGE, state='DISMISSED')], event='schedule', open_prs=[7])
+    assert final(dismissed) == 'pending'
+
+
+@needs_node
+def test_an_api_error_never_keeps_a_green_status(tmp_path):
+    out = run_gate(tmp_path, reviews=[review(MERGE)], reviews_fail=True, event='schedule', open_prs=[7])
+    assert [s[1] for s in out['statuses']] == ['pending', 'error'] and out['failed'], 'fail closed'
+
+
+@needs_node
+def test_schedule_evaluates_every_open_pr(tmp_path):
+    out = run_gate(tmp_path, reviews=[review(MERGE)], event='schedule', open_prs=[7, 8, 9])
+    assert out['evaluated'] == [7, 8, 9] and len(out['statuses']) == 6
 
 
 @needs_node
 def test_dispatch_runs_only_from_main_with_a_numeric_pr(tmp_path):
     ok = run_gate(tmp_path, reviews=[review(MERGE)], event='workflow_dispatch', inp='7')
-    assert ok['automerge'] == 1
+    assert final(ok) == 'success'
     other = run_gate(tmp_path, reviews=[review(MERGE)], event='workflow_dispatch', inp='7', ref='refs/heads/feature')
-    assert other['failed'] and other['statuses'] == [] and other['automerge'] == 0
+    assert other['failed'] and other['statuses'] == []
     bad = run_gate(tmp_path, reviews=[review(MERGE)], event='workflow_dispatch', inp='7; rm -rf /')
     assert bad['failed'] == 'No valid PR number.' and bad['statuses'] == []
-
-
-@needs_node
-def test_edited_or_dismissed_review_turns_the_gate_back_off(tmp_path):
-    """Review MRK-97 P1: MERGE → auto-merge on; the review is then edited to BLOCK or dismissed (no event the trusted
-    copy sees) → the scheduled pass re-evaluates every open PR: failure/pending and auto-merge OFF."""
-    on = run_gate(tmp_path, reviews=[review(MERGE)])
-    assert on['statuses'][0][1] == 'success' and on['automerge'] == 1
-    enabled = {'merge_method': 'merge'}
-    edited = run_gate(tmp_path, reviews=[review(BLOCK)], event='schedule', auto_merge=enabled, open_prs=[7])
-    assert edited['evaluated'] == [7] and edited['statuses'][0][1] == 'failure' and edited['automergeOff'] == 1
-    dismissed = run_gate(tmp_path, reviews=[review(MERGE, state='DISMISSED')], event='schedule', auto_merge=enabled, open_prs=[7])
-    assert dismissed['statuses'][0][1] == 'pending' and dismissed['automergeOff'] == 1 and dismissed['automerge'] == 0
-
-
-@needs_node
-def test_schedule_evaluates_every_open_pr_and_keeps_auto_merge_once(tmp_path):
-    out = run_gate(tmp_path, reviews=[review(MERGE)], event='schedule', open_prs=[7, 8, 9])
-    assert out['evaluated'] == [7, 8, 9] and len(out['statuses']) == 3
-    again = run_gate(tmp_path, reviews=[review(MERGE)], event='schedule', open_prs=[7], auto_merge={'merge_method': 'merge'})
-    assert again['automerge'] == 0 and again['automergeOff'] == 0, 'already on: nothing to change'
-
-
-@needs_node
-def test_critical_change_switches_an_enabled_auto_merge_off(tmp_path):
-    out = run_gate(tmp_path, reviews=[review(MERGE)], files=['backend/alembic/versions/x.py'], auto_merge={'merge_method': 'merge'})
-    assert out['labels'] == ['manual-merge'] and out['automergeOff'] == 1
-
-
-@needs_node
-def test_auto_merge_failure_is_a_warning_not_a_failure(tmp_path):
-    out = run_gate(tmp_path, reviews=[review(MERGE)], automerge_fails=True)
-    assert out['failed'] is None and any('Auto-merge not enabled' in n for n in out['notices'])
 
 
 def test_docs_list_every_required_check_by_its_real_name():
     names = [job['name'] for job in CI['jobs'].values()] + ['Review gate (Codex verdict)']
     for name in names:
         assert f'`{name}`' in OPS, name
-    assert 'Allow auto-merge' in OPS and 'required approvals **0**' in OPS
+    assert 'required approvals **0**' in OPS and '--match-head-commit' in OPS
     assert 'Codex-Verdict: MERGE' in AGENTS and 'nikdy autor kódu' in AGENTS
 
 
@@ -216,7 +211,9 @@ def test_review_script_never_merges_and_codex_stays_read_only():
     code = [line for line in SCRIPT.splitlines() if not line.lstrip().startswith('#')]
     text = '\n'.join(code)
     assert '--sandbox read-only' in text
-    assert 'gh pr merge' not in text and 'git push' not in text, 'review only; GitHub auto-merge does the merge'
+    assert 'git push' not in text and '--auto' not in text, 'never GitHub auto-merge'
+    merges = [line for line in code if 'gh pr merge' in line]
+    assert merges and all('--match-head-commit "$head"' in m for m in merges), 'merge only pinned to the checked head'
     assert 'gh workflow run review-gate.yml --repo "$REPO" --ref main' in text, 'the trusted gate re-evaluates after a review'
 
 

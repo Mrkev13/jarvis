@@ -4,7 +4,7 @@
 # For each open, non-draft PR whose head commit has no "Codex-Verdict:" review yet, the head is checked out in a
 # DEDICATED review clone (never the production checkout), Codex CLI reviews it read-only, and this script posts the
 # answer as a PR review comment, then asks the review gate (.github/workflows/review-gate.yml, always the copy on
-# main) to re-evaluate the PR; on "Codex-Verdict: MERGE" it lets the PR auto-merge once CI is green.
+# main) to re-evaluate the PR. Then it merges ready PRs itself (merge_ready below), never via GitHub auto-merge.
 #
 #   codex-review.sh check   # tools, logins, review clone, timer - names and booleans only; exit 2 = not ready
 #   codex-review.sh run     # one pass over the open PRs (what the timer runs)
@@ -12,7 +12,10 @@
 # Safety:
 # - Run an INSTALLED copy (~/.local/bin/standa-codex-review, see docs/operations.md), never this file inside the
 #   review clone: the clone is checked out to PR heads, so a PR must never decide what code runs with your logins.
-# - Codex runs with --sandbox read-only; only this script talks to GitHub (gh). The gh token needs no merge right.
+# - Codex runs with --sandbox read-only; only this script talks to GitHub (gh).
+# - Merge (role "Codex - merge"): after the reviews, merge_ready merges PRs whose LIVE newest verdict on the current
+#   head is MERGE, that touch no critical path and that GitHub reports CLEAN - pinned to that head commit. Never
+#   through GitHub auto-merge. Labels manual-merge / needs-human / manual-review / no-automerge: no merge.
 # - Each head commit is attempted once (state file per PR). No verdict line, or a new commit during the review,
 #   means nothing is posted. Draft PRs and the label "manual-review" are skipped. One run at a time (flock).
 #
@@ -28,6 +31,10 @@ CODEX="${CODEX:-codex}"
 KEEP_LOGS=30
 # Case-sensitive, a line of its own - the same rule as the gate workflow.
 VERDICT_RE='^Codex-Verdict:[[:space:]]*(MERGE|BLOCK)[[:space:]]*$'
+# Critical changes are merged by Standa by hand - the same list as the gate (.github/workflows/review-gate.yml);
+# every scripts/ path is already critical, so the gate's backup/restore/offsite pattern is covered.
+CRITICAL_RE='^backend/alembic/|^backend/auth[^/]*\.py$|^frontend/proxy\.ts$|^backend/(backup_service|offsite_backup|offsite_restic)\.py$|^\.github/|^scripts/|(^|/)Dockerfile[^/]*$|(^|/)(docker-)?compose[^/]*\.ya?ml$'
+NO_MERGE_LABELS='["manual-merge","needs-human","manual-review","no-automerge"]'
 
 log() { printf '[codex-review] %s\n' "$*"; }
 
@@ -70,6 +77,49 @@ Write the review in Czech as markdown: blocking findings first (file:line, why, 
 ones. Do not claim results you could not check (CI runs separately).
 End with exactly one line on its own: "Codex-Verdict: MERGE" when nothing blocks, otherwise "Codex-Verdict: BLOCK".
 PROMPT
+}
+
+# The newest live verdict (owner account, not dismissed, on this commit, by submit time): MERGE, BLOCK or nothing.
+live_verdict() {   # $1 = PR number, $2 = head sha
+  local owner="${REPO%%/*}" body verdict="" v
+  while IFS= read -r body; do
+    [[ -n "$body" ]] || continue
+    v="$(base64 -d <<<"$body" | grep -E "$VERDICT_RE" | tail -1 | grep -Eo 'MERGE|BLOCK' || true)"
+    [[ -n "$v" ]] && verdict="$v"
+  done < <(gh api --paginate "repos/$REPO/pulls/$1/reviews" \
+    --jq "[.[] | select(.commit_id == \"$2\") | select(.user.login == \"$owner\") | select(.state != \"DISMISSED\")]
+          | sort_by(.submitted_at) | .[] | .body | @base64")
+  printf '%s' "$verdict"
+}
+
+# Role "Codex - merge" (AGENTS.md): the merge happens HERE, never through GitHub auto-merge, so nothing can merge on
+# a status that is no longer true. Right before merging this re-checks, live: the newest verdict on the current head
+# is MERGE, no critical path is touched, and GitHub reports the PR as CLEAN (all required checks green, mergeable);
+# the merge is pinned to that head commit (--match-head-commit). Branch protection still enforces the checks.
+merge_ready() {
+  local prs number head verdict files state merged=0
+  prs="$(gh pr list --repo "$REPO" --state open --json number,headRefOid,isDraft,labels \
+    --jq ".[] | select(.isDraft | not) | select([.labels[].name] | any(. as \$l | $NO_MERGE_LABELS | index(\$l)) | not)
+          | \"\(.number) \(.headRefOid)\"")"
+  while read -r number head; do
+    [[ -n "${number:-}" && "$head" =~ ^[0-9a-f]{40}$ ]] || continue
+    verdict="$(live_verdict "$number" "$head")"
+    [[ "$verdict" == MERGE ]] || continue
+    files="$(gh api --paginate "repos/$REPO/pulls/$number/files" --jq '.[] | .filename, (.previous_filename // empty)')"
+    if grep -Eq "$CRITICAL_RE" <<<"$files"; then
+      log "PR #$number: critical change - Standa merges by hand"
+      continue
+    fi
+    state="$(gh pr view "$number" --repo "$REPO" --json mergeStateStatus,headRefOid --jq '"\(.mergeStateStatus) \(.headRefOid)"')"
+    [[ "$state" == "CLEAN $head" ]] || { log "PR #$number: not ready to merge ($state)"; continue; }
+    if gh pr merge "$number" --repo "$REPO" --merge --match-head-commit "$head" >/dev/null; then
+      result "PR #$number ${head:0:7}: merged (Codex MERGE, checks green)"
+      merged=$((merged + 1))
+    else
+      result "PR #$number: merge refused by GitHub (branch protection or a new commit)"
+    fi
+  done <<<"$prs"
+  return 0
 }
 
 run() {
@@ -118,6 +168,7 @@ run() {
   done <<<"$prs"
 
   [[ $reviewed -gt 0 || -f "$STATE_DIR/last-result.txt" ]] || result "no PR waiting for review"
+  merge_ready
   # keep the newest KEEP_LOGS answers (find, not ls: with pipefail an empty folder must not fail the run)
   find "$STATE_DIR/logs" -maxdepth 1 -name '*.md' -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP_LOGS + 1)) \
     | cut -d' ' -f2- | while read -r old; do rm -f -- "$old" "$old.log"; done

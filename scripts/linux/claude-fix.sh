@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MRK-97: automatic fixes after a blocking Codex review, on the Ubuntu host (systemd user timer, every 10 minutes).
 #
-# Roles (AGENTS.md workflow): Claude writes and fixes code, Codex reviews, GitHub auto-merge merges. This script is
+# Roles (AGENTS.md workflow): Claude writes and fixes code, Codex reviews and merges (codex-review.sh). This script is
 # the hand-off back to Claude: for each open PR whose newest verdict on its CURRENT head commit is
 # "Codex-Verdict: BLOCK", it runs Claude Code headless with the review text in a DISPOSABLE DOCKER CONTAINER
 # (scripts/linux/autofix/) and pushes Claude's new commits to the same branch (fast-forward only). The new commit
@@ -112,6 +112,14 @@ secret_values() {
   sed -n 's/^[A-Za-z_][A-Za-z0-9_]*=//p' "$CLAUDE_ENV_FILE" | awk 'length($0) >= 8'
 }
 
+# Any token value in the returned files, the answer or the docker log? (fixed strings, regular files only)
+returned_has_secret() {   # $1 = work dir
+  local patterns
+  patterns="$(secret_values)"
+  [[ -n "$patterns" ]] || return 1
+  grep -rqsF -f <(printf '%s\n' "$patterns") "$1/out" "$1/docker.log" 2>/dev/null
+}
+
 contains_secret() {   # stdin = text to check
   local text value
   text="$(cat)"
@@ -204,7 +212,7 @@ run() {
   trap 'result "run failed (line $LINENO)"' ERR   # a timer run has no console: keep the failure for `check`
 
   local prs number head branch state tsv rows last rounds short stamp review answer work sandbox_exit claude_exit
-  local new why tree changed protected remote fixed=0
+  local new why leaked tree changed protected remote fixed=0
   token_file_ok || { result "run failed: Claude token file missing or readable by others ($CLAUDE_ENV_FILE)"; return 1; }
   prs="$(gh pr list --repo "$REPO" --state open --json number,headRefOid,headRefName,isDraft,isCrossRepository,labels \
     --jq ".[] | select(.isDraft | not) | select(.isCrossRepository | not)
@@ -246,17 +254,24 @@ run() {
     prompt_for "$number" "$head" "$branch" "$rounds" "$review" >"$work/prompt.md"
     sandbox_exit=0
     sandbox "$work" "$work/out.tar" || sandbox_exit=$?
-    cp "$work/docker.log" "$answer.log" 2>/dev/null || true
-    new="" why=""
+    new="" why="" leaked=""
     if [[ "$(stat -c %s "$work/out.tar" 2>/dev/null || echo 0)" -gt "$MAX_OUT_BYTES" ]]; then
       why="výstup sandboxu je větší než $MAX_OUT_BYTES B"
     elif ! unpack "$work/out.tar" "$work/out" || [[ ! -d "$work/out/tree" ]]; then
       why="výstup sandboxu chybí nebo je neplatný (exit $sandbox_exit)"
     fi
-    if [[ -f "$work/out/answer.md" && ! -L "$work/out/answer.md" ]]; then head -c 200000 "$work/out/answer.md" >"$answer"; else : >"$answer"; fi
+    # DLP BEFORE anything is kept: a token value anywhere in what came back (files, answer, log) = nothing goes to
+    # git objects, logs or comments - the work folder is deleted as a whole
+    if returned_has_secret "$work"; then
+      leaked=1 why="výstup obsahoval tajný token – nic se neuložilo ani nezveřejnilo, token zneplatni"
+      : >"$answer"
+    else
+      head -c "$MAX_LOG_BYTES" "$work/docker.log" >"$answer.log" 2>/dev/null || true
+      if [[ -f "$work/out/answer.md" && ! -L "$work/out/answer.md" ]]; then head -c 200000 "$work/out/answer.md" >"$answer"; else : >"$answer"; fi
+    fi
     claude_exit="$(head -c 8 "$work/out/claude.exit" 2>/dev/null | tr -cd '0-9' || true)"
     if [[ -z "$why" ]]; then
-      # the commit is built HERE, by trusted git with our own config, from the returned file tree
+      # the commit is built HERE, by trusted git with our own config, from the returned (already checked) tree
       tree="$(GIT_INDEX_FILE="$work/index" git -C "$work/out/tree" --git-dir="$FIX_DIR/.git" --work-tree="$work/out/tree" \
         -c core.hooksPath=/dev/null -c core.fsmonitor=false add -A . 2>/dev/null && \
         GIT_INDEX_FILE="$work/index" git --git-dir="$FIX_DIR/.git" write-tree)" || tree=""
@@ -273,10 +288,6 @@ run() {
       fi
     fi
     rm -rf "$work"
-    if contains_secret <"$answer"; then
-      : >"$answer"
-      new="" why="výstup obsahoval tajný token – nic se nezveřejní, token zneplatni"
-    fi
     if [[ -z "$new" ]]; then
       [[ -s "$answer" ]] && comment "$number" "$answer"
       needs_human "$number" "automatická oprava nevznikla: ${why:-neznámý důvod}."
