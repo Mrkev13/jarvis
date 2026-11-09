@@ -13,6 +13,7 @@ Všechno se počítá deterministicky tady (žádné LLM): souhrn pro stránku �
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import uuid4
 import datetime as dt
 from datetime import date, timedelta
 
@@ -259,9 +260,12 @@ def set_attendance(db, subject_id: int, week: date, present: bool | None, *, tod
         row.present, row.updated_at = present, utc_now()
     db.flush()
     word = {True: "byl", False: "nebyl", None: "nezapsáno"}
+    # vlastní klíč pro každou skutečnou změnu: výchozí klíč (souhrn) by Byl → Nebyl → Byl zahodil jako duplikát;
+    # opakovaný stejný požadavek sem nedojde (výše `old == present` = nic)
     log_activity(db, "school", "update", f"Docházka {s.name}, {week_label(week)}: {word[present]}",
                  entity_type="Subject", entity_id=s.id,
-                 delta={"attendance": {"week_start": week.isoformat(), "old": old, "new": present}})
+                 delta={"attendance": {"week_start": week.isoformat(), "old": old, "new": present}},
+                 dedupe_key=f"school.attendance:{s.id}:{week.isoformat()}:{uuid4().hex}")
     return s
 
 

@@ -142,6 +142,16 @@ class SchoolProgressTestCase(unittest.TestCase):
         self.attend(self.law, date(2026, 11, 2), False)
         self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="Subject").count()), 5)
 
+    def test_every_real_attendance_change_is_audited(self):
+        """Review MRK-86: Byl → Nebyl → Byl (and delete → re-add) are real changes - none may lose its Activity row."""
+        for present in (True, False, True, None, True):
+            self.assertEqual(self.attend(self.law, WEEK, present).status_code, 200)
+        logs = self.q(lambda db: [(l.summary, l.delta_json) for l in
+                                  db.query(ActivityLog).filter_by(entity_type="Subject").order_by(ActivityLog.id)])
+        self.assertEqual([s.rsplit(": ", 1)[1] for s, _ in logs], ["byl", "nebyl", "byl", "nezapsáno", "byl"])
+        self.assertIn('"old": false', logs[2][1])
+        self.assertIn('"new": true', logs[2][1])
+
     def test_missing_present_is_rejected_and_deletes_nothing(self):
         """Review MRK-86: a request without `present` must not be read as "delete"; only an explicit null deletes."""
         self.attend(self.law, WEEK, True)
