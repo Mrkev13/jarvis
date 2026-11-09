@@ -1,5 +1,4 @@
-"""MRK-97: static guards for the review gate workflow (no Actions run in CI). The Linux review script is exercised
-for real in test_codex_review_script.py."""
+"""MRK-97: the review gate workflow - static guards plus its script run in Node against a fake GitHub API."""
 import re
 from pathlib import Path
 
@@ -10,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[2]
 GATE_TEXT = (ROOT / '.github' / 'workflows' / 'review-gate.yml').read_text(encoding='utf-8')
 GATE = yaml.safe_load(GATE_TEXT)
 CI = yaml.safe_load((ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8'))
-SCRIPT = (ROOT / 'scripts' / 'linux' / 'codex-review.sh').read_text(encoding='utf-8')
 OPS = (ROOT / 'docs' / 'operations.md').read_text(encoding='utf-8')
 AGENTS = (ROOT / 'AGENTS.md').read_text(encoding='utf-8')
 TRIGGERS = GATE.get('on') or GATE.get(True)   # PyYAML reads the bare key `on` as True
@@ -41,9 +39,6 @@ def verdict_regex():
 def test_only_a_standalone_verdict_line_counts(body, verdict):
     m = verdict_regex().search(body)
     assert (m.group(1) if m else None) == verdict
-    # the review script uses the same rule (POSIX ERE, case-sensitive) before posting
-    ere = re.search(r"VERDICT_RE='([^']+)'", SCRIPT).group(1).replace('[[:space:]]', r'\s')
-    assert bool(re.compile(ere, re.MULTILINE).search(body)) == bool(verdict)
 
 
 def test_gate_runs_only_the_trusted_copy_from_the_default_branch():
@@ -101,11 +96,12 @@ HEAD = 'a' * 40
 
 
 def run_gate(tmp_path, *, reviews=(), files=('backend/x.py',), labels=(), event='pull_request_target', ref='refs/heads/main',
-             inp='', draft=False, auto_merge=None, open_prs=(), reviews_fail=False):
+             inp='', draft=False, auto_merge=None, open_prs=(), reviews_fail=False, changed_files=None):
     import json
     import subprocess
     pr = {'number': 7, 'state': 'open', 'draft': draft, 'node_id': 'PR_x', 'head': {'sha': HEAD},
-          'labels': [{'name': n} for n in labels], 'auto_merge': auto_merge}
+          'labels': [{'name': n} for n in labels], 'auto_merge': auto_merge,
+          'changed_files': len(files) if changed_files is None else changed_files}
     scenario = {'pr': pr, 'files': [{'filename': f} for f in files], 'reviews': list(reviews), 'event': event,
                 'ref': ref, 'input': inp, 'reviewsFail': reviews_fail,
                 'open': [{'number': n} for n in open_prs]}
@@ -161,6 +157,17 @@ def test_critical_change_gets_the_manual_merge_label(tmp_path, path):
 
 
 @needs_node
+def test_more_files_than_the_api_lists_is_treated_as_critical(tmp_path):
+    """Review MRK-97 P1: the files API stops at 3000 - a critical path could hide behind it (fail closed)."""
+    hidden = run_gate(tmp_path, reviews=[review(MERGE)], files=['frontend/a.ts'], changed_files=3500)
+    assert hidden['labels'] == ['manual-merge']
+    at_limit = run_gate(tmp_path, reviews=[review(MERGE)], files=[f'frontend/f{i}.ts' for i in range(3000)])
+    assert at_limit['labels'] == ['manual-merge']
+    normal = run_gate(tmp_path, reviews=[review(MERGE)], files=[f'frontend/f{i}.ts' for i in range(10)])
+    assert normal['labels'] == []
+
+
+@needs_node
 def test_a_leftover_auto_merge_is_always_switched_off(tmp_path):
     """Review MRK-97 P1: no persistent status may authorise a merge - GitHub auto-merge is never left on."""
     for reviews in ([review(MERGE)], [review(BLOCK)], []):
@@ -203,18 +210,8 @@ def test_docs_list_every_required_check_by_its_real_name():
     names = [job['name'] for job in CI['jobs'].values()] + ['Review gate (Codex verdict)']
     for name in names:
         assert f'`{name}`' in OPS, name
-    assert 'required approvals **0**' in OPS and '--match-head-commit' in OPS
+    assert 'required approvals **0**' in OPS and 'merges by hand' in OPS
     assert 'Codex-Verdict: MERGE' in AGENTS and 'nikdy autor kódu' in AGENTS
-
-
-def test_review_script_never_merges_and_codex_stays_read_only():
-    code = [line for line in SCRIPT.splitlines() if not line.lstrip().startswith('#')]
-    text = '\n'.join(code)
-    assert '--sandbox read-only' in text
-    assert 'git push' not in text and '--auto' not in text, 'never GitHub auto-merge'
-    merges = [line for line in code if 'gh pr merge' in line]
-    assert merges and all('--match-head-commit "$head"' in m for m in merges), 'merge only pinned to the checked head'
-    assert 'gh workflow run review-gate.yml --repo "$REPO" --ref main' in text, 'the trusted gate re-evaluates after a review'
 
 
 def critical_rules():
@@ -252,4 +249,4 @@ def test_critical_changes_need_a_manual_merge(path, label):
 def test_critical_areas_are_documented_for_people_and_agents():
     for label, _ in critical_rules():
         assert label in OPS, label
-    assert 'needs-human' in AGENTS and 'manual-merge' in AGENTS
+    assert 'manual-merge' in AGENTS and 'merge dělá Standa ručně' in AGENTS

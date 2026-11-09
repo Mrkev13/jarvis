@@ -83,26 +83,19 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    v popisu `Fixes MRK-NN`. Mimo scope issue nic neměň; nálezy navrhni jako nový issue.
 2. **Před delší prací i před otevřením PR** sync: `git fetch origin && git merge origin/main`.
    Na sdílené nebo cizí branch nikdy rebase ani force-push.
-3. **Role (MRK-97):** Claude = developer (kód, branch, commity, PR, opravy po review), Codex = reviewer
-   a merge. **Agent, který branch vlastní, ji nemerguje.** Merguje skript reviewera na Ubuntu
-   (`scripts/linux/codex-review.sh`), až když v tu chvíli platí: nejnovější verdikt na aktuálním commitu je
-   `MERGE`, PR nemění kritické cesty a GitHub hlásí zelené CI i **Review gate** (merge přesně na ten commit).
-   GitHub auto-merge se nepoužívá. Do `main` se nikdy necommituje přímo.
-   - **Kritické změny merguje jen Standa:** migrace (`backend/alembic/`), přihlašování a bezpečnost
-     (`backend/auth*.py`, `frontend/proxy.ts`), zálohy a obnova, CI / review / deploy (`.github/`, `scripts/`,
-     Docker/Compose). Gate po `MERGE` přidá label `manual-merge` a skript takový PR nemerguje.
-4. **Review dělá jiný agent**, než který kód psal (Claude ↔ Codex). Codex ho spouští automaticky
-   na Ubuntu serveru (`scripts/linux/codex-review.sh`, systemd timer). Review končí jedním samostatným řádkem
-   `Codex-Verdict: MERGE` (nic neblokuje) nebo `Codex-Verdict: BLOCK`. Ten řádek píše **jen reviewer,
-   nikdy autor kódu**, a platí jen pro commit, na kterém review vzniklo. Po pushi musí přijít nové review.
-   - Nálezy autor opraví na téže branch. Po `BLOCK` to dělá automaticky Claude v jednorázovém Docker kontejneru
-     na Ubuntu (`scripts/linux/claude-fix.sh`): dostane jen kopii souborů a smí je jen číst a upravovat (žádný kód
-     z PR se nespouští); commit sestaví a zkontroluje důvěryhodný skript, pushne bez force; testy běží v CI a Codex
-     zkontroluje nový commit.
-   - **Limit:** nejvýš 3 automatická kola oprav na PR. Další `BLOCK`, oprava, která nevznikla, nebo oprava
-     měnící `.github/` či `scripts/` = label `needs-human` a automatika se zastaví; rozhodne Standa (po odebrání
-     labelu pokračuje).
-   - Review gate běží jen z `main` (`pull_request_target`, dispatch, a každých 10 min přepočet všech PR), nikdy z kopie v PR.
+3. **Role (MRK-97):** Claude = developer (kód, branch, commity, PR, opravy po review), Codex = reviewer,
+   **merge dělá Standa ručně**. Agent, který branch vlastní, ji nemerguje. Mergovat jde až při zeleném CI
+   a zeleném statusu **Review gate (Codex verdict)** – verdikt `MERGE` pro aktuální commit. Do `main` se nikdy
+   necommituje přímo.
+   - **Kritické změny** – migrace (`backend/alembic/`), přihlašování a bezpečnost (`backend/auth*.py`,
+     `frontend/proxy.ts`), zálohy a obnova, CI / review / deploy (`.github/`, `scripts/`, Docker/Compose), nebo
+     PR s víc soubory, než GitHub API vypíše – dostanou od gate label `manual-merge`: Standa je kontroluje pečlivěji.
+   - Review gate běží jen z `main` (`pull_request_target`, ruční spuštění, každých 10 min přepočet všech PR),
+     nikdy z kopie v PR; nikdy nemerguje.
+4. **Review dělá jiný agent**, než který kód psal (Claude ↔ Codex); spouští ho Standa. Review končí jedním
+   samostatným řádkem `Codex-Verdict: MERGE` (nic neblokuje) nebo `Codex-Verdict: BLOCK`. Ten řádek píše **jen
+   reviewer, nikdy autor kódu**, a platí jen pro commit, na kterém review vzniklo. Po pushi musí přijít nové review.
+   Nálezy autor opraví na téže branch. (Automatický reviewer a automatické opravy na serveru = navazující issue.)
 5. PR vyplní šablonu (`.github/pull_request_template.md`). Povinně:
    - **UI změna** → screenshot desktop (1366 nebo 1920 px) + mobil (390 px) – stačí odkaz na artefakt
      `ui-check-screenshots` z CI a názvy souborů, které změnu ukazují;

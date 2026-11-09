@@ -346,37 +346,29 @@ Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `up
 `-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
 in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
 
-### Review gate and automatic merge (MRK-97)
+### Review gate (MRK-97)
 
-A PR merges by itself when **all CI jobs and the status "Review gate (Codex verdict)" are green**. The gate
-(`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head commit**,
-posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`. `BLOCK` makes
-it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending` first and any
-API error ends in `error` (fail closed).
+Roles: Claude writes the code and opens the PR, Codex reviews it (started by Standa), **Standa merges by hand**.
+Branch protection makes the merge possible only when **all CI jobs and the status "Review gate (Codex verdict)"
+are green**.
 
-**Who merges:** never GitHub auto-merge (a persistent green status must not authorise a merge after the review
-changed - the gate even switches a leftover auto-merge off). The trusted reviewer host merges: on every timer run
-`codex-review.sh` re-checks, **live, right before merging**, that the newest owner verdict on the current head is
-`MERGE`, that no critical path is touched, and that GitHub reports the PR `CLEAN` (all required checks green,
-mergeable) - then `gh pr merge --merge --match-head-commit <head>`, so a new commit in between makes GitHub refuse.
-Labels `manual-merge`, `needs-human`, `manual-review`, `no-automerge`: no automatic merge; Standa merges by hand.
+The gate (`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head
+commit**, posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`.
+`BLOCK` makes it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending`
+first and any API error ends in `error` (fail closed). The gate **never merges** and never enables GitHub
+auto-merge (a leftover auto-merge is switched off).
 
-**The gate is trusted code.** It runs only the copy on `main`: `pull_request_target` (every push / label change)
-runs the base branch's file, after each posted review `codex-review.sh` calls
-`gh workflow run review-gate.yml --ref main -f pr=<n>` (a `workflow_dispatch` from any other ref fails), and a
-`schedule` pass every 10 minutes re-evaluates **all open PRs** - an edited or dismissed review is not an event the
-trusted copy sees, so within 10 minutes the status follows it (the merge itself does not rely on it - it re-checks
-live). It never
-checks out or runs PR code. Because `pull_request_target` checks land on the base commit, the result is a **commit
-status** on the PR head with the context `Review gate (Codex verdict)` - that is the required check. After a review
-written by hand, re-run it from *Actions → Review gate → Run workflow* (branch `main`, PR number).
+**The gate is trusted code.** It runs only the copy on `main` and never checks out or runs PR code:
+- `pull_request_target` (every push / label change) runs the base branch's file;
+- `schedule` every 10 minutes re-evaluates **all open PRs** - a review written, edited or dismissed is not an event
+  the trusted copy sees, so the status follows it within 10 minutes;
+- `workflow_dispatch` (*Actions → Review gate → Run workflow*, branch `main`, PR number) for an immediate re-check;
+  a dispatch from any other ref fails.
 
-**Roles and flow:** Claude (developer) writes the code and opens the PR → Codex reviews every new head commit
-(`codex-review.sh`) → on `BLOCK` Claude fixes it automatically in a sandbox (`claude-fix.sh`) and the new commit is
-reviewed again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MRK-108). Nobody approves their
-own work.
+Because `pull_request_target` checks land on the base commit, the result is a **commit status** on the PR head with
+the context `Review gate (Codex verdict)` - that is the required check.
 
-**Critical changes** (manual merge by Standa: the gate adds `manual-merge`, the reviewer host never merges them):
+**Critical changes** get the label `manual-merge` (look at them extra carefully before merging):
 
 | area | paths |
 |---|---|
@@ -384,120 +376,28 @@ own work.
 | přihlašování a bezpečnost | `backend/auth*.py`, `frontend/proxy.ts` |
 | zálohy a obnova | `backend/backup_service.py`, `backend/offsite_backup.py`, `backend/offsite_restic.py`, `scripts/**/*backup*`, `*restore*`, `*offsite*` |
 | CI, review a deploy | `.github/`, `scripts/`, `Dockerfile*`, `docker-compose*.yml` / `compose*.yml` |
+| příliš mnoho souborů | more changed files than the API lists (`changed_files` > listed, or > 3000) - fail closed |
 
-**Round limit:** at most **3** automatic fix rounds per PR. A 4th `BLOCK`, a round without a usable fix, or a fix
-that touches `.github/` / `scripts/` labels the PR `needs-human` with a comment and stops the automation; remove the
-label to let it continue.
+**Limitations:** Codex posts with the same GitHub account as the agents, so the verdict line is a rule in
+`AGENTS.md` (only the reviewer writes it), not an identity check. A PR that **adds** a workflow runs it with that
+PR's token; such a PR is critical (`.github/`), and the reviewer must block anything that touches the gate. The first
+introduction of the gate (the MRK-97 PR itself) runs only once the workflow is on `main`.
 
-**Limitations (accepted, documented):**
-- Codex CLI posts with the same GitHub account as the agents. The verdict line is a rule in `AGENTS.md` (only the
-  reviewer writes it), not an identity check.
-- Anyone who can push a branch to this repository is trusted by GitHub: a PR that **adds** a new workflow runs it
-  with that PR's token, which could also post a status or enable a merge. Only Standa's account pushes here; such a
-  PR is critical (`.github/`) and Codex blocks it. A separate GitHub App / account for the review and the merge
-  (branch protection limited to that identity) would close both gaps - a possible follow-up issue.
-- The first introduction of the gate (the MRK-97 PR itself) is merged by hand: `pull_request_target` runs only once
-  the workflow is on `main`.
+Automatic review on the Ubuntu host, automatic fixes after `BLOCK` and an automatic merge are a follow-up issue:
+they need a proper isolation boundary for the reviewer and the fixer (see that issue).
 
 **GitHub settings (Standa, once, after the MRK-97 PR is on `main`):**
 
-1. Repository → *Settings* → *General* → *Pull Requests*: keep *Allow merge commits*; **Allow auto-merge** is not
-   needed (leave it off - the reviewer host merges, see above).
-2. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
+1. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
    - **Require a pull request before merging**, required approvals **0** (the gate is the review requirement);
    - **Require status checks to pass before merging**, add these five checks:
      `Backend tests and pyflakes`, `PostgreSQL migration round-trip`, `Frontend lint, types, tests and build`,
      `UI checks (ui-check, module flags, changes)`, `Review gate (Codex verdict)`.
      A check is offered only after it has reported once, so add the gate after it ran on a PR;
-   - leave *Require branches to be up to date* **off**. One PR at a time, and the gate is tied to the exact head
-     commit anyway;
+   - leave *Require branches to be up to date* **off** (the gate is tied to the exact head commit anyway);
    - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
-3. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), turn green after a `MERGE`
-   review, and within one timer run (10 minutes) the reviewer host merges it.
-
-**Automatic Codex review (Ubuntu host, your user account with Codex CLI and GitHub CLI):**
-`scripts/linux/codex-review.sh` runs every 10 minutes from a systemd user timer:
-- for each open, non-draft PR without a live owner verdict on its head commit, it checks that commit out in a
-  **dedicated review clone**, runs `codex exec --sandbox read-only`, posts Codex's answer with
-  `gh pr review --comment` and asks the gate (on `main`) to re-evaluate;
-- a verdict by another account or a dismissed one does not count (same trust filter as the gate);
-- Codex itself never touches GitHub, the network or the production checkout;
-- after the reviews the script merges ready PRs (live checks above, never critical ones, never with auto-merge);
-- each commit is attempted once. An answer without a verdict line, or one that arrives after a new push, is not
-  posted (see the log). Label `manual-review` skips a PR;
-- state, Codex answers and logs: `~/.local/state/standa-hub/codex-review`.
-
-The timers run **installed copies** (`~/.local/bin/standa-codex-review`, `standa-claude-fix`), never scripts inside a
-clone: clones are checked out to PR heads, and a PR must not decide what code runs with your logins. After a change
-to the scripts on `main`, repeat the `install` lines (and rebuild the sandbox image).
-
-The GitHub token for `gh` (fine-grained, this repository only) needs *Pull requests: Read and write*, **Actions:
-Read and write** (trigger the gate) and **Contents: Read and write** (merge, push automatic fixes) - no admin
-rights; branch protection still decides whether a merge is allowed.
-
-```bash
-# once, as your user on the Ubuntu host (not root)
-git clone https://github.com/Mrkev13/jarvis ~/standa-hub-review   # review clone, NEVER the production checkout
-gh auth login                                                    # if `gh auth status` fails
-codex login                                                      # if Codex CLI is not logged in
-install -Dm755 ~/standa-hub-review/scripts/linux/codex-review.sh ~/.local/bin/standa-codex-review
-install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-codex-review.{service,timer}
-loginctl enable-linger "$USER"                                   # user timers run without a login session
-systemctl --user daemon-reload && systemctl --user enable --now standa-codex-review.timer
-~/.local/bin/standa-codex-review run                             # first pass by hand
-~/.local/bin/standa-codex-review check                           # ready: true, last_result
-```
-
-Optional guard: if the production checkout is a git clone on the same host, set `PRODUCTION_DIR` in the services
-(`systemctl --user edit standa-codex-review.service`, `[Service]` → `Environment=PRODUCTION_DIR=/path`), and the
-scripts refuse to use it.
-
-**Automatic fixes after `BLOCK` (Ubuntu host, same user, Docker):** `scripts/linux/claude-fix.sh` runs every 10
-minutes from a second user timer. For each open, non-draft PR from this repository whose newest verdict on its
-**current head** is `BLOCK`:
-- it exports a **plain copy of the tracked files** at the reviewed commit (no `.git`, no config, no hooks) and starts
-  a **disposable container** (`scripts/linux/autofix/`: Python 3.12, Node 22, Claude Code CLI) that gets only that
-  copy (read-only), the prompt with the review and the **dedicated Claude token**. Inside, Claude may **only read and
-  edit files** (`--permission-mode dontAsk`, allowlist `Read Edit Write Glob Grep`; shell, git and web refused) -
-  so **no code from the PR ever runs**, and nothing the PR controls can reach the token or the network. Tests run in
-  CI after the push, and Codex reviews the fix again;
-- container: non-root (your uid), `--cap-drop ALL`, `no-new-privileges`, read-only root filesystem, everything it
-  writes goes to size-limited tmpfs (`/work` 1 GB, `/tmp` 512 MB), pid / memory / CPU limits, 50-minute limit, no
-  GitHub token, no host folder mounted writable. The network is used only by the Claude CLI itself;
-- the only way back is the container's **stdout**: a tar with Claude's answer and the edited tree, capped at
-  `MAX_OUT_BYTES` (200 MB) and unpacked with Python's safe `data` filter (no absolute paths, `..`, links out,
-  devices). The trusted script **builds the commit itself** with its own git config and checks it: on top of the
-  reviewed head, nothing in `.github/` or `scripts/`, at most `MAX_CHANGED_FILES` (200) files, **no value of the
-  token** in the diff or in the answer - and only then pushes, fast-forward, never with force, only while the
-  remote branch is still at the reviewed commit. Claude's summary is posted as a PR comment (never a verdict);
-- each blocked commit is attempted once; the round limit and the labels `needs-human`, `manual-review`,
-  `no-autofix` stop it; optional `CLAUDE_BUDGET_USD` caps one run (`--max-budget-usd`);
-- state and logs (log capped at 1 MB per run): `~/.local/state/standa-hub/claude-fix`.
-
-Keep the dedicated token for this only (`claude setup-token`), with a budget; revoke it if anything looks wrong.
-
-```bash
-# once, after the Codex review setup above
-git clone https://github.com/Mrkev13/jarvis ~/standa-hub-fix      # fix clone, NOT the review or production clone
-# sandbox image from the reviewed copy (pin the Claude Code version you checked with `claude --version`);
-# host needs python3 >= 3.11.4 (Ubuntu 24.04: 3.12) for the safe unpack
-docker build -t standa-autofix --build-arg CLAUDE_CODE_VERSION=<version> ~/standa-hub-review/scripts/linux/autofix
-# dedicated Claude token for the sandbox only (claude setup-token prints it once); file readable only by you
-install -Dm600 /dev/null ~/.config/standa-hub/claude-autofix.env
-nano ~/.config/standa-hub/claude-autofix.env                     # one line: CLAUDE_CODE_OAUTH_TOKEN=<token>
-install -Dm755 ~/standa-hub-review/scripts/linux/claude-fix.sh ~/.local/bin/standa-claude-fix
-install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-claude-fix.{service,timer}
-systemctl --user daemon-reload && systemctl --user enable --now standa-claude-fix.timer
-~/.local/bin/standa-claude-fix check                             # ready: true, sandbox_image, claude_token_file, safe_unpack
-```
-
-Your user must be allowed to run `docker` (group `docker`). Before the first real run, check the flags your Claude
-Code version accepts inside the image (`docker run --rm standa-autofix claude --help`: `-p`,
-`--permission-mode dontAsk`, `--allowedTools`, `--disallowedTools`, `--max-budget-usd`).
-
-The review gate's periodic pass (every 10 minutes, see above) also catches a review that was edited or dismissed
-after a `MERGE`: the status turns red / pending. The merge never depends on that status alone - the reviewer host
-re-reads the verdict right before merging.
+2. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), and turn green within
+   10 minutes after a `MERGE` review (or at once with *Run workflow*). Then merge by hand.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

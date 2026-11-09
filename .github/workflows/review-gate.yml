@@ -11,15 +11,14 @@ name: Review gate
 #   context "Review gate (Codex verdict)" - this is the required check in branch protection (docs/operations.md).
 # Triggers:
 # - every push / label change of a PR (pull_request_target);
-# - after each posted review: codex-review.sh runs `gh workflow run review-gate.yml --ref main -f pr=<n>`;
-# - every 10 minutes for ALL open PRs (schedule): a review that was edited or dismissed is not an event the
-#   trusted copy sees, so the periodic pass re-evaluates it (status only - the merge itself re-checks live).
+# - every 10 minutes for ALL open PRs (schedule): a review that was written, edited or dismissed is not an event the
+#   trusted copy sees, so the periodic pass picks it up;
+# - by hand: Actions -> Review gate -> Run workflow (branch main, PR number).
 #
-# This workflow NEVER merges and never enables GitHub auto-merge (a persistent green status must not authorise a
-# merge after the review changed). It only reports the status (pending first, then the result; any error = error)
-# and labels critical changes `manual-merge`. The merge is done by the trusted reviewer host (codex-review.sh on
-# Ubuntu), which re-checks the live verdict, the critical paths and the merge state at the moment of merging.
-# Critical change (migrations, auth, backups, CI/review/deploy) -> label `manual-merge`, Standa merges by hand.
+# This workflow NEVER merges and never enables GitHub auto-merge (a leftover one is switched off). Standa merges by
+# hand once CI and this status are green (AGENTS.md workflow). It reports the status (pending first, then the
+# result; any error = error, fail closed) and labels critical changes `manual-merge`: migrations, auth, backups,
+# CI/review/deploy, or more changed files than the API lists (a critical path could hide behind the 3000-file limit).
 # Limitations (docs/operations.md): author and reviewer post with the same GitHub account (the verdict line is a
 # rule, not an identity check), and a PR that ADDS a new workflow runs it with that PR's token - such a PR is
 # critical (.github/) and the reviewer must block anything that touches this gate.
@@ -72,6 +71,7 @@ jobs:
               ['zálohy a obnova', /^backend\/(backup_service|offsite_backup|offsite_restic)\.py$|^scripts\/.*(backup|restore|offsite)/i],
               ['CI, review a deploy', /^\.github\/|^scripts\/|(^|\/)Dockerfile[^/]*$|(^|\/)(docker-)?compose[^/]*\.ya?ml$/],
             ];
+            const MAX_LISTED_FILES = 3000;
             const AUTO_OFF = 'mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }';
 
             // GitHub auto-merge is never used (see the header); one left over from earlier is switched off.
@@ -99,6 +99,10 @@ jobs:
                 const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
                 const paths = files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
                 const critical = CRITICAL.filter(([, re]) => paths.some((p) => re.test(p))).map(([label]) => label);
+                // The files API lists at most 3000 files: a critical path could hide behind that limit (fail closed).
+                if (files.length < (pr.changed_files || 0) || files.length >= MAX_LISTED_FILES) {
+                  critical.push('příliš mnoho souborů');
+                }
 
                 // Only the repository owner's account (Codex CLI posts as the owner), only reviews on this commit,
                 // never dismissed ones; the newest verdict wins (an edited review counts with its current text).
