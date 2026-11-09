@@ -9,10 +9,13 @@ import {
 } from "./dashboardLayout.ts";
 
 const ids = (layout) => layout.widgets.map((w) => w.id);
-// MRK-78: denní jádro nahoře, Cíle a Hry hned pod ním, Klíčová čísla dole; nahrazené bloky skryté na konci
-const DEFAULT_IDS = ["burning", "day", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
-// MRK-21: widgety modulů (manifest) jsou ve výchozím stavu skryté → výchozí viditelné rozložení 4B.1 se nemění
+// MRK-78: denní jádro nahoře, Cíle a Hry hned pod ním, Klíčová čísla dole; nahrazené bloky skryté na konci.
+// MRK-104: Návyky (widget modulu) ve výchozím stavu hned za „Můj den".
+const DEFAULT_IDS = ["burning", "day", "habits_today", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
+// MRK-21: widgety modulů (manifest) jsou ve výchozím stavu skryté – kromě Návyků (MRK-104)
 const MODULE_IDS = MODULE_WIDGETS.map((w) => w.id);
+const VISIBLE_MODULE_IDS = ["habits_today"];
+const HIDDEN_MODULE_IDS = MODULE_IDS.filter((id) => !VISIBLE_MODULE_IDS.includes(id));
 
 test("registry: unique semantic ids, sane defaults", () => {
   const all = WIDGETS.map((w) => w.id);
@@ -36,20 +39,21 @@ test("registry: unique semantic ids, sane defaults", () => {
 test("default layout: the daily core first, replaced blocks hidden at the end (MRK-78)", () => {
   const d = defaultLayout();
   assert.equal(d.version, 2);
-  assert.deepEqual(ids(d).filter((id) => !MODULE_IDS.includes(id)), [...DEFAULT_IDS, ...REPLACED_IN_V2]);
+  assert.deepEqual(ids(d).filter((id) => !HIDDEN_MODULE_IDS.includes(id)), [...DEFAULT_IDS, ...REPLACED_IN_V2]);
   assert.deepEqual(visibleWidgets(d).map((w) => w.id), DEFAULT_IDS, "nic dvakrát");
-  assert.ok(d.widgets.filter((w) => MODULE_IDS.includes(w.id)).every((w) => !w.visible), "widgety modulů skryté");
+  assert.ok(d.widgets.filter((w) => HIDDEN_MODULE_IDS.includes(w.id)).every((w) => !w.visible), "widgety modulů skryté");
+  assert.ok(VISIBLE_MODULE_IDS.every((id) => MODULE_IDS.includes(id)), "Návyky jsou widget modulu");
   assert.deepEqual(d.widgets.map((w) => w.order), d.widgets.map((_, i) => (i + 1) * 10));
   assert.ok(isDefaultLayout(d));
 });
 
-test("default desktop packing: Co hoří | Můj den side by side, then Cíle | Hry", () => {
+test("default desktop packing: Co hoří | Můj den side by side, Návyky | Cíle under them, then Hry (MRK-104)", () => {
   const blocks = packDesktop(visibleWidgets(defaultLayout()));
   assert.deepEqual(
     blocks.map((b) => b.columns.map((c) => c.ids)),
     [
-      [["burning"], ["day"]],
-      [["goals"], ["games"]],
+      [["burning", "habits_today"], ["day", "goals"]],
+      [["games"]],
       [["daily_briefing", "changes"], ["weekly_review", "work", "finance"]],
       [["key_metrics", "quick_actions"]],
     ],
@@ -96,7 +100,7 @@ test("validation: unknown ids dropped, duplicates keep the first, invalid sizes 
   assert.deepEqual([get("finance").visible, get("finance").size], [false, "medium"], "platná volba zachována");
   assert.equal(get("work").size, "small", "nepovolená velikost → výchozí");
   assert.equal(get("work").visible, true, "neplatná viditelnost → výchozí");
-  assert.equal(get("games").size, "large", "neznámá velikost → výchozí");
+  assert.equal(get("games").size, "full", "neznámá velikost → výchozí");
   assert.deepEqual(ids(l).filter((i) => ["finance", "work", "games"].includes(i)), ["finance", "work", "games"], "uživatelské pořadí zachováno");
   assert.equal(l.widgets.length, WIDGETS.length, "chybějící widgety doplněny");
 });
@@ -145,6 +149,25 @@ test("MRK-78: a version 1 layout keeps visibility and sizes, takes the new order
   assert.equal(migrateV1(v1).version, 2);
 });
 
+test("MRK-104: a stored layout without the habits widget keeps its choice – the widget is added hidden", () => {
+  // v2 uložené před MRK-104: celý tehdejší seznam bez habits_today
+  const before = defaultLayout().widgets.filter((w) => w.id !== "habits_today");
+  const v2 = normalizeLayout({ version: 2, widgets: before });
+  const habits = v2.widgets.find((w) => w.id === "habits_today");
+  assert.equal(habits.visible, false, "v2: doplněn skrytý");
+  assert.equal(ids(v2).indexOf("habits_today"), ids(v2).indexOf("day") + 1, "na svém místě – zapne se v úpravách");
+  assert.deepEqual(visibleWidgets(v2).map((w) => w.id), DEFAULT_IDS.filter((id) => id !== "habits_today"), "viditelné beze změny");
+  // v1 uložené rozložení
+  const v1 = normalizeLayout({ version: 1, widgets: [{ id: "goals", visible: true, order: 10, size: "medium" }] });
+  assert.equal(v1.widgets.find((w) => w.id === "habits_today").visible, false, "v1: doplněn skrytý");
+  // uložená volba „zobrazit" zůstává, čerstvé výchozí rozložení ho ukazuje
+  const shown = normalizeLayout({ version: 2, widgets: [...before, { id: "habits_today", visible: true, order: 25, size: "medium" }] });
+  assert.equal(shown.widgets.find((w) => w.id === "habits_today").visible, true);
+  assert.equal(defaultLayout().widgets.find((w) => w.id === "habits_today").visible, true, "bez uložené volby viditelný");
+  // poškozená / žádná uložená hodnota = výchozí rozložení (viditelný)
+  assert.equal(normalizeLayout(null).widgets.find((w) => w.id === "habits_today").visible, true);
+});
+
 test("round trip through storage keeps choices", () => {
   let l = setWidgetSize(moveWidget(setWidgetVisible(defaultLayout(), "goals", false), "finance", -1), "finance", "medium");
   const back = parseStoredLayout(serializeLayout(l));
@@ -160,16 +183,16 @@ test("reorder moves among visible widgets and stops at edges", () => {
   assert.deepEqual(ids(down).slice(0, 2), ["day", "burning"]);
   const hidden = setWidgetVisible(d, "day", false);
   const skip = moveWidget(hidden, "burning", 1);
-  assert.deepEqual(ids(skip).slice(0, 3), ["goals", "day", "burning"], "skrytý se přeskočí");
+  assert.deepEqual(ids(skip).slice(0, 3), ["habits_today", "day", "burning"], "skrytý se přeskočí");
   assert.equal(moveWidget(hidden, "day", 1), hidden, "skrytý se neposouvá");
   assert.equal(moveWidget(d, "nope", 1), d);
-  assert.deepEqual(visiblePosition(skip, "burning"), { index: 2, count: 10 });
+  assert.deepEqual(visiblePosition(skip, "burning"), { index: 2, count: DEFAULT_IDS.length - 1 });
 });
 
 test("hide / show and the dashboard data request", () => {
   let l = defaultLayout();
   l = setWidgetVisible(l, "games", false);
-  assert.deepEqual(hiddenWidgets(l).map((w) => w.id).filter((id) => !MODULE_IDS.includes(id) && !REPLACED_IN_V2.includes(id)), ["games"]);
+  assert.deepEqual(hiddenWidgets(l).map((w) => w.id).filter((id) => !HIDDEN_MODULE_IDS.includes(id) && !REPLACED_IN_V2.includes(id)), ["games"]);
   assert.equal(visibleWidgets(l).length, DEFAULT_IDS.length - 1);
   l = setWidgetVisible(l, "games", true);
   assert.ok(isDefaultLayout(l));
@@ -177,7 +200,9 @@ test("hide / show and the dashboard data request", () => {
   assert.equal(needsDashboardData(onlySelfFetching), false, "bez widgetů z /dashboard žádný dotaz");
   assert.equal(needsDashboardData(defaultLayout()), true);
   assert.equal(needsToday(defaultLayout()), true);
-  assert.equal(needsToday(setWidgetVisible(setWidgetVisible(defaultLayout(), "burning", false), "day", false)), false, "bez Co hoří / Můj den žádné GET /today");
+  const noToday = ["burning", "day", "habits_today"].reduce((acc, id) => setWidgetVisible(acc, id, false), defaultLayout());
+  assert.equal(needsToday(noToday), false, "bez Co hoří / Můj den / Návyků žádné GET /today");
+  assert.equal(needsToday(setWidgetVisible(setWidgetVisible(defaultLayout(), "burning", false), "day", false)), true, "Návyky samy potřebují /today");
 });
 
 test("sizes: only allowed sizes are applied", () => {

@@ -14,6 +14,7 @@ import school_moodle
 from context_format import MAX_ITEMS, WINDOW_DAYS, list_or_none, short
 from models import Assignment, Exam, Goal, Subject
 from modules.school import integrations as materials
+from modules.school import progress
 from module_contracts import (
     ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule,
@@ -276,6 +277,7 @@ def context_school(req: ContextRequest) -> list[str]:
         moodle = school_moodle.school_deadlines(db, today, window_end + timedelta(days=1))
         texts = [f"{short(m['title'], 50)}, {short(m['subject_name'], 25)}, {m['date']}" for m in moodle[:MAX_ITEMS]]
         lines.append(f"Moodle termíny do {window_end.isoformat()}: {list_or_none(texts, len(moodle))}")
+    lines += progress.context_lines(db, today)  # MRK-86: zápočty, výsledky zkoušek, docházka (spočítané v kódu)
     return lines
 
 
@@ -433,15 +435,19 @@ INTEGRATIONS = ModuleIntegrations(
                     upcoming=today_school_upcoming, closed_refs=today_school_closed),
         # MRK-76: před Kalendářem (35), aby dedupe ponechal školní verzi Moodle události
         TodaySource("school_moodle", 21, timeline=today_moodle_timeline, upcoming=today_moodle_upcoming),
+        # MRK-86: varování o absencích (poslední povolená / vyčerpáno / překročeno) → Pozornost a Co hoří
+        TodaySource("school_attendance", 22, overdue=progress.today_overdue),
     ),
     entity_refs=(
         EntityRef("assignment", "/school?assignment={id}", planner_actions=("complete",), notification_source=True),
         EntityRef("exam", "/school?exam={id}", notification_source=True),
+        EntityRef("subject", "/school?subject={id}"),
         *materials.ENTITY_REFS,
     ),
     dashboard=(DashboardSection("upcoming", dashboard_upcoming, empty=[]),),
     context=(
-        ContextSection("school", ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test"),
+        ContextSection("school", ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test",
+                                  "dochaz", "absenc"),
                        order=10, build=context_school, covered_tools=("get_school_assignments", "get_school_exams")),
         *materials.CONTEXT,
     ),

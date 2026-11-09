@@ -53,11 +53,12 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
     try:
         assert {'study_courses', 'study_materials'} <= set(inspect(engine).get_table_names())
         with Session(engine) as db:
-            subject = models.Subject(name='Synthetic preservation subject', active=True)
-            db.add(subject)
-            db.flush()
+            # subjects jen se sloupci, které existují v 0021 (MRK-86 přidal další) – ne přes ORM model
+            subjects = Base.metadata.tables['subjects']
+            subject_id = db.execute(subjects.insert().values(name='Synthetic preservation subject', active=True)
+                                    .returning(subjects.c.id)).scalar_one()
             course = models.StudyCourse(source='moodle', external_id='mrk33-preservation',
-                                       name='Synthetic preservation course', subject_id=subject.id)
+                                       name='Synthetic preservation course', subject_id=subject_id)
             db.add(course)
             db.flush()
             db.add(models.StudyMaterial(course_id=course.id, external_id='7:/synthetic.txt',
@@ -69,8 +70,13 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
             db.commit()
 
         def snapshot():
+            def columns(name):
+                table = Base.metadata.tables[name]
+                if name == 'subjects':  # sloupce z doby 0021 (pozdější migrace přidávají nullable sloupce)
+                    return [table.c[c] for c in ('id', 'name', 'code', 'semester', 'credits', 'active')]
+                return list(table.c)
             with engine.connect() as connection:
-                return {name: connection.execute(select(Base.metadata.tables[name])
+                return {name: connection.execute(select(*columns(name))
                         .order_by(Base.metadata.tables[name].c.id)).all()
                         for name in ('subjects', 'study_courses', 'study_materials')}
 
