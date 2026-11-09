@@ -260,6 +260,8 @@ export type WidgetProps = {
   today: TodayResource;
   changes: ApiResource<ChangesResponse>;
   dayTimeline: ApiResource<DayTimelinePayload>;
+  /** MRK-104: typy položek, které „Můj den" vynechá, protože je ukazuje jiný viditelný widget. */
+  dayExcludeTypes?: readonly string[];
 };
 
 function DailyBriefingWidget({ briefing, index }: WidgetProps) {

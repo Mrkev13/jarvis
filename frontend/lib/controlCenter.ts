@@ -114,10 +114,17 @@ export function burningItems(
   return out.slice(0, limit);
 }
 
-/** „Můj den": nevyřízené položky dnešní osy (časové chronologicky, pak během dne); „další" jde první. */
-export function dayItems(today: Pick<TodayPayload, "timeline" | "summary"> | null, limit = DAY_LIMIT): TodayItem[] {
+/**
+ * „Můj den": nevyřízené položky dnešní osy (časové chronologicky, pak během dne); „další" jde první.
+ * `excludeTypes`: typy, které ukazuje jiný widget (MRK-104: návyky mají vlastní kartu se Splnit).
+ */
+export function dayItems(
+  today: Pick<TodayPayload, "timeline" | "summary"> | null,
+  limit = DAY_LIMIT,
+  excludeTypes: readonly string[] = [],
+): TodayItem[] {
   if (!today) return [];
-  const open = today.timeline.filter((it) => it.status !== "done" && it.status !== "past");
+  const open = today.timeline.filter((it) => it.status !== "done" && it.status !== "past" && !excludeTypes.includes(it.type));
   const timed = open.filter((it) => it.time).sort((a, b) => (a.time! < b.time! ? -1 : a.time! > b.time! ? 1 : 0));
   const list = [...timed, ...open.filter((it) => !it.time)];
   const next = today.summary.next?.id;

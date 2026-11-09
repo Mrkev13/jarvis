@@ -120,10 +120,10 @@ function DayRow({ item }: { item: TodayItem }) {
   );
 }
 
-export function DayWidget({ today, dayTimeline, index }: WidgetProps) {
+export function DayWidget({ today, dayTimeline, index, dayExcludeTypes }: WidgetProps) {
   const data = today.data;
   const next = data?.summary.next ?? null;
-  const rest = dayItems(data).filter((it) => it.id !== next?.id);
+  const rest = dayItems(data, undefined, dayExcludeTypes).filter((it) => it.id !== next?.id);
   const free = dayTimeline.data?.free_blocks_from?.length ? nextFreeBlock(dayTimeline.data.free_blocks, data?.now_local ?? "") : null;
   const hasFreeSource = Boolean(dayTimeline.data?.free_blocks_from?.length);
   return (

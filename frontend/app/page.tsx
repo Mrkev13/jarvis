@@ -40,6 +40,7 @@ import {
 import type { WeeklyPayload } from "@/lib/weeklyReview";
 
 const TITLE = new Map(WIDGETS.map((w) => [w.id, w.title]));
+const HABIT_TYPES = ["habit"] as const;
 
 /**
  * Řídicí centrum (Roadmap 4F): widgety z explicitního registru (lib/dashboardLayout.ts) v uživatelském
@@ -56,7 +57,7 @@ export default function Home() {
   const [announcement, setAnnouncement] = useState("");
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
-  const isVisible = (id: WidgetId) => Boolean(layout?.widgets.some((w) => w.id === id && w.visible));
+  const isVisible = (id: string) => Boolean(layout?.widgets.some((w) => w.id === id && w.visible));
   // Jeden GET /dashboard pro všechny widgety; jen když je některý z nich vidět. Přehledy jen když jsou vidět.
   const dashboard = useApiResource<DashboardPayload>(layout && needsDashboardData(layout) ? "/dashboard" : null);
   const briefing = useApiResource<BriefingPayload>(isVisible("daily_briefing") ? "/briefing/today" : null);
@@ -70,6 +71,8 @@ export default function Home() {
   );
   const [changesPath] = useState(() => changesPreviewPath()); // okno „od včera" se počítá jednou při otevření
   const changes = useApiResource<ChangesResponse>(isVisible("changes") ? changesPath : null);
+  // MRK-104: návyky se splňují ve vlastní kartě, „Můj den" je pak neukazuje podruhé
+  const habitsOnDashboard = isVisible("habits_today");
 
   // fokus po přesunu / skrytí / ukončení úprav (prvek se mohl přemístit do jiného bloku → nový uzel)
   useEffect(() => {
@@ -236,6 +239,7 @@ export default function Home() {
                 today={today}
                 changes={changes}
                 dayTimeline={dayTimeline}
+                dayExcludeTypes={habitsOnDashboard ? HABIT_TYPES : undefined}
               />
             ) : null;
           }}

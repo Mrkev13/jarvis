@@ -72,8 +72,8 @@ export interface WidgetDef {
 export const CORE_WIDGETS: WidgetDef[] = [
   { id: "burning", title: "Co hoří", area: null, defaultVisible: true, defaultOrder: 10, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, usesToday: true },
   { id: "day", title: "Můj den", area: null, defaultVisible: true, defaultOrder: 20, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: false, usesToday: true },
-  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 30, defaultSize: "small", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
-  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
+  { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 30, defaultSize: "medium", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
+  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
   { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 50, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
   { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
   { id: "changes", title: "Od včera", area: null, defaultVisible: true, defaultOrder: 70, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
@@ -299,7 +299,7 @@ export interface DesktopBlock {
 /**
  * Desktop (6 jednotek): řádky se plní v pořadí; další řádek se NEPŘIDÁ pod ten předchozí jako nový řádek,
  * ale do jeho sloupců, pokud jeho velikosti odpovídají konci předchozího řádku (stejné šířky zprava).
- * Výchozí vyvážení (MRK-78): [Co hoří | Můj den], [Cíle | Hry], pak [Denní přehled | Týdenní přehled] +
+ * Výchozí vyvážení (MRK-78, MRK-104): [Co hoří | Můj den], [Návyky | Cíle], [Hry], pak [Denní přehled | Týdenní přehled] +
  * [Od včera | Práce] + [Finance] → vlevo přehled + změny, vpravo týden, Práce a Finance pod sebou.
  * Karty ve sloupci se skládají pod sebe bez děr, nic se neroztahuje.
  */

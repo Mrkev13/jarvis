@@ -30,6 +30,7 @@ export const HABITS_UI: ModuleUi = {
     },
   },
   widgets: [
-    { id: "habits_today", title: "Návyky", area: "habits", defaultVisible: false, defaultOrder: 65, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: true, modules: ["habits"] },
+    // MRK-104: na hlavní obrazovce hned pod „Můj den" se Splnit / Přeskočit (data z GET /today, týden z /dashboard)
+    { id: "habits_today", title: "Návyky", area: "habits", defaultVisible: true, defaultOrder: 25, defaultSize: "medium", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, usesToday: true, modules: ["habits"] },
   ],
 };

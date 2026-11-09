@@ -1177,7 +1177,7 @@ async function qaType(page, text) {
 // 18) Roadmap 4F – Řídicí centrum na míru: registr widgetů, rozložení v localStorage (klíč verze 1).
 // MRK-78: hlavní denní obrazovka (Co hoří + Můj den nahoře) a rozložení uložené na serveru (/preferences).
 const LAYOUT_KEY = "standa-hub:dashboard-layout:v1";
-const DEFAULT_ORDER = ["burning", "day", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
+const DEFAULT_ORDER = ["burning", "day", "habits_today", "goals", "games", "daily_briefing", "weekly_review", "changes", "work", "finance", "key_metrics", "quick_actions"];
 const resetPrefs = (fail = "") => fetch(`http://127.0.0.1:8000/__mock/preferences/reset${fail ? `?fail=${fail}` : ""}`, { method: "POST" });
 const serverPrefs = async () => (await fetch("http://127.0.0.1:8000/__mock/preferences")).json();
 const widgetOrder = (page) =>
@@ -1382,7 +1382,7 @@ async function openSeeded(value, opts = {}) {
   ] });
   const { ctx, page, errors } = await openSeeded(seeded);
   const order = await widgetOrder(page);
-  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno", order.length === 10 && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
+  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno", order.length === 11 && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
   check("dashboard: uložené rozložení bez bliknutí výchozího", !(await page.evaluate(() => window.__seenGames)));
   check("dashboard: neplatná data bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
@@ -1476,6 +1476,70 @@ async function openSeeded(value, opts = {}) {
   await page.screenshot({ path: `${OUT}dashboard-mobile-full.png`, fullPage: true });
   check("dashboard mobil: bez chyb JS (denní jádro)", errors.length === 0, errors.join("; "));
   await ctx.close();
+}
+// MRK-104: Návyky na Řídicím centru – Splnit / Přeskočit jedním klepnutím (stejné API jako Dnes), žádný návyk dvakrát
+{
+  const base = JSON.parse(readFileSync(new URL("./fixtures/today.json", import.meta.url), "utf8"));
+  const habit = (id, title, measure) => ({ id: `habit:${id}`, type: "habit", title, subtitle: `Návyk · ${measure}`, area: "habits", date: base.date,
+    time: null, status: "open", priority: null, severity: null, href: "/habits", source_id: id, actions: ["complete", "skip"] });
+  for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+    await resetPrefs();
+    const state = { "habit:31": null, "habit:32": null };
+    const posts = [];
+    let failNext = false;
+    const { ctx, page, errors } = await open("/", {
+      width, height,
+      setup: async (p) => {
+        await p.route(/:8000\/today(\?|$)/, (route) => {
+          const timeline = [...base.timeline, habit(31, "Rehab kolene", "20 min"), habit(32, "Čtení", "denně")].map((it) =>
+            state[it.id] ? { ...it, status: "done", actions: [], subtitle: `Návyk · ${state[it.id] === "done" ? "splněno" : "přeskočeno"} · ${it.subtitle.split(" · ")[1]}` } : it);
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...base, timeline }) });
+        });
+        await p.route(/:8000\/habits\/\d+\/entries/, async (route) => {
+          const req = route.request();
+          if (req.method() !== "POST") return route.fallback();
+          const id = `habit:${req.url().match(/habits\/(\d+)/)[1]}`;
+          const body = JSON.parse(req.postData() || "{}");
+          posts.push({ id, state: body.state, today: new URL(req.url()).searchParams.get("source") === "today" });
+          if (failNext) {
+            failNext = false;
+            return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "chyba" }) });
+          }
+          state[id] = body.state;
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+        });
+      },
+    });
+    const widget = page.locator('[data-widget="habits_today"]');
+    await widget.getByRole("button", { name: "Splnit návyk: Rehab kolene" }).waitFor({ timeout: 5000 }).catch(() => {});
+    const order = await widgetOrder(page);
+    check(`dashboard návyky ${label}: widget hned za Můj den`, order.indexOf("habits_today") === order.indexOf("day") + 1, order.join(","));
+    check(`dashboard návyky ${label}: návyk jen jednou na obrazovce`,
+      (await page.locator('[data-widget="day"]').getByText("Rehab kolene").count()) === 0 && (await widget.getByText("Rehab kolene").count()) === 1);
+    const done = widget.getByRole("button", { name: "Splnit návyk: Rehab kolene" });
+    const skip = widget.getByRole("button", { name: "Přeskočit návyk: Čtení" });
+    const sizes = [await done.boundingBox(), await skip.boundingBox()];
+    check(`dashboard návyky ${label}: tlačítka aspoň 44 px`, sizes.every((b) => b && b.height >= 44 && b.width >= 44), JSON.stringify(sizes));
+    await page.screenshot({ path: `${OUT}dashboard-habits-${label}.png`, fullPage: label === "desktop" });
+    // chyba → řádek zůstane s „Zkusit znovu", druhý pokus projde
+    failNext = true;
+    await done.click();
+    const retry = widget.locator('[data-item="habit:31"]').getByRole("button", { name: "Zkusit znovu" });
+    check(`dashboard návyky ${label}: chyba ukáže Zkusit znovu`, await eventually(async () => (await retry.count()) === 1), JSON.stringify(posts));
+    await retry.click();
+    check(`dashboard návyky ${label}: Splnit jedním klepnutím (stejné API jako Dnes)`,
+      await eventually(async () => (await widget.locator('[data-item="habit:31"]').getByText("Splněno", { exact: false }).count()) >= 1 && state["habit:31"] === "done"),
+      JSON.stringify(posts));
+    await skip.click();
+    check(`dashboard návyky ${label}: Přeskočit jedním klepnutím`, await eventually(async () => state["habit:32"] === "skipped"), JSON.stringify(posts));
+    check(`dashboard návyky ${label}: POST /habits/{id}/entries?source=today`,
+      posts.length === 3 && posts.every((x) => x.today) && posts.map((x) => x.state).join(",") === "done,done,skipped", JSON.stringify(posts));
+    check(`dashboard návyky ${label}: postup Dnes splněno`, await eventually(async () => /Dnes splněno\s+1 \/ 2/.test(await widget.innerText())), await widget.innerText());
+    check(`dashboard návyky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await widget.screenshot({ path: `${OUT}dashboard-habits-${label}-after.png` });
+    check(`dashboard návyky ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
+    await ctx.close();
+  }
 }
 // mobil 390 px: úpravy bez tažení, ovládání se vejde, rozložení drží po obnovení
 {
