@@ -65,8 +65,11 @@ def test_least_privilege_and_no_untrusted_text_in_shell():
     assert '!github.event.pull_request.draft' in merge['if']
     run = merge['steps'][0]['run']
     assert '${{' not in run, 'event values reach the shell only through env'
-    assert set(merge['steps'][0]['env']) == {'GH_TOKEN', 'PR', 'REPO'}
+    assert set(merge['steps'][0]['env']) == {'GH_TOKEN', 'PR', 'REPO', 'CRITICAL'}
     assert 'gh pr merge "$PR" --repo "$REPO" --auto --merge' in run
+    # critical change: no auto-merge, label for Standa - before the auto-merge line
+    assert run.index('--add-label manual-merge') < run.index('--auto --merge')
+    assert '--disable-auto' in run
     # no PR title/body/branch name anywhere in the workflow
     for risky in ('pull_request.title', 'pull_request.body', 'review.body', 'head.ref', 'head_ref'):
         assert risky not in GATE_TEXT, risky
@@ -85,3 +88,41 @@ def test_review_script_never_merges_and_codex_stays_read_only():
     text = '\n'.join(code)
     assert '--sandbox read-only' in text
     assert 'gh pr merge' not in text and 'git push' not in text, 'review only; GitHub auto-merge does the merge'
+
+
+def critical_rules():
+    """The CRITICAL list from the gate script → [(label, compiled regex)] (JS regex syntax is Python-compatible here)."""
+    block = re.search(r'const CRITICAL = \[(.*?)\];', gate_script(), re.S).group(1)
+    rules = []
+    for line in block.strip().splitlines():
+        label, pattern, flags = re.match(r"\s*\['([^']+)', /(.*)/(i?)\],?\s*$", line).groups()
+        rules.append((label, re.compile(pattern, re.I if flags else 0)))
+    assert len(rules) == 4
+    return rules
+
+
+@pytest.mark.parametrize('path,label', [
+    ('backend/alembic/versions/0028_school_progress.py', 'migrace'),
+    ('backend/auth_service.py', 'přihlašování a bezpečnost'),
+    ('frontend/proxy.ts', 'přihlašování a bezpečnost'),
+    ('backend/backup_service.py', 'zálohy a obnova'),
+    ('backend/offsite_restic.py', 'zálohy a obnova'),
+    ('scripts/windows/offsite-secrets.ps1', 'zálohy a obnova'),
+    ('.github/workflows/review-gate.yml', 'CI, review a deploy'),
+    ('scripts/linux/claude-fix.sh', 'CI, review a deploy'),
+    ('docker-compose.yml', 'CI, review a deploy'),
+    ('backend/Dockerfile', 'CI, review a deploy'),
+    ('backend/modules/school/progress.py', None),
+    ('frontend/app/page.tsx', None),
+    ('docs/backups.md', None),
+    ('backend/tests/test_backup.py', None),
+])
+def test_critical_changes_need_a_manual_merge(path, label):
+    hits = [name for name, rx in critical_rules() if rx.search(path)]
+    assert (hits[0] if hits else None) == label, (path, hits)
+
+
+def test_critical_areas_are_documented_for_people_and_agents():
+    for label, _ in critical_rules():
+        assert label in OPS, label
+    assert 'needs-human' in AGENTS and 'manual-merge' in AGENTS

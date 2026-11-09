@@ -354,6 +354,25 @@ posted by the repository owner's account, contains the line `Codex-Verdict: MERG
 it, and every new push needs a new review. On `MERGE` the workflow turns on GitHub auto-merge (merge commit). With
 the label `manual-merge` nobody auto-merges; Standa merges by hand.
 
+**Roles and flow:** Claude (developer) writes the code and opens the PR → Codex reviews every new head commit
+(`codex-review.sh`) → on `BLOCK` Claude fixes it automatically (`claude-fix.sh`) and the new commit is reviewed
+again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MRK-108). Nobody approves their own work.
+
+**Critical changes** (manual merge by Standa, the gate adds `manual-merge` and does not enable auto-merge):
+
+| area | paths |
+|---|---|
+| migrace | `backend/alembic/` |
+| přihlašování a bezpečnost | `backend/auth*.py`, `frontend/proxy.ts` |
+| zálohy a obnova | `backend/backup_service.py`, `backend/offsite_backup.py`, `backend/offsite_restic.py`, `scripts/**/*backup*`, `*restore*`, `*offsite*` |
+| CI, review a deploy | `.github/`, `scripts/`, `Dockerfile*`, `docker-compose*.yml` / `compose*.yml` |
+
+GitHub runs the PR's own copy of `review-gate.yml` on pull_request events, so a PR could edit the list; such a PR is
+critical itself (`.github/`), and Codex is told to block anything that weakens the gate.
+
+**Round limit:** at most **3** automatic fix rounds per PR. A 4th `BLOCK`, or a round where Claude made no commit,
+labels the PR `needs-human` with a comment and stops the automation; remove the label to let it continue.
+
 Limitation: Codex CLI posts with the same GitHub account as the agents. The verdict line is a rule in `AGENTS.md`
 (only the reviewer writes it), not an identity check. A separate GitHub account or app for Codex would close that gap.
 
@@ -405,6 +424,39 @@ systemctl --user daemon-reload && systemctl --user enable --now standa-codex-rev
 Optional guard: if the production checkout is a git clone on the same host, set `PRODUCTION_DIR` in the service
 (`systemctl --user edit standa-codex-review.service`, `[Service]` → `Environment=PRODUCTION_DIR=/path`), and the
 script refuses to use it as the review clone.
+
+**Automatic fixes after `BLOCK` (Ubuntu host, same user, Claude Code CLI):** `scripts/linux/claude-fix.sh` runs every
+10 minutes from a second user timer:
+- for each open, non-draft PR from this repository whose newest verdict on its **current head** is `BLOCK`, it checks
+  the PR branch out in a **separate fix clone** (not the review clone, not production), runs `claude -p` with the
+  review text and pushes Claude's new commits to the same branch - fast-forward only, and only if nobody pushed in
+  the meantime;
+- Claude runs with `--permission-mode dontAsk` and an allowlist: read/edit files, `git add/commit/diff/log/show`,
+  the repo's checks (`scripts/setup-dev.sh`, pytest, pyflakes, npm lint/test/build, tsc). `git push`, `gh`, `curl`
+  and web tools are refused; only the script pushes. It never merges and never writes a verdict;
+- each blocked commit is attempted once; the round limit and the labels `needs-human`, `manual-review`,
+  `no-autofix` stop it; Claude's summary is posted as a PR comment;
+- optional `CLAUDE_BUDGET_USD` (service env) caps one run (`--max-budget-usd`);
+- state and logs: `~/.local/state/standa-hub/claude-fix`.
+
+Claude runs the PR's code (tests) with your user's rights on the server - the same code CI runs, but on your host.
+The fix clone has no `.env`; keep production secrets out of that user's reach where possible.
+
+The GitHub token for this needs **Contents: Read and write** on this repository (to push the fix branch) in addition
+to *Pull requests: Read and write*; still no admin or merge rights.
+
+```bash
+# once, after the Codex review setup above
+git clone https://github.com/Mrkev13/jarvis ~/standa-hub-fix      # fix clone, NOT the review or production clone
+claude                                                           # log in once (interactive), then exit
+install -Dm755 ~/standa-hub-review/scripts/linux/claude-fix.sh ~/.local/bin/standa-claude-fix
+install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-claude-fix.{service,timer}
+systemctl --user daemon-reload && systemctl --user enable --now standa-claude-fix.timer
+~/.local/bin/standa-claude-fix check                             # ready: true, max_rounds: 3, last_result
+```
+
+Before the first real run check the flags your Claude Code version accepts (`claude --help`: `-p`,
+`--permission-mode dontAsk`, `--allowedTools`, `--disallowedTools`, `--max-budget-usd`).
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

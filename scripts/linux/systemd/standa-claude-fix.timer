@@ -1,0 +1,11 @@
+# MRK-97: every 10 minutes, first run 8 minutes after boot (offset from the Codex review timer). A run still in
+# progress is not started twice (oneshot + flock in the script).
+[Unit]
+Description=Standa Hub: Claude fixes after Codex review every 10 minutes (MRK-97)
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

@@ -7,6 +7,10 @@ name: Review gate
 # new review. On MERGE it switches on GitHub auto-merge, so the PR merges by itself once every required check
 # (CI + this gate, see docs/operations.md "Review gate and auto-merge") is green. Label `manual-merge` = merge by hand.
 # Limitation: author and reviewer post with the same GitHub account; the verdict line is a rule, not an identity check.
+# Critical changes (migrations, auth, backups, CI/review/deploy - list below, docs/operations.md) never auto-merge:
+# on MERGE the PR gets the label `manual-merge` and Standa merges by hand.
+# Note: on pull_request events GitHub runs the PR's own copy of this file, so a change to it is critical by itself
+# and the reviewer must check it does not weaken the gate.
 
 on:
   pull_request:
@@ -29,6 +33,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       merge: ${{ steps.verdict.outputs.merge }}
+      critical: ${{ steps.verdict.outputs.critical }}
     steps:
       - id: verdict
         uses: actions/github-script@v7
@@ -39,6 +44,18 @@ jobs:
             const head = pr.head.sha;
             const short = head.slice(0, 7);
             const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 });
+            // Critical areas need Standa's manual merge (AGENTS.md workflow, docs/operations.md "Critical changes").
+            const CRITICAL = [
+              ['migrace', /^backend\/alembic\//],
+              ['přihlašování a bezpečnost', /^backend\/auth[^/]*\.py$|^frontend\/proxy\.ts$/],
+              ['zálohy a obnova', /^backend\/(backup_service|offsite_backup|offsite_restic)\.py$|^scripts\/.*(backup|restore|offsite)/i],
+              ['CI, review a deploy', /^\.github\/|^scripts\/|(^|\/)Dockerfile[^/]*$|(^|\/)(docker-)?compose[^/]*\.ya?ml$/],
+            ];
+            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: pr.number, per_page: 100 });
+            const paths = files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+            const critical = CRITICAL.filter(([, re]) => paths.some((p) => re.test(p))).map(([label]) => label);
+            core.setOutput('critical', critical.join(', '));
+            if (critical.length) core.notice(`Critical change (${critical.join(', ')}): manual merge by Standa.`);
             // Only the repository owner's account (Codex CLI posts as the owner) and only reviews made on this commit.
             const verdicts = reviews
               .filter((r) => r.commit_id === head && r.user && r.user.login === owner && r.state !== 'DISMISSED')
@@ -75,7 +92,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        # Fails softly while "Allow auto-merge" / branch protection are not set up yet (docs/operations.md).
+          CRITICAL: ${{ needs.gate.outputs.critical }}
+        # Critical change: no auto-merge, label `manual-merge` for Standa. Otherwise auto-merge; fails softly while
+        # "Allow auto-merge" / branch protection are not set up yet (docs/operations.md).
         run: |
+          if [[ -n "$CRITICAL" ]]; then
+            gh pr merge "$PR" --repo "$REPO" --disable-auto >/dev/null 2>&1 || true
+            gh pr edit "$PR" --repo "$REPO" --add-label manual-merge \
+              || echo "::warning::Could not add the label manual-merge."
+            echo "::notice::Critical change ($CRITICAL): approved by Codex, waiting for Standa's manual merge."
+            exit 0
+          fi
           gh pr merge "$PR" --repo "$REPO" --auto --merge \
             || echo "::warning::Auto-merge not enabled (repo setting 'Allow auto-merge' or branch protection missing?). Merge by hand."

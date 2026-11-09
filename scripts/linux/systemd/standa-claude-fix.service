@@ -1,0 +1,11 @@
+# MRK-97: one pass of the automatic Claude fix after a blocking Codex review (user unit; see docs/operations.md).
+# Runs the INSTALLED copy, never the script inside a clone (clones are checked out to PR heads).
+[Unit]
+Description=Standa Hub: Claude fixes pull requests blocked by Codex (MRK-97)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/standa-claude-fix run
+TimeoutStartSec=60min

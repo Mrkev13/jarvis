@@ -83,14 +83,21 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    v popisu `Fixes MRK-NN`. Mimo scope issue nic neměň; nálezy navrhni jako nový issue.
 2. **Před delší prací i před otevřením PR** sync: `git fetch origin && git merge origin/main`.
    Na sdílené nebo cizí branch nikdy rebase ani force-push.
-3. **Agent, který branch vlastní, ji nemerguje** ani nezapíná auto-merge. Merge provede GitHub sám
-   (auto-merge, MRK-97), až projde celé CI a check **Review gate** (verdikt `MERGE` pro aktuální commit).
-   Ručně merguje jen Standa, třeba u PR s labelem `manual-merge`. Do `main` se nikdy necommituje přímo.
+3. **Role (MRK-97):** Claude = developer (kód, branch, commity, PR, opravy po review), Codex = reviewer,
+   merge dělá GitHub auto-merge. **Agent, který branch vlastní, ji nemerguje** ani nezapíná auto-merge. Merge
+   proběhne sám, až projde celé CI a check **Review gate** (verdikt `MERGE` pro aktuální commit). Do `main` se
+   nikdy necommituje přímo.
+   - **Kritické změny merguje jen Standa:** migrace (`backend/alembic/`), přihlašování a bezpečnost
+     (`backend/auth*.py`, `frontend/proxy.ts`), zálohy a obnova, CI / review / deploy (`.github/`, `scripts/`,
+     Docker/Compose). Gate po `MERGE` přidá label `manual-merge` a auto-merge nezapne.
 4. **Review dělá jiný agent**, než který kód psal (Claude ↔ Codex). Codex ho spouští automaticky
    na Ubuntu serveru (`scripts/linux/codex-review.sh`, systemd timer). Review končí jedním samostatným řádkem
    `Codex-Verdict: MERGE` (nic neblokuje) nebo `Codex-Verdict: BLOCK`. Ten řádek píše **jen reviewer,
    nikdy autor kódu**, a platí jen pro commit, na kterém review vzniklo. Po pushi musí přijít nové review.
-   Nálezy autor opraví na téže branch.
+   - Nálezy autor opraví na téže branch. Po `BLOCK` to dělá automaticky Claude CLI na Ubuntu
+     (`scripts/linux/claude-fix.sh`): opraví, commitne, skript pushne (bez force) a Codex zkontroluje nový commit.
+   - **Limit:** nejvýš 3 automatická kola oprav na PR. Další `BLOCK`, nebo oprava, která nevznikla, = label
+     `needs-human` a automatika se zastaví; rozhodne Standa (po odebrání labelu pokračuje).
 5. PR vyplní šablonu (`.github/pull_request_template.md`). Povinně:
    - **UI změna** → screenshot desktop (1366 nebo 1920 px) + mobil (390 px) – stačí odkaz na artefakt
      `ui-check-screenshots` z CI a názvy souborů, které změnu ukazují;
