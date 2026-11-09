@@ -159,7 +159,7 @@ def test_round_limit_stops_and_asks_standa(env):
 
 
 def test_someone_pushed_during_the_fix_is_not_overwritten(env):
-    other = git('commit-tree', git('rev-parse', f'{env["head"]}^{{tree}}', cwd=env['origin']), '-p', env['head'], '-m', 'human',
+    other = git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit-tree', git('rev-parse', f'{env["head"]}^{{tree}}', cwd=env['origin']), '-p', env['head'], '-m', 'human',
                 cwd=env['origin'])
     (env['fake'] / 'move_remote').write_text(other)
     assert run(env).returncode == 0
