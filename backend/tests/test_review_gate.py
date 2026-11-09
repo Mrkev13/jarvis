@@ -79,7 +79,10 @@ const github = {
     issues: { addLabels: async (a) => { out.labels.push(...a.labels); } },
   },
   graphql: async (q) => {
-    if (q.includes('disablePullRequestAutoMerge')) { out.automergeOff += 1; return; }
+    if (q.includes('disablePullRequestAutoMerge')) {
+      if (sc.automergeOffFails) throw new Error('permission denied');
+      out.automergeOff += 1; return;
+    }
     out.automerge += 1;
   },
 };
@@ -89,6 +92,8 @@ const context = { repo: { owner: 'Mrkev13', repo: 'jarvis' }, eventName: sc.even
 process.env.PR_INPUT = sc.input || '';
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 new AsyncFunction('github', 'context', 'core', 'process', fs.readFileSync(scriptFile, 'utf8'))(github, context, core, process)
+  // like actions/github-script: an uncaught error fails the step
+  .catch((e) => { out.failed = out.failed || `uncaught: ${e.message}`; })
   .then(() => console.log(JSON.stringify(out)));
 """
 
@@ -96,14 +101,15 @@ HEAD = 'a' * 40
 
 
 def run_gate(tmp_path, *, reviews=(), files=('backend/x.py',), labels=(), event='pull_request_target', ref='refs/heads/main',
-             inp='', draft=False, auto_merge=None, open_prs=(), reviews_fail=False, changed_files=None):
+             inp='', draft=False, auto_merge=None, open_prs=(), reviews_fail=False, changed_files=None,
+             auto_merge_off_fails=False):
     import json
     import subprocess
     pr = {'number': 7, 'state': 'open', 'draft': draft, 'node_id': 'PR_x', 'head': {'sha': HEAD},
           'labels': [{'name': n} for n in labels], 'auto_merge': auto_merge,
           'changed_files': len(files) if changed_files is None else changed_files}
     scenario = {'pr': pr, 'files': [{'filename': f} for f in files], 'reviews': list(reviews), 'event': event,
-                'ref': ref, 'input': inp, 'reviewsFail': reviews_fail,
+                'ref': ref, 'input': inp, 'reviewsFail': reviews_fail, 'automergeOffFails': auto_merge_off_fails,
                 'open': [{'number': n} for n in open_prs]}
     (tmp_path / 'gate.js').write_text(gate_script())
     (tmp_path / 'scenario.json').write_text(json.dumps(scenario))
@@ -173,6 +179,18 @@ def test_a_leftover_auto_merge_is_always_switched_off(tmp_path):
     for reviews in ([review(MERGE)], [review(BLOCK)], []):
         out = run_gate(tmp_path, reviews=reviews, auto_merge={'merge_method': 'merge'})
         assert out['automergeOff'] == 1 and out['automerge'] == 0
+
+
+@needs_node
+@pytest.mark.parametrize('event,files', [('pull_request_target', ['frontend/a.ts']),
+                                         ('schedule', ['backend/alembic/versions/0029_x.py'])])
+def test_failing_to_switch_auto_merge_off_never_ends_green(tmp_path, event, files):
+    """Review MRK-97 P1: a leftover auto-merge that cannot be switched off must not get a green status - else the
+    last CI check would let GitHub merge, even a critical PR."""
+    out = run_gate(tmp_path, reviews=[review(MERGE)], files=files, auto_merge={'merge_method': 'merge'},
+                   auto_merge_off_fails=True, event=event, open_prs=[7])
+    assert [s[1] for s in out['statuses']] == ['pending', 'error'], out['statuses']
+    assert out['failed'] and out['automerge'] == 0
 
 
 @needs_node

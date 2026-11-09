@@ -356,7 +356,7 @@ The gate (`.github/workflows/review-gate.yml`) is green only when the newest rev
 commit**, posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`.
 `BLOCK` makes it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending`
 first and any API error ends in `error` (fail closed). The gate **never merges** and never enables GitHub
-auto-merge (a leftover auto-merge is switched off).
+auto-merge; a leftover auto-merge is switched off, and if that fails the status ends in `error`, never `success`.
 
 **The gate is trusted code.** It runs only the copy on `main` and never checks out or runs PR code:
 - `pull_request_target` (every push / label change) runs the base branch's file;

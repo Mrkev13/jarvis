@@ -74,15 +74,12 @@ jobs:
             const MAX_LISTED_FILES = 3000;
             const AUTO_OFF = 'mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }';
 
-            // GitHub auto-merge is never used (see the header); one left over from earlier is switched off.
+            // GitHub auto-merge is never used (Standa merges by hand); one left over from earlier is switched off.
+            // If that fails, the error propagates: the status ends in `error`, never `success` (fail closed).
             async function autoMergeOff(pr) {
               if (!pr.auto_merge) return;
-              try {
-                await github.graphql(AUTO_OFF, { id: pr.node_id });
-                core.notice(`PR #${pr.number}: GitHub auto-merge switched off (the reviewer host merges).`);
-              } catch (e) {
-                core.warning(`PR #${pr.number}: could not switch auto-merge off: ${e.message}`);
-              }
+              await github.graphql(AUTO_OFF, { id: pr.node_id });
+              core.notice(`PR #${pr.number}: GitHub auto-merge switched off (merges are manual).`);
             }
 
             async function evaluate(number) {
@@ -94,8 +91,8 @@ jobs:
                 { owner, repo, sha: head, state, context: CONTEXT, description: description.slice(0, 140) });
               // fail closed: pending first, so an earlier success never survives a pass that does not finish
               await status('pending', `Evaluating the Codex verdict on ${short}…`);
-              await autoMergeOff(pr);
               try {
+                await autoMergeOff(pr);
                 const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
                 const paths = files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
                 const critical = CRITICAL.filter(([, re]) => paths.some((p) => re.test(p))).map(([label]) => label);
