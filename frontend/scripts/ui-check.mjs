@@ -2532,7 +2532,7 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   check(`docházka ${label}: absence proti limitu + varování`, /absence 1 z max\. 2 \(zbývá poslední\)/.test(await fyz.innerText()) && (await fyz.innerText()).includes("zbývá poslední povolená absence"));
   check(`docházka ${label}: splněný zápočet s datem`, (await card(3).innerText()).includes("Zápočet splněn · 2. 10."));
   check(`docházka ${label}: souhrn zkoušek`, (await card(3).innerText()).includes("Zkoušky: 1 uzavřená (1 složeno)"));
-  const byl = fyz.getByRole("button", { name: "Byl – Fyzika, Tento týden" });
+  const byl = fyz.getByRole("button", { name: "Byl – Fyzika, Tento týden", exact: true });
   const nebyl = fyz.getByRole("button", { name: "Nebyl – Fyzika, Tento týden" });
   const sizes = [await byl.boundingBox(), await nebyl.boundingBox()];
   check(`docházka ${label}: Byl / Nebyl ≥ 44 px`, sizes.every((b) => b && b.height >= 44), JSON.stringify(sizes));
@@ -2548,9 +2548,9 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   check(`docházka ${label}: druhé klepnutí zápis zruší`, await eventually(async () => (await nebyl.getAttribute("aria-pressed")) === "false" && (await calls()).at(-1)?.body.present === null));
   // chyba zápisu → hláška u předmětu, nic se neztratí
   await fetch("http://127.0.0.1:8000/__mock/school/fail-next-attendance", { method: "POST" });
-  await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden" }).click();
+  await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).click();
   check(`docházka ${label}: chyba = hláška u předmětu`, await eventually(async () => (await card(1).getByRole("alert").count()) === 1));
-  check(`docházka ${label}: po chybě stav beze změny`, (await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden" }).getAttribute("aria-pressed")) === "false");
+  check(`docházka ${label}: po chybě stav beze změny`, (await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).getAttribute("aria-pressed")) === "false");
   // zápočet
   await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
   check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
