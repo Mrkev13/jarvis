@@ -40,6 +40,14 @@ test("Můj den: open items, timed chronologically, next first", () => {
   assert.deepEqual(dayItems(null), []);
 });
 
+test("Můj den: types shown by another widget are left out (MRK-104 – návyky mají vlastní kartu)", () => {
+  const habit = { id: "habit:3", type: "habit", title: "Čtení", subtitle: "Návyk", time: null, status: "open", actions: ["complete", "skip"], href: "/habits" };
+  const withHabit = { ...today, timeline: [...today.timeline, habit] };
+  assert.ok(dayItems(withHabit, 10).some((i) => i.id === "habit:3"), "bez widgetu Návyky zůstává v Můj den");
+  assert.ok(!dayItems(withHabit, 10, ["habit"]).some((i) => i.id === "habit:3"), "s widgetem Návyky jen jednou");
+  assert.deepEqual(dayItems(withHabit, 10, ["habit"]).map((i) => i.id), dayItems(today, 10).map((i) => i.id));
+});
+
 test("next free block: the running one counts from now, finished ones are skipped", () => {
   const blocks = [
     { local_start: "08:00", local_end: "10:00", duration_minutes: 120 },
