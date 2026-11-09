@@ -19,6 +19,13 @@
 - Frontend build variable: NEXT_PUBLIC_API_URL
 - PostgreSQL network: postgres_default
 
+## Running commit in /health
+
+`backend/compose.yaml` passes `APP_COMMIT` from the shell into the container, so `/health` reports the running
+commit (empty = unknown). Set it when starting the backend, e.g.
+`APP_COMMIT="$(git -C /srv/standa-hub rev-parse HEAD)" docker compose up -d` in `backend/` - the automatic deploy
+(MRK-108) does this.
+
 ## Building images
 From backend directory: docker compose build
 From frontend directory: docker compose build

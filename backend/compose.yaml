@@ -1,3 +1,4 @@
+# MRK-101: Standa Hub backend on the Ubuntu host (docs/ubuntu-deployment.md). Secrets only in backend/.env.production.
 services:
   migrate:
     image: standa-hub-backend:local
@@ -33,6 +34,9 @@ services:
     env_file:
       - path:  .env.production
         format: raw
+    environment:
+      # set by the deploy (MRK-108) so /health reports the running commit; empty = unknown
+      APP_COMMIT: ${APP_COMMIT:-}
     command:
       - python
       - -m
