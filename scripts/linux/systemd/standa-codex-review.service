@@ -1,0 +1,11 @@
+# MRK-97: one pass of the automatic Codex review (user unit; see docs/operations.md).
+# Runs the INSTALLED copy, never the script inside the review clone (that clone is checked out to PR heads).
+[Unit]
+Description=Standa Hub: Codex review of open pull requests (MRK-97)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/standa-codex-review run
+TimeoutStartSec=45min

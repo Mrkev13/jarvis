@@ -370,24 +370,41 @@ Limitation: Codex CLI posts with the same GitHub account as the agents. The verd
      commit anyway;
    - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
 3. Check: open a PR, watch "Review gate" fail ("Waiting for a Codex review…"), then pass after a `MERGE` review,
-   and the PR merges by itself. The auto-deploy (above) then ships it.
+   and the PR merges by itself. On the Ubuntu host the deploy after merge is still manual (the auto-deploy above is
+   the Windows one).
 
-**Automatic Codex review (Windows, user account with Codex CLI and GitHub CLI):**
-`scripts/windows/codex-review.ps1` runs every 10 minutes as you. For each open, non-draft PR without a verdict on
-its head commit, it checks that commit out in a dedicated clone, runs `codex exec --sandbox read-only` and posts
-Codex's answer with `gh pr review --comment`. Codex itself never touches GitHub or the production checkout. Each
-commit is attempted once. An answer without a verdict line is not posted (see the log). Label `manual-review` skips
-a PR. State and Codex answers are kept in `%LOCALAPPDATA%\StandaHub\codex-review`.
+**Automatic Codex review (Ubuntu host, your user account with Codex CLI and GitHub CLI):**
+`scripts/linux/codex-review.sh` runs every 10 minutes from a systemd user timer:
+- for each open, non-draft PR without a verdict on its head commit, it checks that commit out in a **dedicated
+  review clone**, runs `codex exec --sandbox read-only` and posts Codex's answer with `gh pr review --comment`;
+- Codex itself never touches GitHub, the network or the production checkout, and nothing in the script merges;
+- each commit is attempted once. An answer without a verdict line, or one that arrives after a new push, is not
+  posted (see the log). Label `manual-review` skips a PR;
+- state, Codex answers and logs: `~/.local/state/standa-hub/codex-review`.
 
-```powershell
-git clone https://github.com/Mrkev13/jarvis C:\StandaHub-review    # review clone, NEVER the production C:\StandaHub
-gh auth login                                                     # once, if `gh auth status` fails
-codex login                                                       # once, if Codex CLI is not logged in
-$s = 'C:\StandaHub\scripts\windows\codex-review.ps1'
-powershell -ExecutionPolicy Bypass -File $s -Mode Register        # Windows password (not the PIN); first run in 15 min
-powershell -ExecutionPolicy Bypass -File $s -Mode Run             # first pass by hand
-powershell -ExecutionPolicy Bypass -File $s -Mode Check           # ready: True, last_result
+The timer runs an **installed copy** (`~/.local/bin/standa-codex-review`), never the script inside the review
+clone: that clone is checked out to PR heads, and a PR must not decide what code runs with your logins. After a
+change to the script on `main`, repeat the `install` lines.
+
+The GitHub token for `gh` needs no merge right. A fine-grained token for this repository with *Pull requests:
+Read and write* and *Contents: Read* is enough, because GitHub auto-merge does the merge.
+
+```bash
+# once, as your user on the Ubuntu host (not root)
+git clone https://github.com/Mrkev13/jarvis ~/standa-hub-review   # review clone, NEVER the production checkout
+gh auth login                                                    # if `gh auth status` fails
+codex login                                                      # if Codex CLI is not logged in
+install -Dm755 ~/standa-hub-review/scripts/linux/codex-review.sh ~/.local/bin/standa-codex-review
+install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-codex-review.{service,timer}
+loginctl enable-linger "$USER"                                   # user timers run without a login session
+systemctl --user daemon-reload && systemctl --user enable --now standa-codex-review.timer
+~/.local/bin/standa-codex-review run                             # first pass by hand
+~/.local/bin/standa-codex-review check                           # ready: true, last_result
 ```
+
+Optional guard: if the production checkout is a git clone on the same host, set `PRODUCTION_DIR` in the service
+(`systemctl --user edit standa-codex-review.service`, `[Service]` → `Environment=PRODUCTION_DIR=/path`), and the
+script refuses to use it as the review clone.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

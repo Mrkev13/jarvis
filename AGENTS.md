@@ -87,7 +87,7 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    (auto-merge, MRK-97), až projde celé CI a check **Review gate** (verdikt `MERGE` pro aktuální commit).
    Ručně merguje jen Standa, třeba u PR s labelem `manual-merge`. Do `main` se nikdy necommituje přímo.
 4. **Review dělá jiný agent**, než který kód psal (Claude ↔ Codex). Codex ho spouští automaticky
-   (`scripts/windows/codex-review.ps1`). Review končí jedním samostatným řádkem
+   na Ubuntu serveru (`scripts/linux/codex-review.sh`, systemd timer). Review končí jedním samostatným řádkem
    `Codex-Verdict: MERGE` (nic neblokuje) nebo `Codex-Verdict: BLOCK`. Ten řádek píše **jen reviewer,
    nikdy autor kódu**, a platí jen pro commit, na kterém review vzniklo. Po pushi musí přijít nové review.
    Nálezy autor opraví na téže branch.

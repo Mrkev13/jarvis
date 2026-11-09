@@ -1,4 +1,5 @@
-"""MRK-97: static guards for the review gate workflow and scripts/windows/codex-review.ps1 (no PowerShell / Actions in CI)."""
+"""MRK-97: static guards for the review gate workflow (no Actions run in CI). The Linux review script is exercised
+for real in test_codex_review_script.py."""
 import re
 from pathlib import Path
 
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GATE_TEXT = (ROOT / '.github' / 'workflows' / 'review-gate.yml').read_text(encoding='utf-8')
 GATE = yaml.safe_load(GATE_TEXT)
 CI = yaml.safe_load((ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8'))
-SCRIPT = (ROOT / 'scripts' / 'windows' / 'codex-review.ps1').read_text(encoding='utf-8')
+SCRIPT = (ROOT / 'scripts' / 'linux' / 'codex-review.sh').read_text(encoding='utf-8')
 OPS = (ROOT / 'docs' / 'operations.md').read_text(encoding='utf-8')
 AGENTS = (ROOT / 'AGENTS.md').read_text(encoding='utf-8')
 TRIGGERS = GATE.get('on') or GATE.get(True)   # PyYAML reads the bare key `on` as True
@@ -37,10 +38,9 @@ def test_only_a_standalone_verdict_line_counts(body, verdict):
     m = verdict_regex().search(body)
     assert (m.group(1) if m else None) == verdict
     # the poller uses the same rule before posting
-    ps = re.search(r"\$VerdictPattern = '\(\?m\)([^']+)'", SCRIPT).group(1)
-    assert bool(re.compile(ps, re.MULTILINE).search(body)) == bool(verdict)
-    # case-sensitive (-cmatch) like the gate, so a lowercase verdict is never posted
-    assert '-match $VerdictPattern' not in SCRIPT and '-notmatch $VerdictPattern' not in SCRIPT
+    # the review script uses the same rule (POSIX ERE, case-sensitive) before posting
+    ere = re.search(r"VERDICT_RE='([^']+)'", SCRIPT).group(1).replace('[[:space:]]', r'\s')
+    assert bool(re.compile(ere, re.MULTILINE).search(body)) == bool(verdict)
 
 
 def test_gate_trusts_only_the_owner_and_the_exact_head_commit():
@@ -80,32 +80,8 @@ def test_docs_list_every_required_check_by_its_real_name():
     assert 'Codex-Verdict: MERGE' in AGENTS and 'nikdy autor kódu' in AGENTS
 
 
-def test_codex_review_script_is_ascii_and_read_only():
-    SCRIPT.encode('ascii')
-    assert '& codex exec --sandbox read-only --cd $ReviewDirectory --output-last-message $answer $prompt' in SCRIPT
-    prompt = SCRIPT[SCRIPT.index('function Get-Prompt'):SCRIPT.index('function Read-State')]
-    code = [line for line in prompt.splitlines() if not line.strip().startswith('#')]
-    assert not any('"' in line for line in code), 'PowerShell 5.1 mangles double quotes in native arguments'
-    assert ") -join ' '" in prompt, 'one line: an npm codex.cmd would cut a multi-line argument'
-
-
-def test_codex_review_never_touches_production_and_posts_at_most_once_per_commit():
-    assert '$review -ne $production' in SCRIPT
-    assert "if (-not (Test-ReviewClone)) { throw 'Review clone missing or equal to the production checkout' }" in SCRIPT
-    loop = SCRIPT[SCRIPT.index('foreach ($pr in $prs) {'):SCRIPT.index('$reviewed++')]
-    # the attempt is recorded before Codex runs, so a crash or a bad answer is not retried every 10 minutes
-    assert loop.index('Write-State $stateName $head   # at most one attempt') < loop.index('& codex exec')
-    # no verdict line -> nothing posted; new commit during the review -> nothing posted
-    assert loop.index('$body -cnotmatch $VerdictPattern') < loop.index("'gh pr review'")
-    assert loop.index("[string]$now[0].headRefOid -ne $head") < loop.index("'gh pr review'")
-    assert "'--comment', '--body-file', $answer" in loop
-    assert "-contains 'manual-review'" in loop and '$pr.isDraft' in loop
-
-
-def test_codex_review_task_like_auto_update():
-    assert "$TaskName = 'StandaHub-CodexReview'" in SCRIPT
-    assert '$firstStart = (Get-Date).AddMinutes(15)' in SCRIPT and '-RepetitionInterval (New-TimeSpan -Minutes 10)' in SCRIPT
-    assert '-MultipleInstances IgnoreNew' in SCRIPT
-    assert SCRIPT.count('GetNetworkCredential().Password') == 1 and '$cred = $null' in SCRIPT
-    assert "'OpenOrCreate', 'ReadWrite', 'None'" in SCRIPT
-    assert '-RunLevel Limited' in SCRIPT, 'review needs no admin rights'
+def test_review_script_never_merges_and_codex_stays_read_only():
+    code = [line for line in SCRIPT.splitlines() if not line.lstrip().startswith('#')]
+    text = '\n'.join(code)
+    assert '--sandbox read-only' in text
+    assert 'gh pr merge' not in text and 'git push' not in text, 'review only; GitHub auto-merge does the merge'
