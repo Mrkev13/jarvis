@@ -456,16 +456,17 @@ for (const width of [1920, 1366]) {
   const { ctx, page } = await open("/", { width, height: 1000 });
   const m = await page.evaluate(() => {
     const box = (id) => document.querySelector(`[data-widget="${id}"]`)?.getBoundingClientRect();
-    const [burning, day, goals, games, changes, finance, metrics] = ["burning", "day", "goals", "games", "changes", "finance", "key_metrics"].map(box);
+    const [burning, day, habits, goals, changes, finance, metrics] = ["burning", "day", "habits_today", "goals", "changes", "finance", "key_metrics"].map(box);
     return {
       topGap: Math.abs(burning.top - day.top),
-      secondRow: Math.abs(goals.top - games.top),
+      // MRK-104: sloupce se skládají – Návyky pod Co hoří, Cíle pod Můj den
+      secondRow: Math.abs(habits.left - burning.left) + Math.abs(goals.left - day.left) + (habits.top >= burning.bottom && goals.top >= day.bottom ? 0 : 99),
       // sloupec Týden/Práce/Finance nesmí trčet pod Denní přehled + Od včera
       stackOverhang: finance.bottom - changes.bottom,
       metricsBelow: metrics.top >= Math.max(changes.bottom, finance.bottom),
     };
   });
-  check(`dashboard @${width}: Co hoří a Můj den v jednom řádku nahoře`, m.topGap < 2 && m.secondRow < 2, JSON.stringify(m));
+  check(`dashboard @${width}: Co hoří | Můj den nahoře, Návyky | Cíle pod nimi`, m.topGap < 2 && m.secondRow < 2, JSON.stringify(m));
   check(`dashboard @${width}: Práce/Finance nepřečnívá sousedy`, m.stackOverhang <= 40, `${Math.round(m.stackOverhang)} px`);
   check(`dashboard @${width}: Klíčová čísla dole pod sloupci`, m.metricsBelow);
   await ctx.close();
@@ -1203,7 +1204,7 @@ function countRequests(page) {
   check("dashboard: normální režim bez ovládání úprav", (await page.getByRole("button", { name: /^Posunout/ }).count()) === 0 && (await page.getByRole("button", { name: /^Skrýt widget/ }).count()) === 0);
   check("dashboard: bez uloženého rozložení nic v localStorage", (await storedLayout(page)) === null);
   const widths = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-widget]")].map((el) => [el.getAttribute("data-widget"), Math.round(el.getBoundingClientRect().width)])));
-  check("dashboard: výchozí vyvážení (Co hoří | Můj den napůl, přehled 2/3, čísla celá šířka)", widths.burning === widths.day && widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.work === widths.goals, JSON.stringify(widths));
+  check("dashboard: výchozí vyvážení (Co hoří | Můj den a Návyky | Cíle napůl, Hry a čísla celá šířka, přehled 2/3)", widths.burning === widths.day && widths.habits_today === widths.goals && widths.habits_today === widths.burning && widths.daily_briefing > widths.weekly_review * 1.8 && widths.key_metrics > widths.daily_briefing * 1.4 && widths.games === widths.key_metrics && widths.work === widths.weekly_review, JSON.stringify(widths));
   check("dashboard: jeden dotaz na každý zdroj", ["/dashboard", "/briefing/today", "/weekly-review", "/today", "/changes", "/timeline/day"].every((k) => counts[k] === 1), JSON.stringify(counts));
   const burning = page.locator('[data-widget="burning"]');
   check("dashboard: Co hoří – po termínu, pozornost a Moodle test do 7 dní", (await burning.getByText("Sada").count()) === 1 && (await burning.getByText("Test 1 se zavírá").count()) === 1 && (await burning.getByText("Projekt").count()) === 0);
@@ -1314,12 +1315,12 @@ function countRequests(page) {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
   let order = await widgetOrder(page);
-  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 7 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
+  check("klávesnice: dvakrát dolů (fokus drží)", order.indexOf("weekly_review") === 8 && (await focusedName(page)) === "Posunout dolů: Týdenní přehled", order.join(","));
   await page.keyboard.press("Shift+Tab");
   check("klávesnice: posun nahoru", (await focusedName(page)) === "Posunout nahoru: Týdenní přehled");
   await page.keyboard.press("Space");
   await page.waitForTimeout(100);
-  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 6);
+  check("klávesnice: nahoru o jednu", (await widgetOrder(page)).indexOf("weekly_review") === 7);
   check("klávesnice: Tab ke Skrýt", await tabTo("Skrýt widget: Týdenní přehled", 6));
   await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
