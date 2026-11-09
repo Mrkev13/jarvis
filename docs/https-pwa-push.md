@@ -115,10 +115,16 @@ origin.
   into the new one instead of generating new keys. Then the phones keep working. New keys = every device must
   reconnect (MRK-102).
 - Since MRK-102 a device that still holds a subscription for the old public key no longer shows "Připojeno":
-  - the settings card compares the subscription's key with `GET /push/config` and shows *Je potřeba se znovu
-    připojit* with a **Znovu připojit** button;
-  - `POST /push/subscriptions` answers `409 {"category": "stale_key"}` when the frontend sends the old key;
-  - a 401/403 from the push service (key mismatch) disables the subscription, like 404/410.
+  - the settings card compares the key the subscription was **really created with** (`subscription.options`,
+    or the key the page remembered for that endpoint when it subscribed) with `GET /push/config` and shows *Je
+    potřeba se znovu připojit* with a **Znovu připojit** button. It never sends the server's current key in place
+    of an unknown one; when the browser does not reveal the key, no `server_key` is sent and the card says the
+    state is not verified;
+  - `POST /push/subscriptions` answers `409 {"category": "stale_key"}` when that key differs from the server's
+    (compared as decoded bytes);
+  - a 401/403 from the push service is a permanent error of that delivery but **does not disable** the
+    subscription: per RFC 8292 it can also be a server-wide VAPID problem (keys, clock, headers), which must stay
+    visible instead of silently disabling every device. 404/410 still disable it.
 
 ## PWA and service worker behaviour
 
@@ -145,9 +151,10 @@ origin.
 - **The test push works but reminders don't arrive:** check `EXTERNAL_DELIVERY_ENABLED=true`,
   `REMINDERS_CHECK_ENABLED=true`, that `/health` shows the reminders job `ok`, and `GET /push/status` (last
   delivery and its category).
-- **Device silently stops receiving:** the push service answered 401/403/404/410, so the device was disabled
-  (401/403 usually means the server's VAPID keys changed, e.g. after a move). The settings card shows *Znovu
-  připojit*; tap it on that device.
+- **Device stops receiving:** 404/410 from the push service disabled the device (the subscription is gone).
+  401/403 means the push service rejected the server's VAPID authentication: either the device holds a
+  subscription for old keys (after a move) or the server's `WEB_PUSH_*` / clock is wrong. *Poslat test* explains
+  both; tap *Znovu připojit* on that device, and if it still fails, check the server env.
 - **Checking the server without revealing values** (Docker, MRK-101): in the backend container print only whether
   `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` and `WEB_PUSH_CONTACT` are set, plus the values of
   `EXTERNAL_DELIVERY_ENABLED`, `REMINDERS_CHECK_ENABLED` and `SCHEDULER_ENABLED`. `GET /push/config` must answer

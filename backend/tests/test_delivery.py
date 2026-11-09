@@ -321,12 +321,13 @@ class WebPushProviderTestCase(DeliveryTestBase):
 
     def test_status_classification(self):
         cases = {201: (True, False, False), 503: (False, False, False), 429: (False, False, False),
-                 413: (False, True, False), 401: (False, True, True), 403: (False, True, True),
+                 413: (False, True, False), 401: (False, True, False), 403: (False, True, False),
                  404: (False, True, True), 410: (False, True, True)}
         for status, (ok, permanent, gone) in cases.items():
             with self.subTest(status=status):
                 r = ds.classify(webpush.PushResponse(status))
-                # MRK-102: 401/403 = subscription of other VAPID keys, never deliverable -> disabled like 404/410
+                # MRK-102 review: 401/403 = VAPID auth rejected; may be a server-wide config problem (RFC 8292),
+                # so it is a permanent error of this delivery but never disables the subscription
                 self.assertEqual((r.ok, r.permanent, r.target_gone), (ok, permanent, gone))
         self.assertFalse(ds.classify(webpush.PushResponse(None, error="network:Timeout")).permanent)
 

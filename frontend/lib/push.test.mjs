@@ -74,3 +74,26 @@ test("test push results are explained, rejected subscriptions ask to reconnect",
   assert.match(testResultText(false, "network").text, /network/);
   assert.match(deviceStateLabel("stale"), /znovu připojit/);
 });
+
+// MRK-102 review: the key sent to the server must be the one the subscription was really created with.
+test("subscription key comes from the subscription, never from the server's current key", async () => {
+  const { keyToBase64Url, subscriptionServerKey } = await import("./push.ts");
+  const bufA = urlBase64ToUint8Array(KEY_A).buffer;
+  assert.equal(keyToBase64Url(bufA), KEY_A, "round trip without padding");
+  assert.equal(keyToBase64Url(null), null);
+  assert.equal(keyToBase64Url(new ArrayBuffer(0)), null);
+  const ep = "https://fcm.googleapis.com/x";
+  assert.equal(subscriptionServerKey(bufA, ep, { endpoint: ep, key: KEY_B }), KEY_A, "browser's own key wins");
+  assert.equal(subscriptionServerKey(null, ep, { endpoint: ep, key: KEY_B }), KEY_B, "remembered key for the same endpoint");
+  assert.equal(subscriptionServerKey(null, ep, { endpoint: "https://fcm.googleapis.com/other", key: KEY_B }), null,
+    "a key remembered for another subscription says nothing");
+  assert.equal(subscriptionServerKey(undefined, ep, null), null, "unknown → nothing is claimed");
+});
+
+test("401/403 explain both causes and still offer reconnecting", () => {
+  for (const error of ["http_401", "http_403"]) {
+    const r = testResultText(false, error);
+    assert.match(r.text, /ověření serveru/);
+    assert.match(r.text, /WEB_PUSH_/);
+  }
+});

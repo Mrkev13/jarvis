@@ -7,12 +7,16 @@ import {
   currentPushEnv,
   detectPushSupport,
   deviceStateLabel,
+  readRememberedKey,
+  rememberKey,
   SERVER_REASON_TEXT,
   serverKeyMatches,
   STALE_TEXT,
   subscriptionBody,
+  subscriptionServerKey,
   testResultText,
   UNSUPPORTED_TEXT,
+  UNVERIFIED_TEXT,
   urlBase64ToUint8Array,
   type DeviceState,
 } from "@/lib/push";
@@ -67,23 +71,26 @@ export default function PushSettings() {
       }
       const sub = await existingSubscription();
       if (sub) {
-        // MRK-102: odběr ke starým klíčům serveru se už tiše neposílá zpět („Připojeno", ale nic nedorazí).
-        if (serverKeyMatches(sub.options?.applicationServerKey, cfg.public_key) === false) {
+        // MRK-102: klíč, pro který byl odběr opravdu vytvořen (ne aktuální klíč serveru – ten by starý odběr „potvrdil").
+        const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, readRememberedKey());
+        if (usedKey && !serverKeyMatches(urlBase64ToUint8Array(usedKey).buffer, cfg.public_key)) {
           setState("stale");
           setDetail(STALE_TEXT);
           return;
         }
-        // Tichá synchronizace se serverem (bez dotazu na oprávnění).
-        const sync = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: cfg.public_key });
+        // Tichá synchronizace se serverem (bez dotazu na oprávnění); neznámý klíč = server_key se neposílá.
+        const body = subscriptionBody(sub.toJSON());
+        const sync = await postJson("/push/subscriptions", usedKey ? { ...body, server_key: usedKey } : body);
         if (sync.status === 409) {
           setState("stale");
           setDetail(STALE_TEXT);
           return;
         }
         setState(sync.ok ? "on" : "off");
-      } else {
-        setState("off");
+        setDetail(sync.ok && !usedKey ? UNVERIFIED_TEXT : null);
+        return;
       }
+      setState("off");
       setDetail(null);
     } catch {
       setState("off");
@@ -122,12 +129,15 @@ export default function PushSettings() {
         await (await reg.pushManager.getSubscription())?.unsubscribe();
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       }
-      const res = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: config.public_key });
+      // nový odběr: prohlížeč ho přijal s klíčem config.public_key (options ho potvrdí, kde ho prohlížeč prozradí)
+      const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, null) ?? config.public_key;
+      const res = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: usedKey });
       if (!res.ok) {
         await sub.unsubscribe();
         const err = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
+      rememberKey(sub.endpoint, usedKey);
       setState("on");
       setDetail(null);
       setMessage("Hotovo. Zkus „Poslat test“.");

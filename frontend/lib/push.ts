@@ -81,6 +81,51 @@ export function serverKeyMatches(subscriptionKey: ArrayBuffer | null | undefined
   return used.every((byte, i) => byte === current[i]);
 }
 
+/** Bajty klíče → base64url bez paddingu (stejný zápis jako WEB_PUSH_VAPID_PUBLIC_KEY); prázdné / chybějící = null. */
+export function keyToBase64Url(key: ArrayBuffer | null | undefined): string | null {
+  if (!key || key.byteLength === 0) return null;
+  let raw = "";
+  for (const byte of new Uint8Array(key)) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * MRK-102 (review): klíč serveru, pro který byl odběr SKUTEČNĚ vytvořen – z `subscription.options` prohlížeče,
+ * jinak ten, který si stránka zapamatovala při vytvoření odběru pro stejný endpoint. Nikdy aktuální klíč serveru:
+ * ten by server přesvědčil, že starý odběr sedí. `null` = nejde poznat → server_key se neposílá a nic se netvrdí.
+ */
+export function subscriptionServerKey(
+  optionsKey: ArrayBuffer | null | undefined,
+  endpoint: string,
+  remembered: { endpoint: string; key: string } | null,
+): string | null {
+  return keyToBase64Url(optionsKey) ?? (remembered && remembered.endpoint === endpoint ? remembered.key : null);
+}
+
+export const REMEMBERED_KEY_STORAGE = "standa-hub:push-subscription-key";
+
+/** Zapamatovaný klíč odběru (localStorage může být nedostupný – pak null). */
+export function readRememberedKey(): { endpoint: string; key: string } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(REMEMBERED_KEY_STORAGE) ?? "null") as { endpoint?: unknown; key?: unknown } | null;
+    return typeof v?.endpoint === "string" && typeof v?.key === "string" ? { endpoint: v.endpoint, key: v.key } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberKey(endpoint: string, key: string): void {
+  try {
+    localStorage.setItem(REMEMBERED_KEY_STORAGE, JSON.stringify({ endpoint, key }));
+  } catch {
+    // bez úložiště jen chybí záloha pro prohlížeče, které klíč odběru neprozradí
+  }
+}
+
+/** Text, když prohlížeč klíč odběru neprozradí (stav „Připojeno" pak není ověřený). */
+export const UNVERIFIED_TEXT =
+  "Prohlížeč neprozradí, ke kterému klíči serveru odběr patří. Když „Poslat test“ nedorazí, klepni na „Znovu připojit“.";
+
 /** PushSubscription.toJSON() → tělo POST /push/subscriptions (jen endpoint + klíče). */
 export function subscriptionBody(json: unknown): { endpoint: string; keys: { p256dh: string; auth: string } } {
   const j = json as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } } | null;
@@ -104,6 +149,12 @@ export function testResultText(ok: boolean, error: string | null | undefined): {
   switch (error) {
     case "http_401":
     case "http_403":
+      // RFC 8292: odmítnuté ověření serveru – starý odběr NEBO chyba VAPID na serveru (odběr se proto nevypíná)
+      return {
+        text: "Push služba odmítla ověření serveru. Buď odběr patří ke starým klíčům – klepni na „Znovu připojit“ –, " +
+          "nebo je na serveru chyba v nastavení klíčů pro upozornění (WEB_PUSH_*, čas serveru).",
+        stale: true,
+      };
     case "http_404":
     case "http_410":
     case "not_subscribed":
