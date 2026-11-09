@@ -142,6 +142,15 @@ class SchoolProgressTestCase(unittest.TestCase):
         self.attend(self.law, date(2026, 11, 2), False)
         self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="Subject").count()), 5)
 
+    def test_missing_present_is_rejected_and_deletes_nothing(self):
+        """Review MRK-86: a request without `present` must not be read as "delete"; only an explicit null deletes."""
+        self.attend(self.law, WEEK, True)
+        r = self.client.put(f"/school/subject/{self.law}/attendance", json={"week_start": WEEK.isoformat()})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.q(lambda db: db.query(SchoolAttendance).count()), 1, "nothing deleted")
+        self.assertEqual(self.attend(self.law, WEEK, None).status_code, 200)
+        self.assertEqual(self.q(lambda db: db.query(SchoolAttendance).count()), 0, "explicit null deletes")
+
     def test_attendance_validation(self):
         self.assertEqual(self.attend(self.law, date(2026, 11, 10), True).status_code, 422, "úterý není začátek týdne")
         self.assertEqual(self.attend(self.law, date(2026, 11, 16), True).status_code, 422, "budoucí týden")

@@ -319,7 +319,8 @@ class CreditRequest(BaseModel):
 
 class AttendanceRequest(BaseModel):
     week_start: date
-    present: bool | None = None
+    # povinné, ale nullable: smazání je jen explicitní `null`; chybějící pole = 422, nic se nesmaže (review)
+    present: bool | None
 
 
 def _run(fn, *, commit: bool = False):

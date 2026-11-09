@@ -47,9 +47,13 @@ export function ProgressPanel({ reloadKey }: { reloadKey?: unknown }) {
     queueMicrotask(() => void load());
   }, [load, reloadKey]);
 
+  function clearError(subjectId: number) {
+    setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => Number(id) !== subjectId)));
+  }
+
   async function write(subject: SubjectProgress, key: string, path: string, init: RequestInit, done: string) {
     setBusy(`${subject.id}:${key}`);
-    setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => Number(id) !== subject.id)));
+    clearError(subject.id);
     try {
       const updated = await apiJson<SubjectProgress>(path, init);
       setData((prev) => (prev ? { ...prev, subjects: prev.subjects.map((s) => (s.id === updated.id ? updated : s)) } : prev));
@@ -73,6 +77,8 @@ export function ProgressPanel({ reloadKey }: { reloadKey?: unknown }) {
   }
 
   async function setLimit(subject: SubjectProgress, text: string) {
+    // stará chyba (neplatný limit, selhání) patří k předchozímu pokusu – před novým zmizí
+    clearError(subject.id);
     const limit = parseAbsenceLimit(text);
     if (limit === "invalid") {
       setErrors((prev) => ({ ...prev, [subject.id]: "Limit absencí musí být celé číslo 0–52 (prázdné = bez limitu)." }));

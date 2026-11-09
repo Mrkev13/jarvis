@@ -2616,6 +2616,16 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).click();
   check(`docházka ${label}: chyba = hláška u předmětu`, await eventually(async () => (await card(1).getByRole("alert").count()) === 1));
   check(`docházka ${label}: po chybě stav beze změny`, (await card(1).getByRole("button", { name: "Byl – Matematika, Minulý týden", exact: true }).getAttribute("aria-pressed")) === "false");
+  // limit: neplatný → chyba u předmětu; oprava → chyba zmizí a limit se uloží (review MRK-86)
+  const limit = card(1).getByLabel("Limit absencí – Matematika");
+  await limit.fill("53");
+  await card(1).getByRole("button", { name: "Uložit" }).click();
+  check(`docházka ${label}: neplatný limit = hláška`, await eventually(async () => /0–52/.test(await card(1).getByRole("alert").innerText().catch(() => ""))));
+  await limit.fill("3");
+  await card(1).getByRole("button", { name: "Uložit" }).click();
+  check(`docházka ${label}: opravený limit smaže starou chybu`,
+    await eventually(async () => (await card(1).getByRole("alert").count()) === 0 && /z max\. 3/.test(await card(1).innerText())),
+    await card(1).innerText());
   // zápočet
   await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
   check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
