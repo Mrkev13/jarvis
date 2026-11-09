@@ -1383,7 +1383,7 @@ async function openSeeded(value, opts = {}) {
   ] });
   const { ctx, page, errors } = await openSeeded(seeded);
   const order = await widgetOrder(page);
-  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno", order.length === 11 && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
+  check("dashboard: uložené volby zachovány, neznámé zahozeno, chybějící doplněno (Návyky skryté – MRK-104)", order.length === 10 && !order.includes("habits_today") && !order.includes("games") && !order.includes("zastaraly_widget") && order.indexOf("finance") < order.indexOf("work") && (await page.locator('[data-widget="work"]').getAttribute("data-size")) === "small", order.join(","));
   check("dashboard: uložené rozložení bez bliknutí výchozího", !(await page.evaluate(() => window.__seenGames)));
   check("dashboard: neplatná data bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();

@@ -137,7 +137,7 @@ test("MRK-78: a version 1 layout keeps visibility and sizes, takes the new order
   const l = normalizeLayout(v1);
   const get = (id) => l.widgets.find((w) => w.id === id);
   assert.equal(l.version, 2);
-  assert.deepEqual(visibleWidgets(l).map((w) => w.id), ["burning", "day", "habits_today", "goals", "games", "daily_briefing", "changes", "work", "key_metrics", "quick_actions"]);
+  assert.deepEqual(visibleWidgets(l).map((w) => w.id), ["burning", "day", "goals", "games", "daily_briefing", "changes", "work", "key_metrics", "quick_actions"]);
   for (const id of REPLACED_IN_V2) assert.equal(get(id).visible, false, `${id} skrytý – nic dvakrát`);
   assert.deepEqual([get("daily_briefing").size, get("goals").size, get("games").size], ["full", "medium", "full"], "velikosti zůstaly");
   assert.equal(get("weekly_review").visible, false, "skrytý zůstal skrytý");
@@ -147,6 +147,25 @@ test("MRK-78: a version 1 layout keeps visibility and sizes, takes the new order
   assert.equal(v1.widgets[2].visible, true);
   assert.deepEqual(parseStoredLayout(serializeLayout(l)), l);
   assert.equal(migrateV1(v1).version, 2);
+});
+
+test("MRK-104: a stored layout without the habits widget keeps its choice – the widget is added hidden", () => {
+  // v2 uložené před MRK-104: celý tehdejší seznam bez habits_today
+  const before = defaultLayout().widgets.filter((w) => w.id !== "habits_today");
+  const v2 = normalizeLayout({ version: 2, widgets: before });
+  const habits = v2.widgets.find((w) => w.id === "habits_today");
+  assert.equal(habits.visible, false, "v2: doplněn skrytý");
+  assert.equal(ids(v2).indexOf("habits_today"), ids(v2).indexOf("day") + 1, "na svém místě – zapne se v úpravách");
+  assert.deepEqual(visibleWidgets(v2).map((w) => w.id), DEFAULT_IDS.filter((id) => id !== "habits_today"), "viditelné beze změny");
+  // v1 uložené rozložení
+  const v1 = normalizeLayout({ version: 1, widgets: [{ id: "goals", visible: true, order: 10, size: "medium" }] });
+  assert.equal(v1.widgets.find((w) => w.id === "habits_today").visible, false, "v1: doplněn skrytý");
+  // uložená volba „zobrazit" zůstává, čerstvé výchozí rozložení ho ukazuje
+  const shown = normalizeLayout({ version: 2, widgets: [...before, { id: "habits_today", visible: true, order: 25, size: "medium" }] });
+  assert.equal(shown.widgets.find((w) => w.id === "habits_today").visible, true);
+  assert.equal(defaultLayout().widgets.find((w) => w.id === "habits_today").visible, true, "bez uložené volby viditelný");
+  // poškozená / žádná uložená hodnota = výchozí rozložení (viditelný)
+  assert.equal(normalizeLayout(null).widgets.find((w) => w.id === "habits_today").visible, true);
 });
 
 test("round trip through storage keeps choices", () => {

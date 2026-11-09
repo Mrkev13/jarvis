@@ -67,6 +67,11 @@ export interface WidgetDef {
   modules?: string[];
   /** MRK-78: widget čte GET /today (načte se jednou pro všechny takové widgety). */
   usesToday?: boolean;
+  /**
+   * MRK-104: do existujícího uloženého rozložení (v1 i v2), ve kterém widget chybí, se doplní SKRYTÝ – uložená volba
+   * se nemění, zapne se v úpravách. `defaultVisible` platí jen pro čerstvé výchozí rozložení (bez uložené volby).
+   */
+  hiddenInStoredLayouts?: boolean;
 }
 
 export const CORE_WIDGETS: WidgetDef[] = [
@@ -161,7 +166,8 @@ export function migrateV1(raw: Record<string, unknown>, defs: WidgetDef[] = WIDG
  * - jiná verze / nesmyslná struktura → výchozí rozložení;
  * - neznámá (zastaralá) id a duplicity (platí první výskyt) se zahodí;
  * - neplatná velikost → výchozí velikost widgetu; neplatná viditelnost / pořadí → výchozí hodnota;
- * - widget, který v uloženém rozložení chybí (např. nový), se vloží za svého předchůdce ve výchozím pořadí.
+ * - widget, který v uloženém rozložení chybí (např. nový), se vloží za svého předchůdce ve výchozím pořadí –
+ *   viditelný podle `defaultVisible`, nebo skrytý, když má `hiddenInStoredLayouts` (MRK-104).
  */
 export function normalizeLayout(raw: unknown, defs: WidgetDef[] = WIDGETS): DashboardLayout {
   if (isRecord(raw) && raw.version === 1 && Array.isArray(raw.widgets)) raw = migrateV1(raw, defs);
@@ -192,7 +198,8 @@ export function normalizeLayout(raw: unknown, defs: WidgetDef[] = WIDGETS): Dash
     if (seen.has(def.id)) continue;
     const before = defaults.slice(0, defaults.indexOf(def)).reverse().find((d) => seen.has(d.id));
     const at = before ? ordered.findIndex((w) => w.id === before.id) + 1 : 0;
-    ordered = [...ordered.slice(0, at), { id: def.id, visible: def.defaultVisible, order: 0, size: def.defaultSize }, ...ordered.slice(at)];
+    const visible = def.hiddenInStoredLayouts ? false : def.defaultVisible;
+    ordered = [...ordered.slice(0, at), { id: def.id, visible, order: 0, size: def.defaultSize }, ...ordered.slice(at)];
     ordered = ordered.map((w, i) => ({ ...w, order: (i + 1) * ORDER_STEP }));
     seen.add(def.id);
   }
