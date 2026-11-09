@@ -138,11 +138,49 @@ function send(res, req, status, body, extraHeaders = {}) {
 // Game Enrichment B: stavový WoT (splnění grindu, historie, milníky, screenshoty). Výchozí data = fixtures ze
 // skutečného wot_service; /__mock/wot/reset vrátí výchozí stav. Screenshoty = neutrální testovací PNG (ne herní
 // grafika); id 5 představuje soubor smazaný z disku (404 → náhradní stav v galerii).
+// MRK-86: týden mocku = týden fixture Dnes (neděle 11. 10. 2026 → pondělí 5. 10.)
+const PROGRESS_WEEK = "2026-10-05";
+const PROGRESS_PREV = "2026-09-28";
+const CREDIT_LABELS = { pending: "nesplněn", passed: "splněn", failed: "neuznán" };
+// stejné texty a úrovně jako backend modules/school/progress.py (zjednodušeně, jen pro UI kontroly)
+function subjectProgress(s) {
+  const p = schoolState.progress[s.id] ?? (schoolState.progress[s.id] = { credit: "pending", creditDate: null, limit: null, weeks: {} });
+  const weeks = Object.entries(p.weeks).sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([week_start, present]) => ({ week_start, present }));
+  const present = weeks.filter((w) => w.present).length;
+  const absent = weeks.length - present;
+  const remaining = p.limit === null ? null : p.limit - absent;
+  const level = remaining === null ? null : remaining < 0 ? "exceeded" : remaining === 0 ? "exhausted" : remaining === 1 ? "last" : "ok";
+  const base = weeks.length ? `byl ${present} z ${weeks.length}` : "docházka zatím nezapsaná";
+  const tail = { exceeded: `limit překročen o ${-remaining}`, exhausted: "už žádná nezbývá", last: "zbývá poslední" }[level] ?? `zbývá ${remaining}`;
+  const text = p.limit === null ? (absent ? `${base}, absence ${absent}` : base) : `${base}, absence ${absent} z max. ${p.limit} (${tail})`;
+  const warning = p.credit !== "passed" && ["last", "exhausted", "exceeded"].includes(level)
+    ? `${s.name}: ${level === "exceeded" ? "limit absencí překročen" : level === "exhausted" ? "vyčerpané absence" : "zbývá poslední povolená absence"} (${absent} z max. ${p.limit})`
+    : null;
+  const exams = schoolState.exams.filter((e) => e.subject_id === s.id);
+  const closed = exams.filter((e) => !SCHOOL_EXAM_OPEN.includes(e.status ?? ""));
+  return {
+    id: s.id, name: s.name, code: s.code ?? "", semester: s.semester ?? "", active: s.active,
+    credit: { status: p.credit, label: CREDIT_LABELS[p.credit], date: p.creditDate },
+    exams: { open: exams.length - closed.length, closed: closed.length, passed: closed.filter((e) => e.status === "passed").length,
+      failed: closed.filter((e) => e.status === "failed").length,
+      results: closed.map((e) => ({ id: e.id, title: e.title, date: e.exam_date, outcome: e.status,
+        outcome_label: { passed: "složeno", failed: "nesloženo" }[e.status] ?? "bez hodnocení", result: e.result_value ?? null })) },
+    attendance: { present, absent, recorded: weeks.length, limit: p.limit, remaining, level, text, warning,
+      this_week: p.weeks[PROGRESS_WEEK] ?? null, weeks },
+  };
+}
+const progressCalls = [];
+let failNextAttendance = false;
 // MRK-14: stavová Škola (splnění / uzavření / znovuotevření); /__mock/school/reset vrátí fixtures.
 const schoolState = {};
 function resetSchool() {
   Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams"),
     subjects: fixture("school-subjects") });  // MRK-75: id 4 = archivovaný předmět
+  // MRK-86: zápočet a docházka – Fyzika má limit 2 a jednu absenci (zbývá poslední), Dějepis zápočet splněný
+  schoolState.progress = {
+    2: { credit: "pending", creditDate: null, limit: 2, weeks: { [PROGRESS_PREV]: false, "2026-09-21": true } },
+    3: { credit: "passed", creditDate: "2026-10-02", limit: null, weeks: { [PROGRESS_PREV]: true } },
+  };
 }
 resetSchool();
 const SCHOOL_ASSIGNMENT_DONE = ["done", "completed", "hotovo", "closed", "finished"];
@@ -441,12 +479,46 @@ createServer(async (req, res) => {
   }
   if (url.pathname === "/__mock/school/reset") {
     resetSchool();
+    progressCalls.length = 0;
+    failNextAttendance = false;
     return respond(200, { ok: true });
   }
   // MRK-75: předměty – archivované jen s ?include_archived=true; PATCH úprava / archivace / obnovení
   if (url.pathname === "/school/subjects" && req.method === "GET") {
     const all = url.searchParams.get("include_archived") === "true";
     return respond(200, schoolState.subjects.filter((s) => all || s.active), 60);
+  }
+  // MRK-86: zápočty a docházka (/__mock/school/progress-calls = zápisy pro kontrolu UI)
+  if (url.pathname === "/school/progress" && req.method === "GET") {
+    return respond(200, { week_start: PROGRESS_WEEK, previous_week_start: PROGRESS_PREV,
+      subjects: schoolState.subjects.filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name, "cs")).map(subjectProgress) }, 80);
+  }
+  if (url.pathname === "/__mock/school/progress-calls") return respond(200, progressCalls);
+  const progressMatch = /^\/school\/subject\/(\d+)\/(credit|attendance)$/.exec(url.pathname);
+  if (progressMatch && req.method === "PUT") {
+    const s = schoolState.subjects.find((x) => x.id === Number(progressMatch[1]));
+    if (!s) return respond(404, { detail: { code: "not_found", message: "Předmět neexistuje." } });
+    const b = body ?? {};
+    progressCalls.push({ subject_id: s.id, kind: progressMatch[2], body: b });
+    if (b.__fail || (progressMatch[2] === "attendance" && failNextAttendance)) {
+      failNextAttendance = false;
+      return respond(500, { detail: "Server odpověděl chybou." }, 100);
+    }
+    subjectProgress(s);
+    const p = schoolState.progress[s.id];
+    if (progressMatch[2] === "credit") {
+      p.credit = b.status;
+      p.creditDate = b.status === "pending" ? null : b.date ?? "2026-10-11";
+    } else if (b.present === null) {
+      delete p.weeks[b.week_start];
+    } else {
+      p.weeks[b.week_start] = Boolean(b.present);
+    }
+    return respond(200, subjectProgress(s), 200);
+  }
+  if (url.pathname === "/__mock/school/fail-next-attendance") {
+    failNextAttendance = true;
+    return respond(200, { ok: true });
   }
   const subjectMatch = /^\/school\/subject\/(\d+)$/.exec(url.pathname);
   if (subjectMatch && req.method === "PATCH") {
@@ -455,6 +527,10 @@ createServer(async (req, res) => {
     const b = body ?? {};
     if (b.name !== undefined && !String(b.name).trim()) {
       return respond(422, { detail: { code: "name_required", message: "Název předmětu je povinný." } }, 200);
+    }
+    if ("absence_limit" in b) {  // MRK-86: limit absencí patří k docházce
+      subjectProgress(item);
+      schoolState.progress[item.id].limit = b.absence_limit;
     }
     Object.assign(item, b);
     return respond(200, item, 300);

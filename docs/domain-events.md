@@ -58,6 +58,7 @@ declaration. Pilot types:
 | `school.assignment.completed` / `.reopened` | `school_service` | `assignment_id`, `subject_id`, `completed_at` / `previous_completed_at` |
 | `school.exam.closed` / `.reopened` | `school_service` | `exam_id`, `subject_id`, `outcome`, `result_type`, `completed_at` / `previous_outcome` |
 | `school.subject.updated` / `.archived` / `.restored` | `modules/school/subjects.update_subject` (MRK-75; archive = `active` false, nothing is deleted) | `subject_id`, `active` |
+| `school.subject.credit_changed` | `modules/school/progress.set_credit` (MRK-86; only when status or date changes; weekly attendance is Activity history only) | `subject_id`, `credit_status`, `previous_status`, `credit_date` |
 | `habits.entry.done` / `.skipped` | `modules/habits/service.set_entry` (only when the state changes; a note/value edit is Activity history only) | `habit_id`, `entry_id`, `date`, `state`, `previous_state` |
 | `fitness.exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |
 | `fitness.rehab_exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |

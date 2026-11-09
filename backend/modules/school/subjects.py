@@ -14,7 +14,9 @@ import database
 from domain_events import ActivityProjection, append_domain_event
 from models import Subject
 
-FIELDS = ("name", "code", "semester", "credits", "active")
+FIELDS = ("name", "code", "semester", "credits", "active", "absence_limit")
+NULLABLE = frozenset({"absence_limit"})  # MRK-86: null = bez limitu absencí
+MAX_ABSENCE_LIMIT = 52
 LIMITS = {"name": 150, "code": 50, "semester": 50}
 MAX_CREDITS = 99
 
@@ -34,16 +36,20 @@ class SubjectUpdate(BaseModel):
     semester: str | None = None
     credits: int | None = None
     active: bool | None = None
+    absence_limit: int | None = None
 
 
 def subject_dict(s: Subject) -> dict:
     return {"id": s.id, "name": s.name, "code": s.code, "semester": s.semester, "credits": s.credits,
-            "active": s.active is not False}
+            "active": s.active is not False, "absence_limit": s.absence_limit}
 
 
 def _clean(values: dict) -> dict:
     out = {}
     for key, value in values.items():
+        if value is None and key in NULLABLE:
+            out[key] = None
+            continue
         if value is None:
             raise SubjectError("Pole nesmí být prázdné.", 422, "empty_field")
         if key in LIMITS:
@@ -54,6 +60,8 @@ def _clean(values: dict) -> dict:
                 raise SubjectError("Text je příliš dlouhý.", 422, "too_long")
         if key == "credits" and not 0 <= value <= MAX_CREDITS:
             raise SubjectError(f"Kredity musí být 0–{MAX_CREDITS}.", 422, "invalid_credits")
+        if key == "absence_limit" and not 0 <= value <= MAX_ABSENCE_LIMIT:
+            raise SubjectError(f"Limit absencí musí být 0–{MAX_ABSENCE_LIMIT}.", 422, "invalid_absence_limit")
         out[key] = value
     return out
 
