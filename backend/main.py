@@ -459,6 +459,7 @@ class ReminderUpdateRequest(BaseModel):
 class PushSubscriptionRequest(BaseModel):
     endpoint: str
     keys: dict[str, str]
+    server_key: str | None = None  # MRK-102: VAPID veřejný klíč, pro který prohlížeč odběr vytvořil
 
 
 class BriefingGenerateRequest(BaseModel):
@@ -2158,7 +2159,10 @@ def push_subscribe(request: PushSubscriptionRequest, http_request: Request):
     try:
         try:
             sub = delivery_service.upsert_subscription(
-                db, request.endpoint, request.keys, http_request.headers.get("user-agent"))
+                db, request.endpoint, request.keys, http_request.headers.get("user-agent"),
+                server_key=request.server_key, current_key=delivery_service.WebPushProvider().public_key)
+        except delivery_service.StaleServerKey:
+            raise HTTPException(status_code=409, detail={"category": "stale_key"}) from None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         db.commit()
