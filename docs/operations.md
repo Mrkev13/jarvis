@@ -355,8 +355,11 @@ it red, no verdict keeps it pending, and every new push needs a new review. On `
 auto-merge (merge commit). With the label `manual-merge` nobody auto-merges; Standa merges by hand.
 
 **The gate is trusted code.** It runs only the copy on `main`: `pull_request_target` (every push / label change)
-runs the base branch's file, and after each posted review `codex-review.sh` calls
-`gh workflow run review-gate.yml --ref main -f pr=<n>` (a `workflow_dispatch` from any other ref fails). It never
+runs the base branch's file, after each posted review `codex-review.sh` calls
+`gh workflow run review-gate.yml --ref main -f pr=<n>` (a `workflow_dispatch` from any other ref fails), and a
+`schedule` pass every 10 minutes re-evaluates **all open PRs** - an edited or dismissed review is not an event the
+trusted copy sees, so within 10 minutes the status follows it and auto-merge is switched off when the verdict is
+no longer `MERGE`. It never
 checks out or runs PR code. Because `pull_request_target` checks land on the base commit, the result is a **commit
 status** on the PR head with the context `Review gate (Codex verdict)` - that is the required check. After a review
 written by hand, re-run it from *Actions → Review gate → Run workflow* (branch `main`, PR number).
@@ -443,30 +446,32 @@ scripts refuse to use it.
 **Automatic fixes after `BLOCK` (Ubuntu host, same user, Docker):** `scripts/linux/claude-fix.sh` runs every 10
 minutes from a second user timer. For each open, non-draft PR from this repository whose newest verdict on its
 **current head** is `BLOCK`:
-- it clones the PR branch **fresh** into a disposable work folder and starts a **disposable container**
-  (`scripts/linux/autofix/`: Python 3.12, Node 22, git, Claude Code CLI) that gets only that clone, the prompt with
-  the review, an output folder and the **dedicated Claude token** - no GitHub token, no home folder, no production
-  checkout, no other host files. Non-root (your uid), `--cap-drop ALL`, `no-new-privileges`, read-only root
-  filesystem, pid / memory / CPU limits and a 50-minute limit. Inside, Claude edits, runs the repo's checks and
-  commits (`--permission-mode dontAsk`, allowlist; `git push`, `gh`, `curl`, web tools refused);
-- the PR's code (tests, setup, npm scripts) therefore only ever runs **inside the container**;
-- back on the host only a **git bundle** of the new commits is read - never the container's repository or its git
-  config. The trusted script checks it: commits on top of the reviewed head, none touching `.github/` or `scripts/`
-  (the automation itself), the remote branch still at the reviewed commit - and only then pushes, fast-forward,
-  never with force. Claude's summary is posted as a PR comment (never a verdict);
+- it exports a **plain copy of the tracked files** at the reviewed commit (no `.git`, no config, no hooks) and starts
+  a **disposable container** (`scripts/linux/autofix/`: Python 3.12, Node 22, Claude Code CLI) that gets only that
+  copy (read-only), the prompt with the review and the **dedicated Claude token**. Inside, Claude may **only read and
+  edit files** (`--permission-mode dontAsk`, allowlist `Read Edit Write Glob Grep`; shell, git and web refused) -
+  so **no code from the PR ever runs**, and nothing the PR controls can reach the token or the network. Tests run in
+  CI after the push, and Codex reviews the fix again;
+- container: non-root (your uid), `--cap-drop ALL`, `no-new-privileges`, read-only root filesystem, everything it
+  writes goes to size-limited tmpfs (`/work` 1 GB, `/tmp` 512 MB), pid / memory / CPU limits, 50-minute limit, no
+  GitHub token, no host folder mounted writable. The network is used only by the Claude CLI itself;
+- the only way back is the container's **stdout**: a tar with Claude's answer and the edited tree, capped at
+  `MAX_OUT_BYTES` (200 MB) and unpacked with Python's safe `data` filter (no absolute paths, `..`, links out,
+  devices). The trusted script **builds the commit itself** with its own git config and checks it: on top of the
+  reviewed head, nothing in `.github/` or `scripts/`, at most `MAX_CHANGED_FILES` (200) files, **no value of the
+  token** in the diff or in the answer - and only then pushes, fast-forward, never with force, only while the
+  remote branch is still at the reviewed commit. Claude's summary is posted as a PR comment (never a verdict);
 - each blocked commit is attempted once; the round limit and the labels `needs-human`, `manual-review`,
   `no-autofix` stop it; optional `CLAUDE_BUDGET_USD` caps one run (`--max-budget-usd`);
-- state and logs: `~/.local/state/standa-hub/claude-fix`.
+- state and logs (log capped at 1 MB per run): `~/.local/state/standa-hub/claude-fix`.
 
-Residual risk: the container has network access (the Claude API and package registries need it), so code in a PR
-could use the dedicated Claude token or the network from inside it. Keep that token separate (create it only for
-this), set a budget, and revoke it if a PR misbehaves. `AUTOFIX_NETWORK` can name a docker network with an egress
-proxy if you want to restrict hosts further.
+Keep the dedicated token for this only (`claude setup-token`), with a budget; revoke it if anything looks wrong.
 
 ```bash
 # once, after the Codex review setup above
 git clone https://github.com/Mrkev13/jarvis ~/standa-hub-fix      # fix clone, NOT the review or production clone
-# sandbox image from the reviewed copy (pin the Claude Code version you checked with `claude --version`)
+# sandbox image from the reviewed copy (pin the Claude Code version you checked with `claude --version`);
+# host needs python3 >= 3.11.4 (Ubuntu 24.04: 3.12) for the safe unpack
 docker build -t standa-autofix --build-arg CLAUDE_CODE_VERSION=<version> ~/standa-hub-review/scripts/linux/autofix
 # dedicated Claude token for the sandbox only (claude setup-token prints it once); file readable only by you
 install -Dm600 /dev/null ~/.config/standa-hub/claude-autofix.env
@@ -474,12 +479,15 @@ nano ~/.config/standa-hub/claude-autofix.env                     # one line: CLA
 install -Dm755 ~/standa-hub-review/scripts/linux/claude-fix.sh ~/.local/bin/standa-claude-fix
 install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-claude-fix.{service,timer}
 systemctl --user daemon-reload && systemctl --user enable --now standa-claude-fix.timer
-~/.local/bin/standa-claude-fix check                             # ready: true, sandbox_image, claude_token_file
+~/.local/bin/standa-claude-fix check                             # ready: true, sandbox_image, claude_token_file, safe_unpack
 ```
 
 Your user must be allowed to run `docker` (group `docker`). Before the first real run, check the flags your Claude
 Code version accepts inside the image (`docker run --rm standa-autofix claude --help`: `-p`,
 `--permission-mode dontAsk`, `--allowedTools`, `--disallowedTools`, `--max-budget-usd`).
+
+The review gate's periodic pass (every 10 minutes, see above) also catches a review that was edited or dismissed
+after a `MERGE`: the status turns red / pending and auto-merge is switched off again.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

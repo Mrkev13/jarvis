@@ -48,7 +48,8 @@ def test_only_a_standalone_verdict_line_counts(body, verdict):
 
 def test_gate_runs_only_the_trusted_copy_from_the_default_branch():
     """Review MRK-97 P1: a PR must not run its own copy of the gate (pull_request would)."""
-    assert set(TRIGGERS) == {'pull_request_target', 'workflow_dispatch'}
+    assert set(TRIGGERS) == {'pull_request_target', 'workflow_dispatch', 'schedule'}
+    assert TRIGGERS['schedule'] == [{'cron': '*/10 * * * *'}], 'periodic trusted pass catches edited / dismissed reviews'
     assert set(TRIGGERS['pull_request_target']['types']) >= {'opened', 'synchronize', 'reopened', 'labeled', 'unlabeled'}
     assert 'pull_request' not in TRIGGERS and 'pull_request_review' not in TRIGGERS
     assert 'actions/checkout' not in GATE_TEXT, 'never check out PR code with a write token'
@@ -70,16 +71,21 @@ NODE_HARNESS = r"""
 const fs = require('fs');
 const [scriptFile, scenarioFile] = process.argv.slice(2);
 const sc = JSON.parse(fs.readFileSync(scenarioFile, 'utf8'));
-const out = { statuses: [], labels: [], automerge: 0, failed: null, notices: [] };
+const out = { statuses: [], labels: [], automerge: 0, automergeOff: 0, failed: null, notices: [], evaluated: [] };
 const list = (name) => async () => sc[name];
 const github = {
   paginate: async (fn, args) => fn(args),
   rest: {
-    pulls: { get: async () => ({ data: sc.pr }), listFiles: list('files'), listReviews: list('reviews') },
+    pulls: { get: async (a) => { out.evaluated.push(a.pull_number); return { data: { ...sc.pr, number: a.pull_number } }; },
+             list: async () => sc.open || [], listFiles: list('files'), listReviews: list('reviews') },
     repos: { createCommitStatus: async (a) => { out.statuses.push([a.sha, a.state, a.context]); } },
     issues: { addLabels: async (a) => { out.labels.push(...a.labels); } },
   },
-  graphql: async () => { if (sc.automergeFails) throw new Error('not allowed'); out.automerge += 1; },
+  graphql: async (q) => {
+    if (q.includes('disablePullRequestAutoMerge')) { out.automergeOff += 1; return; }
+    if (sc.automergeFails) throw new Error('not allowed');
+    out.automerge += 1;
+  },
 };
 const core = { setFailed: (m) => { out.failed = m; }, notice: (m) => out.notices.push(m), warning: (m) => out.notices.push(m) };
 const context = { repo: { owner: 'Mrkev13', repo: 'jarvis' }, eventName: sc.event, ref: sc.ref,
@@ -94,13 +100,14 @@ HEAD = 'a' * 40
 
 
 def run_gate(tmp_path, *, reviews=(), files=('backend/x.py',), labels=(), event='pull_request_target', ref='refs/heads/main',
-             inp='', draft=False, automerge_fails=False):
+             inp='', draft=False, automerge_fails=False, auto_merge=None, open_prs=()):
     import json
     import subprocess
     pr = {'number': 7, 'state': 'open', 'draft': draft, 'node_id': 'PR_x', 'head': {'sha': HEAD},
-          'labels': [{'name': n} for n in labels]}
+          'labels': [{'name': n} for n in labels], 'auto_merge': auto_merge}
     scenario = {'pr': pr, 'files': [{'filename': f} for f in files], 'reviews': list(reviews), 'event': event,
-                'ref': ref, 'input': inp, 'automergeFails': automerge_fails}
+                'ref': ref, 'input': inp, 'automergeFails': automerge_fails,
+                'open': [{'number': n} for n in open_prs]}
     (tmp_path / 'gate.js').write_text(gate_script())
     (tmp_path / 'scenario.json').write_text(json.dumps(scenario))
     (tmp_path / 'harness.js').write_text(NODE_HARNESS)
@@ -162,6 +169,33 @@ def test_dispatch_runs_only_from_main_with_a_numeric_pr(tmp_path):
     assert other['failed'] and other['statuses'] == [] and other['automerge'] == 0
     bad = run_gate(tmp_path, reviews=[review(MERGE)], event='workflow_dispatch', inp='7; rm -rf /')
     assert bad['failed'] == 'No valid PR number.' and bad['statuses'] == []
+
+
+@needs_node
+def test_edited_or_dismissed_review_turns_the_gate_back_off(tmp_path):
+    """Review MRK-97 P1: MERGE → auto-merge on; the review is then edited to BLOCK or dismissed (no event the trusted
+    copy sees) → the scheduled pass re-evaluates every open PR: failure/pending and auto-merge OFF."""
+    on = run_gate(tmp_path, reviews=[review(MERGE)])
+    assert on['statuses'][0][1] == 'success' and on['automerge'] == 1
+    enabled = {'merge_method': 'merge'}
+    edited = run_gate(tmp_path, reviews=[review(BLOCK)], event='schedule', auto_merge=enabled, open_prs=[7])
+    assert edited['evaluated'] == [7] and edited['statuses'][0][1] == 'failure' and edited['automergeOff'] == 1
+    dismissed = run_gate(tmp_path, reviews=[review(MERGE, state='DISMISSED')], event='schedule', auto_merge=enabled, open_prs=[7])
+    assert dismissed['statuses'][0][1] == 'pending' and dismissed['automergeOff'] == 1 and dismissed['automerge'] == 0
+
+
+@needs_node
+def test_schedule_evaluates_every_open_pr_and_keeps_auto_merge_once(tmp_path):
+    out = run_gate(tmp_path, reviews=[review(MERGE)], event='schedule', open_prs=[7, 8, 9])
+    assert out['evaluated'] == [7, 8, 9] and len(out['statuses']) == 3
+    again = run_gate(tmp_path, reviews=[review(MERGE)], event='schedule', open_prs=[7], auto_merge={'merge_method': 'merge'})
+    assert again['automerge'] == 0 and again['automergeOff'] == 0, 'already on: nothing to change'
+
+
+@needs_node
+def test_critical_change_switches_an_enabled_auto_merge_off(tmp_path):
+    out = run_gate(tmp_path, reviews=[review(MERGE)], files=['backend/alembic/versions/x.py'], auto_merge={'merge_method': 'merge'})
+    assert out['labels'] == ['manual-merge'] and out['automergeOff'] == 1
 
 
 @needs_node

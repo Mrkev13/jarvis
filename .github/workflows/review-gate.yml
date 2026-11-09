@@ -5,12 +5,16 @@ name: Review gate
 #   Codex-Verdict: MERGE      or      Codex-Verdict: BLOCK
 #
 # TRUSTED: this workflow always runs the copy on the default branch, never a PR's copy:
-# - pull_request_target runs the base branch's file; workflow_dispatch runs the file of --ref main.
-# - It never checks out or runs PR code; it only reads the PR through the API.
+# - pull_request_target runs the base branch's file; workflow_dispatch runs the file of --ref main; schedule runs
+#   the default branch. It never checks out or runs PR code; it only reads PRs through the API.
 # Because pull_request_target check runs land on the base commit, the result is a commit STATUS on the PR head:
 #   context "Review gate (Codex verdict)" - this is the required check in branch protection (docs/operations.md).
-# Triggers: every push / label change (pull_request_target) and, after each posted review, codex-review.sh runs
-#   gh workflow run review-gate.yml --ref main -f pr=<n>      (a review by hand: "Run workflow" in Actions)
+# Triggers:
+# - every push / label change of a PR (pull_request_target);
+# - after each posted review: codex-review.sh runs `gh workflow run review-gate.yml --ref main -f pr=<n>`;
+# - every 10 minutes for ALL open PRs (schedule): a review that was edited or dismissed is not an event the
+#   trusted copy sees, so the periodic pass re-evaluates it - a verdict that is no longer MERGE turns the status
+#   red/pending and switches auto-merge OFF again.
 #
 # On MERGE: normal PR -> GitHub auto-merge; critical change (migrations, auth, backups, CI/review/deploy) -> label
 # `manual-merge`, no auto-merge, Standa merges by hand. Label `manual-merge` set by hand = no auto-merge either.
@@ -26,22 +30,24 @@ on:
       pr:
         description: Pull request number
         required: true
+  schedule:
+    - cron: '*/10 * * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number || github.event.inputs.pr }}
-  cancel-in-progress: true
+  group: review-gate-${{ github.event.pull_request.number || github.event.inputs.pr || 'all' }}
+  cancel-in-progress: false
 
 jobs:
   gate:
     name: Review gate (Codex verdict)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
-      contents: write        # gh pr merge --auto
-      pull-requests: write   # label manual-merge, read reviews and files
+      contents: write        # enable auto-merge
+      pull-requests: write   # label manual-merge, read reviews and files, disable auto-merge
       statuses: write        # the required status on the PR head
     steps:
       - uses: actions/github-script@v7
@@ -57,16 +63,6 @@ jobs:
               core.setFailed(`Run the review gate from ${trusted} only.`);
               return;
             }
-            const input = String(process.env.PR_INPUT || '');
-            const number = context.payload.pull_request ? context.payload.pull_request.number : (/^[0-9]{1,7}$/.test(input) ? Number(input) : 0);
-            if (!Number.isInteger(number) || number <= 0) { core.setFailed('No valid PR number.'); return; }
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
-            const head = pr.head.sha;
-            const short = head.slice(0, 7);
-            const status = (state, description) => github.rest.repos.createCommitStatus(
-              { owner, repo, sha: head, state, context: CONTEXT, description: description.slice(0, 140) });
-            if (pr.state !== 'open') { core.notice(`PR #${number} is ${pr.state}.`); return; }
-
             // Critical areas need Standa's manual merge (AGENTS.md workflow, docs/operations.md "Critical changes").
             const CRITICAL = [
               ['migrace', /^backend\/alembic\//],
@@ -74,45 +70,79 @@ jobs:
               ['zálohy a obnova', /^backend\/(backup_service|offsite_backup|offsite_restic)\.py$|^scripts\/.*(backup|restore|offsite)/i],
               ['CI, review a deploy', /^\.github\/|^scripts\/|(^|\/)Dockerfile[^/]*$|(^|\/)(docker-)?compose[^/]*\.ya?ml$/],
             ];
-            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
-            const paths = files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
-            const critical = CRITICAL.filter(([, re]) => paths.some((p) => re.test(p))).map(([label]) => label);
+            const AUTO_ON = 'mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: MERGE}) { clientMutationId } }';
+            const AUTO_OFF = 'mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }';
 
-            // Only the repository owner's account (Codex CLI posts as the owner), only reviews on this commit,
-            // never dismissed ones; the newest verdict wins.
-            const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: number, per_page: 100 });
-            const verdicts = reviews
-              .filter((r) => r.commit_id === head && r.user && r.user.login === owner && r.state !== 'DISMISSED')
-              .map((r) => ({ at: r.submitted_at || '', m: /^Codex-Verdict:\s*(MERGE|BLOCK)\s*$/m.exec(r.body || '') }))
-              .filter((x) => x.m)
-              .sort((a, b) => a.at.localeCompare(b.at));
-            const last = verdicts[verdicts.length - 1];
-            if (!last) {
-              await status('pending', `Waiting for a Codex review with "Codex-Verdict: MERGE" on ${short}.`);
-              core.notice(`PR #${number}: no verdict on ${short} yet.`);
-              return;
-            }
-            if (last.m[1] !== 'MERGE') {
-              await status('failure', `Codex verdict on ${short}: BLOCK. Fix the findings and push.`);
-              core.notice(`PR #${number}: BLOCK on ${short}.`);
-              return;
-            }
-            await status('success', `Codex verdict on ${short}: MERGE.` + (critical.length ? ' Critical change: manual merge.' : ''));
-            if (pr.draft) return;
-            const labels = pr.labels.map((l) => l.name);
-            if (critical.length) {
-              if (!labels.includes('manual-merge')) {
-                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['manual-merge'] });
+            async function autoMergeOff(pr, why) {
+              if (!pr.auto_merge) return;
+              try {
+                await github.graphql(AUTO_OFF, { id: pr.node_id });
+                core.notice(`PR #${pr.number}: auto-merge switched off (${why}).`);
+              } catch (e) {
+                core.warning(`PR #${pr.number}: could not switch auto-merge off: ${e.message}`);
               }
-              core.notice(`Critical change (${critical.join(', ')}): approved by Codex, waiting for Standa's manual merge.`);
+            }
+
+            async function evaluate(number) {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              if (pr.state !== 'open') { core.notice(`PR #${number} is ${pr.state}.`); return; }
+              const head = pr.head.sha;
+              const short = head.slice(0, 7);
+              const status = (state, description) => github.rest.repos.createCommitStatus(
+                { owner, repo, sha: head, state, context: CONTEXT, description: description.slice(0, 140) });
+
+              const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
+              const paths = files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+              const critical = CRITICAL.filter(([, re]) => paths.some((p) => re.test(p))).map(([label]) => label);
+
+              // Only the repository owner's account (Codex CLI posts as the owner), only reviews on this commit,
+              // never dismissed ones; the newest verdict wins (an edited review counts with its current text).
+              const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: number, per_page: 100 });
+              const verdicts = reviews
+                .filter((r) => r.commit_id === head && r.user && r.user.login === owner && r.state !== 'DISMISSED')
+                .map((r) => ({ at: r.submitted_at || '', m: /^Codex-Verdict:\s*(MERGE|BLOCK)\s*$/m.exec(r.body || '') }))
+                .filter((x) => x.m)
+                .sort((a, b) => a.at.localeCompare(b.at));
+              const last = verdicts[verdicts.length - 1];
+              if (!last) {
+                await status('pending', `Waiting for a Codex review with "Codex-Verdict: MERGE" on ${short}.`);
+                await autoMergeOff(pr, 'no MERGE verdict on the head');
+                return;
+              }
+              if (last.m[1] !== 'MERGE') {
+                await status('failure', `Codex verdict on ${short}: BLOCK. Fix the findings and push.`);
+                await autoMergeOff(pr, 'verdict BLOCK');
+                return;
+              }
+              await status('success', `Codex verdict on ${short}: MERGE.` + (critical.length ? ' Critical change: manual merge.' : ''));
+              if (pr.draft) { await autoMergeOff(pr, 'draft'); return; }
+              const labels = pr.labels.map((l) => l.name);
+              if (critical.length) {
+                if (!labels.includes('manual-merge')) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['manual-merge'] });
+                }
+                await autoMergeOff(pr, 'critical change');
+                core.notice(`PR #${number}: critical change (${critical.join(', ')}), waiting for Standa's manual merge.`);
+                return;
+              }
+              if (labels.includes('manual-merge')) { await autoMergeOff(pr, 'label manual-merge'); return; }
+              if (pr.auto_merge) return;
+              try {
+                await github.graphql(AUTO_ON, { id: pr.node_id });
+                core.notice(`PR #${number}: auto-merge enabled.`);
+              } catch (e) {
+                core.warning(`Auto-merge not enabled (repo setting "Allow auto-merge" or branch protection missing?): ${e.message}`);
+              }
+            }
+
+            if (context.eventName === 'schedule') {
+              const open = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+              for (const pr of open) {
+                try { await evaluate(pr.number); } catch (e) { core.warning(`PR #${pr.number}: ${e.message}`); }
+              }
               return;
             }
-            if (labels.includes('manual-merge')) { core.notice('Label manual-merge: merge by hand.'); return; }
-            try {
-              await github.graphql(
-                'mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: MERGE}) { clientMutationId } }',
-                { id: pr.node_id });
-              core.notice(`PR #${number}: auto-merge enabled.`);
-            } catch (e) {
-              core.warning(`Auto-merge not enabled (repo setting "Allow auto-merge" or branch protection missing?): ${e.message}`);
-            }
+            const input = String(process.env.PR_INPUT || '');
+            const number = context.payload.pull_request ? context.payload.pull_request.number : (/^[0-9]{1,7}$/.test(input) ? Number(input) : 0);
+            if (!Number.isInteger(number) || number <= 0) { core.setFailed('No valid PR number.'); return; }
+            await evaluate(number);

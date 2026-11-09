@@ -1,43 +1,39 @@
 #!/usr/bin/env bash
 # MRK-97: runs INSIDE the disposable autofix container (scripts/linux/autofix/Dockerfile), never on the host.
 #
-# The container gets only: /work (a fresh clone of the PR branch, no host config, no hooks), /prompt.md (read-only),
-# /out (results) and the dedicated Claude token from the env file. No GitHub token, no host files, no production.
-# Claude edits and commits inside /work; this script then writes the new commits as a git bundle to /out. The
-# trusted host script (claude-fix.sh) verifies the bundle and is the only one that pushes.
-#
-#   autofix-run <reviewed head sha>
-# Outputs: $OUT_DIR/answer.md (Claude's summary), claude.exit, fix.bundle (only when there are new commits).
+# Input:  /src (read-only) = the PR's tracked files at the reviewed commit - a plain file tree, NO .git;
+#         /prompt.md (read-only) = the task with the review text; the dedicated Claude token in the environment.
+# Work:   the tree is copied to /work (size-limited tmpfs; the stage in /tmp is a tmpfs too). Claude may only read and edit files there - no shell,
+#         no git, no web (allowlist + dontAsk). So NO code from the PR (tests, setup or npm scripts) runs anywhere
+#         near the token; CI runs the tests after the push, and Codex reviews the result again.
+# Output: a tar on stdout with answer.md (Claude's summary) and tree/ (the edited files). The trusted host script
+#         (claude-fix.sh) caps its size, unpacks it safely, builds the commit itself, checks it and pushes.
 set -uo pipefail
 
-HEAD_SHA="${1:?usage: autofix-run <head sha>}"
-OUT_DIR="${OUT_DIR:-/out}"
+SRC_DIR="${SRC_DIR:-/src}"
+WORK_DIR="${WORK_DIR:-/work}"
+STAGE_DIR="${STAGE_DIR:-/tmp/stage}"
 PROMPT_FILE="${PROMPT_FILE:-/prompt.md}"
 CLAUDE="${CLAUDE:-claude}"
+MAX_ANSWER_BYTES=200000
 
-# What Claude may do without asking (dontAsk refuses everything else). Inside the container these are conveniences,
-# not the security boundary - the container is.
-ALLOWED_TOOLS=(Read Edit Write Glob Grep
-  "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
-  "Bash(bash scripts/setup-dev.sh:*)" "Bash(.venv/bin/python -m pytest:*)" "Bash(.venv/bin/python -m pyflakes:*)"
-  "Bash(npm run lint:*)" "Bash(npm test:*)" "Bash(npm run build:*)" "Bash(npx tsc:*)" "Bash(cd:*)" "Bash(ls:*)")
-DENIED_TOOLS=("Bash(git push:*)" "Bash(gh:*)" "Bash(curl:*)" "Bash(wget:*)" WebFetch WebSearch)
+# Read and edit files only. Everything else is refused in dontAsk mode; the denials are belt and braces.
+ALLOWED_TOOLS=(Read Edit Write Glob Grep)
+DENIED_TOOLS=(Bash WebFetch WebSearch NotebookEdit)
 
 budget=()
 [[ -n "${CLAUDE_BUDGET_USD:-}" ]] && budget=(--max-budget-usd "$CLAUDE_BUDGET_USD")
 
-git config --global --add safe.directory "$PWD"
-git config --global user.name "Claude (autofix)"
-git config --global user.email "noreply@anthropic.com"
+mkdir -p "$STAGE_DIR"
+cp -a "$SRC_DIR/." "$WORK_DIR/"
+cd "$WORK_DIR" || exit 3
 
 claude_exit=0
 "$CLAUDE" -p "$(cat "$PROMPT_FILE")" --permission-mode dontAsk --output-format text \
   --allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DENIED_TOOLS[@]}" "${budget[@]}" \
-  </dev/null >"$OUT_DIR/answer.md" 2>"$OUT_DIR/claude.log" || claude_exit=$?
-echo "$claude_exit" >"$OUT_DIR/claude.exit"
+  </dev/null >"$STAGE_DIR/answer.raw" 2>"$STAGE_DIR/claude.log" || claude_exit=$?
+head -c "$MAX_ANSWER_BYTES" "$STAGE_DIR/answer.raw" >"$STAGE_DIR/answer.md"
+echo "$claude_exit" >"$STAGE_DIR/claude.exit"
 
-# Only commits on top of the reviewed head travel back; nothing else from this container is used.
-if git merge-base --is-ancestor "$HEAD_SHA" HEAD 2>/dev/null && [[ "$(git rev-list --count "$HEAD_SHA..HEAD")" -gt 0 ]]; then
-  git bundle create --quiet "$OUT_DIR/fix.bundle" HEAD "^$HEAD_SHA"
-fi
-exit 0
+# stdout = the only channel back to the host
+tar -cf - -C "$STAGE_DIR" answer.md claude.exit -C "$WORK_DIR" --transform 's,^\./,tree/,' .
