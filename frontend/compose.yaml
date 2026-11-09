@@ -1,0 +1,23 @@
+# MRK-101: Standa Hub frontend on the Ubuntu host (docs/operations.md "Ubuntu production").
+# NEXT_PUBLIC_API_URL (the public https API origin via Tailscale Serve) comes from frontend/.env.production.local
+# on the server (git-ignored):   docker compose --env-file .env.production.local up -d --build
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    image: standa-hub-frontend:local
+    container_name: standa-hub-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

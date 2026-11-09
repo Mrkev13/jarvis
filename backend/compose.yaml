@@ -1,0 +1,45 @@
+# MRK-101: Standa Hub backend on the Ubuntu host (docs/operations.md "Ubuntu production").
+# Secrets live only in backend/.env.production on the server (mode 600, never in git; see .env.production.template).
+# PostgreSQL runs in its own stack (/srv/services/postgres) - this joins its network `postgres_default`.
+# Migrations run at startup (RUN_ALEMBIC_UPGRADE_AT_STARTUP, default true).
+# APP_COMMIT is set by the deploy (MRK-108) so /health reports the running commit; empty = unknown.
+services:
+  backend:
+    build:
+      context: .
+    image: standa-hub-backend:local
+    container_name: standa-hub-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        format: raw
+    environment:
+      APP_COMMIT: ${APP_COMMIT:-}
+    command:
+      - python
+      - -m
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-proxy-headers
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - /srv/standa-hub-data/media:/data/media
+      - /srv/standa-hub-data/backups:/data/backups
+    networks:
+      - postgres_net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+networks:
+  postgres_net:
+    external: true
+    name: postgres_default

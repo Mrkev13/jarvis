@@ -76,6 +76,11 @@ Změna této tabulky je architektonické rozhodnutí: samostatný issue, PR a re
 
 Caddy, Tailscale a Pi-hole mají rozdílné role: Caddy směruje HTTP(S), Tailscale vytváří privátní síť a Pi-hole řeší DNS/filtering. Žádná z těchto vrstev neobchází autentizaci aplikací.
 
+**Aktuální stav (2026-11, MRK-101):** Ubuntu server `standa-server` – Jarvis (backend + frontend) v Docker Compose
+z tohoto repa (`/srv/standa-hub`), PostgreSQL 18 a Uptime Kuma ve vlastních stackách v `/srv/services`, Minecraft
+NeoForge jako systemd služba, Tailscale pro privátní přístup. Cesty, porty, zálohy a obnova: `docs/operations.md`
+„Ubuntu production host“.
+
 ## 6. Observabilita
 
 Jedna kontrola nemůže pokrýt všechny typy selhání:

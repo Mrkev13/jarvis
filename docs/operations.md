@@ -57,6 +57,66 @@ those development files in a separate checkout. The helper clears inherited
 production file can still come from the inherited process environment; review it
 before deployment. The backend never auto-loads dev dotenv files in production.
 
+## Ubuntu production host (MRK-101)
+
+Production runs on the Ubuntu server `standa-server` in Docker Compose. Everything except secrets and data is in
+this repository; the sections about Windows below are the previous host and kept for reference.
+
+| what | where |
+|---|---|
+| code (git checkout of `main`, detached) | `/srv/standa-hub` |
+| backend container | `backend/compose.yaml` → `standa-hub-backend`, image `standa-hub-backend:local`, `127.0.0.1:8000` |
+| frontend container | `frontend/compose.yaml` → `standa-hub-frontend`, image `standa-hub-frontend:local`, `127.0.0.1:3000` |
+| backend secrets | `backend/.env.production` (mode 600, never in git; keys: `backend/.env.production.template`) |
+| frontend build setting | `frontend/.env.production.local` (`NEXT_PUBLIC_API_URL` = the https API origin via Tailscale Serve) |
+| PostgreSQL 18 | own stack `/srv/services/postgres/compose.yaml`, container `standa-postgres`, `127.0.0.1:5432`, network `postgres_default` |
+| Uptime Kuma | own stack `/srv/services/uptime-kuma/compose.yaml` |
+| media / backups | `/srv/standa-hub-data/media`, `/srv/standa-hub-data/backups` (bind mounts `/data/media`, `/data/backups`) |
+| private access | Tailscale Serve (`tailscale serve status`); nothing is published on public ports |
+| backup | `standa-hub-backup.timer` 03:00 → `/usr/local/lib/standa-hub/backup.sh` (`docker exec` → `backup_service.run_backup()`) |
+| Minecraft | `minecraft.service` (NeoForge 1.21.1, `:25565`), `minecraft-backup.timer` 04:00 - not part of this repo |
+
+The containers do **not** read the checkout at run time: the code is baked into the images, only media and backups
+are mounted. Migrations run when the backend starts (`RUN_ALEMBIC_UPGRADE_AT_STARTUP`, default true). `/health` is
+public and secret-free; with `APP_COMMIT` set (the deploy does it, MRK-108) it reports the running commit.
+
+**Update by hand** (until the automatic deploy, MRK-108) - as root or a user in the `docker` group:
+
+```bash
+cd /srv/standa-hub
+sudo systemctl start standa-hub-backup.service           # fresh backup first
+git fetch origin && git checkout --detach origin/main
+export APP_COMMIT="$(git rev-parse HEAD)"
+(cd backend && sudo --preserve-env=APP_COMMIT docker compose up -d --build)
+(cd frontend && sudo docker compose --env-file .env.production.local up -d --build)
+curl -s http://127.0.0.1:8000/health | head -c 300; echo   # healthy, migrations current, commit = APP_COMMIT
+```
+
+**Rollback:** `git checkout --detach <previous commit>` and the same two `up -d --build` lines. The database is
+**not** rolled back: migrations are additive, so the previous code works with the newer schema; restoring data
+needs a backup (below). Never run `docker compose config` without `-q` on the server: it prints the `.env` values.
+
+**Restore from a backup:** the nightly backup writes a `pg_dump` and a media copy to `/srv/standa-hub-data/backups`
+(restore steps: `docs/backups.md`; off-site copies: `docs/offsite-backups.md`). As there: never restore over the
+live database or media - restore into a **new** database (`standa_hub_restore_<YYYYMMDD>` in `standa-postgres`, e.g.
+via `docker exec -i standa-postgres psql …`) and a new media folder, point `DATABASE_URL` / `MEDIA_DIR` in
+`backend/.env.production` at them, `docker compose up -d` in `backend/`, check `/health`; the old state stays as the
+way back.
+
+**One-time switch to the versioned files** (the server had them untracked before MRK-101):
+
+```bash
+cd /srv/standa-hub
+git --no-pager diff --ignore-cr-at-eol --stat | tail -1     # must be empty: only Windows line endings differ
+git checkout -- .                                           # restore LF line endings of tracked files
+mkdir -p ~/pre-mrk101 && for f in backend/{Dockerfile,compose.yaml,.dockerignore} frontend/{Dockerfile,compose.yaml,.dockerignore}; do
+  mkdir -p ~/pre-mrk101/"$(dirname "$f")" && mv "$f" ~/pre-mrk101/"$f"; done
+git fetch origin && git checkout --detach origin/main      # now contains the same files, versioned
+chmod -R o-rwx /srv/standa-hub                              # no access for other users (was o+rwx)
+```
+
+Then do one update by hand (above) and compare with the old files in `~/pre-mrk101` if anything looks different.
+
 ## Development vs production
 
 Development (working directories matter):
