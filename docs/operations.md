@@ -346,6 +346,59 @@ Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `up
 `-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
 in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
 
+### Review gate (MRK-97)
+
+Roles: Claude writes the code and opens the PR, Codex reviews it (started by Standa), **Standa merges by hand**.
+Branch protection makes the merge possible only when **all CI jobs and the status "Review gate (Codex verdict)"
+are green**.
+
+The gate (`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head
+commit**, posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`.
+`BLOCK` makes it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending`
+first and any API error ends in `error` (fail closed). The gate **never merges** and never enables GitHub
+auto-merge; a leftover auto-merge is switched off, and if that fails the status ends in `error`, never `success`.
+
+**The gate is trusted code.** It runs only the copy on `main` and never checks out or runs PR code:
+- `pull_request_target` (every push / label change) runs the base branch's file;
+- `schedule` every 10 minutes re-evaluates **all open PRs** - a review written, edited or dismissed is not an event
+  the trusted copy sees, so the status follows it within 10 minutes;
+- `workflow_dispatch` (*Actions → Review gate → Run workflow*, branch `main`, PR number) for an immediate re-check;
+  a dispatch from any other ref fails.
+
+Because `pull_request_target` checks land on the base commit, the result is a **commit status** on the PR head with
+the context `Review gate (Codex verdict)` - that is the required check.
+
+**Critical changes** get the label `manual-merge` (look at them extra carefully before merging):
+
+| area | paths |
+|---|---|
+| migrace | `backend/alembic/` |
+| přihlašování a bezpečnost | `backend/auth*.py`, `frontend/proxy.ts` |
+| zálohy a obnova | `backend/backup_service.py`, `backend/offsite_backup.py`, `backend/offsite_restic.py`, `scripts/**/*backup*`, `*restore*`, `*offsite*` |
+| CI, review a deploy | `.github/`, `scripts/`, `Dockerfile*`, `docker-compose*.yml` / `compose*.yml` |
+| příliš mnoho souborů | more changed files than the API lists (`changed_files` > listed, or > 3000) - fail closed |
+
+**Limitations:** Codex posts with the same GitHub account as the agents, so the verdict line is a rule in
+`AGENTS.md` (only the reviewer writes it), not an identity check. A PR that **adds** a workflow runs it with that
+PR's token; such a PR is critical (`.github/`), and the reviewer must block anything that touches the gate. The first
+introduction of the gate (the MRK-97 PR itself) runs only once the workflow is on `main`.
+
+Automatic review on the Ubuntu host, automatic fixes after `BLOCK` and an automatic merge are a follow-up issue:
+they need a proper isolation boundary for the reviewer and the fixer (see that issue).
+
+**GitHub settings (Standa, once, after the MRK-97 PR is on `main`):**
+
+1. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
+   - **Require a pull request before merging**, required approvals **0** (the gate is the review requirement);
+   - **Require status checks to pass before merging**, add these five checks:
+     `Backend tests and pyflakes`, `PostgreSQL migration round-trip`, `Frontend lint, types, tests and build`,
+     `UI checks (ui-check, module flags, changes)`, `Review gate (Codex verdict)`.
+     A check is offered only after it has reported once, so add the gate after it ran on a PR;
+   - leave *Require branches to be up to date* **off** (the gate is tied to the exact head commit anyway);
+   - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
+2. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), and turn green within
+   10 minutes after a `MERGE` review (or at once with *Run workflow*). Then merge by hand.
+
 ## LOCAL Windows acceptance (not performed in cloud)
 
 1. Verify isolated production DB/config/media/backup/log paths and ACLs; SYSTEM can

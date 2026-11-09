@@ -2,3 +2,4 @@
 pytest==9.1.1
 pytest-socket==0.8.1
 pyflakes==4.0.3
+PyYAML==6.0.3  # MRK-97: workflow guard tests (test_review_gate.py); also pulled in by uvicorn[standard]
