@@ -320,12 +320,14 @@ class WebPushProviderTestCase(DeliveryTestBase):
         self.assertEqual(len(self.deliveries()), 1, "zaniklé zařízení nedostane další doručení")
 
     def test_status_classification(self):
-        cases = {201: (True, False), 503: (False, False), 429: (False, False), 413: (False, True),
-                 401: (False, True), 404: (False, True)}
-        for status, (ok, permanent) in cases.items():
+        cases = {201: (True, False, False), 503: (False, False, False), 429: (False, False, False),
+                 413: (False, True, False), 401: (False, True, True), 403: (False, True, True),
+                 404: (False, True, True), 410: (False, True, True)}
+        for status, (ok, permanent, gone) in cases.items():
             with self.subTest(status=status):
                 r = ds.classify(webpush.PushResponse(status))
-                self.assertEqual((r.ok, r.permanent), (ok, permanent))
+                # MRK-102: 401/403 = subscription of other VAPID keys, never deliverable -> disabled like 404/410
+                self.assertEqual((r.ok, r.permanent, r.target_gone), (ok, permanent, gone))
         self.assertFalse(ds.classify(webpush.PushResponse(None, error="network:Timeout")).permanent)
 
     def test_unsubscribe_skips_pending_and_stops_sending(self):

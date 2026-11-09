@@ -8,7 +8,10 @@ import {
   detectPushSupport,
   deviceStateLabel,
   SERVER_REASON_TEXT,
+  serverKeyMatches,
+  STALE_TEXT,
   subscriptionBody,
+  testResultText,
   UNSUPPORTED_TEXT,
   urlBase64ToUint8Array,
   type DeviceState,
@@ -64,8 +67,19 @@ export default function PushSettings() {
       }
       const sub = await existingSubscription();
       if (sub) {
+        // MRK-102: odběr ke starým klíčům serveru se už tiše neposílá zpět („Připojeno", ale nic nedorazí).
+        if (serverKeyMatches(sub.options?.applicationServerKey, cfg.public_key) === false) {
+          setState("stale");
+          setDetail(STALE_TEXT);
+          return;
+        }
         // Tichá synchronizace se serverem (bez dotazu na oprávnění).
-        const sync = await postJson("/push/subscriptions", subscriptionBody(sub.toJSON()));
+        const sync = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: cfg.public_key });
+        if (sync.status === 409) {
+          setState("stale");
+          setDetail(STALE_TEXT);
+          return;
+        }
         setState(sync.ok ? "on" : "off");
       } else {
         setState("off");
@@ -95,6 +109,11 @@ export default function PushSettings() {
       const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
       await navigator.serviceWorker.ready;
       const key = urlBase64ToUint8Array(config.public_key);
+      // MRK-102: starý odběr k jiným klíčům serveru nejdřív zrušit, jinak by subscribe() vrátil ten starý.
+      const previous = await reg.pushManager.getSubscription();
+      if (previous && serverKeyMatches(previous.options?.applicationServerKey, config.public_key) !== true) {
+        await previous.unsubscribe();
+      }
       let sub: PushSubscription;
       try {
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
@@ -103,13 +122,14 @@ export default function PushSettings() {
         await (await reg.pushManager.getSubscription())?.unsubscribe();
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       }
-      const res = await postJson("/push/subscriptions", subscriptionBody(sub.toJSON()));
+      const res = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: config.public_key });
       if (!res.ok) {
         await sub.unsubscribe();
         const err = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
       setState("on");
+      setDetail(null);
       setMessage("Hotovo. Zkus „Poslat test“.");
     } catch (err) {
       setMessage(err instanceof Error ? `Nepovedlo se: ${err.message}` : "Nepovedlo se zapnout upozornění.");
@@ -129,7 +149,9 @@ export default function PushSettings() {
       }
       const res = await postJson("/push/test", { endpoint: sub.endpoint });
       const data = (await res.json()) as { ok?: boolean; error?: string | null };
-      setMessage(data.ok ? "Test odeslán – upozornění by mělo za chvíli přijít." : `Test selhal (${data.error ?? "?"}).`);
+      const result = testResultText(Boolean(data.ok), data.error);
+      setMessage(result.text);
+      if (result.stale) setState("stale");
     } catch {
       setMessage("Test se nepodařilo odeslat.");
     } finally {
@@ -160,14 +182,14 @@ export default function PushSettings() {
     <Card as="section" aria-busy={busy || state === "checking"} aria-labelledby="push-settings">
       <CardHeader title={<span id="push-settings">Upozornění mimo aplikaci</span>} />
       <div className="-mt-2 mb-3">
-        <StatusBadge tone={on ? "success" : state === "denied" ? "warning" : "neutral"} dot={on} className="whitespace-normal">
+        <StatusBadge tone={on ? "success" : state === "denied" || state === "stale" ? "warning" : "neutral"} dot={on} className="whitespace-normal">
           <span role="status">{deviceStateLabel(state)}</span>
         </StatusBadge>
       </div>
       <div className="flex flex-wrap gap-2">
-        {state === "off" && (
-          <Button variant="primary" size="sm" busy={busy} busyLabel="Zapínám…" onClick={() => void enable()}>
-            Zapnout na tomto zařízení
+        {(state === "off" || state === "stale") && (
+          <Button variant="primary" size="sm" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
+            {state === "stale" ? "Znovu připojit" : "Zapnout na tomto zařízení"}
           </Button>
         )}
         {on && (

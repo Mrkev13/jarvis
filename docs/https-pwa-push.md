@@ -111,6 +111,14 @@ origin.
   SYSTEM + Administrators). Never put them in git, Linear, logs or the frontend.
 - The browser receives only the public key, from `GET /push/config` (session required).
 - Rotating the keys invalidates every existing subscription: re-enable notifications on each device afterwards.
+- **Moving the server (e.g. Windows → Ubuntu/Docker): copy the three `WEB_PUSH_*` values from the old env file**
+  into the new one instead of generating new keys. Then the phones keep working. New keys = every device must
+  reconnect (MRK-102).
+- Since MRK-102 a device that still holds a subscription for the old public key no longer shows "Připojeno":
+  - the settings card compares the subscription's key with `GET /push/config` and shows *Je potřeba se znovu
+    připojit* with a **Znovu připojit** button;
+  - `POST /push/subscriptions` answers `409 {"category": "stale_key"}` when the frontend sends the old key;
+  - a 401/403 from the push service (key mismatch) disables the subscription, like 404/410.
 
 ## PWA and service worker behaviour
 
@@ -137,8 +145,14 @@ origin.
 - **The test push works but reminders don't arrive:** check `EXTERNAL_DELIVERY_ENABLED=true`,
   `REMINDERS_CHECK_ENABLED=true`, that `/health` shows the reminders job `ok`, and `GET /push/status` (last
   delivery and its category).
-- **Device silently stops receiving:** the push service answered 404/410, so the device was disabled. Enable
-  notifications again on that device.
+- **Device silently stops receiving:** the push service answered 401/403/404/410, so the device was disabled
+  (401/403 usually means the server's VAPID keys changed, e.g. after a move). The settings card shows *Znovu
+  připojit*; tap it on that device.
+- **Checking the server without revealing values** (Docker, MRK-101): in the backend container print only whether
+  `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` and `WEB_PUSH_CONTACT` are set, plus the values of
+  `EXTERNAL_DELIVERY_ENABLED`, `REMINDERS_CHECK_ENABLED` and `SCHEDULER_ENABLED`. `GET /push/config` must answer
+  `available: true`, and `GET /push/status` shows the last delivery category per device. After changing the env
+  file, recreate the container (`docker compose up -d`); `restart` does not reload env.
 - **Nothing shows on Windows:** check Windows notification settings and Focus Assist / Do Not Disturb for the browser
   or installed app.
 - **Login loops over HTTPS:** check `FRONTEND_ORIGINS` contains the exact https origin, `AUTH_COOKIE_SECURE=true`, and

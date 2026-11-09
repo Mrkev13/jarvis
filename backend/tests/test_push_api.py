@@ -127,6 +127,27 @@ class PushApiTestCase(unittest.TestCase):
         self.assertTrue(self.client.get("/push/status").json()["subscriptions"][0]["disabled"])
         self.assertEqual(self.client.post("/push/subscriptions", json=SUB).json()["subscription"]["disabled"], False)
 
+    def test_subscription_for_old_server_keys_is_refused_and_disabled_on_403(self):
+        """MRK-102: after a server move with new VAPID keys the phone kept an old subscription; the page showed
+        "connected" while every push was rejected with 403. Now the old subscription is refused (409) and a 403
+        from the push service disables it, so the device shows "reconnect" instead of failing silently."""
+        self.login()
+        _, old_public = webpush.generate_keypair()
+        stale = self.client.post("/push/subscriptions", json={**SUB, "server_key": old_public})
+        self.assertEqual((stale.status_code, stale.json()["detail"]), (409, {"category": "stale_key"}))
+        self.assertEqual(self.Session().query(PushSubscription).count(), 0, "nothing stored")
+        # matching key (new frontend) and no key (older frontend) are both accepted
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": self.public}).status_code, 200)
+        self.assertEqual(self.client.post("/push/subscriptions", json=SUB).status_code, 200)
+
+        with patch.object(webpush, "send", lambda *a, **k: webpush.PushResponse(403)):
+            r = self.client.post("/push/test", json={"endpoint": ENDPOINT}).json()
+        self.assertEqual(r, {"ok": False, "error": "http_403"})
+        self.assertTrue(self.client.get("/push/status").json()["subscriptions"][0]["disabled"])
+        # an old-key re-post (page reload on the phone) must not revive it
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": old_public}).status_code, 409)
+        self.assertTrue(self.client.get("/push/status").json()["subscriptions"][0]["disabled"])
+
     def test_test_push_without_configuration(self):
         self.login()
         self.client.post("/push/subscriptions", json=SUB)

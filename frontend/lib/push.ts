@@ -68,6 +68,19 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuf
   return out;
 }
 
+/**
+ * MRK-102: patří odběr ke klíči, který má server teď? `subscriptionKey` = `PushSubscription.options.applicationServerKey`.
+ * Po přesunu serveru s novými VAPID klíči telefon drží starý odběr a push služba každou zprávu odmítne (403).
+ * `null` = prohlížeč klíč neprozradí (nejde poznat) – pak rozhoduje server (409 stale_key) a výsledek testu.
+ */
+export function serverKeyMatches(subscriptionKey: ArrayBuffer | null | undefined, publicKey: string): boolean | null {
+  if (!subscriptionKey) return null;
+  const current = urlBase64ToUint8Array(publicKey);
+  const used = new Uint8Array(subscriptionKey);
+  if (used.length !== current.length) return false;
+  return used.every((byte, i) => byte === current[i]);
+}
+
 /** PushSubscription.toJSON() → tělo POST /push/subscriptions (jen endpoint + klíče). */
 export function subscriptionBody(json: unknown): { endpoint: string; keys: { p256dh: string; auth: string } } {
   const j = json as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } } | null;
@@ -78,12 +91,36 @@ export function subscriptionBody(json: unknown): { endpoint: string; keys: { p25
   return { endpoint, keys: { p256dh, auth } };
 }
 
-export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on";
+export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on" | "stale";
+
+/** MRK-102: vysvětlení stavu „stale" (odběr ke starým klíčům serveru). */
+export const STALE_TEXT =
+  "Server má od posledního připojení jiné klíče pro upozornění (např. po přesunu na jiný počítač). " +
+  "Starý odběr už nefunguje – klepni na „Znovu připojit“.";
+
+/** Výsledek „Poslat test" → věta pro člověka; `stale` = odběr je potřeba připojit znovu. */
+export function testResultText(ok: boolean, error: string | null | undefined): { text: string; stale: boolean } {
+  if (ok) return { text: "Test odeslán – upozornění by mělo za chvíli přijít.", stale: false };
+  switch (error) {
+    case "http_401":
+    case "http_403":
+    case "http_404":
+    case "http_410":
+    case "not_subscribed":
+      return { text: "Push služba tento odběr odmítla. " + STALE_TEXT, stale: true };
+    case "not_configured":
+      return { text: "Server nemá nastavené klíče pro upozornění.", stale: false };
+    default:
+      return { text: `Test se nepodařilo doručit (${error ?? "neznámá chyba"}). Zkus to za chvíli znovu.`, stale: false };
+  }
+}
 
 export function deviceStateLabel(state: DeviceState): string {
   switch (state) {
     case "on":
       return "Připojeno – připomínky přijdou i mimo aplikaci";
+    case "stale":
+      return "Je potřeba se znovu připojit";
     case "off":
       return "Nepřipojeno";
     case "denied":

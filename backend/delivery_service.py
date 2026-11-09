@@ -144,12 +144,14 @@ class WebPushProvider:
 
 
 def classify(resp: webpush.PushResponse) -> DeliveryResult:
-    """Odpověď push služby → výsledek. 404/410 = odběr zanikl; jiné 4xx = trvalá chyba; 429/5xx/síť = znovu."""
+    """Odpověď push služby → výsledek. 404/410 = odběr zanikl; 401/403 = odběr patří k jiným VAPID klíčům
+    (MRK-102: např. po přesunu serveru s novými klíči) – už nikdy neprojde, takže se vypne a zařízení se musí
+    znovu připojit; jiné 4xx = trvalá chyba; 429/5xx/síť = znovu."""
     if resp.status in (200, 201, 202):
         return DeliveryResult(True, message_id=resp.message_id)
     if resp.status is None:
         return DeliveryResult(False, error=resp.error or "network")
-    if resp.status in (404, 410):
+    if resp.status in (401, 403, 404, 410):
         return DeliveryResult(False, permanent=True, error=f"http_{resp.status}", target_gone=True)
     if resp.status == 429 or resp.status >= 500:
         return DeliveryResult(False, error=f"http_{resp.status}", retry_after=resp.retry_after)
@@ -212,7 +214,16 @@ def validate_subscription(endpoint, keys) -> tuple[str, str, str]:
     return endpoint, webpush.b64u_encode(raw_p), webpush.b64u_encode(raw_a)
 
 
-def upsert_subscription(db: Session, endpoint, keys, user_agent: str | None = None, now: datetime | None = None) -> PushSubscription:
+class StaleServerKey(ValueError):
+    """MRK-102: prohlížeč posílá odběr vytvořený pro jiný (starý) VAPID veřejný klíč, než má server teď."""
+
+
+def upsert_subscription(db: Session, endpoint, keys, user_agent: str | None = None, now: datetime | None = None,
+                        server_key: str | None = None, current_key: str | None = None) -> PushSubscription:
+    """`server_key` = veřejný klíč, pro který prohlížeč odběr vytvořil (posílá ho novější frontend). Když se liší
+    od aktuálního klíče serveru, odběr se neuloží ani neoživí: push služba by každou zprávu odmítla (401/403)."""
+    if server_key is not None and current_key and server_key.strip() != current_key.strip():
+        raise StaleServerKey("Odběr patří ke starým klíčům serveru, je potřeba se znovu připojit.")
     endpoint, p256dh, auth = validate_subscription(endpoint, keys)
     now = now or utc_now()
     h = endpoint_hash(endpoint)

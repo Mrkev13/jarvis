@@ -2,7 +2,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { detectPushSupport, deviceStateLabel, subscriptionBody, urlBase64ToUint8Array } from "./push.ts";
+import {
+  detectPushSupport, deviceStateLabel, serverKeyMatches, subscriptionBody, testResultText, urlBase64ToUint8Array,
+} from "./push.ts";
 
 const ok = {
   isSecureContext: true, hasServiceWorker: true, hasPushManager: true, hasNotification: true,
@@ -46,4 +48,29 @@ test("subscription body keeps only endpoint and keys", () => {
 test("state labels", () => {
   assert.match(deviceStateLabel("on"), /Připojeno/);
   assert.match(deviceStateLabel("denied"), /zakázaná/);
+});
+
+// MRK-102: after a server move with new VAPID keys the phone kept the old subscription and showed "connected".
+const KEY_A = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+const KEY_B = "BDd3_hVL9fZi9Ybo2UUzA284WG5FZR30_95YeZJsiApwXKpNcF1rRPF3foIiBHXRdJI2Qhumhf6_LFTeZaNndIo";
+
+test("subscription key is compared byte by byte with the server's current key", () => {
+  const usedA = urlBase64ToUint8Array(KEY_A).buffer;
+  assert.equal(serverKeyMatches(usedA, KEY_A), true);
+  assert.equal(serverKeyMatches(usedA, KEY_B), false, "old key after a server move");
+  assert.equal(serverKeyMatches(new Uint8Array(10).buffer, KEY_A), false);
+  assert.equal(serverKeyMatches(null, KEY_A), null, "browser does not reveal the key: undecided, server decides");
+  assert.equal(serverKeyMatches(undefined, KEY_A), null);
+});
+
+test("test push results are explained, rejected subscriptions ask to reconnect", () => {
+  assert.deepEqual(testResultText(true, null).stale, false);
+  for (const error of ["http_401", "http_403", "http_404", "http_410", "not_subscribed"]) {
+    const r = testResultText(false, error);
+    assert.equal(r.stale, true, error);
+    assert.match(r.text, /Znovu připojit/);
+  }
+  assert.equal(testResultText(false, "http_503").stale, false);
+  assert.match(testResultText(false, "network").text, /network/);
+  assert.match(deviceStateLabel("stale"), /znovu připojit/);
 });
