@@ -348,15 +348,23 @@ in a new PR. The merge deploys itself; if the fix must go out at once, run `upda
 
 ### Review gate and auto-merge (MRK-97)
 
-A PR merges by itself when **all CI jobs and the check "Review gate (Codex verdict)" are green**. The gate
-(`.github/workflows/review-gate.yml`) passes only when the newest review **on the PR's current head commit**,
-posted by the repository owner's account, contains the line `Codex-Verdict: MERGE`. `BLOCK` or no verdict fails
-it, and every new push needs a new review. On `MERGE` the workflow turns on GitHub auto-merge (merge commit). With
-the label `manual-merge` nobody auto-merges; Standa merges by hand.
+A PR merges by itself when **all CI jobs and the status "Review gate (Codex verdict)" are green**. The gate
+(`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head commit**,
+posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`. `BLOCK` makes
+it red, no verdict keeps it pending, and every new push needs a new review. On `MERGE` the gate turns on GitHub
+auto-merge (merge commit). With the label `manual-merge` nobody auto-merges; Standa merges by hand.
+
+**The gate is trusted code.** It runs only the copy on `main`: `pull_request_target` (every push / label change)
+runs the base branch's file, and after each posted review `codex-review.sh` calls
+`gh workflow run review-gate.yml --ref main -f pr=<n>` (a `workflow_dispatch` from any other ref fails). It never
+checks out or runs PR code. Because `pull_request_target` checks land on the base commit, the result is a **commit
+status** on the PR head with the context `Review gate (Codex verdict)` - that is the required check. After a review
+written by hand, re-run it from *Actions → Review gate → Run workflow* (branch `main`, PR number).
 
 **Roles and flow:** Claude (developer) writes the code and opens the PR → Codex reviews every new head commit
-(`codex-review.sh`) → on `BLOCK` Claude fixes it automatically (`claude-fix.sh`) and the new commit is reviewed
-again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MRK-108). Nobody approves their own work.
+(`codex-review.sh`) → on `BLOCK` Claude fixes it automatically in a sandbox (`claude-fix.sh`) and the new commit is
+reviewed again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MRK-108). Nobody approves their
+own work.
 
 **Critical changes** (manual merge by Standa, the gate adds `manual-merge` and does not enable auto-merge):
 
@@ -367,16 +375,21 @@ again → on `MERGE` with green CI GitHub merges → the Ubuntu host updates (MR
 | zálohy a obnova | `backend/backup_service.py`, `backend/offsite_backup.py`, `backend/offsite_restic.py`, `scripts/**/*backup*`, `*restore*`, `*offsite*` |
 | CI, review a deploy | `.github/`, `scripts/`, `Dockerfile*`, `docker-compose*.yml` / `compose*.yml` |
 
-GitHub runs the PR's own copy of `review-gate.yml` on pull_request events, so a PR could edit the list; such a PR is
-critical itself (`.github/`), and Codex is told to block anything that weakens the gate.
+**Round limit:** at most **3** automatic fix rounds per PR. A 4th `BLOCK`, a round without a usable fix, or a fix
+that touches `.github/` / `scripts/` labels the PR `needs-human` with a comment and stops the automation; remove the
+label to let it continue.
 
-**Round limit:** at most **3** automatic fix rounds per PR. A 4th `BLOCK`, or a round where Claude made no commit,
-labels the PR `needs-human` with a comment and stops the automation; remove the label to let it continue.
+**Limitations (accepted, documented):**
+- Codex CLI posts with the same GitHub account as the agents. The verdict line is a rule in `AGENTS.md` (only the
+  reviewer writes it), not an identity check.
+- Anyone who can push a branch to this repository is trusted by GitHub: a PR that **adds** a new workflow runs it
+  with that PR's token, which could also post a status or enable a merge. Only Standa's account pushes here; such a
+  PR is critical (`.github/`) and Codex blocks it. A separate GitHub App / account for the review and the merge
+  (branch protection limited to that identity) would close both gaps - a possible follow-up issue.
+- The first introduction of the gate (the MRK-97 PR itself) is merged by hand: `pull_request_target` runs only once
+  the workflow is on `main`.
 
-Limitation: Codex CLI posts with the same GitHub account as the agents. The verdict line is a rule in `AGENTS.md`
-(only the reviewer writes it), not an identity check. A separate GitHub account or app for Codex would close that gap.
-
-**GitHub settings (Standa, once):**
+**GitHub settings (Standa, once, after the MRK-97 PR is on `main`):**
 
 1. Repository → *Settings* → *General* → *Pull Requests*: tick **Allow auto-merge** (keep *Allow merge commits*).
 2. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
@@ -384,29 +397,31 @@ Limitation: Codex CLI posts with the same GitHub account as the agents. The verd
    - **Require status checks to pass before merging**, add these five checks:
      `Backend tests and pyflakes`, `PostgreSQL migration round-trip`, `Frontend lint, types, tests and build`,
      `UI checks (ui-check, module flags, changes)`, `Review gate (Codex verdict)`.
-     A check is offered only after it has run once, so add the gate after the MRK-97 PR has run CI;
+     A check is offered only after it has reported once, so add the gate after it ran on a PR;
    - leave *Require branches to be up to date* **off**. One PR at a time, and the gate is tied to the exact head
      commit anyway;
    - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
-3. Check: open a PR, watch "Review gate" fail ("Waiting for a Codex review…"), then pass after a `MERGE` review,
-   and the PR merges by itself. On the Ubuntu host the deploy after merge is still manual (the auto-deploy above is
-   the Windows one).
+3. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), turn green after a `MERGE`
+   review, and the PR merges by itself.
 
 **Automatic Codex review (Ubuntu host, your user account with Codex CLI and GitHub CLI):**
 `scripts/linux/codex-review.sh` runs every 10 minutes from a systemd user timer:
-- for each open, non-draft PR without a verdict on its head commit, it checks that commit out in a **dedicated
-  review clone**, runs `codex exec --sandbox read-only` and posts Codex's answer with `gh pr review --comment`;
+- for each open, non-draft PR without a live owner verdict on its head commit, it checks that commit out in a
+  **dedicated review clone**, runs `codex exec --sandbox read-only`, posts Codex's answer with
+  `gh pr review --comment` and asks the gate (on `main`) to re-evaluate;
+- a verdict by another account or a dismissed one does not count (same trust filter as the gate);
 - Codex itself never touches GitHub, the network or the production checkout, and nothing in the script merges;
 - each commit is attempted once. An answer without a verdict line, or one that arrives after a new push, is not
   posted (see the log). Label `manual-review` skips a PR;
 - state, Codex answers and logs: `~/.local/state/standa-hub/codex-review`.
 
-The timer runs an **installed copy** (`~/.local/bin/standa-codex-review`), never the script inside the review
-clone: that clone is checked out to PR heads, and a PR must not decide what code runs with your logins. After a
-change to the script on `main`, repeat the `install` lines.
+The timers run **installed copies** (`~/.local/bin/standa-codex-review`, `standa-claude-fix`), never scripts inside a
+clone: clones are checked out to PR heads, and a PR must not decide what code runs with your logins. After a change
+to the scripts on `main`, repeat the `install` lines (and rebuild the sandbox image).
 
-The GitHub token for `gh` needs no merge right. A fine-grained token for this repository with *Pull requests:
-Read and write* and *Contents: Read* is enough, because GitHub auto-merge does the merge.
+The GitHub token for `gh` (fine-grained, this repository only) needs *Pull requests: Read and write*, **Actions:
+Read and write** (trigger the gate) and **Contents: Read and write** (push automatic fixes) - no admin rights; the
+merge is GitHub auto-merge.
 
 ```bash
 # once, as your user on the Ubuntu host (not root)
@@ -421,41 +436,49 @@ systemctl --user daemon-reload && systemctl --user enable --now standa-codex-rev
 ~/.local/bin/standa-codex-review check                           # ready: true, last_result
 ```
 
-Optional guard: if the production checkout is a git clone on the same host, set `PRODUCTION_DIR` in the service
+Optional guard: if the production checkout is a git clone on the same host, set `PRODUCTION_DIR` in the services
 (`systemctl --user edit standa-codex-review.service`, `[Service]` → `Environment=PRODUCTION_DIR=/path`), and the
-script refuses to use it as the review clone.
+scripts refuse to use it.
 
-**Automatic fixes after `BLOCK` (Ubuntu host, same user, Claude Code CLI):** `scripts/linux/claude-fix.sh` runs every
-10 minutes from a second user timer:
-- for each open, non-draft PR from this repository whose newest verdict on its **current head** is `BLOCK`, it checks
-  the PR branch out in a **separate fix clone** (not the review clone, not production), runs `claude -p` with the
-  review text and pushes Claude's new commits to the same branch - fast-forward only, and only if nobody pushed in
-  the meantime;
-- Claude runs with `--permission-mode dontAsk` and an allowlist: read/edit files, `git add/commit/diff/log/show`,
-  the repo's checks (`scripts/setup-dev.sh`, pytest, pyflakes, npm lint/test/build, tsc). `git push`, `gh`, `curl`
-  and web tools are refused; only the script pushes. It never merges and never writes a verdict;
+**Automatic fixes after `BLOCK` (Ubuntu host, same user, Docker):** `scripts/linux/claude-fix.sh` runs every 10
+minutes from a second user timer. For each open, non-draft PR from this repository whose newest verdict on its
+**current head** is `BLOCK`:
+- it clones the PR branch **fresh** into a disposable work folder and starts a **disposable container**
+  (`scripts/linux/autofix/`: Python 3.12, Node 22, git, Claude Code CLI) that gets only that clone, the prompt with
+  the review, an output folder and the **dedicated Claude token** - no GitHub token, no home folder, no production
+  checkout, no other host files. Non-root (your uid), `--cap-drop ALL`, `no-new-privileges`, read-only root
+  filesystem, pid / memory / CPU limits and a 50-minute limit. Inside, Claude edits, runs the repo's checks and
+  commits (`--permission-mode dontAsk`, allowlist; `git push`, `gh`, `curl`, web tools refused);
+- the PR's code (tests, setup, npm scripts) therefore only ever runs **inside the container**;
+- back on the host only a **git bundle** of the new commits is read - never the container's repository or its git
+  config. The trusted script checks it: commits on top of the reviewed head, none touching `.github/` or `scripts/`
+  (the automation itself), the remote branch still at the reviewed commit - and only then pushes, fast-forward,
+  never with force. Claude's summary is posted as a PR comment (never a verdict);
 - each blocked commit is attempted once; the round limit and the labels `needs-human`, `manual-review`,
-  `no-autofix` stop it; Claude's summary is posted as a PR comment;
-- optional `CLAUDE_BUDGET_USD` (service env) caps one run (`--max-budget-usd`);
+  `no-autofix` stop it; optional `CLAUDE_BUDGET_USD` caps one run (`--max-budget-usd`);
 - state and logs: `~/.local/state/standa-hub/claude-fix`.
 
-Claude runs the PR's code (tests) with your user's rights on the server - the same code CI runs, but on your host.
-The fix clone has no `.env`; keep production secrets out of that user's reach where possible.
-
-The GitHub token for this needs **Contents: Read and write** on this repository (to push the fix branch) in addition
-to *Pull requests: Read and write*; still no admin or merge rights.
+Residual risk: the container has network access (the Claude API and package registries need it), so code in a PR
+could use the dedicated Claude token or the network from inside it. Keep that token separate (create it only for
+this), set a budget, and revoke it if a PR misbehaves. `AUTOFIX_NETWORK` can name a docker network with an egress
+proxy if you want to restrict hosts further.
 
 ```bash
 # once, after the Codex review setup above
 git clone https://github.com/Mrkev13/jarvis ~/standa-hub-fix      # fix clone, NOT the review or production clone
-claude                                                           # log in once (interactive), then exit
+# sandbox image from the reviewed copy (pin the Claude Code version you checked with `claude --version`)
+docker build -t standa-autofix --build-arg CLAUDE_CODE_VERSION=<version> ~/standa-hub-review/scripts/linux/autofix
+# dedicated Claude token for the sandbox only (claude setup-token prints it once); file readable only by you
+install -Dm600 /dev/null ~/.config/standa-hub/claude-autofix.env
+nano ~/.config/standa-hub/claude-autofix.env                     # one line: CLAUDE_CODE_OAUTH_TOKEN=<token>
 install -Dm755 ~/standa-hub-review/scripts/linux/claude-fix.sh ~/.local/bin/standa-claude-fix
 install -Dm644 -t ~/.config/systemd/user ~/standa-hub-review/scripts/linux/systemd/standa-claude-fix.{service,timer}
 systemctl --user daemon-reload && systemctl --user enable --now standa-claude-fix.timer
-~/.local/bin/standa-claude-fix check                             # ready: true, max_rounds: 3, last_result
+~/.local/bin/standa-claude-fix check                             # ready: true, sandbox_image, claude_token_file
 ```
 
-Before the first real run check the flags your Claude Code version accepts (`claude --help`: `-p`,
+Your user must be allowed to run `docker` (group `docker`). Before the first real run, check the flags your Claude
+Code version accepts inside the image (`docker run --rm standa-autofix claude --help`: `-p`,
 `--permission-mode dontAsk`, `--allowedTools`, `--disallowedTools`, `--max-budget-usd`).
 
 ## LOCAL Windows acceptance (not performed in cloud)

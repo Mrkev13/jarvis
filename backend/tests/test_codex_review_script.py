@@ -19,9 +19,17 @@ case "$1 $2" in
   "auth status") exit 0 ;;
   "pr list") [[ -s "$d/prs" ]] && cat "$d/prs"; exit 0 ;;
   "pr view") cat "$d/head_now"; exit 0 ;;
+  "workflow run") exit 0 ;;
   "pr review") f=""; while [[ $# -gt 0 ]]; do [[ "$1" == --body-file ]] && f="$2"; shift; done; cp "$f" "$d/posted.md"; exit 0 ;;
 esac
-if [[ "$1" == api ]]; then [[ -f "$d/review_bodies" ]] && cat "$d/review_bodies"; exit 0; fi
+if [[ "$1" == api ]]; then
+  # reviews.json = the real API shape, filtered with the script's own --jq (needs jq); review_bodies = raw bodies
+  if [[ -f "$d/reviews.json" ]]; then
+    q=""; while [[ $# -gt 0 ]]; do [[ "$1" == --jq ]] && q="$2"; shift; done
+    jq -r "$q" "$d/reviews.json"; exit $?
+  fi
+  [[ -f "$d/review_bodies" ]] && cat "$d/review_bodies"; exit 0
+fi
 echo "unexpected gh $*" >&2; exit 9
 '''
 
@@ -91,6 +99,7 @@ def test_reviews_the_pr_head_read_only_and_posts_the_answer_once(env):
     assert run(env).returncode == 0
     assert len(calls(env, 'codex')) == 1
     assert sum(c.startswith('pr review') for c in calls(env, 'gh')) == 1
+    assert sum(c.startswith('workflow run review-gate.yml --repo Mrkev13/jarvis --ref main -f pr=7') for c in calls(env, 'gh')) == 1
 
 
 def test_answer_without_a_verdict_line_is_not_posted_and_not_retried(env):
@@ -112,6 +121,20 @@ def test_existing_verdict_on_the_head_skips_codex(env):
     (env['fake'] / 'review_bodies').write_text('Ruční review.\nCodex-Verdict: BLOCK\n')
     assert run(env).returncode == 0
     assert calls(env, 'codex') == []
+
+
+@pytest.mark.skipif(shutil.which('jq') is None, reason='needs jq for the real --jq filter')
+@pytest.mark.parametrize('login,state,skipped', [
+    ('Mrkev13', 'COMMENTED', True),        # the owner's verdict on the head: already reviewed
+    ('someone-else', 'COMMENTED', False),  # a stranger's verdict line does not count (the gate ignores it too)
+    ('Mrkev13', 'DISMISSED', False),       # a dismissed verdict does not count
+])
+def test_only_the_owners_live_verdict_skips_codex(env, login, state, skipped):
+    import json
+    reviews = [{'commit_id': env['head'], 'user': {'login': login}, 'state': state, 'body': 'x\nCodex-Verdict: MERGE\n'}]
+    (env['fake'] / 'reviews.json').write_text(json.dumps(reviews))
+    assert run(env).returncode == 0
+    assert (calls(env, 'codex') == []) == skipped
 
 
 def test_new_commit_during_the_review_is_not_posted(env):

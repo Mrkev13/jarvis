@@ -3,28 +3,36 @@
 #
 # Roles (AGENTS.md workflow): Claude writes and fixes code, Codex reviews, GitHub auto-merge merges. This script is
 # the hand-off back to Claude: for each open PR whose newest verdict on its CURRENT head commit is
-# "Codex-Verdict: BLOCK", it checks the PR branch out in a DEDICATED fix clone (never the production checkout, never
-# the review clone), runs Claude Code CLI headless with the review text, and pushes Claude's new commits to the same
-# branch (fast-forward only). The new commit then gets a new Codex review (codex-review.sh).
+# "Codex-Verdict: BLOCK", it runs Claude Code headless with the review text in a DISPOSABLE DOCKER CONTAINER
+# (scripts/linux/autofix/) and pushes Claude's new commits to the same branch (fast-forward only). The new commit
+# then gets a new Codex review (codex-review.sh).
 #
-#   claude-fix.sh check   # tools, logins, fix clone, timer - names and booleans only; exit 2 = not ready
+#   claude-fix.sh check   # tools, logins, image, token file, fix clone, timer - names and booleans only; exit 2 = not ready
 #   claude-fix.sh run     # one pass over the open PRs (what the timer runs)
 #
-# Limits and safety:
+# Isolation (the PR's code - tests, setup scripts, npm scripts - only ever runs inside the container):
+# - The container gets a FRESH clone of the PR branch (no host git config, no hooks), the prompt, an output folder
+#   and ONLY the dedicated Claude token (CLAUDE_ENV_FILE). No GitHub token, no host home, no production checkout.
+#   Non-root (host uid), --cap-drop ALL, no-new-privileges, read-only root fs, pid/memory/cpu limits, a time limit.
+#   Network: needed for the Claude API and package installs; AUTOFIX_NETWORK can name a restricted docker network.
+# - Back on the host only a git bundle is read (never the container's repo or its config). This trusted script checks
+#   it - commits only on top of the reviewed head, none touching .github/ or scripts/ (the automation itself) - and
+#   is the only one that pushes: never with force, only while the remote branch is still at the reviewed commit.
+#
+# Limits:
 # - At most MAX_ROUNDS blocking reviews per PR (default 3). After that the PR gets the label `needs-human`, one
 #   comment, and no more automatic fixes - Standa decides. Labels `needs-human`, `manual-review` and `no-autofix`
 #   are skipped; draft PRs and PRs from forks too.
-# - Each blocked head commit is attempted once (state file per PR). No new commit from Claude = no push; the PR gets
-#   Claude's explanation as a comment and the label `needs-human`.
-# - Claude runs with --permission-mode dontAsk and an allowlist (edit files, git add/commit/diff, the repo's test
-#   commands); `git push`, web access and anything not listed are refused. Only this script pushes, never with force,
-#   and only when the remote branch is still at the reviewed commit.
+# - Each blocked head commit is attempted once (state file per PR). No usable fix = no push; the PR gets Claude's
+#   explanation as a comment and the label `needs-human`.
 # - This script never writes a verdict and never merges. A comment it posts never contains a "Codex-Verdict:" line.
 # - Run an INSTALLED copy (~/.local/bin/standa-claude-fix, docs/operations.md), never this file inside a clone.
 #
 # Env: REPO (Mrkev13/jarvis), FIX_DIR (~/standa-hub-fix), REVIEW_DIR (~/standa-hub-review, refused as fix dir),
 #      PRODUCTION_DIR (optional, refused as fix dir), STATE_DIR (~/.local/state/standa-hub/claude-fix),
-#      CLAUDE (claude), MAX_ROUNDS (3), CLAUDE_BUDGET_USD (optional, passed as --max-budget-usd).
+#      MAX_ROUNDS (3), CLAUDE_BUDGET_USD (optional --max-budget-usd), DOCKER (docker), AUTOFIX_IMAGE (standa-autofix),
+#      CLAUDE_ENV_FILE (~/.config/standa-hub/claude-autofix.env, mode 600: CLAUDE_CODE_OAUTH_TOKEN=… only),
+#      AUTOFIX_NETWORK (bridge), AUTOFIX_MEMORY (6g), AUTOFIX_CPUS (2), AUTOFIX_TIMEOUT (50m).
 set -euo pipefail
 
 REPO="${REPO:-Mrkev13/jarvis}"
@@ -32,19 +40,21 @@ FIX_DIR="${FIX_DIR:-$HOME/standa-hub-fix}"
 REVIEW_DIR="${REVIEW_DIR:-$HOME/standa-hub-review}"
 PRODUCTION_DIR="${PRODUCTION_DIR:-}"
 STATE_DIR="${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/standa-hub/claude-fix}"
-CLAUDE="${CLAUDE:-claude}"
 MAX_ROUNDS="${MAX_ROUNDS:-3}"
 CLAUDE_BUDGET_USD="${CLAUDE_BUDGET_USD:-}"
+DOCKER="${DOCKER:-docker}"
+AUTOFIX_IMAGE="${AUTOFIX_IMAGE:-standa-autofix}"
+CLAUDE_ENV_FILE="${CLAUDE_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/standa-hub/claude-autofix.env}"
+AUTOFIX_NETWORK="${AUTOFIX_NETWORK:-bridge}"
+AUTOFIX_MEMORY="${AUTOFIX_MEMORY:-6g}"
+AUTOFIX_CPUS="${AUTOFIX_CPUS:-2}"
+AUTOFIX_TIMEOUT="${AUTOFIX_TIMEOUT:-50m}"
 KEEP_LOGS=30
 SKIP_LABELS='["needs-human","manual-review","no-autofix"]'
 # Same rule as the gate workflow and codex-review.sh.
 VERDICT_RE='^Codex-Verdict:[[:space:]]*(MERGE|BLOCK)[[:space:]]*$'
-# What Claude may do without asking (everything else is refused in dontAsk mode).
-ALLOWED_TOOLS=(Read Edit Write Glob Grep
-  "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
-  "Bash(bash scripts/setup-dev.sh:*)" "Bash(.venv/bin/python -m pytest:*)" "Bash(.venv/bin/python -m pyflakes:*)"
-  "Bash(npm run lint:*)" "Bash(npm test:*)" "Bash(npm run build:*)" "Bash(npx tsc:*)" "Bash(cd:*)" "Bash(ls:*)")
-DENIED_TOOLS=("Bash(git push:*)" "Bash(gh:*)" "Bash(curl:*)" "Bash(wget:*)" WebFetch WebSearch)
+# A fix that touches the automation itself is never pushed automatically.
+PROTECTED_RE='^(\.github/|scripts/)'
 
 log() { printf '[claude-fix] %s\n' "$*"; }
 
@@ -54,6 +64,25 @@ result() {
 }
 
 real() { (cd "$1" 2>/dev/null && pwd -P) || true; }
+
+token_file_ok() {   # exists, owned by us, readable by nobody else
+  [[ -f "$CLAUDE_ENV_FILE" && -O "$CLAUDE_ENV_FILE" ]] || return 1
+  [[ "$(stat -c '%a' "$CLAUDE_ENV_FILE")" =~ ^[46]00$ ]]
+}
+
+# One disposable container per fix (see the header). $1 = work dir (repo/, prompt.md, out/), $2 = reviewed head.
+sandbox() {
+  local name="standa-autofix-$$" code=0
+  timeout --kill-after=60s "$AUTOFIX_TIMEOUT" "$DOCKER" run --rm --name "$name" \
+    --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
+    --tmpfs /tmp:rw,exec,size=2g --tmpfs /home/autofix:rw,exec,size=6g -e HOME=/home/autofix \
+    --pids-limit 1024 --memory "$AUTOFIX_MEMORY" --cpus "$AUTOFIX_CPUS" --network "$AUTOFIX_NETWORK" \
+    --env-file "$CLAUDE_ENV_FILE" -e "CLAUDE_BUDGET_USD=$CLAUDE_BUDGET_USD" \
+    -v "$1/repo:/work" -v "$1/prompt.md:/prompt.md:ro" -v "$1/out:/out" -w /work \
+    "$AUTOFIX_IMAGE" autofix-run "$2" </dev/null >"$1/out/docker.log" 2>&1 || code=$?
+  "$DOCKER" rm -f "$name" >/dev/null 2>&1 || true   # after a timeout the container may still run
+  return "$code"
+}
 
 fix_clone_ok() {
   [[ -d "$FIX_DIR/.git" ]] || return 1
@@ -136,9 +165,9 @@ run() {
   fix_clone_ok || { result "run failed: fix clone missing or equal to the review / production checkout"; return 1; }
   trap 'result "run failed (line $LINENO)"' ERR   # a timer run has no console: keep the failure for `check`
 
-  local prs number head branch state tsv rows last rounds short stamp review answer claude_exit new_commits remote fixed=0
-  local -a budget=()
-  [[ -n "$CLAUDE_BUDGET_USD" ]] && budget=(--max-budget-usd "$CLAUDE_BUDGET_USD")
+  local prs number head branch state tsv rows last rounds short stamp review answer work sandbox_exit claude_exit
+  local new new_commits protected remote fixed=0
+  token_file_ok || { result "run failed: Claude token file missing or readable by others ($CLAUDE_ENV_FILE)"; return 1; }
   prs="$(gh pr list --repo "$REPO" --state open --json number,headRefOid,headRefName,isDraft,isCrossRepository,labels \
     --jq ".[] | select(.isDraft | not) | select(.isCrossRepository | not)
           | select([.labels[].name] | any(. as \$l | $SKIP_LABELS | index(\$l)) | not)
@@ -171,18 +200,37 @@ run() {
       result "PR #$number: branch moved since $short was reviewed; skipped"
       continue
     fi
-    log "fixing PR #$number at $short (round $rounds/$MAX_ROUNDS)"
-    claude_exit=0
-    (cd "$FIX_DIR" && "$CLAUDE" -p "$(prompt_for "$number" "$head" "$branch" "$rounds" "$review")" \
-        --permission-mode dontAsk --output-format text \
-        --allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DENIED_TOOLS[@]}" "${budget[@]}" \
-        </dev/null >"$answer" 2>"$answer.log") || claude_exit=$?
-    new_commits="$(git -C "$FIX_DIR" rev-list --count "$head..HEAD")"
-    if [[ $claude_exit -ne 0 || "$new_commits" -eq 0 ]] || ! git -C "$FIX_DIR" merge-base --is-ancestor "$head" HEAD; then
+    log "fixing PR #$number at $short (round $rounds/$MAX_ROUNDS) in the sandbox"
+    work="$(mktemp -d "$STATE_DIR/work.XXXXXX")"
+    mkdir "$work/out"
+    # fresh clone for the container: nothing from the fix clone's config or hooks travels into it
+    git clone --quiet --no-hardlinks --branch "autofix/$number" "$FIX_DIR" "$work/repo"
+    prompt_for "$number" "$head" "$branch" "$rounds" "$review" >"$work/prompt.md"
+    sandbox_exit=0
+    sandbox "$work" "$head" || sandbox_exit=$?
+    cp "$work/out/answer.md" "$answer" 2>/dev/null || : >"$answer"
+    cp "$work/out/docker.log" "$answer.log" 2>/dev/null || true
+    claude_exit="$(cat "$work/out/claude.exit" 2>/dev/null || echo "sandbox $sandbox_exit")"
+    new=""
+    if [[ -s "$work/out/fix.bundle" ]] && git -C "$FIX_DIR" bundle verify --quiet "$work/out/fix.bundle" >/dev/null 2>&1; then
+      git -C "$FIX_DIR" fetch --quiet "$work/out/fix.bundle" "+HEAD:refs/autofix/$number"
+      new="$(git -C "$FIX_DIR" rev-parse "refs/autofix/$number")"
+    fi
+    rm -rf "$work"
+    new_commits=0
+    [[ -n "$new" ]] && git -C "$FIX_DIR" merge-base --is-ancestor "$head" "$new" \
+      && new_commits="$(git -C "$FIX_DIR" rev-list --count "$head..$new")"
+    if [[ "$new_commits" -eq 0 ]]; then
       [[ -s "$answer" ]] || printf 'Claude nevytvořil opravu (exit %s).\n' "$claude_exit" >"$answer"
       comment "$number" "$answer"
-      needs_human "$number" "automatická oprava nevznikla (Claude exit $claude_exit, nových commitů $new_commits)."
-      result "PR #$number $short: no fix (claude exit $claude_exit, commits $new_commits), labelled needs-human"
+      needs_human "$number" "automatická oprava nevznikla (Claude exit $claude_exit, nových commitů 0)."
+      result "PR #$number $short: no fix (claude exit $claude_exit), labelled needs-human"
+      continue
+    fi
+    protected="$(git -C "$FIX_DIR" diff --name-only "$head" "$new" | grep -E "$PROTECTED_RE" || true)"
+    if [[ -n "$protected" ]]; then
+      needs_human "$number" "oprava mění automatiku (.github/ nebo scripts/), to se automaticky nepushuje: $(tr '\n' ' ' <<<"$protected")"
+      result "PR #$number $short: fix touches protected paths, not pushed, labelled needs-human"
       continue
     fi
     remote="$(git -C "$FIX_DIR" ls-remote origin "refs/heads/$branch" | cut -f1)"
@@ -190,7 +238,7 @@ run() {
       result "PR #$number: someone pushed during the fix; $short fix not pushed"
       continue
     fi
-    git -C "$FIX_DIR" push --quiet origin "HEAD:refs/heads/$branch"   # fast-forward only, no forced push
+    git -C "$FIX_DIR" push --quiet origin "$new:refs/heads/$branch"   # fast-forward only, no forced push
     comment "$number" "$answer"
     result "PR #$number $short: fix pushed ($new_commits commit(s), round $rounds/$MAX_ROUNDS)"
     fixed=$((fixed + 1))
@@ -206,7 +254,9 @@ check() {
   local ready=true value
   report() { printf '%s: %s\n' "$1" "$2"; [[ "$2" == true ]] || ready=false; }
   command -v gh >/dev/null && value=true || value=false; report gh_installed "$value"
-  command -v "$CLAUDE" >/dev/null && value=true || value=false; report claude_installed "$value"
+  command -v "$DOCKER" >/dev/null && value=true || value=false; report docker_installed "$value"
+  "$DOCKER" image inspect "$AUTOFIX_IMAGE" >/dev/null 2>&1 && value=true || value=false; report sandbox_image "$value"
+  token_file_ok && value=true || value=false; report claude_token_file "$value"
   command -v flock >/dev/null && value=true || value=false; report flock_installed "$value"
   gh auth status --hostname github.com >/dev/null 2>&1 && value=true || value=false; report gh_logged_in "$value"
   fix_clone_ok && value=true || value=false; report fix_clone_ready "$value"

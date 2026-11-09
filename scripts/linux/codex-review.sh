@@ -3,8 +3,8 @@
 #
 # For each open, non-draft PR whose head commit has no "Codex-Verdict:" review yet, the head is checked out in a
 # DEDICATED review clone (never the production checkout), Codex CLI reviews it read-only, and this script posts the
-# answer as a PR review comment. The review gate workflow (.github/workflows/review-gate.yml) lets the PR auto-merge
-# on "Codex-Verdict: MERGE" once CI is green.
+# answer as a PR review comment, then asks the review gate (.github/workflows/review-gate.yml, always the copy on
+# main) to re-evaluate the PR; on "Codex-Verdict: MERGE" it lets the PR auto-merge once CI is green.
 #
 #   codex-review.sh check   # tools, logins, review clone, timer - names and booleans only; exit 2 = not ready
 #   codex-review.sh run     # one pass over the open PRs (what the timer runs)
@@ -46,9 +46,12 @@ review_clone_ok() {
 }
 
 has_verdict() {   # $1 = PR number, $2 = head sha
+  # The same trust filter as the gate: only the owner's account, only reviews that were not dismissed - a stranger's
+  # or a dismissed verdict must not stop the automatic review (the gate would ignore it and stay red).
   # Into a variable first: with pipefail, `gh … | grep -q` can fail on SIGPIPE although grep matched.
-  local bodies
-  bodies="$(gh api --paginate "repos/$REPO/pulls/$1/reviews" --jq ".[] | select(.commit_id == \"$2\") | .body")"
+  local bodies owner="${REPO%%/*}"
+  bodies="$(gh api --paginate "repos/$REPO/pulls/$1/reviews" \
+    --jq ".[] | select(.commit_id == \"$2\") | select(.user.login == \"$owner\") | select(.state != \"DISMISSED\") | .body")"
   grep -Eq "$VERDICT_RE" <<<"$bodies"
 }
 
@@ -106,6 +109,9 @@ run() {
       continue
     fi
     gh pr review "$number" --repo "$REPO" --comment --body-file "$answer" >/dev/null
+    # the gate runs from main (trusted copy) - a review is not a PR event it sees, so ask it to re-evaluate
+    gh workflow run review-gate.yml --repo "$REPO" --ref main -f "pr=$number" >/dev/null \
+      || log "PR #$number: could not trigger the review gate (Actions: write on the token?)"
     verdict="$(grep -Eo "$VERDICT_RE" "$answer" | tail -1 | grep -Eo 'MERGE|BLOCK')"
     result "PR #$number $short: review posted, verdict $verdict"
     reviewed=$((reviewed + 1))

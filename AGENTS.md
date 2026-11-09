@@ -94,10 +94,13 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    na Ubuntu serveru (`scripts/linux/codex-review.sh`, systemd timer). Review končí jedním samostatným řádkem
    `Codex-Verdict: MERGE` (nic neblokuje) nebo `Codex-Verdict: BLOCK`. Ten řádek píše **jen reviewer,
    nikdy autor kódu**, a platí jen pro commit, na kterém review vzniklo. Po pushi musí přijít nové review.
-   - Nálezy autor opraví na téže branch. Po `BLOCK` to dělá automaticky Claude CLI na Ubuntu
-     (`scripts/linux/claude-fix.sh`): opraví, commitne, skript pushne (bez force) a Codex zkontroluje nový commit.
-   - **Limit:** nejvýš 3 automatická kola oprav na PR. Další `BLOCK`, nebo oprava, která nevznikla, = label
-     `needs-human` a automatika se zastaví; rozhodne Standa (po odebrání labelu pokračuje).
+   - Nálezy autor opraví na téže branch. Po `BLOCK` to dělá automaticky Claude v jednorázovém Docker kontejneru
+     na Ubuntu (`scripts/linux/claude-fix.sh`): opraví a commitne v izolaci, důvěryhodný skript zkontroluje výsledek
+     a pushne (bez force); Codex pak zkontroluje nový commit.
+   - **Limit:** nejvýš 3 automatická kola oprav na PR. Další `BLOCK`, oprava, která nevznikla, nebo oprava
+     měnící `.github/` či `scripts/` = label `needs-human` a automatika se zastaví; rozhodne Standa (po odebrání
+     labelu pokračuje).
+   - Review gate běží jen z `main` (`pull_request_target`), nikdy z kopie v PR.
 5. PR vyplní šablonu (`.github/pull_request_template.md`). Povinně:
    - **UI změna** → screenshot desktop (1366 nebo 1920 px) + mobil (390 px) – stačí odkaz na artefakt
      `ui-check-screenshots` z CI a názvy souborů, které změnu ukazují;

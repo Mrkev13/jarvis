@@ -8,4 +8,5 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/standa-claude-fix run
-TimeoutStartSec=60min
+# AUTOFIX_TIMEOUT (50 min) limits one fix; a pass may fix several PRs
+TimeoutStartSec=3h
