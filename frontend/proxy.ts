@@ -6,7 +6,7 @@ import { isPublicPath } from "./lib/publicPaths";
 // Next.js 16: soubor `middleware` je přejmenovaný na `proxy` (běží v Node.js runtime). Chování beze změny –
 // rozhodnutí je v lib/authGate.ts (testy authGate.test.mjs).
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || "standa_hub_session";
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 async function checkSession(req: NextRequest): Promise<SessionCheck> {
   const cookie = req.cookies.get(AUTH_COOKIE_NAME);
