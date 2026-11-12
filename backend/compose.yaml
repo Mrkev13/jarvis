@@ -54,8 +54,12 @@ services:
       - /srv/standa-hub-data/backups:/data/backups
     networks:
       - postgres_net
+      - jarvis_api
 
 networks:
   postgres_net:
     external: true
     name: postgres_default
+  jarvis_api:
+    external: true
+    name: jarvis_api
