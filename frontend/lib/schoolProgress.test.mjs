@@ -2,7 +2,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { absenceTone, creditTone, examsSummary, parseAbsenceLimit, shortDate, weekLabel, weekState } from "./schoolProgress.ts";
+import {
+  absenceTone, attendanceWeeks, creditTone, examsSummary, parseAbsenceLimit, scheduleChoice, schedulePatch, shortDate, weekLabel,
+  weekState,
+} from "./schoolProgress.ts";
 
 test("credit and absence tones", () => {
   assert.deepEqual(["pending", "passed", "failed"].map(creditTone), ["neutral", "success", "danger"]);
@@ -36,4 +39,25 @@ test("absence limit input", () => {
   assert.equal(parseAbsenceLimit(" 3 "), 3);
   assert.equal(parseAbsenceLimit("0"), 0);
   for (const bad of ["-1", "53", "2.5", "abc", "100"]) assert.equal(parseAbsenceLimit(bad), "invalid", bad);
+});
+
+// MRK-112: výuka ob týden a starší týdny
+test("weeks split into this week, last class and older", () => {
+  const weekly = { attendance: { class_weeks: ["2026-11-09", "2026-11-02", "2026-10-26", "2026-10-19"] } };
+  assert.deepEqual(attendanceWeeks(weekly, "2026-11-09"),
+    { current: "2026-11-09", previous: "2026-11-02", older: ["2026-10-26", "2026-10-19"] });
+  const offWeek = { attendance: { class_weeks: ["2026-11-02", "2026-10-19", "2026-10-05"] } };
+  assert.deepEqual(attendanceWeeks(offWeek, "2026-11-09"),
+    { current: null, previous: "2026-11-02", older: ["2026-10-19", "2026-10-05"] }, "tento týden výuka není");
+  assert.deepEqual(attendanceWeeks({ attendance: { class_weeks: [] } }, "2026-11-09"), { current: null, previous: null, older: [] });
+});
+
+test("schedule choice and patch body", () => {
+  const p = (every, classThisWeek) => ({ schedule: { every, anchor: null }, attendance: { class_this_week: classThisWeek } });
+  assert.equal(scheduleChoice(p(1, true)), "weekly");
+  assert.equal(scheduleChoice(p(2, true)), "this");
+  assert.equal(scheduleChoice(p(2, false)), "prev");
+  assert.deepEqual(schedulePatch("weekly", "2026-11-09", "2026-11-02"), { attendance_every: 1, attendance_anchor: null });
+  assert.deepEqual(schedulePatch("this", "2026-11-09", "2026-11-02"), { attendance_every: 2, attendance_anchor: "2026-11-09" });
+  assert.deepEqual(schedulePatch("prev", "2026-11-09", "2026-11-02"), { attendance_every: 2, attendance_anchor: "2026-11-02" });
 });

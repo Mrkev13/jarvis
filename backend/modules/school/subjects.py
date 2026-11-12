@@ -7,6 +7,8 @@ mapping and its suggestion.
 """
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -14,8 +16,9 @@ import database
 from domain_events import ActivityProjection, append_domain_event
 from models import Subject
 
-FIELDS = ("name", "code", "semester", "credits", "active", "absence_limit")
-NULLABLE = frozenset({"absence_limit"})  # MRK-86: null = bez limitu absencí
+FIELDS = ("name", "code", "semester", "credits", "active", "absence_limit", "attendance_every", "attendance_anchor")
+# MRK-86: null = bez limitu absencí; MRK-112: null = výuka každý týden (bez kotvy)
+NULLABLE = frozenset({"absence_limit", "attendance_every", "attendance_anchor"})
 MAX_ABSENCE_LIMIT = 52
 LIMITS = {"name": 150, "code": 50, "semester": 50}
 MAX_CREDITS = 99
@@ -37,11 +40,15 @@ class SubjectUpdate(BaseModel):
     credits: int | None = None
     active: bool | None = None
     absence_limit: int | None = None
+    attendance_every: int | None = None
+    attendance_anchor: date | None = None
 
 
 def subject_dict(s: Subject) -> dict:
     return {"id": s.id, "name": s.name, "code": s.code, "semester": s.semester, "credits": s.credits,
-            "active": s.active is not False, "absence_limit": s.absence_limit}
+            "active": s.active is not False, "absence_limit": s.absence_limit,
+            "attendance_every": s.attendance_every or 1,
+            "attendance_anchor": s.attendance_anchor.isoformat() if s.attendance_anchor else None}
 
 
 def _clean(values: dict) -> dict:
@@ -62,8 +69,27 @@ def _clean(values: dict) -> dict:
             raise SubjectError(f"Kredity musí být 0–{MAX_CREDITS}.", 422, "invalid_credits")
         if key == "absence_limit" and not 0 <= value <= MAX_ABSENCE_LIMIT:
             raise SubjectError(f"Limit absencí musí být 0–{MAX_ABSENCE_LIMIT}.", 422, "invalid_absence_limit")
+        if key == "attendance_every" and value not in (1, 2):
+            raise SubjectError("Výuka je každý týden (1) nebo ob týden (2).", 422, "invalid_attendance_every")
+        if key == "attendance_anchor" and value.weekday() != 0:
+            raise SubjectError("Týden výuky začíná pondělím.", 422, "invalid_attendance_anchor")
         out[key] = value
     return out
+
+
+def _schedule(s: Subject, changes: dict) -> dict:
+    """MRK-112: rytmus po změně – ob týden potřebuje kotvu, každý týden ji nemá (uloží se 1 → NULL, bez kotvy)."""
+    every = changes.get("attendance_every", s.attendance_every) or 1
+    anchor = changes.get("attendance_anchor", s.attendance_anchor)
+    if every == 2 and anchor is None:
+        raise SubjectError("U výuky ob týden vyber týden, kdy výuka je.", 422, "attendance_anchor_required")
+    if "attendance_every" not in changes and "attendance_anchor" not in changes:
+        return {}
+    return {"attendance_every": None if every == 1 else 2, "attendance_anchor": None if every == 1 else anchor}
+
+
+def _plain(value):
+    return value.isoformat() if isinstance(value, date) else value
 
 
 def update_subject(db, subject_id: int, values: dict) -> Subject:
@@ -72,13 +98,16 @@ def update_subject(db, subject_id: int, values: dict) -> Subject:
     if s is None:
         raise SubjectError("Předmět neexistuje.", 404, "not_found")
     changes = _clean({k: v for k, v in values.items() if k in FIELDS})
+    changes.update(_schedule(s, changes))
     before = {k: getattr(s, k) for k in FIELDS}
     before["active"] = before["active"] is not False  # NULL in old rows = active
-    delta = {k: {"old": before[k], "new": v} for k, v in changes.items() if before[k] != v}
-    if not delta:
+    changed = {k: v for k, v in changes.items() if before[k] != v}
+    if not changed:
         return s
-    for key, change in delta.items():
-        setattr(s, key, change["new"])
+    # data v deltě jako ISO text (Aktivita i událost se ukládají jako JSON)
+    delta = {k: {"old": _plain(before[k]), "new": _plain(v)} for k, v in changed.items()}
+    for key, value in changed.items():
+        setattr(s, key, value)
     db.flush()
     if "active" in delta:
         action, activity_type, label = (("restored", "restore", "Předmět obnoven") if s.active
