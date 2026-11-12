@@ -153,6 +153,7 @@ function WeekButtons({
   busy,
   onAttend,
   primary,
+  dateInLabel,
 }: {
   subject: SubjectProgress;
   week: string;
@@ -160,6 +161,8 @@ function WeekButtons({
   busy: string | null;
   onAttend: (s: SubjectProgress, week: string, present: boolean | null) => void;
   primary?: boolean;
+  /** Starší týdny mají datum už v popisku („týden od 14. 9.") – bez druhého „(od …)". */
+  dateInLabel?: boolean;
 }) {
   const state = weekState(subject, week);
   const working = busy === `${subject.id}:week:${week}`;
@@ -185,7 +188,8 @@ function WeekButtons({
   return (
     <div className="space-y-1">
       <p className="text-xs text-ink-muted">
-        {label} <span className="tabular-nums">(od {shortDate(week)})</span>
+        {label}
+        {dateInLabel ? null : <span className="tabular-nums"> (od {shortDate(week)})</span>}
         {state === null ? " · nezapsáno" : null}
       </p>
       <div className="flex gap-2">
@@ -268,7 +272,7 @@ function SubjectCard({
           </summary>
           <div className="space-y-3 border-t border-line-subtle px-3 py-3">
             {weeks.older.slice(0, olderShown).map((w) => (
-              <WeekButtons key={w} subject={s} week={w} label={weekLabel(w)} busy={busy} onAttend={onAttend} />
+              <WeekButtons key={w} subject={s} week={w} label={weekLabel(w)} busy={busy} onAttend={onAttend} dateInLabel />
             ))}
             {weeks.older.length > olderShown ? (
               <Button size="sm" variant="secondary" className="min-h-11 w-full" onClick={() => setOlderShown((n) => n + OLDER_STEP)}>
