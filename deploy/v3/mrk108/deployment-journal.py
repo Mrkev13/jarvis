@@ -8,13 +8,16 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+# MRK-108 review: "aborted" = the transaction stopped in "prepared", before any container was touched
+# (`deploying` is always written before the first `docker compose up`). Terminal, like deployed / rolled_back.
 STATES = {
-    "prepared": {"deploying"},
+    "prepared": {"deploying", "aborted"},
     "deploying": {"verifying", "rollback_required"},
     "verifying": {"deployed", "rollback_required"},
     "rollback_required": {"rolled_back"},
     "deployed": set(),
     "rolled_back": set(),
+    "aborted": set(),
 }
 
 

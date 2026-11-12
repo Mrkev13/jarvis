@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path("/srv/standa-hub-data/backups")
+# DEPLOY_BACKUP_ROOT: isolated tests only (backend/tests/test_deploy_v3.py)
+ROOT = Path(os.environ.get("DEPLOY_BACKUP_ROOT", "/srv/standa-hub-data/backups"))
 MAX_AGE = 24 * 3600
 
 manifests = sorted(

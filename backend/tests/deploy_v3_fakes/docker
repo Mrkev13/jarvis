@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Fake `docker` for backend/tests/test_deploy_v3.py (MRK-108 v3). State lives in $FAKE_DIR/state.json.
+
+Models just enough of docker / docker compose for deploy-transaction-v3.sh and auto-update-v3.sh: image tags -> IDs,
+image labels and Alembic head, two containers with image, APP_COMMIT and Compose config-hash, `compose config`,
+`compose up`, `build --iidfile`, `run ... alembic heads`. Failure injection via $FAKE_DIR/inject.json:
+  {"fail_up": ["frontend"], "kill_on_up": ["backend"], "fail_build": true}
+Each "kill_on_up" entry is used once: the calling script gets SIGKILL before the container changes (power loss).
+"""
+import hashlib
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+FAKE = Path(os.environ["FAKE_DIR"])
+STATE = FAKE / "state.json"
+
+
+def load():
+    return json.loads(STATE.read_text())
+
+
+def save(s):
+    STATE.write_text(json.dumps(s, indent=1))
+
+
+def inject():
+    p = FAKE / "inject.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def log(*parts):
+    with open(FAKE / "calls.log", "a") as f:
+        f.write(" ".join(parts) + "\n")
+
+
+def resolve(s, ref):
+    if ref in s["tags"]:
+        return s["tags"][ref]
+    if ref in s["meta"]:
+        return ref
+    return None
+
+
+def config_hash(resolved):
+    """Like Compose: the hash covers the whole resolved service config (image, environment, pull_policy...)."""
+    return hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()
+
+
+def compose(args, s):
+    project, files, i = None, [], 0
+    while args[i] in ("-p", "-f"):
+        if args[i] == "-p":
+            project = args[i + 1]
+        else:
+            files.append(args[i + 1])
+        i += 2
+    sub, rest = args[i], args[i + 1:]
+    service = project
+    env_key = f"{service.upper()}_IMAGE"
+    resolved = {}
+    for f in files:
+        if f.endswith(".json"):  # snapshot / override: merged over what came before
+            resolved.update(json.loads(Path(f).read_text())["services"][service])
+        else:  # managed YAML template: values from the environment
+            image = os.environ.get(env_key)
+            if not image:
+                print(f"{env_key} required", file=sys.stderr)
+                return 1
+            env = ({"APP_COMMIT": os.environ.get("APP_COMMIT", "")} if service == "backend"
+                   else {"NEXT_PUBLIC_API_URL": os.environ.get("NEXT_PUBLIC_API_URL", "")})
+            resolved.update({"image": image, "environment": env})
+    resolved.pop("container_name", None)
+    image = resolved.get("image")
+    if sub == "config":
+        if "--hash" in rest:
+            print(f"{service} {config_hash(resolved)}")
+        elif "--format" in rest:
+            print(json.dumps({"name": project, "services": {service: {**resolved, "container_name": f"standa-hub-{service}"}}}))
+        return 0
+    if sub == "up":
+        inj = inject()
+        log("up", service, image)
+        if service in inj.get("kill_on_up", []):
+            inj["kill_on_up"].remove(service)
+            (FAKE / "inject.json").write_text(json.dumps(inj))
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        if service in inj.get("fail_up", []):
+            print(f"container {service} failed to start", file=sys.stderr)
+            return 1
+        image_id = resolve(s, image)
+        if image_id is None:
+            print(f"No such image: {image}", file=sys.stderr)
+            return 1
+        s["containers"][f"standa-hub-{service}"] = {
+            "image_ref": image, "image_id": image_id, "running": True,
+            "app_commit": resolved.get("environment", {}).get("APP_COMMIT", ""),
+            "hash": config_hash(resolved), "project": project, "service": service}
+        save(s)
+        return 0
+    return 2
+
+
+def main(argv):
+    s = load()
+    log(*argv)
+    if argv[0] == "compose":
+        return compose(argv[1:], s)
+    if argv[:2] == ["image", "inspect"]:
+        image_id = resolve(s, argv[2])
+        if image_id is None:
+            print(f"No such image: {argv[2]}", file=sys.stderr)
+            return 1
+        fmt = argv[argv.index("--format") + 1]
+        print(image_id if fmt == "{{.Id}}" else s["meta"][image_id]["revision"])
+        return 0
+    if argv[:2] == ["image", "tag"]:
+        image_id = resolve(s, argv[2])
+        if image_id is None:
+            return 1
+        s["tags"][argv[3]] = image_id
+        save(s)
+        return 0
+    if argv[0] == "inspect":
+        c = s["containers"].get(argv[1])
+        if c is None:
+            return 1
+        if "--format" not in argv:
+            print(json.dumps([{"State": {"Running": c["running"]}, "Config": {"Labels": {
+                "com.docker.compose.project": c["project"], "com.docker.compose.service": c["service"]}}}]))
+            return 0
+        fmt = argv[argv.index("--format") + 1]
+        out = {
+            "{{.Image}}": c["image_id"],
+            "{{.Config.Image}}": c["image_ref"],
+            "{{range .Config.Env}}{{println .}}{{end}}": f"PATH=/usr/bin\nAPP_COMMIT={c['app_commit']}",
+            '{{index .Config.Labels "com.docker.compose.config-hash"}}': c["hash"],
+            '{{index .Config.Labels "com.docker.compose.project"}}': c["project"],
+        }[fmt]
+        print(out)
+        return 0
+    if argv[0] == "run":  # docker run --rm --network none --pull never --entrypoint alembic IMAGE heads
+        image_id = resolve(s, argv[-2])
+        print(f"{s['meta'][image_id]['head']} (head)")
+        return 0
+    if argv[0] == "build":
+        if inject().get("fail_build"):
+            print("build failed", file=sys.stderr)
+            return 1
+        ctx = Path(argv[-1])
+        tag = argv[argv.index("-t") + 1]
+        revision = next(a.split("=", 1)[1] for a in argv if a.startswith("org.opencontainers.image.revision="))
+        content = b"".join((ctx / n).read_bytes() for n in sorted(os.listdir(ctx)) if (ctx / n).is_file())
+        image_id = "sha256:" + hashlib.sha256(tag.split(":")[0].encode() + content).hexdigest()
+        head_file = ctx.parent / "backend" / "ALEMBIC_HEAD"
+        s["meta"][image_id] = {"revision": revision, "head": head_file.read_text().strip()}
+        s["tags"][tag] = image_id
+        Path(argv[argv.index("--iidfile") + 1]).write_text(image_id)
+        save(s)
+        return 0
+    print(f"fake docker: unsupported {argv}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

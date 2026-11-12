@@ -8,7 +8,8 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-RELEASES = Path("/srv/standa-hub/releases")
+# DEPLOY_RELEASES: isolated tests only (backend/tests/test_deploy_v3.py)
+RELEASES = Path(os.environ.get("DEPLOY_RELEASES", "/srv/standa-hub/releases"))
 
 
 def git(*args):
