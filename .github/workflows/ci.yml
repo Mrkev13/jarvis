@@ -42,6 +42,13 @@ jobs:
         run: python -m pyflakes backend/*.py backend/scripts/*.py backend/modules/*.py backend/modules/*/*.py
       - name: Run tests without network access
         run: python -m pytest backend/tests --disable-socket --allow-unix-socket -x -q
+      - name: Validate the production Compose files (MRK-101)
+        # placeholders only: an empty env file and dummy values - no secret is ever needed here
+        run: |
+          : > backend/.env.production
+          docker compose -f backend/compose.yaml config -q
+          NEXT_PUBLIC_API_URL=https://example.invalid docker compose -f frontend/compose.yaml config -q
+          POSTGRES_PASSWORD=ci-placeholder docker compose -f postgres/compose.yaml config -q
 
   migrations:
     name: PostgreSQL migration round-trip

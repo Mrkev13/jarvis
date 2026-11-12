@@ -1,3 +1,11 @@
+> **Current production (November 2026): Ubuntu Server + Docker Compose.**
+> The Windows deployment instructions below describe the previous
+> hosting environment and are retained for historical reference.
+> Do not run Windows auto-update scripts against the Ubuntu server.
+> See [Ubuntu deployment](ubuntu-deployment.md) for the current setup.
+
+---
+
 # Home server (mini PC): architektura a zdroje pravdy
 
 Stav: **schválený architektonický směr**. Linear: milník **Home Server / Mini PC**, dokumentační issue MRK-45.

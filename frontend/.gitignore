@@ -49,3 +49,6 @@ next-env.d.ts
 !/public/game-assets/README.md
 
 !.env.production.template
+
+# Public environment example
+!.env.example

@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18.6
+    container_name: standa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: standa_hub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: standa_hub
+      TZ: Europe/Prague
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U standa_hub -d standa_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
