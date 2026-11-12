@@ -2,6 +2,7 @@
 
 `deploy/v3/` started as an exact, sanitized copy of the production files (`SHA256SUMS.original`, `REDACTIONS.md`,
 commit 4f5049e). Later commits in PR #65 change them on purpose; the diff against 4f5049e is the review record.
+Changes made on the server after the import are recorded in `PRODUCTION_CHANGES.md`.
 **Nothing here is installed automatically, and `--apply` stays off** until the isolated test on a second commit
 (MRK-108 step 5) has passed.
 
