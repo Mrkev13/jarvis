@@ -5,15 +5,20 @@ import { Button, Card, EmptyState, ErrorState, LoadingState, StatusBadge, fieldC
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import {
   CREDIT_OPTIONS,
+  SCHEDULE_OPTIONS,
   absenceTone,
+  attendanceWeeks,
   creditTone,
   examsSummary,
   parseAbsenceLimit,
+  scheduleChoice,
+  schedulePatch,
   shortDate,
   weekLabel,
   weekState,
   type CreditStatus,
   type ProgressPayload,
+  type ScheduleChoice,
   type SubjectProgress,
 } from "@/lib/schoolProgress";
 import { cx } from "@/lib/ui";
@@ -21,6 +26,7 @@ import { cx } from "@/lib/ui";
 /**
  * MRK-86: zápočty a docházka – u každého aktivního předmětu stav zápočtu, souhrn zkoušek, docházka „byl X z Y"
  * a absence proti limitu. Tento týden se zapisuje jedním klepnutím (Byl / Nebyl), minulý týden jde opravit.
+ * MRK-112: předmět může mít výuku ob týden (nabízí se jen týdny s výukou) a starší týdny jde doplnit v historii.
  * Všechno počítá backend (GET /school/progress); tady jen zobrazení a zápisy.
  */
 export function ProgressPanel({ reloadKey }: { reloadKey?: unknown }) {
@@ -96,6 +102,21 @@ export function ProgressPanel({ reloadKey }: { reloadKey?: unknown }) {
     }
   }
 
+  async function setSchedule(subject: SubjectProgress, choice: ScheduleChoice) {
+    if (!data) return;
+    clearError(subject.id);
+    setBusy(`${subject.id}:schedule`);
+    try {
+      await apiJson(`/school/subject/${subject.id}`, jsonBody("PATCH", schedulePatch(choice, data.week_start, data.previous_week_start)));
+      await load();
+      setNotice(`${subject.name}: výuka ${SCHEDULE_OPTIONS.find((o) => o.value === choice)?.label.toLowerCase()}.`);
+    } catch (e) {
+      setErrors((prev) => ({ ...prev, [subject.id]: errorMessage(e, "Rytmus výuky se nepodařilo uložit.") }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (loading && !data) return <LoadingState lines={3} label="Načítám zápočty a docházku…" />;
   if (loadError && !data) return <ErrorState message={loadError} onRetry={() => void load()} retrying={loading} />;
   if (!data) return null;
@@ -112,12 +133,12 @@ export function ProgressPanel({ reloadKey }: { reloadKey?: unknown }) {
             key={s.id}
             subject={s}
             week={data.week_start}
-            previousWeek={data.previous_week_start}
             busy={busy}
             error={errors[s.id] ?? null}
             onAttend={attend}
             onCredit={setCredit}
             onLimit={setLimit}
+            onSchedule={setSchedule}
           />
         ))}
       </ul>
@@ -132,6 +153,7 @@ function WeekButtons({
   busy,
   onAttend,
   primary,
+  dateInLabel,
 }: {
   subject: SubjectProgress;
   week: string;
@@ -139,6 +161,8 @@ function WeekButtons({
   busy: string | null;
   onAttend: (s: SubjectProgress, week: string, present: boolean | null) => void;
   primary?: boolean;
+  /** Starší týdny mají datum už v popisku („týden od 14. 9.") – bez druhého „(od …)". */
+  dateInLabel?: boolean;
 }) {
   const state = weekState(subject, week);
   const working = busy === `${subject.id}:week:${week}`;
@@ -164,7 +188,8 @@ function WeekButtons({
   return (
     <div className="space-y-1">
       <p className="text-xs text-ink-muted">
-        {label} <span className="tabular-nums">(od {shortDate(week)})</span>
+        {label}
+        {dateInLabel ? null : <span className="tabular-nums"> (od {shortDate(week)})</span>}
         {state === null ? " · nezapsáno" : null}
       </p>
       <div className="flex gap-2">
@@ -175,28 +200,34 @@ function WeekButtons({
   );
 }
 
+const OLDER_STEP = 8;
+
 function SubjectCard({
   subject: s,
   week,
-  previousWeek,
   busy,
   error,
   onAttend,
   onCredit,
   onLimit,
+  onSchedule,
 }: {
   subject: SubjectProgress;
   week: string;
-  previousWeek: string;
   busy: string | null;
   error: string | null;
   onAttend: (s: SubjectProgress, week: string, present: boolean | null) => void;
   onCredit: (s: SubjectProgress, status: CreditStatus) => void;
   onLimit: (s: SubjectProgress, text: string) => Promise<void>;
+  onSchedule: (s: SubjectProgress, choice: ScheduleChoice) => Promise<void>;
 }) {
   const [limitText, setLimitText] = useState(s.attendance.limit === null ? "" : String(s.attendance.limit));
+  const [olderShown, setOlderShown] = useState(OLDER_STEP);
   const exams = examsSummary(s.exams);
   const tone = absenceTone(s.attendance);
+  const biweekly = s.schedule.every === 2;
+  const weeks = attendanceWeeks(s, week);
+  const olderMissing = weeks.older.filter((w) => weekState(s, w) === null).length;
   return (
     <Card as="li" inset className="min-w-0 space-y-3" data-progress-subject={s.id}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -212,14 +243,45 @@ function SubjectCard({
       >
         <p className="text-ink-2">
           <span className="font-medium text-ink">Docházka:</span> {s.attendance.text}
+          {biweekly ? <span className="text-ink-muted"> · ob týden</span> : null}
         </p>
         {s.attendance.warning ? (
           <p className={cx("mt-1 text-xs font-medium", tone === "danger" ? "text-danger" : "text-warning")}>{s.attendance.warning}</p>
         ) : null}
       </div>
 
-      <WeekButtons subject={s} week={week} label="Tento týden" busy={busy} onAttend={onAttend} primary />
-      <WeekButtons subject={s} week={previousWeek} label="Minulý týden" busy={busy} onAttend={onAttend} />
+      {weeks.current ? (
+        <WeekButtons subject={s} week={weeks.current} label="Tento týden" busy={busy} onAttend={onAttend} primary />
+      ) : (
+        <p className="text-xs text-ink-muted" data-no-class-week>
+          Tento týden <span className="tabular-nums">(od {shortDate(week)})</span> · výuka není
+        </p>
+      )}
+      {weeks.previous ? (
+        <WeekButtons subject={s} week={weeks.previous} label={biweekly ? "Minulá výuka" : "Minulý týden"} busy={busy} onAttend={onAttend} />
+      ) : null}
+
+      {weeks.older.length ? (
+        <details className="group rounded-[var(--radius-control)] border border-line-subtle" data-older-weeks>
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm text-ink-2">
+            <span>
+              Starší týdny
+              {olderMissing ? <span className="text-ink-muted"> · nezapsáno {olderMissing}</span> : null}
+            </span>
+            <span aria-hidden className="text-ink-muted transition-transform group-open:rotate-180">▾</span>
+          </summary>
+          <div className="space-y-3 border-t border-line-subtle px-3 py-3">
+            {weeks.older.slice(0, olderShown).map((w) => (
+              <WeekButtons key={w} subject={s} week={w} label={weekLabel(w)} busy={busy} onAttend={onAttend} dateInLabel />
+            ))}
+            {weeks.older.length > olderShown ? (
+              <Button size="sm" variant="secondary" className="min-h-11 w-full" onClick={() => setOlderShown((n) => n + OLDER_STEP)}>
+                Zobrazit starší
+              </Button>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       {exams ? (
         <div className="text-xs text-ink-muted">
@@ -235,6 +297,23 @@ function SubjectCard({
           ) : null}
         </div>
       ) : null}
+
+      <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-muted">
+        Výuka
+        <select
+          className={cx(fieldClass, "min-h-11")}
+          value={scheduleChoice(s)}
+          disabled={busy !== null}
+          onChange={(e) => void onSchedule(s, e.target.value as ScheduleChoice)}
+          aria-label={`Rytmus výuky – ${s.name}`}
+        >
+          {SCHEDULE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-ink-muted">

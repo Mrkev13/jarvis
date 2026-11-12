@@ -348,6 +348,9 @@ class Subject(Base):
     credit_status = Column(String(20), nullable=True)  # pending | passed | failed
     credit_date = Column(Date, nullable=True)
     absence_limit = Column(Integer, nullable=True)
+    # MRK-112: rytmus výuky pro docházku – NULL/1 = každý týden, 2 = ob týden od pondělí `attendance_anchor`
+    attendance_every = Column(Integer, nullable=True)
+    attendance_anchor = Column(Date, nullable=True)
 
 
 class Assignment(Base):

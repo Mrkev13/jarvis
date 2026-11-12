@@ -168,6 +168,82 @@ class SchoolProgressTestCase(unittest.TestCase):
         self.assertEqual(self.attend(999, WEEK, True).status_code, 404)
         self.assertEqual(self.q(lambda db: (db.query(SchoolAttendance).count(), db.query(ActivityLog).count())), (0, 0))
 
+    # ---------- MRK-112: výuka ob týden a starší týdny ----------
+
+    def biweekly(self, subject_id, anchor):
+        return self.client.patch(f"/school/subject/{subject_id}",
+                                 json={"attendance_every": 2, "attendance_anchor": anchor.isoformat()})
+
+    def test_class_week_rhythm(self):
+        s = Subject(name="X", attendance_every=2, attendance_anchor=date(2026, 10, 26))
+        self.assertTrue(progress.is_class_week(s, date(2026, 10, 26)))
+        self.assertFalse(progress.is_class_week(s, date(2026, 11, 2)))
+        self.assertTrue(progress.is_class_week(s, WEEK))
+        self.assertTrue(progress.is_class_week(s, date(2026, 10, 12)), "i před kotvou")
+        self.assertFalse(progress.is_class_week(s, date(2026, 10, 19)))
+        self.assertEqual(progress.class_weeks(s, WEEK, span=6),
+                         [WEEK, date(2026, 10, 26), date(2026, 10, 12)])
+        weekly = Subject(name="Y")
+        self.assertEqual(len(progress.class_weeks(weekly, WEEK)), progress.HISTORY_SPAN_WEEKS)
+        self.assertTrue(progress.is_class_week(Subject(name="Z", attendance_every=2), date(2026, 11, 2)),
+                        "bez kotvy = každý týden")
+
+    def test_biweekly_subject_counts_and_offers_only_class_weeks(self):
+        self.attend(self.law, date(2026, 11, 2), False)   # zapsáno dřív, než byl nastaven rytmus
+        r = self.biweekly(self.law, WEEK)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["attendance_every"], r.json()["attendance_anchor"]), (2, WEEK.isoformat()))
+        p = self.progress(self.law)
+        self.assertEqual(p["schedule"], {"every": 2, "anchor": WEEK.isoformat()})
+        a = p["attendance"]
+        self.assertTrue(a["class_this_week"])
+        self.assertEqual(a["class_weeks"][:3], ["2026-11-09", "2026-10-26", "2026-10-12"])
+        self.assertEqual((a["recorded"], a["absent"], a["weeks"]), (0, 0, []), "týden bez výuky se nepočítá")
+        # zápis do týdne bez výuky = 422, nic se nezmění; smazat starý záznam jde
+        self.assertEqual(self.attend(self.law, date(2026, 11, 2), True).status_code, 422)
+        self.attend(self.law, date(2026, 10, 12), True)
+        self.assertEqual(self.progress(self.law)["attendance"]["text"],
+                         "byl 1 z 1, absence 0 z max. 2 (zbývá 2)")
+        self.assertEqual(self.attend(self.law, date(2026, 11, 2), None).status_code, 200)
+        self.assertEqual(self.q(lambda db: db.query(SchoolAttendance).count()), 1)
+        # výuka minulý týden → tento týden bez výuky
+        self.biweekly(self.law, date(2026, 11, 2))
+        a = self.progress(self.law)["attendance"]
+        self.assertFalse(a["class_this_week"])
+        self.assertEqual(a["class_weeks"][0], "2026-11-02")
+        # zpět na každý týden: kotva zmizí, počítá se všechno
+        r = self.client.patch(f"/school/subject/{self.law}", json={"attendance_every": 1})
+        self.assertEqual((r.json()["attendance_every"], r.json()["attendance_anchor"]), (1, None))
+        self.assertEqual(self.q(lambda db: (db.get(Subject, self.law).attendance_every,
+                                             db.get(Subject, self.law).attendance_anchor)), (None, None))
+
+    def test_schedule_validation_and_audit(self):
+        bad = [{"attendance_every": 2}, {"attendance_every": 3, "attendance_anchor": WEEK.isoformat()},
+               {"attendance_every": 2, "attendance_anchor": "2026-11-10"}]
+        for body in bad:
+            self.assertEqual(self.client.patch(f"/school/subject/{self.ait}", json=body).status_code, 422, body)
+        self.assertEqual(self.biweekly(self.ait, WEEK).status_code, 200)
+        log = self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="Subject").one())
+        self.assertIn('"attendance_anchor": {"old": null, "new": "2026-11-09"}', log.delta_json)
+        # posun kotvy u předmětu ob týden stačí sám
+        self.assertEqual(self.client.patch(f"/school/subject/{self.ait}",
+                                           json={"attendance_anchor": "2026-11-02"}).status_code, 200)
+
+    def test_older_weeks_can_be_filled_in(self):
+        old_week = date(2026, 9, 21)
+        self.assertEqual(self.attend(self.law, old_week, True).status_code, 200)
+        a = self.progress(self.law)["attendance"]
+        self.assertIn(old_week.isoformat(), a["class_weeks"])
+        self.assertEqual(a["weeks"], [{"week_start": old_week.isoformat(), "present": True}])
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="Subject").one().summary),
+                         "Docházka Právo, týden od 21. 9.: byl")
+
+    def test_ai_context_marks_biweekly(self):
+        self.biweekly(self.law, WEEK)
+        self.attend(self.law, WEEK, True)
+        text = "\n".join(self.q(lambda db: context_school(ContextRequest(db, TODAY, NOW_UTC))))
+        self.assertIn("Právo (výuka ob týden): byl 1 z 1", text)
+
     # ---------- zápočet ----------
 
     def test_credit_change_is_a_domain_event_with_activity(self):
