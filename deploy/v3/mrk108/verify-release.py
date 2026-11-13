@@ -8,15 +8,17 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-# DEPLOY_RELEASES: isolated tests only (backend/tests/test_deploy_v3.py)
+# DEPLOY_* overrides support isolated tests; production uses the configured Git checkout.
 RELEASES = Path(os.environ.get("DEPLOY_RELEASES", "/srv/standa-hub/releases"))
+ROOT = Path(os.environ.get("DEPLOY_ROOT", "/home/standa/projects/jarvis-mrk101"))
+GIT_USER = os.environ.get("DEPLOY_GIT_USER", "standa")
 
 
 def git(*args):
-    return subprocess.check_output(
-        ["git", *args],
-        stderr=subprocess.PIPE,
-    )
+    command = ["git", "-C", str(ROOT), *args]
+    if GIT_USER:
+        command = ["runuser", "-u", GIT_USER, "--", *command]
+    return subprocess.check_output(command, stderr=subprocess.PIPE)
 
 
 def fail(message):
