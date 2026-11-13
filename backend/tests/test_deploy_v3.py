@@ -487,3 +487,86 @@ def test_journal_transitions(w, tmp_path):
     j.write_text(json.dumps({'state': 'deploying'}))
     assert 'INVALID_TRANSITION' in go('aborted').stderr, 'after deploying only rollback'
     assert oct(j.stat().st_mode & 0o777) == '0o600'
+
+
+# ---------- Codex review regressions: trust modes, crash window, Git UID ----------
+
+@pytest.mark.parametrize('target,mode,entry', [
+    ('trusted_dir', 0o777, 'UNTRUSTED_HELPER'),
+    ('ci_helper', 0o666, 'UNTRUSTED_HELPER'),
+    ('transaction', 0o777, 'UNTRUSTED_HELPER'),
+])
+def test_updater_rejects_group_or_world_writable_trusted_paths(w, target, mode, entry):
+    paths = {
+        'trusted_dir': w.trusted,
+        'ci_helper': w.trusted / 'check-ci.sh',
+        'transaction': w.transaction,
+    }
+    p = paths[target]
+    p.chmod(mode)
+    r = w.update('--check')
+    assert r.returncode != 0 and entry in out(r), out(r)
+
+
+@pytest.mark.parametrize('target,mode', [
+    ('managed_yaml', 0o666),
+    ('journal_helper', 0o775),
+    ('transaction', 0o775),
+    ('trusted_dir', 0o777),
+])
+def test_transaction_rejects_writable_trusted_inputs(w, target, mode):
+    paths = {
+        'managed_yaml': w.trusted / 'backend-managed.yaml',
+        'journal_helper': w.trusted / 'deployment-journal.py',
+        'transaction': w.transaction,
+        'trusted_dir': w.trusted,
+    }
+    paths[target].chmod(mode)
+    r = w.tx('--check', w.a)
+    assert r.returncode != 0 and 'UNTRUSTED_PATH' in out(r), out(r)
+
+
+def test_recover_aborted_canonical_journal_after_crash_before_rename(w):
+    old = w.running()
+    b = w.commit('B')
+    w.ci_success(b)
+    _journal_wrapper(w, 'kill')
+    assert w.update().returncode != 0
+    shutil.move(w.trusted / 'deployment-journal.real.py', w.trusted / 'deployment-journal.py')
+    journal = w.state / f'transaction-v3-{b}' / 'journal.json'
+    # Crash point: 'advance aborted' completed, 'mv -T' did not run.
+    j = run('python3', '-I', str(w.trusted / 'deployment-journal.py'), str(journal), 'aborted')
+    assert j.returncode == 0
+    assert 'TRANSACTION_ALREADY_EXISTS' in out(w.update())
+    recover = w.tx('--recover', b)
+    assert recover.returncode == 0 and 'TRANSACTION_ABORTED_NO_PRODUCTION_CHANGE' in out(recover), out(recover)
+    assert not journal.exists()
+    assert w.running() == old
+    archived = list(w.state.glob(f'transaction-v3-{b}.aborted-*'))
+    assert len(archived) == 1
+    assert json.loads((archived[0] / 'journal.json').read_text())['state'] == 'aborted'
+    retry = w.update()
+    assert retry.returncode == 0 and w.running_commit() == b, out(retry)
+
+
+def test_verify_release_git_invoked_with_configured_checkout_user(w):
+    # Test Git invocation boundary without requiring CI runner to be root.
+    verifier = w.trusted / 'verify-release.py'
+    marker = w.tmp / 'runuser-invoked.txt'
+    fake = w.bin / 'runuser'
+    fake.write_text('#!/usr/bin/env python3\n'
+                    'import os,sys\n'
+                    'with open(os.environ["RUNUSER_MARKER"],"a") as f: f.write(" ".join(sys.argv[1:4])+"\\n")\n'
+                    'assert sys.argv[1:4] == ["-u","separate-git-user","--"]\n'
+                    'os.execvp(sys.argv[4], sys.argv[4:])\n')
+    fake.chmod(0o755)
+    # Fake Git repository belongs to the CI test UID, but the verifier must
+    # select a distinct configured identity through runuser, not Git as root.
+    env = {**w.env, 'DEPLOY_GIT_USER': 'separate-git-user', 'RUNUSER_MARKER': str(marker)}
+    # Force the entire release extraction via the normal updater first.
+    b = w.commit('B')
+    w.ci_success(b)
+    assert w.update('--check').returncode == 0
+    result = run('python3', '-I', str(verifier), b, cwd=w.tmp, env=env, check=False)
+    assert result.returncode == 0, out(result)
+    assert marker.exists() and '-u separate-git-user --' in marker.read_text()
