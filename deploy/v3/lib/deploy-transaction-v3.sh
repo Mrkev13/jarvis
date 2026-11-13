@@ -35,8 +35,14 @@ MODE=$1 TARGET=$2
 [[ $EUID == "$REQUIRED_UID" && -e /proc/self/fd/9 ]] || { echo 'ROOT_AND_MAINTENANCE_LOCK_REQUIRED' >&2; exit 1; }
 [[ $NEXT_PUBLIC_API_URL == https://* && $NEXT_PUBLIC_API_URL != *'<'* ]] || { echo 'NEXT_PUBLIC_API_URL_NOT_CONFIGURED' >&2; exit 1; }
 [[ -d $STATE_DIR && ! -L $STATE_DIR && $(stat -c '%u:%a' "$STATE_DIR") == "$REQUIRED_UID:700" ]] || { echo 'INSECURE_STATE_DIR' >&2; exit 1; }
-for p in "$TRUSTED" "$TRUSTED/deployment-journal.py" "$TRUSTED/check-backup.py" "$TRUSTED/verify-release.py" "$TRUSTED/check-ci.sh" "$BACKEND_MANAGED" "$FRONTEND_MANAGED"; do
-  [[ -e $p && ! -L $p && $(stat -c '%u' "$p") == "$REQUIRED_UID" ]] || { echo "UNTRUSTED_PATH: $p" >&2; exit 1; }
+trusted_path() {
+  local path=$1 mode
+  [[ -e $path && ! -L $path && $(stat -c %u -- "$path") == "$REQUIRED_UID" ]] || return 1
+  mode=$(stat -c %a -- "$path") || return 1
+  (( (8#$mode & 0022) == 0 ))
+}
+for p in "$TRUSTED" "$TRUSTED/deployment-journal.py" "$TRUSTED/check-backup.py" "$TRUSTED/verify-release.py" "$TRUSTED/check-ci.sh" "$BACKEND_MANAGED" "$FRONTEND_MANAGED" "$0"; do
+  trusted_path "$p" || { echo "UNTRUSTED_PATH: $p" >&2; exit 1; }
 done
 
 FINAL="$STATE_DIR/transaction-v3-$TARGET"
@@ -234,6 +240,19 @@ rollback() {
 # "prepared": the journal exists but "deploying" was never written, so no `compose up` ran. Prove it (both containers
 # still run the journal's previous image IDs), close the transaction as "aborted" and move it aside so the same target
 # can be deployed again later.
+archive_aborted() {
+  local expected_b expected_f destination
+  [[ $(jval state) == aborted ]] || { echo 'NOT_ABORTED' >&2; return 1; }
+  expected_b=$(jval backend); expected_f=$(jval frontend)
+  if [[ $(running_id standa-hub-backend) != "$expected_b" || $(running_id standa-hub-frontend) != "$expected_f" ]]; then
+    echo 'ABORTED_BUT_CONTAINERS_CHANGED: MANUAL_RECOVERY_REQUIRED' >&2; return 1
+  fi
+  destination="$TX.aborted-$(utc_stamp)-$-$RANDOM"
+  [[ ! -e $destination ]] || { echo 'ABORT_ARCHIVE_COLLISION' >&2; return 1; }
+  mv -T -- "$TX" "$destination"
+  fsync_dir "$STATE_DIR"
+  echo 'TRANSACTION_ABORTED_NO_PRODUCTION_CHANGE'
+}
 abort_prepared() {
   local expected_b expected_f
   expected_b=$(jval backend); expected_f=$(jval frontend)
@@ -241,9 +260,7 @@ abort_prepared() {
     echo 'PREPARED_BUT_CONTAINERS_CHANGED: MANUAL_RECOVERY_REQUIRED' >&2; return 1
   fi
   advance aborted
-  mv -T -- "$TX" "$TX.aborted-$(utc_stamp)"
-  fsync_dir "$STATE_DIR"
-  echo 'TRANSACTION_ABORTED_NO_PRODUCTION_CHANGE'
+  archive_aborted
 }
 
 on_exit() {
@@ -253,6 +270,7 @@ on_exit() {
     state=$(jval state) || state=invalid
     case "$state" in
       prepared) abort_prepared || echo 'MANUAL_RECOVERY_REQUIRED' >&2 ;;
+      aborted) archive_aborted || echo 'MANUAL_RECOVERY_REQUIRED' >&2 ;;
       deploying|verifying) { advance rollback_required && rollback; } || echo 'MANUAL_RECOVERY_REQUIRED' >&2 ;;
     esac
   elif (( rc != 0 )) && [[ $MODE == --apply && $TX != "$FINAL" && -d $TX ]]; then
@@ -289,6 +307,7 @@ if [[ $MODE == --recover ]]; then
   state=$(jval state)
   case "$state" in
     prepared) abort_prepared; exit 0 ;;
+    aborted) archive_aborted; exit 0 ;;
     deploying|verifying) advance rollback_required ;;
     rollback_required) ;;
     *) echo "NOT_RECOVERABLE: $state" >&2; exit 1 ;;
