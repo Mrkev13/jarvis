@@ -339,6 +339,7 @@ if sys.argv[2] == "deploying":
     sys.exit("SIMULATED_FAILURE")
 sys.exit(subprocess.call([sys.executable, "-I", {str(real)!r}, *sys.argv[1:]]))
 ''')
+    (w.trusted / 'deployment-journal.py').chmod(0o644)
 
 
 def test_failure_in_prepared_aborts_without_touching_production_and_allows_retry(w):
