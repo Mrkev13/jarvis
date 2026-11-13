@@ -55,13 +55,17 @@ class World:
             shutil.copy(FAKES / name, self.bin / name)
             (self.bin / name).chmod(0o755)
         for f in (V3 / 'mrk108').iterdir():
-            shutil.copy(f, self.trusted / f.name)
+            destination = self.trusted / f.name
+            shutil.copy(f, destination)
+            destination.chmod(0o644)
         shutil.copy(REPO_ROOT / 'deploy' / 'scripts' / 'check-ci.sh', self.trusted / 'check-ci.sh')
         (self.trusted / 'check-ci.sh').chmod(0o755)
         self.transaction = tmp / 'deploy-transaction-v3.sh'
         self.updater = tmp / 'auto-update-v3.sh'
         shutil.copy(V3 / 'lib' / 'deploy-transaction-v3.sh', self.transaction)
         shutil.copy(V3 / 'lib' / 'auto-update-v3.sh', self.updater)
+        self.transaction.chmod(0o755)
+        self.updater.chmod(0o755)
         self.env_file = tmp / 'backend.env'
         self.env_file.write_text('DATABASE_URL=postgresql://user:secret@db/x\n')
         self.git_env = {**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't',
@@ -348,6 +352,7 @@ def test_failure_in_prepared_aborts_without_touching_production_and_allows_retry
     aborted = [n for n in w.transactions() if n.startswith(f'transaction-v3-{b}.aborted-')]
     assert len(aborted) == 1 and json.loads((w.state / aborted[0] / 'journal.json').read_text())['state'] == 'aborted'
     shutil.move(w.trusted / 'deployment-journal.real.py', w.trusted / 'deployment-journal.py')
+    (w.trusted / 'deployment-journal.py').chmod(0o644)
     retry = w.update()
     assert retry.returncode == 0 and w.running_commit() == b, out(retry)
 
@@ -359,6 +364,7 @@ def test_power_loss_in_prepared_is_recovered_as_aborted(w):
     _journal_wrapper(w, 'kill')
     w.update()
     shutil.move(w.trusted / 'deployment-journal.real.py', w.trusted / 'deployment-journal.py')
+    (w.trusted / 'deployment-journal.py').chmod(0o644)
     assert w.journal(b)['state'] == 'prepared'
     assert 'PENDING_TRANSACTION' in out(w.update())
     rec = w.tx('--recover', b)
@@ -373,6 +379,7 @@ def test_prepared_with_changed_containers_needs_manual_recovery(w):
     _journal_wrapper(w, 'kill')
     w.update()
     shutil.move(w.trusted / 'deployment-journal.real.py', w.trusted / 'deployment-journal.py')
+    (w.trusted / 'deployment-journal.py').chmod(0o644)
     w.mutate(lambda s: s['containers']['standa-hub-backend'].update(image_id=image_id('someone-else')))
     rec = w.tx('--recover', b)
     assert rec.returncode != 0 and 'MANUAL_RECOVERY_REQUIRED' in out(rec)
@@ -537,6 +544,7 @@ def test_recover_aborted_canonical_journal_after_crash_before_rename(w):
     _journal_wrapper(w, 'kill')
     assert w.update().returncode != 0
     shutil.move(w.trusted / 'deployment-journal.real.py', w.trusted / 'deployment-journal.py')
+    (w.trusted / 'deployment-journal.py').chmod(0o644)
     journal = w.state / f'transaction-v3-{b}' / 'journal.json'
     # Crash point: 'advance aborted' completed, 'mv -T' did not run.
     j = run('python3', '-I', str(w.trusted / 'deployment-journal.py'), str(journal), 'aborted')
