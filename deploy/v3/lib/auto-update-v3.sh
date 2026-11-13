@@ -25,8 +25,14 @@ GIT_USER=${DEPLOY_GIT_USER-standa}
 
 [[ "$EUID" -eq "$REQUIRED_UID" && -e /proc/self/fd/9 ]] || { echo 'ROOT_AND_MAINTENANCE_LOCK_REQUIRED' >&2; exit 1; }
 [[ $API_URL == https://* && $API_URL != *'<'* ]] || { echo 'NEXT_PUBLIC_API_URL_NOT_CONFIGURED' >&2; exit 1; }
-for path in "$TRUSTED/check-backup.py" "$TRUSTED/verify-release.py" "$TRUSTED/check-ci.sh" "$TRANSACTION"; do
-  [[ -f "$path" && ! -L "$path" && $(stat -c %u "$path") == "$REQUIRED_UID" ]] || { echo "UNTRUSTED_HELPER: $path" >&2; exit 1; }
+trusted_path() {
+  local path=$1 mode
+  [[ -e $path && ! -L $path && $(stat -c %u -- "$path") == "$REQUIRED_UID" ]] || return 1
+  mode=$(stat -c %a -- "$path") || return 1
+  (( (8#$mode & 0022) == 0 ))
+}
+for path in "$TRUSTED" "$TRUSTED/check-backup.py" "$TRUSTED/verify-release.py" "$TRUSTED/check-ci.sh" "$TRANSACTION"; do
+  trusted_path "$path" || { echo "UNTRUSTED_HELPER: $path" >&2; exit 1; }
 done
 as_git_user() { if [[ -n $GIT_USER ]]; then runuser -u "$GIT_USER" -- "$@"; else "$@"; fi; }
 [[ -d "$RELEASES" && ! -L "$RELEASES" ]] || { echo 'RELEASE_DIRECTORY_NOT_READY' >&2; exit 1; }
