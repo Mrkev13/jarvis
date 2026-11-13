@@ -38,3 +38,12 @@ Root-owned, no symlinks: `lib/*.sh` → `/usr/local/lib/standa-hub/`, `mrk108/*`
 `/usr/local/lib/standa-hub/mrk108/`, `systemd/` units and drop-ins → `/etc/systemd/system/`, plus the local
 `20-local.conf`. Keep the updater on `--check` until the second-commit test (including a failure, rollback and an
 interrupted transaction) has passed on the isolated environment.
+
+
+## Codex BLOCK review fixes (13 November 2026)
+
+- **Trusted paths:** the updater rejects group/other-writable trusted directory, scripts and helpers; the transaction additionally checks its own executable, the journal helper and both managed Compose YAML files. Production installation must keep the trusted directory root-owned with mode `0755` or tighter, executable scripts `0755` or tighter, and configuration files `0644` or tighter. Never grant group/other write permissions.
+- **Interrupted `aborted` archive:** `--recover` handles a terminal `aborted` journal still in its canonical transaction directory after a crash between the atomic state update and directory rename. It checks that the original container image IDs are unchanged and then archives with a unique filename.
+- **Git ownership:** `verify-release.py` runs Git with `git -C DEPLOY_ROOT` under `DEPLOY_GIT_USER` (production: `standa`), avoiding root's `dubious ownership` rejection for the user's checkout. A simulated runuser boundary is tested in CI. An actual root/standa differing-UID integration test is still required.
+
+Regression tests are added in `backend/tests/test_deploy_v3.py`. These code changes are **not** installed on the production server. Do not change systemd to `--apply` or merge the draft PR until fresh CI and independent re-review are complete.
