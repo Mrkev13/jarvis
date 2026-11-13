@@ -46,6 +46,10 @@ class World:
         self.root = tmp / 'root'
         for d in (self.fake, self.bin, self.trusted, self.releases, self.backups / 'runs'):
             d.mkdir(parents=True)
+        # pytest's tmp_path inherits the host umask (often 0002), while the
+        # production trusted directory is installed root-owned, non-writable
+        # by group/other. Model that secure baseline explicitly.
+        self.trusted.chmod(0o755)
         self.state.mkdir(mode=0o700)
         for name in ('docker', 'curl', 'gh'):
             shutil.copy(FAKES / name, self.bin / name)
