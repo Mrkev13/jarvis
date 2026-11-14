@@ -130,7 +130,8 @@ prepare_snapshot() {
   local old_commit=$1 old_backend=$2 old_frontend=$3
   local bh fh
   bh=$(env BACKEND_IMAGE="$old_backend" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" APP_COMMIT="$old_commit" \
-       docker compose -p backend -f "$BACKEND_MANAGED" config --hash backend | awk '{print $NF}')
+       bash -o pipefail -c 'docker compose -p backend -f "$1" config --format json |
+         docker compose -p backend -f - config --hash backend' _ "$BACKEND_MANAGED" | awk '{print $NF}')
   fh=$(env FRONTEND_IMAGE="$old_frontend" NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" \
        docker compose -p frontend -f "$FRONTEND_MANAGED" config --hash frontend | awk '{print $NF}')
   [[ -n $bh && -n $fh ]] || { echo 'COMPOSE_HASH_MISSING' >&2; return 1; }

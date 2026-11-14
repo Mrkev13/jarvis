@@ -62,7 +62,9 @@ def compose(args, s):
     env_key = f"{service.upper()}_IMAGE"
     resolved = {}
     for f in files:
-        if f.endswith(".json"):  # snapshot / override: merged over what came before
+        if f == "-":
+            resolved.update(json.load(sys.stdin)["services"][service])
+        elif f.endswith(".json"):  # snapshot / override: merged over what came before
             resolved.update(json.loads(Path(f).read_text())["services"][service])
         else:  # managed YAML template: values from the environment
             image = os.environ.get(env_key)
