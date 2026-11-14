@@ -1,0 +1,13 @@
+[Unit]
+Description=Standa Hub automatic update
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/home/standa/projects/jarvis-mrk101
+ExecStart=/usr/local/lib/standa-hub/with-deployment-lock.sh /usr/local/lib/standa-hub/auto-update-v2.sh --check
+TimeoutStartSec=7200

@@ -1,0 +1,9 @@
+[Unit]
+Description=Standa Hub - database and media backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /usr/local/lib/standa-hub/backup.sh
+TimeoutStartSec=30min
