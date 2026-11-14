@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Standa Hub updates hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1h
+Persistent=true
+Unit=standa-hub-auto-update.service
+
+[Install]
+WantedBy=timers.target

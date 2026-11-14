@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Fake `curl` for backend/tests/test_deploy_v3.py: /health and /login answered from the fake docker state.
+An image ID listed in state["unhealthy"] makes its service unhealthy (backend: status unhealthy, frontend: HTTP 500)."""
+import json
+import os
+import sys
+from pathlib import Path
+
+state = json.loads((Path(os.environ["FAKE_DIR"]) / "state.json").read_text())
+url = sys.argv[-1]
+service = "backend" if url.endswith("/health") else "frontend"
+c = state["containers"].get(f"standa-hub-{service}")
+if not c or not c["running"]:
+    sys.exit(7)
+bad = c["image_id"] in state.get("unhealthy", [])
+if service == "frontend":
+    sys.exit(22 if bad else 0)
+print(json.dumps({"status": "unhealthy" if bad else "healthy", "database": {"status": "reachable"},
+                  "migrations": {"status": "current"}}))

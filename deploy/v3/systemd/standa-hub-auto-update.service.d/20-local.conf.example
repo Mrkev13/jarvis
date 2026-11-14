@@ -1,0 +1,4 @@
+# Local, NOT in Git: copy to /etc/systemd/system/standa-hub-auto-update.service.d/20-local.conf and fill in.
+# The reviewed scripts refuse to run with the <tailnet-host> placeholder (NEXT_PUBLIC_API_URL_NOT_CONFIGURED).
+[Service]
+Environment=DEPLOY_NEXT_PUBLIC_API_URL=https://<tailnet-host>:8443
