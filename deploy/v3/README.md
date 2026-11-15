@@ -94,3 +94,20 @@ What it does - journal `$STATE_DIR/migration-v3-<SHA>/journal.json`, helper `mrk
 Tests: `backend/tests/test_deploy_migration_v3.py` (fake docker models the production revision, throwaway copies,
 rehearsal apps and `alembic upgrade`). Before the first real migration (`0029_attendance_schedule`, PR #64): LXD test,
 restore of a real backup, old/new app compatibility on a real copy - MRK-114.
+
+## Update interval (MRK-108, 15 November 2026)
+
+The production timer polls every **10 minutes** (`systemd/standa-hub-auto-update.timer.d/20-interval.conf`; the
+audited base timer keeps `1h`). Install on the server:
+
+```bash
+sudo install -d -o root -g root -m 755 /etc/systemd/system/standa-hub-auto-update.timer.d
+sudo install -o root -g root -m 644 deploy/v3/systemd/standa-hub-auto-update.timer.d/20-interval.conf \
+  /etc/systemd/system/standa-hub-auto-update.timer.d/
+sudo systemctl daemon-reload && sudo systemctl restart standa-hub-auto-update.timer
+systemctl show standa-hub-auto-update.timer -p TimersMonotonic   # OnUnitInactiveUSec=10min
+```
+
+Delivery after a merge to `mrk-101-ubuntu-production` = up to 10 minutes of waiting + push CI on that SHA + image
+build. It is measured, not guaranteed. Commits that change the Alembic head are still blocked by the updater and
+need the controlled migration procedure.
