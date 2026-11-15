@@ -112,12 +112,36 @@ fi
 
 echo "DATABASE_IDENTITY_OK"
 
-TABLE_COUNT="$(sudo docker exec "$CONTAINER" \
-  psql -X -U standa_hub -d standa_hub_restore -tAc \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';")"
+# MRK-101 review: "empty" = no user object at all - relations (tables, views, sequences, materialized views, indexes,
+# foreign tables) in any non-system schema, functions, types, extra schemas and extensions besides plpgsql.
+# (*.sql files are gitignored on purpose - no dumps in the repository - so the query lives here, between the markers;
+#  backend/tests/test_restore_target_empty.py runs exactly this text against a real PostgreSQL.)
+OBJECT_COUNT="$(sudo docker exec -i "$CONTAINER" \
+  psql -X -v ON_ERROR_STOP=1 -U standa_hub -d standa_hub_restore -tA <<'EMPTY_SQL'
+-- MRK-101: number of user objects in the restore target database; restore-postgres-test.sh requires 0.
+-- Counts everything a plain SQL dump could collide with, in every non-system schema (fail closed):
+-- relations (tables, partitioned tables, views, materialized views, sequences, indexes, foreign tables, composite
+-- types), functions/procedures, user types (domains, enums, ranges, base types - not the row types of the relations
+-- already counted), schemas other than public, and extensions other than plpgsql.
+-- Test: backend/tests/test_restore_target_empty.py runs this text on a real PostgreSQL.
+WITH user_ns AS (
+  SELECT oid, nspname FROM pg_namespace
+  WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+    AND nspname NOT LIKE 'pg\_toast%'
+    AND nspname NOT LIKE 'pg\_temp\_%'
+)
+SELECT
+  (SELECT count(*) FROM pg_class c JOIN user_ns n ON n.oid = c.relnamespace)
++ (SELECT count(*) FROM pg_proc p JOIN user_ns n ON n.oid = p.pronamespace)
++ (SELECT count(*) FROM pg_type t JOIN user_ns n ON n.oid = t.typnamespace
+     WHERE t.typrelid = 0 AND t.typelem = 0)
++ (SELECT count(*) FROM user_ns WHERE nspname <> 'public')
++ (SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql');
+EMPTY_SQL
+)"
 
-if [[ "$TABLE_COUNT" != "0" ]]; then
-  echo "ERROR: Restore target database is not empty" >&2
+if [[ "$OBJECT_COUNT" != "0" ]]; then
+  echo "ERROR: Restore target database is not empty ($OBJECT_COUNT user objects)" >&2
   exit 2
 fi
 
