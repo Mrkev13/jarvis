@@ -37,7 +37,7 @@ export interface MaterialsPayload {
   materials: StudyMaterial[];
   truncated: boolean;
   courses: StudyCourse[];
-  subjects: { id: number; name: string }[];
+  subjects: { id: number; name: string; active?: boolean }[];  // MRK-75: active false = archivovaný
 }
 
 export interface MaterialFilters { subject: string; type: string; state: MaterialState; course: string }

@@ -16,6 +16,7 @@ from tools import get_wot_resources, get_wot_grinds, get_finance_summary
 from auth_service import (
     auth_enabled,
     authenticate_pin_and_create_session,
+    client_ip,
     validate_session_token,
     revoke_session_token,
     cookie_params,
@@ -288,6 +289,8 @@ app.add_middleware(
 
 from health_router import router as health_router
 app.include_router(health_router)
+from ui_preferences import router as ui_preferences_router  # MRK-78: rozložení Řídicího centra na serveru
+app.include_router(ui_preferences_router)
 
 # MRK-21: REST modulů z `ModuleIntegrations.routers` (modules/<id>/router.py). Globální dependencies výše (auth,
 # brána vypnutého modulu) platí i pro ně – nový modul do main.py nic nepřidává.
@@ -296,15 +299,9 @@ for _owner, _module_router in all_contributions("routers"):
 
 
 def _get_client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",", 1)[0].strip()
-    if hasattr(request.client, "host"):
-        try:
-            return request.client.host
-        except Exception:
-            return "unknown"
-    return "unknown"
+    # MRK-73: X-Forwarded-For counts only from AUTH_TRUSTED_PROXIES (auth_service.client_ip).
+    peer = getattr(request.client, "host", None) if request.client else None
+    return client_ip(peer, request.headers.get("x-forwarded-for"))
 
 
 class ChatMessage(BaseModel):
@@ -462,6 +459,7 @@ class ReminderUpdateRequest(BaseModel):
 class PushSubscriptionRequest(BaseModel):
     endpoint: str
     keys: dict[str, str]
+    server_key: str | None = None  # MRK-102: VAPID veřejný klíč, pro který prohlížeč odběr vytvořil
 
 
 class BriefingGenerateRequest(BaseModel):
@@ -596,7 +594,8 @@ def chat(request: ChatRequest):
         planner_mode, planner_summary_intro = planner_intent
         planner_db = SessionLocal()
         try:
-            plan_payload = generate_plan(planner_db, mode=planner_mode)
+            # MRK-71: the answer is saved to the conversation (LLM history) → no Finance-computed goals
+            plan_payload = generate_plan(planner_db, mode=planner_mode, exclude_finance=True)
             planner_db.commit()
             card_type = (
                 "goal_review" if planner_mode == PLANNER_MODE_GOAL_REVIEW
@@ -1466,8 +1465,8 @@ def finance_summary():
 # ===== SCHOOL =====
 
 @app.get("/school/subjects")
-def school_subjects():
-    return get_school_subjects()
+def school_subjects(include_archived: bool = False):
+    return get_school_subjects(include_archived=include_archived)
 
 @app.post("/school/subject")
 def add_school_subject(request: SubjectRequest):
@@ -2160,7 +2159,10 @@ def push_subscribe(request: PushSubscriptionRequest, http_request: Request):
     try:
         try:
             sub = delivery_service.upsert_subscription(
-                db, request.endpoint, request.keys, http_request.headers.get("user-agent"))
+                db, request.endpoint, request.keys, http_request.headers.get("user-agent"),
+                server_key=request.server_key, current_key=delivery_service.WebPushProvider().public_key)
+        except delivery_service.StaleServerKey:
+            raise HTTPException(status_code=409, detail={"category": "stale_key"}) from None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         db.commit()
@@ -2501,27 +2503,11 @@ def dashboard_get():
                 logging.getLogger(__name__).exception("dashboard: section %s (%s) failed", sec.key, owner)
                 db.rollback()
 
-        recent_activity_rows = (
-            db.query(ActivityLog)
-            .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc())
-            .limit(5)
-            .all()
-        )
-        recent_activity = [
-            {
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-                "area": r.area,
-                "action_type": r.action_type,
-                "summary": r.summary,
-            }
-            for r in recent_activity_rows
-        ]
-
+        # MRK-78: „recent_activity" odstraněno – frontend ho nečetl; změny ukazuje widget „Od včera" (GET /changes).
         return {
             "today": today,
             "notifications": notifications,
             **sections,
-            "recent_activity": recent_activity,
         }
     finally:
         db.close()

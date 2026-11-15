@@ -344,6 +344,13 @@ class Subject(Base):
     semester = Column(String(50), default="")
     credits = Column(Integer, default=0)
     active = Column(Boolean, default=True)
+    # MRK-86: stav zápočtu (NULL = nesplněn), jeho datum a volitelný limit povolených absencí
+    credit_status = Column(String(20), nullable=True)  # pending | passed | failed
+    credit_date = Column(Date, nullable=True)
+    absence_limit = Column(Integer, nullable=True)
+    # MRK-112: rytmus výuky pro docházku – NULL/1 = každý týden, 2 = ob týden od pondělí `attendance_anchor`
+    attendance_every = Column(Integer, nullable=True)
+    attendance_anchor = Column(Date, nullable=True)
 
 
 class Assignment(Base):
@@ -781,13 +788,23 @@ class ModuleSetting(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class UiPreference(Base):
+    """MRK-78: nastavení vzhledu sdílená mezi zařízeními (rozložení Řídicího centra). Klíč z allowlistu
+    (`ui_preferences.KEYS`), hodnota = ověřený JSON bez osobních dat (jen id widgetů, pořadí, velikosti)."""
+    __tablename__ = "ui_preferences"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ---------- modely modulů v balíčcích modules/<id>/ (Platform 2.0) ----------
 # Jeden řádek na modul: registrace tabulek do Base pro Alembic, create_all v testech a kontrolu driftu schématu.
 from modules.habits.models import Habit, HabitEntry  # noqa: E402
 
 from modules.calendar.models import CalendarSource, CalendarEvent  # noqa: E402
 
-from modules.school.models import StudyCourse, StudyMaterial  # noqa: E402
+from modules.school.models import SchoolAttendance, StudyCourse, StudyMaterial  # noqa: E402
 from modules.fitness.models import Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry  # noqa: E402
 from modules.finance.models import (  # noqa: E402
     FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision,
@@ -796,7 +813,7 @@ from modules.finance.legacy_compat import install_legacy_compat  # noqa: E402
 
 install_legacy_compat(FinanceTransaction)
 
-MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, StudyCourse, StudyMaterial, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry,
+MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, StudyCourse, StudyMaterial, SchoolAttendance, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry,
                  FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision)
 
 

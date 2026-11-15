@@ -39,6 +39,7 @@ import {
   GRIND_PRIORITIES,
   grindStatusOptions,
   grindBody,
+  masterySummary,
   sortMilestones,
   RESOURCE_KEYS,
   RESOURCE_LABELS,
@@ -62,6 +63,7 @@ export default function WotPage() {
   const grinds = grindsRes.data ?? [];
   const completions = completedRes.data ?? [];
   const milestones = sortMilestones(milestonesRes.data ?? []);
+  const mastery = masterySummary(milestones);
 
   // splnění grindu: potvrzení → server → krátká oslava (při omezeném pohybu hned) → obnovení seznamů
   const [completing, setCompleting] = useState<WotGrind | null>(null);
@@ -265,6 +267,11 @@ export default function WotPage() {
         title="World of Tanks"
         subtitle="Zdroje a grindy tanků."
         meta={<AreaBadge area="wot" />}
+        actions={
+          <Button size="sm" variant="primary" onClick={() => setMilestoneForm({ open: true, milestone: null })} aria-haspopup="dialog">
+            Přidat Mko
+          </Button>
+        }
       />
 
       {error ? <ErrorState message={error} /> : null}
@@ -275,6 +282,49 @@ export default function WotPage() {
         <ErrorState message={LOAD_ERROR} onRetry={() => void loadData()} retrying={refreshing} />
       ) : (
         <div className="space-y-6 md:space-y-8" aria-busy={refreshing || undefined}>
+          {/* ===== POČÍTADLO M-EK (MRK-82) – stejné pravidlo jako automatický cíl „wot_ace_mastery_count" ===== */}
+          <Card as="section" aria-labelledby="wot-mastery" data-section="wot-mastery" index={0} className="border-t-2 border-t-amber-400/40">
+            <CardHeader
+              title={<span id="wot-mastery">Mka</span>}
+              actions={
+                <ButtonLink href="#wot-milestones" size="sm" variant="ghost">
+                  Všechny milníky
+                </ButtonLink>
+              }
+            />
+            {milestonesRes.loading ? (
+              <LoadingState lines={1} label="Počítám Mka…" />
+            ) : milestonesRes.status === "error" ? (
+              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – milníky níže ukážou chybu.</p>
+            ) : (
+              <>
+                <StatGrid cols={2}>
+                  <MetricCard label="Mka celkem" value={formatNumber(mastery.total)} />
+                  <MetricCard label="Tanků s Mkem" value={formatNumber(mastery.tanks)} />
+                </StatGrid>
+                {mastery.byTank.length > 0 ? (
+                  <ul className="mt-4 flex flex-wrap gap-2" aria-label="Mka podle tanků">
+                    {mastery.byTank.slice(0, 12).map((t) => (
+                      <li
+                        key={t.tank}
+                        className="inline-flex items-center gap-2 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 py-1 pl-1 pr-2.5 text-sm text-ink"
+                      >
+                        <GameImage kind="tank" name={t.tank} size="xs" />
+                        <span className="max-w-[12rem] truncate">{t.tank}</span>
+                        {t.count > 1 ? <span className="font-semibold tabular-nums text-ink-muted">×{t.count}</span> : null}
+                      </li>
+                    ))}
+                    {mastery.byTank.length > 12 ? (
+                      <li className="self-center text-sm text-ink-muted">+{mastery.byTank.length - 12} dalších</li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem nahoře.</p>
+                )}
+              </>
+            )}
+          </Card>
+
           {/* ===== ZDROJE ===== */}
           <Card as="section" id="resources" aria-labelledby="wot-resources" index={0} className="border-t-2 border-t-orange-400/40">
             <CardHeader
@@ -495,12 +545,7 @@ export default function WotPage() {
           <PageSection
             labelledBy="wot-milestones"
             title="Mka & nejlepší bitvy"
-            description="Památné bitvy se statistikami a screenshoty."
-            actions={
-              <Button size="sm" variant="primary" onClick={() => setMilestoneForm({ open: true, milestone: null })} aria-haspopup="dialog">
-                Přidat Mko
-              </Button>
-            }
+            description="Památné bitvy se statistikami a screenshoty. Nové Mko přidáš tlačítkem v záhlaví stránky."
           >
             {milestonesRes.loading ? (
               <LoadingState lines={2} label="Načítám milníky…" />

@@ -18,8 +18,11 @@ try {
    const response={status:200,contentType:'application/json',headers:{'Access-Control-Allow-Origin':base,'Access-Control-Allow-Credentials':'true'}};
    let body={};
    if(u.pathname==='/modules') body={modules:MODULES.map(m=>({id:m.id,label:m.label,available:m.implemented&&m.defaultEnabled,enabled:m.defaultEnabled,implemented:m.implemented,default_enabled:m.defaultEnabled,source:'default',locked:false,depends_on:[],capabilities:m.capabilities}))};
-   else if(u.pathname==='/calendar') body={today:'2026-10-25',events:[],history:[],sources:[],moodle_configured:true};
-   else if(u.pathname==='/calendar/sync'){generation++;body={created:1,updated:0,cancelled:0,errors:0};}
+   // MRK-77: two read-only sources; Google event on the Today list, sync with Google failing
+   else if(u.pathname==='/calendar') body={today:'2026-10-25',events:[{id:9,key:'dentist',title:'Zubař',source_id:2,location:null,starts_at:'2026-10-25T13:00:00Z',ends_at:'2026-10-25T14:00:00Z',all_day:false,status:'active',state:'active',starts_on:null,ends_on:null}],history:[],
+     sources:[{id:1,name:'Moodle',enabled:true,configured:true,key:'moodle'},{id:2,name:'Google Kalendář',enabled:true,configured:true,key:'google'}],moodle_configured:true,configured:true,
+     available_sources:[{key:'moodle',name:'Moodle',configured:true},{key:'google',name:'Google Kalendář',configured:true}]};
+   else if(u.pathname==='/calendar/sync'){generation++;body={created:1,updated:0,cancelled:0,errors:0,sources:{moodle:{created:1,updated:0,cancelled:0,errors:0},google:{error:'feed_unavailable'}}};}
    else if(u.pathname==='/calendar/occurrences') {
     ranges.push({start,end,kind:'events'});
     if(fail){await route.fulfill({...response,status:503,body:'{}'});return;}
@@ -38,8 +41,14 @@ try {
   assert.match(await page.locator('body').innerText(),/Celý den/);
   assert.match(await page.locator('body').innerText(),/11:00/);
   assert.equal(ranges.filter(r=>r.start==='2026-10-19'&&r.end==='2026-10-26').length,2);
+  assert.match(await page.locator('body').innerText(),/zdroje: Moodle a Google Kalendář/);
+  assert.match(await page.locator('body').innerText(),/Google Kalendář/, 'source badge on the Google event');
   await page.getByRole('button',{name:'Synchronizovat',exact:true}).click();
   await page.getByRole('link',{name:'Synthetic lecture 1',exact:true}).waitFor();
+  const notice=await page.getByRole('status').filter({hasText:'Přidáno'}).innerText();
+  assert.match(notice,/Nepodařilo se načíst: Google Kalendář/);
+  assert.doesNotMatch(notice,/feed_unavailable|https?:/);
+  await page.screenshot({path:out+`calendar-sources-${width}.png`});
   assert.equal(ranges.filter(r=>r.start==='2026-10-19'&&r.end==='2026-10-26').length,4);
   await page.getByRole('button',{name:'Předchozí týden'}).click();
   await page.getByText('2026-10-12 – 2026-10-18',{exact:true}).waitFor();

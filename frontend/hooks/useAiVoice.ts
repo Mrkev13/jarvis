@@ -105,12 +105,16 @@ export function useAiVoice({
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleListening]);
 
-  // úklid při odchodu ze stránky
-  const stopSpeech = speech.stop;
+  // úklid jen při odchodu ze stránky. `speech.stop` mění identitu s každou změnou stavu – kdyby byla
+  // v závislostech, úklid by běžel hned po startu diktování a nahrávání okamžitě ukončil (MRK-95).
+  const stopSpeechRef = useRef(speech.stop);
+  useEffect(() => {
+    stopSpeechRef.current = speech.stop;
+  }, [speech.stop]);
   useEffect(
     () => () => {
       try {
-        stopSpeech();
+        stopSpeechRef.current();
       } catch {
         /* ignore */
       }
@@ -120,7 +124,7 @@ export function useAiVoice({
         /* ignore */
       }
     },
-    [stopSpeech, stopTts],
+    [stopTts],
   );
 
   return {

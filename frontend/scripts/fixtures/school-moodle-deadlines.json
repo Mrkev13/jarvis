@@ -1,0 +1,27 @@
+{
+ "items": [
+  {
+   "key": "41",
+   "event_id": 41,
+   "title": "Test 1 se zavírá",
+   "date": "2026-10-14",
+   "time": "22:00",
+   "all_day": false,
+   "subject_id": 2,
+   "subject_name": "Fyzika",
+   "href": "/calendar?event=41"
+  },
+  {
+   "key": "42",
+   "event_id": 42,
+   "title": "Esej – odevzdání",
+   "date": "2026-10-16",
+   "time": "23:59",
+   "all_day": false,
+   "subject_id": 3,
+   "subject_name": "Dějepis",
+   "href": "/calendar?event=42"
+  }
+ ],
+ "calendar_enabled": true
+}

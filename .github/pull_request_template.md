@@ -22,7 +22,8 @@ Fixes MRK-
 
 ## UI
 
-<!-- Jen při změně UI: screenshot desktop (1366/1920 px) + mobil (390 px), případně světlý i tmavý režim. -->
+<!-- Jen při změně UI: screenshot desktop (1366/1920 px) + mobil (390 px), případně světlý i tmavý režim.
+     Stačí odkaz na artefakt `ui-check-screenshots` z CI (job „UI checks“) + názvy souborů, které změnu ukazují. -->
 
 ## Rizika a poznámky pro review
 

@@ -127,6 +127,33 @@ class PushApiTestCase(unittest.TestCase):
         self.assertTrue(self.client.get("/push/status").json()["subscriptions"][0]["disabled"])
         self.assertEqual(self.client.post("/push/subscriptions", json=SUB).json()["subscription"]["disabled"], False)
 
+    def test_subscription_for_old_server_keys_is_refused_and_403_keeps_subscriptions(self):
+        """MRK-102: after a server move with new VAPID keys the phone kept an old subscription; the page showed
+        "connected" while every push was rejected with 403. Now the old subscription is refused (409) by the key
+        the browser created it with. A 403 from the push service is reported, but does not disable the
+        subscription: per RFC 8292 it can be a server-wide VAPID problem that would otherwise kill every device."""
+        self.login()
+        _, old_public = webpush.generate_keypair()
+        stale = self.client.post("/push/subscriptions", json={**SUB, "server_key": old_public})
+        self.assertEqual((stale.status_code, stale.json()["detail"]), (409, {"category": "stale_key"}))
+        self.assertEqual(self.Session().query(PushSubscription).count(), 0, "nothing stored")
+        # matching key (new frontend) and no key (older frontend) are both accepted
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": self.public}).status_code, 200)
+        self.assertEqual(self.client.post("/push/subscriptions", json=SUB).status_code, 200)
+        # the same key written with base64 padding is still the same key
+        padded = self.public + "=" * (-len(self.public) % 4)
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": padded}).status_code, 200)
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": "!!not-base64!!"}).status_code, 409)
+
+        with patch.object(webpush, "send", lambda *a, **k: webpush.PushResponse(403)):
+            r = self.client.post("/push/test", json={"endpoint": ENDPOINT}).json()
+        self.assertEqual(r, {"ok": False, "error": "http_403"})
+        self.assertFalse(self.client.get("/push/status").json()["subscriptions"][0]["disabled"],
+                         "403 alone does not disable a subscription")
+        # an old-key re-post (page reload on the phone) is refused and changes nothing
+        self.assertEqual(self.client.post("/push/subscriptions", json={**SUB, "server_key": old_public}).status_code, 409)
+        self.assertEqual(self.Session().query(PushSubscription).count(), 1)
+
     def test_test_push_without_configuration(self):
         self.login()
         self.client.post("/push/subscriptions", json=SUB)

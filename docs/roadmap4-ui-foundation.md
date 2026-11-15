@@ -117,7 +117,7 @@ visual polish.
 |---|---|
 | Explicit typed widget registry (11 widgets, stable ids) | ✅ design-system §16 |
 | Layout `{version, widgets[{id, visible, order, size}]}` + validation | ✅ `lib/dashboardLayout.ts`, tests |
-| Persistence | ✅ localStorage `standa-hub:dashboard-layout:v1` (no backend preference store exists) |
+| Persistence | ✅ localStorage `standa-hub:dashboard-layout:v1`; since MRK-78 synced with the server (`/preferences/dashboard_layout`) |
 | Customize mode: reorder (buttons), hide/restore, semantic sizes, reset with confirm | ✅ |
 | Default layout identical to the 4B.1 balance (desktop, tablet, mobile) | ✅ before/after screenshots |
 | No refetch on edits; hidden widgets fetch nothing | ✅ |

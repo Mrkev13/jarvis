@@ -299,6 +299,25 @@ export function milestoneStats(m: Pick<WotMilestone, NumberField>): { key: Numbe
     .map((k) => ({ key: k, label: NUMBER_LABELS[k], value: m[k] as number }));
 }
 
+export type MasterySummary = {
+  /** Všechny záznamy „Mistr (Mko)“, i opakované na stejném tanku (stejně jako automatický cíl na backendu). */
+  total: number;
+  tanks: number;
+  byTank: { tank: string; count: number }[];
+};
+
+/** MRK-82: počítadlo M-ek z načtených milníků – stejné pravidlo jako zdroj cíle `wot_ace_mastery_count`. */
+export function masterySummary(list: Pick<WotMilestone, "milestone_type" | "mastery" | "tank">[]): MasterySummary {
+  const counts = new Map<string, number>();
+  for (const m of list) {
+    if (m.milestone_type !== "mastery" || m.mastery !== "ace") continue;
+    counts.set(m.tank, (counts.get(m.tank) ?? 0) + 1);
+  }
+  const byTank = [...counts].map(([tank, count]) => ({ tank, count }))
+    .sort((a, b) => b.count - a.count || a.tank.localeCompare(b.tank, "cs"));
+  return { total: byTank.reduce((sum, t) => sum + t.count, 0), tanks: byTank.length, byTank };
+}
+
 /** Oblíbené (legendární) první, pak nejnovější bitva. */
 export function sortMilestones(list: WotMilestone[]): WotMilestone[] {
   return [...list].sort((a, b) => {

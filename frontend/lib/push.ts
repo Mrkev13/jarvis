@@ -68,6 +68,64 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuf
   return out;
 }
 
+/**
+ * MRK-102: patří odběr ke klíči, který má server teď? `subscriptionKey` = `PushSubscription.options.applicationServerKey`.
+ * Po přesunu serveru s novými VAPID klíči telefon drží starý odběr a push služba každou zprávu odmítne (403).
+ * `null` = prohlížeč klíč neprozradí (nejde poznat) – pak rozhoduje server (409 stale_key) a výsledek testu.
+ */
+export function serverKeyMatches(subscriptionKey: ArrayBuffer | null | undefined, publicKey: string): boolean | null {
+  if (!subscriptionKey) return null;
+  const current = urlBase64ToUint8Array(publicKey);
+  const used = new Uint8Array(subscriptionKey);
+  if (used.length !== current.length) return false;
+  return used.every((byte, i) => byte === current[i]);
+}
+
+/** Bajty klíče → base64url bez paddingu (stejný zápis jako WEB_PUSH_VAPID_PUBLIC_KEY); prázdné / chybějící = null. */
+export function keyToBase64Url(key: ArrayBuffer | null | undefined): string | null {
+  if (!key || key.byteLength === 0) return null;
+  let raw = "";
+  for (const byte of new Uint8Array(key)) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * MRK-102 (review): klíč serveru, pro který byl odběr SKUTEČNĚ vytvořen – z `subscription.options` prohlížeče,
+ * jinak ten, který si stránka zapamatovala při vytvoření odběru pro stejný endpoint. Nikdy aktuální klíč serveru:
+ * ten by server přesvědčil, že starý odběr sedí. `null` = nejde poznat → server_key se neposílá a nic se netvrdí.
+ */
+export function subscriptionServerKey(
+  optionsKey: ArrayBuffer | null | undefined,
+  endpoint: string,
+  remembered: { endpoint: string; key: string } | null,
+): string | null {
+  return keyToBase64Url(optionsKey) ?? (remembered && remembered.endpoint === endpoint ? remembered.key : null);
+}
+
+export const REMEMBERED_KEY_STORAGE = "standa-hub:push-subscription-key";
+
+/** Zapamatovaný klíč odběru (localStorage může být nedostupný – pak null). */
+export function readRememberedKey(): { endpoint: string; key: string } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(REMEMBERED_KEY_STORAGE) ?? "null") as { endpoint?: unknown; key?: unknown } | null;
+    return typeof v?.endpoint === "string" && typeof v?.key === "string" ? { endpoint: v.endpoint, key: v.key } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberKey(endpoint: string, key: string): void {
+  try {
+    localStorage.setItem(REMEMBERED_KEY_STORAGE, JSON.stringify({ endpoint, key }));
+  } catch {
+    // bez úložiště jen chybí záloha pro prohlížeče, které klíč odběru neprozradí
+  }
+}
+
+/** Text, když prohlížeč klíč odběru neprozradí (stav „Připojeno" pak není ověřený). */
+export const UNVERIFIED_TEXT =
+  "Prohlížeč neprozradí, ke kterému klíči serveru odběr patří. Když „Poslat test“ nedorazí, klepni na „Znovu připojit“.";
+
 /** PushSubscription.toJSON() → tělo POST /push/subscriptions (jen endpoint + klíče). */
 export function subscriptionBody(json: unknown): { endpoint: string; keys: { p256dh: string; auth: string } } {
   const j = json as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } } | null;
@@ -78,12 +136,62 @@ export function subscriptionBody(json: unknown): { endpoint: string; keys: { p25
   return { endpoint, keys: { p256dh, auth } };
 }
 
-export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on";
+// MRK-102: „unverified" = odběr existuje, ale nejde zjistit, ke kterému klíči serveru patří (nic se netvrdí);
+// „auth_error" = push služba odmítla ověření serveru (401/403) – starý odběr NEBO chyba VAPID na serveru.
+export type DeviceState = "checking" | "unsupported" | "server_off" | "denied" | "off" | "on" | "stale" | "unverified" | "auth_error";
+
+/**
+ * Stav karty po tiché synchronizaci existujícího odběru (`usedKey` = klíč, se kterým odběr vznikl, nebo null).
+ * „on" jen tehdy, když klíč známe a sedí a server odběr přijal – jinak se připojení netvrdí.
+ */
+export function syncedState(usedKey: string | null, keyMatches: boolean, syncStatus: number): DeviceState {
+  if (usedKey && !keyMatches) return "stale";
+  if (syncStatus === 409) return "stale";
+  if (syncStatus < 200 || syncStatus >= 300) return "off";
+  return usedKey ? "on" : "unverified";
+}
+
+/** MRK-102: vysvětlení stavu „stale" (odběr ke starým klíčům serveru). */
+export const STALE_TEXT =
+  "Server má od posledního připojení jiné klíče pro upozornění (např. po přesunu na jiný počítač). " +
+  "Starý odběr už nefunguje – klepni na „Znovu připojit“.";
+
+/**
+ * Výsledek „Poslat test" → věta pro člověka a nový stav karty (`null` = beze změny). Úspěch odběr ověří („on");
+ * 404/410 = odběr prokazatelně zanikl („stale"); 401/403 = odmítnuté ověření serveru („auth_error") – může jít
+ * o starý odběr i o chybu VAPID na serveru, proto se netvrdí, že je odběr starý.
+ */
+export function testResultText(ok: boolean, error: string | null | undefined): { text: string; state: DeviceState | null } {
+  if (ok) return { text: "Test odeslán – upozornění by mělo za chvíli přijít.", state: "on" };
+  switch (error) {
+    case "http_401":
+    case "http_403":
+      return {
+        text: "Push služba odmítla ověření serveru. Buď odběr patří ke starým klíčům – zkus „Znovu připojit“ –, " +
+          "nebo je na serveru chyba v nastavení klíčů pro upozornění (WEB_PUSH_*, čas serveru).",
+        state: "auth_error",
+      };
+    case "http_404":
+    case "http_410":
+    case "not_subscribed":
+      return { text: "Push služba tento odběr odmítla. " + STALE_TEXT, state: "stale" };
+    case "not_configured":
+      return { text: "Server nemá nastavené klíče pro upozornění.", state: null };
+    default:
+      return { text: `Test se nepodařilo doručit (${error ?? "neznámá chyba"}). Zkus to za chvíli znovu.`, state: null };
+  }
+}
 
 export function deviceStateLabel(state: DeviceState): string {
   switch (state) {
     case "on":
       return "Připojeno – připomínky přijdou i mimo aplikaci";
+    case "stale":
+      return "Je potřeba se znovu připojit";
+    case "unverified":
+      return "Připojení není ověřené – pošli test, nebo se znovu připoj";
+    case "auth_error":
+      return "Push služba odmítla ověření serveru";
     case "off":
       return "Nepřipojeno";
     case "denied":

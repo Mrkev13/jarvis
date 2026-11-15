@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
-import { WIDGET_COMPONENTS, type DashboardPayload } from "@/components/dashboard/widgets";
+import { WIDGET_COMPONENTS, type DashboardPayload, type DayTimelinePayload, type TodayResource } from "@/components/dashboard/widgets";
 import { MODULE_WIDGET_COMPONENTS } from "@/modules/registry";
 import {
   Button,
@@ -20,11 +20,15 @@ import {
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDashboardLayout } from "@/hooks/useDashboardLayout";
 import type { BriefingPayload } from "@/lib/briefing";
+import type { ChangesResponse } from "@/lib/changes";
+import { changesPreviewPath } from "@/lib/controlCenter";
+import { normalizeToday } from "@/lib/today";
 import {
   hiddenWidgets,
   isDefaultLayout,
   moveWidget,
   needsDashboardData,
+  needsToday,
   setWidgetSize,
   setWidgetVisible,
   SIZE_LABELS,
@@ -36,25 +40,39 @@ import {
 import type { WeeklyPayload } from "@/lib/weeklyReview";
 
 const TITLE = new Map(WIDGETS.map((w) => [w.id, w.title]));
+const HABIT_TYPES = ["habit"] as const;
 
 /**
  * Řídicí centrum (Roadmap 4F): widgety z explicitního registru (lib/dashboardLayout.ts) v uživatelském
- * rozložení (pořadí, viditelnost, velikost) uloženém v localStorage. Výchozí rozložení = vyvážení z 4B.1.
- * „Upravit dashboard" zapne režim úprav; změny platí a ukládají se hned, „Hotovo" režim jen ukončí.
+ * rozložení (pořadí, viditelnost, velikost). „Upravit dashboard" zapne režim úprav; změny platí a ukládají se
+ * hned, „Hotovo" režim jen ukončí.
+ * MRK-78: hlavní denní obrazovka – nahoře „Co hoří" a „Můj den" (jádro /today), rozložení uložené na serveru
+ * (platí na PC i v mobilu). /today a /review zůstávají za odkazy z karet.
  */
 export default function Home() {
-  const { layout, update, reset, available } = useDashboardLayout();
+  const { layout, update, reset, available, syncError, retrySync } = useDashboardLayout();
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false); // po prvních úpravách už se vstupní animace karet nepřehrávají
   const [confirmReset, setConfirmReset] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
-  const isVisible = (id: WidgetId) => Boolean(layout?.widgets.some((w) => w.id === id && w.visible));
+  const isVisible = (id: string) => Boolean(layout?.widgets.some((w) => w.id === id && w.visible));
   // Jeden GET /dashboard pro všechny widgety; jen když je některý z nich vidět. Přehledy jen když jsou vidět.
   const dashboard = useApiResource<DashboardPayload>(layout && needsDashboardData(layout) ? "/dashboard" : null);
   const briefing = useApiResource<BriefingPayload>(isVisible("daily_briefing") ? "/briefing/today" : null);
   const weekly = useApiResource<WeeklyPayload>(isVisible("weekly_review") ? "/weekly-review" : null);
+  // MRK-78: jeden GET /today pro „Co hoří" i „Můj den"; volno z denní osy (až je znám pražský den ze serveru)
+  const todayRaw = useApiResource<unknown>(layout && needsToday(layout) ? "/today" : null);
+  const todayData = useMemo(() => (todayRaw.data ? normalizeToday(todayRaw.data) : null), [todayRaw.data]);
+  const today: TodayResource = { ...todayRaw, data: todayData };
+  const dayTimeline = useApiResource<DayTimelinePayload>(
+    isVisible("day") && todayData?.date ? `/timeline/day?date=${todayData.date}&min_minutes=30` : null,
+  );
+  const [changesPath] = useState(() => changesPreviewPath()); // okno „od včera" se počítá jednou při otevření
+  const changes = useApiResource<ChangesResponse>(isVisible("changes") ? changesPath : null);
+  // MRK-104: návyky se splňují ve vlastní kartě, „Můj den" je pak neukazuje podruhé
+  const habitsOnDashboard = isVisible("habits_today");
 
   // fokus po přesunu / skrytí / ukončení úprav (prvek se mohl přemístit do jiného bloku → nový uzel)
   useEffect(() => {
@@ -133,7 +151,8 @@ export default function Home() {
           </HudLabel>
         }
         title="Řídicí centrum"
-        subtitle="Dnešní priority, přehledy, cíle, práce a finance na jednom místě."
+        // na mobilu bez podtitulku: první obrazovka patří „Co hoří" a další položce dne (MRK-78/95)
+        subtitle={<span className="hidden md:inline">Co hoří, co tě dnes čeká a co se změnilo – na jednom místě.</span>}
         actions={
           editing ? (
             <>
@@ -175,6 +194,15 @@ export default function Home() {
         </div>
       ) : null}
 
+      {syncError ? (
+        <p role="status" className="mb-4 flex flex-wrap items-center gap-2 text-sm text-warning md:mb-6">
+          Rozložení se nepodařilo synchronizovat se serverem – zatím platí jen na tomto zařízení.
+          <Button size="sm" variant="ghost" onClick={retrySync}>
+            Zkusit znovu
+          </Button>
+        </p>
+      ) : null}
+
       {dashboard.status === "error" ? (
         <ErrorState message={dashboard.error} onRetry={() => void dashboard.reload()} retrying={dashboard.refreshing} />
       ) : dashboard.error ? (
@@ -208,6 +236,10 @@ export default function Home() {
                 index={edited ? undefined : position}
                 briefing={briefing}
                 weekly={weekly}
+                today={today}
+                changes={changes}
+                dayTimeline={dayTimeline}
+                dayExcludeTypes={habitsOnDashboard ? HABIT_TYPES : undefined}
               />
             ) : null;
           }}

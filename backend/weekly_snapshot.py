@@ -23,7 +23,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy.orm import Session
 
 from briefing_snapshot import Item, meaningful_activity
-from finance_ai_policy import is_finance_activity, is_finance_goal
+from finance_ai_policy import finance_goal_ids, is_finance_activity, is_finance_goal
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
 from models import (
@@ -285,7 +285,8 @@ def _activity(db: Session, p: Period) -> list[ActivityLog]:
     logs = meaningful_activity(db.query(ActivityLog)
                                .filter(ActivityLog.timestamp >= p.start, ActivityLog.timestamp < p.end)
                                .order_by(ActivityLog.timestamp.desc()).all())
-    return [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type)]
+    finance_goals = finance_goal_ids(db)
+    return [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type, lg.entity_id, finance_goals)]
 
 
 def _delta_status(log: ActivityLog) -> str | None:

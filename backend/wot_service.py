@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 import media_storage
 from activity_service import log_activity
+from goal_history_service import WOT_ACE_MASTERY_SOURCE, refresh_automatic_goals
 from models import WotGrind, WotGrindCompletion, WotMilestone, WotMilestoneScreenshot, WotReplay
 from time_utils import utc_now
 
@@ -264,6 +265,12 @@ def _label(m: WotMilestone) -> str:
     return f"{m.tank}" + (f" · {m.map_name}" if m.map_name else "")
 
 
+def _refresh_mastery_goals(db: Session, user_context: str) -> None:
+    """MRK-82: a goal like "50 M-ek" follows every milestone create/update/delete in the same transaction."""
+    db.flush()
+    refresh_automatic_goals(db, {WOT_ACE_MASTERY_SOURCE}, user_context=user_context)
+
+
 def create_milestone(db: Session, data: dict, *, user_context: str = "manual") -> WotMilestone:
     fields = validate_milestone(data)
     m = WotMilestone(**fields)
@@ -273,6 +280,7 @@ def create_milestone(db: Session, data: dict, *, user_context: str = "manual") -
     db.flush()
     log_activity(db, "wot", "create", f"Nový milník: {_label(m)}", entity_type="WotMilestone", entity_id=m.id,
                  user_context=user_context)
+    _refresh_mastery_goals(db, user_context)
     return m
 
 
@@ -290,6 +298,7 @@ def update_milestone(db: Session, milestone_id: int, data: dict, *, user_context
     m.updated_at = utc_now()
     log_activity(db, "wot", "update", f"Milník upraven: {_label(m)}", entity_type="WotMilestone", entity_id=m.id,
                  user_context=user_context, dedupe_key=f"wot-milestone-update:{m.id}:{m.updated_at.isoformat()}")
+    _refresh_mastery_goals(db, user_context)
     return m
 
 
@@ -303,6 +312,7 @@ def delete_milestone(db: Session, milestone_id: int, *, user_context: str = "man
     log_activity(db, "wot", "delete", f"Milník smazán: {_label(m)}", entity_type="WotMilestone", entity_id=m.id,
                  user_context=user_context)
     db.delete(m)
+    _refresh_mastery_goals(db, user_context)
     return files
 
 

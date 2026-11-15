@@ -63,7 +63,7 @@ Development (working directories matter):
 
 ```sh
 cd backend
-python -m uvicorn main:app --reload
+python -m uvicorn main:app --reload --no-proxy-headers
 # separate terminal
 cd frontend
 npm run dev
@@ -78,7 +78,7 @@ python -m production --env-file /absolute/protected/production.env
 ```
 
 The launcher sets backend cwd and starts exactly:
-`python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1`.
+`python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers`.
 On Windows it waits for the foreground child and propagates its exit code; on
 POSIX it replaces the launcher process. There is **no --reload**. Direct launch with that Uvicorn command is also supported
 with production env already loaded, `APP_ENV=production` and all required keys;
@@ -125,7 +125,10 @@ PowerShell, replace placeholders with locally chosen paths (no real secrets here
 
 Private HTTPS for browsers/PWA/Web Push is Tailscale Serve in front of these ports (tailnet only, never Funnel):
 `scripts/windows/tailscale-serve.ps1`, cutover/rollback and `-BindAddress 127.0.0.1` in
-[https-pwa-push.md](https-pwa-push.md).
+[https-pwa-push.md](https-pwa-push.md). The PIN login rate limit reads `X-Forwarded-For` only from
+`AUTH_TRUSTED_PROXIES` (MRK-73; default: no proxy is trusted, the key is the TCP peer). Every Uvicorn start passes
+`--no-proxy-headers` (`production.py` does it itself): without it Uvicorn rewrites the client address from
+`X-Forwarded-For` for loopback peers before the app sees it.
 
 The backend helper defaults to `<installation>\.venv\Scripts\python.exe`; an
 explicit `-PythonPath` supports other installations. Scripts preserve child exit
@@ -262,6 +265,161 @@ and rebuild, then start/verify only if that version supports the current schema.
 Do not blindly downgrade business data. Use reviewed migration downgrade or a
 verified backup restore into a separate scratch DB first; see [backups](backups.md).
 Health mismatch is a stop signal. Avoid parallel backend instances during recovery.
+
+### One-command update (MRK-92)
+
+`scripts/windows/update.ps1` runs the update and rollback above as one operator command. It is started by a person
+(elevated PowerShell) or, opt-in, by the automatic deploy below; nothing else pulls or rebuilds on its own.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\StandaHub\scripts\windows\update.ps1
+```
+
+**First run (bootstrap).** A production checkout older than this script (e.g. `f3da60e`) does not contain
+`update.ps1` yet. Run the reviewed copy from `origin/main` once, without touching the tracked tree: it is written to the
+elevated user's own `%TEMP%` (not readable or writable by other users) and pointed at the installation. The script is
+ASCII-only, so this copy is byte-exact; later runs use the in-repo path above.
+
+```powershell
+git -C C:\StandaHub fetch origin
+git -C C:\StandaHub show origin/main:scripts/windows/update.ps1 | Set-Content -Encoding ASCII "$env:TEMP\standahub-update.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\standahub-update.ps1" -ProjectDirectory C:\StandaHub
+Remove-Item "$env:TEMP\standahub-update.ps1"
+```
+
+1. **Preconditions, nothing changed yet:** elevated shell, no locally modified tracked files, the running commit is
+   contained in the target (`git merge-base --is-ancestor`, so a local commit is never silently dropped), `/health`
+   reports a **fresh** backup (`-AllowStaleBackup` only when you hold another backup), no scheduler job running (the
+   hourly job runs relative to backend start, so the script waits for it). Already at `origin/main` →
+   "Already up to date", exit 0, Hub untouched.
+2. **Update:** write the MRK-90 maintenance marker → stop both tasks → `git checkout --detach <target>` →
+   `pip install -r backend/requirements.txt` → `npm ci` → frontend build → `production --check` → migration →
+   start backend (waits for `/health` with migrations `current`) → start frontend (`/login`) → remove the marker.
+   The marker (`C:\ProgramData\StandaHub\heartbeat\maintenance-until.txt`, protected folder) makes the heartbeat
+   report "up" during the planned outage. It holds an expiry 45 minutes ahead and the heartbeat ignores anything
+   further than 2 hours away, so an interrupted update (crash, power loss) cannot silence monitoring for longer; no
+   scheduled task is ever disabled. The script waits for a heartbeat run already in progress before stopping the Hub.
+   Everything that can fail runs **before** the migration; `alembic/env.py` runs all pending migrations in one
+   transaction, so a failed migration leaves the schema as it was.
+3. **Failure:** the script reads the live schema revision.
+   - unchanged → automatic rollback to the previous commit (reinstall, rebuild, start), **exit 1**, nothing lost;
+   - changed (migration succeeded, a later step failed) → no code rollback and no data downgrade; it starts what it
+     can (backend first: reminders and backups keep running) and exits **3**: stop and get help.
+
+Exit codes: `0` updated / already up to date, `1` failed and rolled back, `2` preconditions not met (nothing
+changed), `3` failed after the migration. Output is the script's own fixed messages plus pip/npm/git/Next output;
+the env file is read only inside Python. Gitignored local files (`frontend/public/game-assets`, `.env*`) are left
+alone. Automatic runs of this script after a merge are opt-in, see the next section.
+
+### Automatic deploy after merge (MRK-98, opt-in)
+
+`scripts/windows/auto-update.ps1` runs `update.ps1` by itself when `origin/main` moved. All decisions stay in
+`update.ps1`: fresh-backup precondition, maintenance marker, build before migration, health check and rollback. What
+this script adds:
+
+- the task `StandaHub-AutoUpdate` runs every 10 minutes as **your Windows account** with highest privileges, so `git
+  fetch` uses your GitHub login. Windows stores the password for the task; the script never prints or saves it.
+  A changed Windows password means re-running `-Mode Register`;
+- it deploys exactly the commit it looked at (`update.ps1 -Ref <sha>`); only reviewed, CI-green merges reach `main`;
+- a commit whose update failed (exit 1 = rolled back, exit 3 = failed after the migration) is **never retried
+  automatically**. The next automatic attempt is a newer commit, or run `update.ps1` by hand after the fix;
+- exit 2 (nothing changed: backup not fresh yet, local edits, Hub unreachable) is retried on the next run;
+- one run at a time (lock file), one log per attempt in `C:\ProgramData\StandaHub\auto-update\logs` (last 30);
+- optional alert: a second healthchecks.io check "Hub deploy" (period 10 min, grace 30 min). Every finished run pings
+  it, or `/fail` while a failed commit is pending or deploys have not started for 6 hours. Missing pings (task
+  disabled, password changed, git cannot fetch) alert too.
+
+Setup (elevated PowerShell on the Hub host; AVG exclusions for `C:\StandaHub\scripts\windows\*` and
+`C:\ProgramData\StandaHub\*` from MRK-90 already cover these paths):
+
+```powershell
+$s = 'C:\StandaHub\scripts\windows\auto-update.ps1'
+powershell -ExecutionPolicy Bypass -File $s -Mode Prepare
+# optional: paste the "Hub deploy" ping URL, save, close (never into chat/Linear/git)
+notepad C:\ProgramData\StandaHub\auto-update\deploy-ping-url.txt
+powershell -ExecutionPolicy Bypass -File $s -Mode Register     # Windows password (not the PIN); first auto run in 15 min
+powershell -ExecutionPolicy Bypass -File $s -Mode Run          # first run by hand: "nothing to do" or a deploy
+powershell -ExecutionPolicy Bypass -File $s -Mode Check        # ready: True, last_result
+```
+
+Day to day: `-Mode Pause` / `-Mode Resume` (e.g. before an exam week; manual `update.ps1` still works),
+`-Mode Check` shows `failed_commit_pending` and `last_result`. After a failed deploy: read the newest log, fix it
+in a new PR. The merge deploys itself; if the fix must go out at once, run `update.ps1` by hand.
+
+### Review gate (MRK-97)
+
+Roles: Claude writes the code and opens the PR, Codex reviews it (started by Standa), **Standa merges by hand**.
+Branch protection makes the merge possible only when **all CI jobs and the status "Review gate (Codex verdict)"
+are green**.
+
+The gate (`.github/workflows/review-gate.yml`) is green only when the newest review **on the PR's current head
+commit**, posted by the repository owner's account and not dismissed, contains the line `Codex-Verdict: MERGE`.
+`BLOCK` makes it red, no verdict keeps it pending, and every new push needs a new review. Each pass sets `pending`
+first and any API error ends in `error` (fail closed). The gate **never merges** and never enables GitHub
+auto-merge; a leftover auto-merge is switched off, and if that fails the status ends in `error`, never `success`.
+
+**The gate is trusted code.** It runs only the copy on `main` and never checks out or runs PR code:
+- `pull_request_target` (every push / label change) runs the base branch's file;
+- `schedule` every 10 minutes re-evaluates **all open PRs** - a review written, edited or dismissed is not an event
+  the trusted copy sees, so the status follows it within 10 minutes;
+- `workflow_dispatch` (*Actions → Review gate → Run workflow*, branch `main`, PR number) for an immediate re-check;
+  a dispatch from any other ref fails.
+
+Because `pull_request_target` checks land on the base commit, the result is a **commit status** on the PR head with
+the context `Review gate (Codex verdict)` - that is the required check.
+
+**Critical changes** get the label `manual-merge` (look at them extra carefully before merging):
+
+| area | paths |
+|---|---|
+| migrace | `backend/alembic/` |
+| přihlašování a bezpečnost | `backend/auth*.py`, `frontend/proxy.ts` |
+| zálohy a obnova | `backend/backup_service.py`, `backend/offsite_backup.py`, `backend/offsite_restic.py`, `scripts/**/*backup*`, `*restore*`, `*offsite*` |
+| CI, review a deploy | `.github/`, `scripts/`, `Dockerfile*`, `docker-compose*.yml` / `compose*.yml` |
+| příliš mnoho souborů | more changed files than the API lists (`changed_files` > listed, or > 3000) - fail closed |
+
+**Limitations:** Codex posts with the same GitHub account as the agents, so the verdict line is a rule in
+`AGENTS.md` (only the reviewer writes it), not an identity check. A PR that **adds** a workflow runs it with that
+PR's token; such a PR is critical (`.github/`), and the reviewer must block anything that touches the gate. The first
+introduction of the gate (the MRK-97 PR itself) runs only once the workflow is on `main`.
+
+Automatic review on the Ubuntu host, automatic fixes after `BLOCK` and an automatic merge are a follow-up issue:
+they need a proper isolation boundary for the reviewer and the fixer (see that issue).
+
+**GitHub settings (Standa, once, after the MRK-97 PR is on `main`):**
+
+1. *Settings* → *Branches* → *Add classic branch protection rule*, pattern `main`:
+   - **Require a pull request before merging**, required approvals **0** (the gate is the review requirement);
+   - **Require status checks to pass before merging**, add these five checks:
+     `Backend tests and pyflakes`, `PostgreSQL migration round-trip`, `Frontend lint, types, tests and build`,
+     `UI checks (ui-check, module flags, changes)`, `Review gate (Codex verdict)`.
+     A check is offered only after it has reported once, so add the gate after it ran on a PR;
+   - leave *Require branches to be up to date* **off** (the gate is tied to the exact head commit anyway);
+   - keep *Do not allow bypassing* **off**, so Standa can still merge by hand in an emergency.
+2. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), and turn green within
+   10 minutes after a `MERGE` review (or at once with *Run workflow*). Then merge by hand.
+
+### Release to production (MRK-113)
+
+Production (Ubuntu) deploys the branch `mrk-101-ubuntu-production`, not `main`. Changes reach it only through a
+release PR:
+
+1. **Actions → Release to production → Run workflow** (branch `main`; optional SHA of a commit on `main`, empty =
+   current `main`).
+2. The workflow (`.github/scripts/release_pr.py`) requires a successful push run of `ci.yml` for exactly that commit
+   on `main` (otherwise it fails and creates nothing), pushes `release/main-<sha12>` pinned to that commit and opens
+   or updates the PR into the production branch: source commit, included commits/PRs, Alembic heads, trial-merge
+   conflicts.
+3. **No Alembic change** → label `release`; after Standa's merge and a green push CI on the production branch the
+   Ubuntu updater deploys it by itself (`deploy/v3`, every 10 minutes).
+4. **Alembic head changes** → labels `release`, `migration`, `manual-merge`, title `(MIGRACE)` and a warning. The
+   updater refuses such a commit (it compares the heads in the old and new image, not the database state, so a
+   database migrated in advance does not unlock it). It needs the controlled migration deployment (MRK-114).
+
+The workflow never merges. One-time setting: Settings → Actions → General → *Allow GitHub Actions to create and
+approve pull requests* (only creating is used). A PR created with the workflow token does not start other workflows;
+the release PR head is the source commit, so its CI checks from the `main` push are shown on it, the review gate
+picks it up on its 10-minute pass.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

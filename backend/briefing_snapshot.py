@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from goal_history_service import compute_goal_progress_and_value
 from llm_budget import estimate_tokens
-from finance_ai_policy import is_finance_activity, is_finance_goal, is_finance_notification
+from finance_ai_policy import finance_goal_ids, is_finance_activity, is_finance_goal, is_finance_notification
 from models import ActivityLog, Assignment, Exam, Goal, Notification, Reminder
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, REMINDER_ACTIVE_STATUSES
 from time_utils import local_day_bounds_utc, to_local
@@ -269,7 +269,8 @@ def build_snapshot(
     logs = meaningful_activity(db.query(ActivityLog)
                                .filter(ActivityLog.timestamp >= since)
                                .order_by(ActivityLog.timestamp.desc()).all())
-    logs = [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type)]
+    finance_goals = finance_goal_ids(db)
+    logs = [lg for lg in logs if not is_finance_activity(lg.area, lg.entity_type, lg.entity_id, finance_goals)]
     counts: dict[str, int] = {}
     for lg in logs:
         counts[lg.area] = counts.get(lg.area, 0) + 1

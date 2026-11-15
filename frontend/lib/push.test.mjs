@@ -2,7 +2,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { detectPushSupport, deviceStateLabel, subscriptionBody, urlBase64ToUint8Array } from "./push.ts";
+import {
+  detectPushSupport, deviceStateLabel, serverKeyMatches, subscriptionBody, testResultText, urlBase64ToUint8Array,
+} from "./push.ts";
 
 const ok = {
   isSecureContext: true, hasServiceWorker: true, hasPushManager: true, hasNotification: true,
@@ -46,4 +48,72 @@ test("subscription body keeps only endpoint and keys", () => {
 test("state labels", () => {
   assert.match(deviceStateLabel("on"), /Připojeno/);
   assert.match(deviceStateLabel("denied"), /zakázaná/);
+});
+
+// MRK-102: after a server move with new VAPID keys the phone kept the old subscription and showed "connected".
+const KEY_A = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+const KEY_B = "BDd3_hVL9fZi9Ybo2UUzA284WG5FZR30_95YeZJsiApwXKpNcF1rRPF3foIiBHXRdJI2Qhumhf6_LFTeZaNndIo";
+
+test("subscription key is compared byte by byte with the server's current key", () => {
+  const usedA = urlBase64ToUint8Array(KEY_A).buffer;
+  assert.equal(serverKeyMatches(usedA, KEY_A), true);
+  assert.equal(serverKeyMatches(usedA, KEY_B), false, "old key after a server move");
+  assert.equal(serverKeyMatches(new Uint8Array(10).buffer, KEY_A), false);
+  assert.equal(serverKeyMatches(null, KEY_A), null, "browser does not reveal the key: undecided, server decides");
+  assert.equal(serverKeyMatches(undefined, KEY_A), null);
+});
+
+test("test push results are explained, rejected subscriptions ask to reconnect", () => {
+  assert.equal(testResultText(true, null).state, "on", "a delivered test verifies the subscription");
+  for (const error of ["http_404", "http_410", "not_subscribed"]) {
+    const r = testResultText(false, error);
+    assert.equal(r.state, "stale", error);
+    assert.match(r.text, /Znovu připojit/);
+  }
+  // review: 401/403 can be a server-side VAPID problem → never claimed as a proven stale subscription
+  for (const error of ["http_401", "http_403"]) {
+    const r = testResultText(false, error);
+    assert.equal(r.state, "auth_error", error);
+    assert.match(r.text, /Znovu připojit/);
+  }
+  assert.equal(testResultText(false, "http_503").state, null);
+  assert.match(testResultText(false, "network").text, /network/);
+  assert.match(deviceStateLabel("stale"), /znovu připojit/);
+});
+
+// MRK-102 review: the key sent to the server must be the one the subscription was really created with.
+test("subscription key comes from the subscription, never from the server's current key", async () => {
+  const { keyToBase64Url, subscriptionServerKey } = await import("./push.ts");
+  const bufA = urlBase64ToUint8Array(KEY_A).buffer;
+  assert.equal(keyToBase64Url(bufA), KEY_A, "round trip without padding");
+  assert.equal(keyToBase64Url(null), null);
+  assert.equal(keyToBase64Url(new ArrayBuffer(0)), null);
+  const ep = "https://fcm.googleapis.com/x";
+  assert.equal(subscriptionServerKey(bufA, ep, { endpoint: ep, key: KEY_B }), KEY_A, "browser's own key wins");
+  assert.equal(subscriptionServerKey(null, ep, { endpoint: ep, key: KEY_B }), KEY_B, "remembered key for the same endpoint");
+  assert.equal(subscriptionServerKey(null, ep, { endpoint: "https://fcm.googleapis.com/other", key: KEY_B }), null,
+    "a key remembered for another subscription says nothing");
+  assert.equal(subscriptionServerKey(undefined, ep, null), null, "unknown → nothing is claimed");
+});
+
+test("401/403 explain both causes and still offer reconnecting", () => {
+  for (const error of ["http_401", "http_403"]) {
+    const r = testResultText(false, error);
+    assert.match(r.text, /ověření serveru/);
+    assert.match(r.text, /WEB_PUSH_/);
+  }
+});
+
+// MRK-102 review: the card's state after the silent sync never claims "Připojeno" for an unknown key.
+test("card state after sync: connected only with a known, matching key", async () => {
+  const { syncedState, deviceStateLabel: label } = await import("./push.ts");
+  assert.equal(syncedState(KEY_A, true, 200), "on");
+  assert.equal(syncedState(KEY_A, false, 200), "stale", "known old key");
+  assert.equal(syncedState(KEY_A, true, 409), "stale", "server refused the key");
+  assert.equal(syncedState(null, false, 200), "unverified", "old subscription, browser hides the key");
+  assert.equal(syncedState(null, false, 409), "stale");
+  assert.equal(syncedState(null, false, 500), "off");
+  assert.doesNotMatch(label("unverified"), /Připojeno/);
+  assert.doesNotMatch(label("auth_error"), /Připojeno|znovu připojit/i);
+  assert.match(label("unverified"), /není ověřené/);
 });

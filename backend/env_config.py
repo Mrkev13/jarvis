@@ -6,6 +6,7 @@ minimum (menší hodnota se zvedne). `.env` se načte jednou při importu (exist
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 
 from dotenv import load_dotenv
@@ -52,3 +53,10 @@ def parse_flag(raw: str | None, default: bool) -> tuple[bool, bool]:
 
 def env_flag(name: str, default: bool) -> tuple[bool, bool]:
     return parse_flag(os.environ.get(name), default)
+
+
+def env_ip_networks(name: str) -> tuple:
+    """Čárkami oddělené IP adresy / CIDR (MRK-73). Prázdné = nic. Neplatná položka = ValueError (překlep nesmí
+    potichu změnit, komu backend věří)."""
+    raw = env_str(name)
+    return tuple(ipaddress.ip_network(part.strip(), strict=False) for part in raw.split(",") if part.strip())

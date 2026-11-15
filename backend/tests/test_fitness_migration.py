@@ -39,10 +39,11 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
     cfg.set_main_option('script_location', str(backend / 'alembic'))
     cfg.set_main_option('version_locations', str(backend / 'alembic/versions'))
     scripts = ScriptDirectory.from_config(cfg)
-    assert scripts.get_heads() == ['0025_finance_ledger']  # MRK-56, MRK-57, then MRK-61 follow Fitness
-    assert scripts.get_revision('0025_finance_ledger').down_revision == '0024_offsite_backup_runs'
-    assert scripts.get_revision('0024_offsite_backup_runs').down_revision == '0023_study_course_export_source'
-    assert scripts.get_revision('0023_study_course_export_source').down_revision == '0022_fitness'
+    # MRK-96: no hardcoded head – exactly one head, and Fitness is on its linear history
+    heads = scripts.get_heads()
+    assert len(heads) == 1, heads
+    head = heads[0]
+    assert '0022_fitness' in {rev.revision for rev in scripts.walk_revisions('base', head)}
     assert scripts.get_revision('0022_fitness').down_revision == '0021_study_materials'
     assert scripts.get_revision('0021_study_materials').down_revision == '0020_calendar_source_presence'
 
@@ -52,11 +53,12 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
     try:
         assert {'study_courses', 'study_materials'} <= set(inspect(engine).get_table_names())
         with Session(engine) as db:
-            subject = models.Subject(name='Synthetic preservation subject', active=True)
-            db.add(subject)
-            db.flush()
+            # subjects jen se sloupci, které existují v 0021 (MRK-86 přidal další) – ne přes ORM model
+            subjects = Base.metadata.tables['subjects']
+            subject_id = db.execute(subjects.insert().values(name='Synthetic preservation subject', active=True)
+                                    .returning(subjects.c.id)).scalar_one()
             course = models.StudyCourse(source='moodle', external_id='mrk33-preservation',
-                                       name='Synthetic preservation course', subject_id=subject.id)
+                                       name='Synthetic preservation course', subject_id=subject_id)
             db.add(course)
             db.flush()
             db.add(models.StudyMaterial(course_id=course.id, external_id='7:/synthetic.txt',
@@ -68,8 +70,13 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
             db.commit()
 
         def snapshot():
+            def columns(name):
+                table = Base.metadata.tables[name]
+                if name == 'subjects':  # sloupce z doby 0021 (pozdější migrace přidávají nullable sloupce)
+                    return [table.c[c] for c in ('id', 'name', 'code', 'semester', 'credits', 'active')]
+                return list(table.c)
             with engine.connect() as connection:
-                return {name: connection.execute(select(Base.metadata.tables[name])
+                return {name: connection.execute(select(*columns(name))
                         .order_by(Base.metadata.tables[name].c.id)).all()
                         for name in ('subjects', 'study_courses', 'study_materials')}
 
@@ -89,7 +96,7 @@ def test_fitness_roundtrip_preserves_school_facts(dialect, tmp_path, monkeypatch
         assert snapshot() == before
         with engine.connect() as connection:
             ctx = MigrationContext.configure(connection)
-            assert ctx.get_current_revision() == '0025_finance_ledger'
+            assert ctx.get_current_revision() == head
             assert compare_metadata(ctx, Base.metadata) == []
     finally:
         engine.dispose()

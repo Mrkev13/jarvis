@@ -3,6 +3,8 @@
  * modules/habits/service.py): stav dne, odvozené „vynecháno" i týdenní souhrn se počítají tam.
  */
 
+import type { TodayItem } from "../../lib/today.ts";
+
 export type HabitKind = "check" | "count" | "duration";
 export type HabitState = "done" | "skipped" | "missed" | "open";
 
@@ -119,6 +121,33 @@ export function summaryFrom(data: unknown): HabitsSummary | null {
   const r = raw as Record<string, unknown>;
   const n = (k: string) => (typeof r[k] === "number" && Number.isFinite(r[k]) ? (r[k] as number) : 0);
   return { total: n("total"), done: n("done"), skipped: n("skipped"), open: n("open"), week_done: n("week_done"), week_expected: n("week_expected") };
+}
+
+/**
+ * MRK-104: dnešní návyky pro widget Řídicího centra – položky `habit:*` z GET /today (stav a povolené akce
+ * počítá backend, modules/habits/integrations.py). Nevyřízené první, pak hotové; v rámci skupiny pořadí serveru.
+ */
+export function habitTodayItems(today: { timeline: TodayItem[] } | null | undefined): TodayItem[] {
+  const habits = (today?.timeline ?? []).filter((it) => it.type === "habit");
+  return [...habits.filter((it) => it.status !== "done"), ...habits.filter((it) => it.status === "done")];
+}
+
+/**
+ * Vyřízený návyk z GET /today: splněno, nebo přeskočeno? Backend obojí posílá jako status `done` a stav píše do
+ * podtitulku („Návyk · přeskočeno · …", modules/habits/integrations.py). `null` = ještě nevyřízený.
+ */
+export function habitResolution(item: TodayItem): "done" | "skipped" | null {
+  if (item.status !== "done") return null;
+  return item.subtitle.split(" · ").includes(STATE_META.skipped.label) ? "skipped" : "done";
+}
+
+/** Podtitulek bez úvodního „Návyk" a bez stavu (ve widgetu je štítek), např. „cíl 2 l" nebo „2 l". */
+export function habitDetail(item: TodayItem): string {
+  const states = Object.values(STATE_META).map((m) => m.label);
+  return item.subtitle
+    .split(" · ")
+    .filter((part, i) => !(i === 0 && part === "Návyk") && !states.includes(part))
+    .join(" · ");
 }
 
 export function percent(done: number, total: number): number {

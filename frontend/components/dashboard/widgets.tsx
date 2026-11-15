@@ -34,6 +34,10 @@ import { staggerStyle } from "@/lib/motion";
 import type { WidgetId } from "@/lib/dashboardLayout";
 import { clampPercent, cx, priorityTone, severityTone, type Tone } from "@/lib/ui";
 import type { WeeklyPayload } from "@/lib/weeklyReview";
+import type { ChangesResponse } from "@/lib/changes";
+import type { FreeBlockLike } from "@/lib/controlCenter";
+import type { TodayPayload } from "@/lib/today";
+import { BurningWidget, ChangesWidget, DayWidget } from "./dailyWidgets";
 
 type NotificationPreview = {
   id: number;
@@ -83,13 +87,15 @@ type FinanceQuick = {
 };
 
 type UpcomingItem = {
-  type: "assignment" | "exam" | "goal_target";
+  type: "assignment" | "exam" | "goal_target" | "calendar_event";
   id: number;
+  key?: string;            // MRK-76: Moodle událost (opakovaná má víc výskytů)
   title: string;
   area: string;
   date: string;
   days_left: number;
   overdue: boolean;
+  subject_name?: string;   // MRK-76: předmět Moodle termínu
 };
 
 type TodayAction = {
@@ -241,12 +247,21 @@ const QUICK_ACTIONS = [
   { href: "/planner", icon: "clipboard" as IconName, title: "Plánovač", hint: "Den / týden" },
 ];
 
+/** MRK-78: GET /today už převedený přes normalizeToday (jeden dotaz pro „Co hoří" i „Můj den"). */
+export type TodayResource = Omit<ApiResource<unknown>, "data" | "setData"> & { data: TodayPayload | null };
+export type DayTimelinePayload = { free_blocks: FreeBlockLike[]; free_blocks_from: string[] };
+
 export type WidgetProps = {
   data: DashboardPayload | null;
   loading: boolean;
   index?: number;
   briefing: ApiResource<BriefingPayload>;
   weekly: ApiResource<WeeklyPayload>;
+  today: TodayResource;
+  changes: ApiResource<ChangesResponse>;
+  dayTimeline: ApiResource<DayTimelinePayload>;
+  /** MRK-104: typy položek, které „Můj den" vynechá, protože je ukazuje jiný viditelný widget. */
+  dayExcludeTypes?: readonly string[];
 };
 
 function DailyBriefingWidget({ briefing, index }: WidgetProps) {
@@ -368,7 +383,7 @@ function TodayWidget({ data, loading, index }: WidgetProps) {
   return (
     <Card index={index} aria-labelledby="today-title">
       <CardHeader
-        title={<span id="today-title">Dnes</span>}
+        title={<span id="today-title">Plán dne</span>}
         icon="sun"
         description={today?.summary}
         actions={<TextLink href="/planner">Plánovač →</TextLink>}
@@ -425,18 +440,19 @@ function UpcomingWidget({ data, loading, index }: WidgetProps) {
             const label = upcomingLabel(u);
             return (
               <EntityRow
-                key={`${u.type}-${u.id}`}
+                key={`${u.type}-${u.key ?? u.id}`}
                 tone={u.overdue ? "danger" : "neutral"}
                 badges={
                   <>
                     {u.type === "assignment" ? <StatusBadge>Úkol</StatusBadge> : null}
                     {u.type === "exam" ? <StatusBadge tone="info">Zkouška</StatusBadge> : null}
                     {u.type === "goal_target" ? <AreaBadge area={u.area} /> : null}
+                    {u.type === "calendar_event" ? <StatusBadge tone="info">Moodle</StatusBadge> : null}
                     <StatusBadge tone={label.tone}>{label.text}</StatusBadge>
                   </>
                 }
                 title={u.title}
-                meta={formatDate(u.date)}
+                meta={u.subject_name ? `${u.subject_name} · ${formatDate(u.date)}` : formatDate(u.date)}
               />
             );
           })}
@@ -606,6 +622,9 @@ function QuickActionsWidget({ index }: WidgetProps) {
 
 /** Komponenta pro každé id z registru – `Record<WidgetId, …>` hlídá úplnost už při kompilaci. */
 export const WIDGET_COMPONENTS: Record<WidgetId, (props: WidgetProps) => React.ReactNode> = {
+  burning: BurningWidget,
+  day: DayWidget,
+  changes: ChangesWidget,
   daily_briefing: DailyBriefingWidget,
   weekly_review: WeeklyReviewWidget,
   today: TodayWidget,

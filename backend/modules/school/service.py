@@ -418,7 +418,8 @@ def suggest_subject_id(course: StudyCourse, subjects) -> int | None:
     """Safe deterministic suggestion only: exactly one subject whose code (≥ 3 chars) equals a whole token of the
     course short/full name. Never by name similarity, never applied automatically."""
     tokens = {_alnum(t) for t in re.split(r'[\s()\[\],;:/|]+', f'{course.short_name or ""} {course.name}')} - {''}
-    matches = {s.id for s in subjects if s.code and len(_alnum(s.code)) >= 3 and _alnum(s.code) in tokens}
+    matches = {s.id for s in subjects
+               if s.active is not False and s.code and len(_alnum(s.code)) >= 3 and _alnum(s.code) in tokens}  # MRK-75: not archived
     return next(iter(matches)) if len(matches) == 1 else None
 
 
@@ -477,7 +478,7 @@ def list_materials(db, *, subject_id=None, course_id=None, material_type=None, s
         'materials': [material_dict(r, courses.get(r.course_id), subjects) for r in rows[:LIST_LIMIT]],
         'truncated': len(rows) > LIST_LIMIT,
         'courses': [course_dict(c, subjects, counts) for c in courses.values()],
-        'subjects': [{'id': s.id, 'name': s.name} for s in subjects.values()],
+        'subjects': [{'id': s.id, 'name': s.name, 'active': s.active is not False} for s in subjects.values()],
     }
 
 
@@ -521,6 +522,8 @@ def set_course_subject(db, course_id: int, subject_id: int | None, *, now=None) 
         subject = db.get(Subject, subject_id)
         if subject is None:
             raise MaterialError('subject_not_found', 404)
+        if subject.active is False and course.subject_id != subject_id:  # MRK-75: keep an existing mapping, no new ones
+            raise MaterialError('subject_archived', 409)
     if course.subject_id != subject_id:
         old = course.subject_id
         course.subject_id, course.updated_at = subject_id, now or utc_now()

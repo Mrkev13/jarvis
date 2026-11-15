@@ -30,6 +30,7 @@ export const GOAL_SOURCES = [
   { value: "mff_t4_count", label: "MFF – postavy T4 celkem", unit: "ks", placeholder: "20" },
   { value: "mff_built_t4_count", label: "MFF – postavené T4", unit: "ks", placeholder: "15" },
   { value: "mff_high_priority_built_count", label: "MFF – postavené s vysokou prioritou", unit: "ks", placeholder: "5" },
+  { value: "wot_ace_mastery_count", label: "WoT – počet M-ek (Mistr)", unit: "ks", placeholder: "50" },
 ] as const;
 
 export function goalSourceMeta(source: string | null | undefined) {

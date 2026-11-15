@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createBody, emptyHabitForm, entryBody, entryMeasure, percent, shortDay, STATE_META, summaryFrom } from "./lib.ts";
+import { createBody, emptyHabitForm, entryBody, entryMeasure, habitDetail, habitResolution, habitTodayItems, percent, shortDay, STATE_META, summaryFrom } from "./lib.ts";
 import { HABITS_UI } from "./manifest.ts";
 import { MODULES, MODULE_UI, createModuleAccess, manifestFlags } from "../../lib/modules.ts";
 import { NAV_PAGES, navPagesFor } from "../../lib/navigation.ts";
@@ -72,4 +72,26 @@ test("Today: module actions are taken from the manifest (complete + skip), unkno
   const reminder = normalizeItem({ id: "reminder:1", type: "reminder", title: "Lék", actions: ["complete", "skip"] });
   assert.deepEqual(reminder.actions, ["complete"]);
   assert.equal(actionLabel(reminder, "complete"), "Dokončit připomínku: Lék");
+});
+
+test("MRK-104: dashboard quick complete – only habits, open first, resolution and detail from /today", () => {
+  const item = (id, status, subtitle, type = "habit") => ({ id, type, title: id, subtitle, time: null, status, actions: status === "open" ? ["complete", "skip"] : [], href: "/habits" });
+  const today = {
+    timeline: [
+      item("habit:1", "done", "Návyk · splněno · 20 min"),
+      item("reminder:4", "open", "Připomínka", "reminder"),
+      item("habit:2", "open", "Návyk · 3× týdně"),
+      item("habit:3", "done", "Návyk · přeskočeno"),
+      item("habit:5", "open", "Návyk"),
+    ],
+  };
+  const list = habitTodayItems(today);
+  assert.deepEqual(list.map((i) => i.id), ["habit:2", "habit:5", "habit:1", "habit:3"], "nejdřív otevřené, žádná jiná položka");
+  assert.equal(new Set(list.map((i) => i.id)).size, list.length, "nic dvakrát");
+  assert.deepEqual(habitTodayItems(null), []);
+  assert.deepEqual(list.map(habitResolution), [null, null, "done", "skipped"]);
+  assert.deepEqual(list.map(habitDetail), ["3× týdně", "", "20 min", ""]);
+  const manifest = WIDGETS.find((w) => w.id === "habits_today");
+  assert.deepEqual([manifest.defaultVisible, manifest.usesToday, manifest.defaultSize], [true, true, "medium"], "viditelný vedle Můj den");
+  assert.ok(manifest.allowedSizes.every((s) => s !== "full"));
 });

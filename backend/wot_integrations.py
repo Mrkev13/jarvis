@@ -3,7 +3,7 @@ search_service, main (GET /dashboard „wot") a context_service. Zápisy zůstá
 from __future__ import annotations
 
 from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, short
-from models import WotGrind, WotReplay, WotResource
+from models import WotGrind, WotMilestone, WotReplay, WotResource
 from module_contracts import ChangeSource, activity_changes, ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, SearchSource
 from text_utils import format_date_cz, format_num_cz, join_parts
 from time_utils import to_local
@@ -71,7 +71,39 @@ def context_wot(req: ContextRequest) -> list[str]:
     grinds = [g for g in db.query(WotGrind).all() if (g.status or "").lower() == "active"]
     grinds.sort(key=lambda g: PRIORITY_RANK.get((g.priority or "").lower(), 3))
     grind_items = [f"{short(g.tank, 25)} {fmt_num(float(g.xp_remaining or 0))} XP ({g.priority})" for g in grinds[:MAX_ITEMS]]
-    return [f"WoT zdroje: {resources or 'žádné'}", f"WoT aktivní grindy: {list_or_none(grind_items, len(grinds))}"]
+    return [f"WoT zdroje: {resources or 'žádné'}", f"WoT aktivní grindy: {list_or_none(grind_items, len(grinds))}",
+            *_mastery_lines(db)]
+
+
+MASTERY_TOP = 5  # „který tank má nejvíc" – pár míst navíc kvůli shodám
+_MASTERY_CLASS = {"first": "I. třída", "second": "II. třída", "third": "III. třída"}
+
+
+def _mastery_lines(db) -> list[str]:
+    """MRK-94: M-ka (odznak Mistr / ace) spočítaná kódem, stejně jako cíl MRK-82 – opakovaná M na jednom tanku se
+    počítají. LLM dostane jen hotový souhrn (počty, pořadí tanků, poslední M-ko)."""
+    rows = db.query(WotMilestone.id, WotMilestone.tank, WotMilestone.mastery, WotMilestone.played_on).filter(
+        WotMilestone.milestone_type == "mastery").order_by(WotMilestone.id).all()
+    aces = [r for r in rows if r.mastery == "ace"]
+    if not aces:
+        lines = ["WoT M-ka (odznak Mistr): žádná zapsaná."]
+    else:
+        counts: dict[str, int] = {}
+        for r in aces:
+            counts[r.tank] = counts.get(r.tank, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
+        top = [f"{short(tank, 25)} {n}×" for tank, n in ranked[:MASTERY_TOP]]
+        lines = [f"WoT M-ka (odznak Mistr): celkem {len(aces)} na {len(counts)} tancích; "
+                 f"podle počtu: {list_or_none(top, len(ranked))}"]
+        dated = [r for r in aces if r.played_on]
+        if dated:
+            # stejný den → později zapsané (vyšší id) je poslední; nezávisí na pořadí řádků z DB
+            last = max(dated, key=lambda r: (r.played_on, r.id))
+            lines.append(f"WoT poslední M-ko: {short(last.tank, 25)} {last.played_on.isoformat()}")
+    others = {label: sum(1 for r in rows if r.mastery == key) for key, label in _MASTERY_CLASS.items()}
+    if any(others.values()):
+        lines.append("WoT ostatní odznaky zvládnutí: " + ", ".join(f"{k} {v}×" for k, v in others.items() if v))
+    return lines
 
 
 def tank_names(db):
@@ -86,7 +118,9 @@ INTEGRATIONS = ModuleIntegrations(
     search=(SearchSource("wot", 90, search_wot),),
     dashboard=(DashboardSection("wot", lambda db, access: get_wot_quick_status(db, limit=2)),),
     context=(
-        ContextSection("wot", ("wot", "tank", "kredit", "gold", "grind", "free xp", "bond"), order=70,
+        # MRK-94: M-ka / odznak Mistr („Mek", „M-ko", „Mka") – s mezerou na začátku, ať nechytají cizí slova
+        ContextSection("wot", ("wot", "tank", "kredit", "gold", "grind", "free xp", "bond", " mek", " m-ek", " m-k",
+                               " mko", " mka", "mistr", "oceneni", "mastery", "odznak"), order=70,
                        build=context_wot, covered_tools=("get_wot_resources", "get_wot_grinds"), name_hints=tank_names),
     ),
 )

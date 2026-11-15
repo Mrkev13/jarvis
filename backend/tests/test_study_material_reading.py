@@ -275,6 +275,23 @@ def test_ai_context_lists_ids_but_never_text(db):
     assert f'id {row.id}' in lines and 'Rekurze' not in lines and 'Funkce volá' not in lines
 
 
+def test_ai_context_recent_window_follows_request_clock_not_wall_clock(db):
+    # MRK-70: the "new in 14 days" window used utc_now(), so tests broke once the real date moved on.
+    from datetime import timedelta
+    from modules.school import integrations
+    from module_contracts import ContextRequest
+    row = add_material(db, 'Prezentace', SLIDES, created_at=NOW)
+
+    def recent(now):
+        return ' '.join(integrations.context_materials(ContextRequest(db, now.date(), now)))
+
+    with patch('time_utils.utc_now', return_value=NOW + timedelta(days=60)):
+        assert f'id {row.id}' in recent(NOW)
+    with patch('time_utils.utc_now', return_value=NOW):
+        assert 'Nové materiály za 14 dní' not in recent(NOW + timedelta(days=60))
+        assert f'id {row.id}' in recent(NOW + timedelta(days=13))
+
+
 def test_search_haystack_has_no_page_markers(db):
     from modules.school import integrations
     row = add_material(db, 'Skripta', f'{extract.page_marker(1)}\nRekurze a zásobník', material_type='pdf')

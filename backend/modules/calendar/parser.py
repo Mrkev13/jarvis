@@ -29,6 +29,7 @@ class ParsedEvent:
     recurrence_metadata: str | None
     sequence: int | None
     source_updated_at: datetime | None
+    course_ref: str | None = None  # MRK-76: the single CATEGORIES value (Moodle: course short name)
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,24 @@ def _text(component, name, maximum, *, required=False):
     if len(text) > maximum or (required and not text):
         raise ValueError('invalid_field')
     return text or None
+
+
+MAX_COURSE_REF = 100
+
+
+def _course_ref(component):
+    """MRK-76: Moodle exports the course short name as CATEGORIES. Exactly one distinct value → that value; none,
+    several or an oversized one → None (no guessing). Never fails the event."""
+    try:
+        props = component.get('CATEGORIES')
+        props = [] if props is None else props if isinstance(props, list) else [props]
+        values = {str(cat).strip() for prop in props for cat in getattr(prop, 'cats', ())} - {''}
+    except Exception:  # noqa: BLE001 - a malformed category never drops the event
+        return None
+    if len(values) != 1:
+        return None
+    value = values.pop()
+    return value if len(value) <= MAX_COURSE_REF else None
 
 
 def _value(component, name):
@@ -164,7 +183,7 @@ def _event(component, default_timezone):
                        starts_at, ends_at, all_day, starts_on, ends_on, event_timezone,
                        'cancelled' if cancelled else 'active', rrule.to_ical().decode('ascii') if rrule else None,
                        json.dumps(recurrence_metadata, sort_keys=True) if recurrence_metadata else None,
-                       sequence, updated)
+                       sequence, updated, _course_ref(component))
 
 
 def parse_ics(data: bytes, default_timezone: str = 'Europe/Prague') -> ParseResult:

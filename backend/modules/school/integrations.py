@@ -10,7 +10,9 @@ from modules.school.extract import PAGE_MARK_CLOSE, PAGE_MARK_OPEN
 from module_contracts import ContextRequest, ContextSection, EntityRef, SearchSource
 from modules.school.models import StudyCourse, StudyMaterial
 from modules.school.router import router
-from time_utils import utc_now
+from modules.school.subjects import router as subjects_router
+from modules.school.progress import router as progress_router
+from time_utils import local_to_utc
 
 SEARCH_LIMIT = 500
 _PAGE_LINE = re.compile(rf'{PAGE_MARK_OPEN}\d+{PAGE_MARK_CLOSE}')
@@ -53,7 +55,7 @@ def context_materials(req: ContextRequest) -> list[str]:
     if total == 0:
         return ['Studijní materiály: zatím žádné (Moodle sync materiálů neproběhl nebo nic nenašel).']
     courses = {c.id: c for c in db.query(StudyCourse).all()}
-    since = utc_now() - timedelta(days=14)
+    since = local_to_utc(req.local_now) - timedelta(days=14)  # request clock, not the wall clock (testable, MRK-70)
     recent = active.filter(StudyMaterial.created_at >= since).order_by(StudyMaterial.created_at.desc()).limit(5).all()
     missing = db.query(StudyMaterial).filter(StudyMaterial.source_missing_at.isnot(None)).count()
     by_type: dict[str, int] = {}
@@ -72,4 +74,4 @@ SEARCH = (SearchSource('school_materials', 11, search_materials),)
 CONTEXT = (ContextSection('school_materials', ('materia', 'prezentac', 'skripta', 'podklad', 'studijni', 'moodle', 'slajd', 'pdf', 'kapitol', 'ucit'),
                           order=11, build=context_materials),)
 ENTITY_REFS = (EntityRef('study_material', MATERIAL_HREF),)
-ROUTERS = (router,)
+ROUTERS = (router, subjects_router, progress_router)  # MRK-75 PATCH /school/subject/{id}, MRK-86 zápočet a docházka

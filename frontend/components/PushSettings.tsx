@@ -7,9 +7,17 @@ import {
   currentPushEnv,
   detectPushSupport,
   deviceStateLabel,
+  readRememberedKey,
+  rememberKey,
   SERVER_REASON_TEXT,
+  serverKeyMatches,
+  STALE_TEXT,
   subscriptionBody,
+  subscriptionServerKey,
+  syncedState,
+  testResultText,
   UNSUPPORTED_TEXT,
+  UNVERIFIED_TEXT,
   urlBase64ToUint8Array,
   type DeviceState,
 } from "@/lib/push";
@@ -64,12 +72,23 @@ export default function PushSettings() {
       }
       const sub = await existingSubscription();
       if (sub) {
-        // Tichá synchronizace se serverem (bez dotazu na oprávnění).
-        const sync = await postJson("/push/subscriptions", subscriptionBody(sub.toJSON()));
-        setState(sync.ok ? "on" : "off");
-      } else {
-        setState("off");
+        // MRK-102: klíč, pro který byl odběr opravdu vytvořen (ne aktuální klíč serveru – ten by starý odběr „potvrdil").
+        const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, readRememberedKey());
+        const keyMatches = usedKey ? serverKeyMatches(urlBase64ToUint8Array(usedKey).buffer, cfg.public_key) === true : false;
+        if (usedKey && !keyMatches) {
+          setState("stale");
+          setDetail(STALE_TEXT);
+          return;
+        }
+        // Tichá synchronizace se serverem (bez dotazu na oprávnění); neznámý klíč = server_key se neposílá.
+        const body = subscriptionBody(sub.toJSON());
+        const sync = await postJson("/push/subscriptions", usedKey ? { ...body, server_key: usedKey } : body);
+        const next = syncedState(usedKey, keyMatches, sync.status);
+        setState(next);
+        setDetail(next === "stale" ? STALE_TEXT : next === "unverified" ? UNVERIFIED_TEXT : null);
+        return;
       }
+      setState("off");
       setDetail(null);
     } catch {
       setState("off");
@@ -95,6 +114,11 @@ export default function PushSettings() {
       const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
       await navigator.serviceWorker.ready;
       const key = urlBase64ToUint8Array(config.public_key);
+      // MRK-102: starý odběr k jiným klíčům serveru nejdřív zrušit, jinak by subscribe() vrátil ten starý.
+      const previous = await reg.pushManager.getSubscription();
+      if (previous && serverKeyMatches(previous.options?.applicationServerKey, config.public_key) !== true) {
+        await previous.unsubscribe();
+      }
       let sub: PushSubscription;
       try {
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
@@ -103,13 +127,17 @@ export default function PushSettings() {
         await (await reg.pushManager.getSubscription())?.unsubscribe();
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       }
-      const res = await postJson("/push/subscriptions", subscriptionBody(sub.toJSON()));
+      // nový odběr: prohlížeč ho přijal s klíčem config.public_key (options ho potvrdí, kde ho prohlížeč prozradí)
+      const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, null) ?? config.public_key;
+      const res = await postJson("/push/subscriptions", { ...subscriptionBody(sub.toJSON()), server_key: usedKey });
       if (!res.ok) {
         await sub.unsubscribe();
         const err = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
+      rememberKey(sub.endpoint, usedKey);
       setState("on");
+      setDetail(null);
       setMessage("Hotovo. Zkus „Poslat test“.");
     } catch (err) {
       setMessage(err instanceof Error ? `Nepovedlo se: ${err.message}` : "Nepovedlo se zapnout upozornění.");
@@ -129,7 +157,12 @@ export default function PushSettings() {
       }
       const res = await postJson("/push/test", { endpoint: sub.endpoint });
       const data = (await res.json()) as { ok?: boolean; error?: string | null };
-      setMessage(data.ok ? "Test odeslán – upozornění by mělo za chvíli přijít." : `Test selhal (${data.error ?? "?"}).`);
+      const result = testResultText(Boolean(data.ok), data.error);
+      setMessage(result.text);
+      if (result.state) {
+        setState(result.state);
+        if (result.state === "on") setDetail(null);
+      }
     } catch {
       setMessage("Test se nepodařilo odeslat.");
     } finally {
@@ -156,21 +189,23 @@ export default function PushSettings() {
   }
 
   const on = state === "on";
+  // odběr existuje, jen není ověřený / push služba odmítla ověření: jde testovat, znovu připojit i vypnout
+  const doubtful = state === "unverified" || state === "auth_error";
   return (
     <Card as="section" aria-busy={busy || state === "checking"} aria-labelledby="push-settings">
       <CardHeader title={<span id="push-settings">Upozornění mimo aplikaci</span>} />
       <div className="-mt-2 mb-3">
-        <StatusBadge tone={on ? "success" : state === "denied" ? "warning" : "neutral"} dot={on} className="whitespace-normal">
+        <StatusBadge tone={on ? "success" : state === "denied" || state === "stale" || doubtful ? "warning" : "neutral"} dot={on} className="whitespace-normal">
           <span role="status">{deviceStateLabel(state)}</span>
         </StatusBadge>
       </div>
       <div className="flex flex-wrap gap-2">
-        {state === "off" && (
-          <Button variant="primary" size="sm" busy={busy} busyLabel="Zapínám…" onClick={() => void enable()}>
-            Zapnout na tomto zařízení
+        {(state === "off" || state === "stale" || doubtful) && (
+          <Button variant={doubtful ? "secondary" : "primary"} size="sm" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
+            {state === "off" ? "Zapnout na tomto zařízení" : "Znovu připojit"}
           </Button>
         )}
-        {on && (
+        {(on || doubtful) && (
           <>
             <Button size="sm" disabled={busy} onClick={() => void sendTest()}>
               Poslat test

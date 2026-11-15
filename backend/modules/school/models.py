@@ -5,7 +5,7 @@ authoritative copy; `extracted_text` is derived from it and may be rebuilt. Rows
 an identity absent from a complete course snapshot gets `source_missing_at`, and the same row is restored when it
 reappears. No upstream URL, token or private link is stored anywhere.
 """
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from database import Base
 from time_utils import utc_now
@@ -68,3 +68,15 @@ class StudyMaterial(Base):
     updated_at = Column(DateTime, nullable=False, default=utc_now)
     # NULL = present in the latest complete snapshot of its course; set (never deleted) when it disappears
     source_missing_at = Column(DateTime, nullable=True)
+
+
+class SchoolAttendance(Base):
+    """MRK-86: ruční docházka po týdnech – jeden záznam byl/nebyl na předmět a týden (pondělí, Europe/Prague).
+    Chybějící řádek = týden nezapsán (nepočítá se ani jako účast, ani jako absence)."""
+    __tablename__ = 'school_attendance'
+    __table_args__ = (UniqueConstraint('subject_id', 'week_start', name='uq_school_attendance_subject_week'),)
+    id = Column(Integer, primary_key=True)
+    subject_id = Column(Integer, ForeignKey('subjects.id', ondelete='CASCADE'), nullable=False, index=True)
+    week_start = Column(Date, nullable=False)
+    present = Column(Boolean, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=utc_now)

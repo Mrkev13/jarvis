@@ -61,7 +61,7 @@ How "missed" works:
 | Search | `SearchSource("habits", 75)` – habits by name, `/habits?habit=<id>` |
 | Today | `TodaySource("habits", 30, timeline=…)`: today's active habits. Open habits get `complete` / `skip`; done or skipped ones are shown with their state. Ordering and dedupe stay global. |
 | Today actions (frontend) | `MODULE_UI.habits.todayActions` – "Splněno" / "Přeskočit" POST to the module endpoint through the generic path in `useTodayActions` |
-| Dashboard | `DashboardSection("habits")` (today done/skipped/total, last 7 days done/expected) + widget `habits_today`, **hidden by default** so the existing dashboard layout does not change; the user adds it under "Upravit dashboard" |
+| Dashboard | `DashboardSection("habits")` (today done/skipped/total, last 7 days done/expected) + widget `habits_today` (MRK-104): **visible by default** right after "Můj den", with one-tap Splnit / Přeskočit (≥ 44 px) through the same `todayActions` as Dnes (`POST /habits/{id}/entries?source=today`); while it is visible, "Můj den" leaves habits out so none is shown twice. Stored layouts keep their choice: a saved layout (v1 or v2) where the widget is hidden **or missing** shows it hidden (`hiddenInStoredLayouts`) until it is enabled under "Upravit dashboard"; only a fresh default layout shows it |
 | AI context | `ContextSection("habits", order=75)`: "Návyky dnes: …; posledních 7 dní splněno x/y". Keywords are návyk, habit, rutin and rehab, and active habit names also mark the area. No AI tools. |
 | Feature flag | normal module (`MODULE_HABITS_ENABLED`, Settings toggle), default enabled |
 

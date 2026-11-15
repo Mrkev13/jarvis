@@ -23,8 +23,34 @@ export interface CalendarPayload {
   events: CalendarEvent[];
   history?: CalendarEvent[];
   selected?: CalendarEvent | null;
-  sources: { id: number; name: string; enabled: boolean; configured: boolean }[];
+  sources: { id: number; name: string; enabled: boolean; configured: boolean; key?: string | null }[];
   moodle_configured: boolean;
+  /** MRK-77: every allowlisted ICS source (Moodle, Google…) and whether its private address is set on the server. */
+  available_sources?: { key: string; name: string; configured: boolean }[];
+  /** At least one source is set up (older backends: only `moodle_configured`). */
+  configured?: boolean;
+}
+
+type SyncCounts = { created: number; updated: number; cancelled: number; errors: number };
+export type SyncResult = SyncCounts & { sources?: Record<string, Partial<SyncCounts> & { error?: string }> };
+
+export function anySourceConfigured(data: Pick<CalendarPayload, 'configured' | 'moodle_configured'>): boolean {
+  return data.configured ?? data.moodle_configured;
+}
+
+/** „Moodle a Google Kalendář“ – connected sources for the page header; empty when none. */
+export function connectedSources(data: Pick<CalendarPayload, 'available_sources'>): string {
+  const names = (data.available_sources ?? []).filter(s => s.configured).map(s => s.name);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} a ${names[names.length - 1]}` : names[0] ?? '';
+}
+
+/** Notice after POST /calendar/sync: summed counts, then each source that failed (names only, never a reason text). */
+export function syncNotice(result: SyncResult, available: CalendarPayload['available_sources'] = []): string {
+  const text = `Přidáno ${result.created}, změněno ${result.updated}, zrušeno ${result.cancelled}.`
+    + (result.errors ? ` ${result.errors} položek se nepodařilo načíst.` : '');
+  const failed = Object.entries(result.sources ?? {}).filter(([, r]) => r.error)
+    .map(([key]) => available.find(s => s.key === key)?.name ?? key);
+  return failed.length ? `${text} Nepodařilo se načíst: ${failed.join(', ')} (uložené události zůstaly).` : text;
 }
 
 export function groupEvents(events: CalendarEvent[], today: string) {

@@ -15,6 +15,8 @@ const OUT = fileURLToPath(new URL("./.ui-check/", import.meta.url));
 mkdirSync(OUT, { recursive: true });
 const DISABLED = new Set((process.env.UI_FLAGS_DISABLED || "").split(",").map((s) => s.trim()).filter(Boolean));
 const MODE = DISABLED.size ? `off:${[...DISABLED].join("+")}` : "default";
+// název souboru bez „:" a „+" (CI artefakt i Windows je v cestě odmítnou) – MRK-95
+const FILE_MODE = MODE.replace(/[^a-z0-9_-]+/gi, "-");
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {});
@@ -26,7 +28,12 @@ function check(name, ok, detail = "") {
 }
 
 const MODULE_PAGES = { school: "/school", work: "/work", finance: "/finance", goals: "/goals", wot: "/wot", mff: "/mff" };
-const NAV_TOTAL = 17; // + Nastavení (MRK-18 A2, jádro) + Návyky (MRK-21, modul bez vypínání v těchto scénářích) + Co se změnilo (MRK-28)
+// MRK-96: očekávané počty z registru stránek (lib/navigation.ts), žádné ručně udržované číslo – nová stránka
+// nebo modul tenhle skript neupravuje. Mock /modules má zapnuté všechny implementované moduly, vypnuté jen DISABLED.
+const { NAV_PAGES } = await import("../lib/navigation.ts");
+const availablePages = NAV_PAGES.filter((p) => !p.module || !DISABLED.has(p.module));
+const SEARCH_TOTAL = availablePages.length; // Ctrl+K najde i stránky mimo menu (Dnes, Týdenní přehled)
+const MENU_TOTAL = availablePages.filter((p) => p.menu !== false).length; // MRK-78: hlavní navigace bez `menu: false`
 
 // Runtime stav modulů v mocku (žádný rebuild): reset + volitelně vypnuté moduly jako uložené volby.
 await fetch(`${MOCK_API}/__mock/modules/reset`);
@@ -55,14 +62,14 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
 {
   const { ctx, page, errors } = await open("/");
   const hrefs = await navHrefs(page, "aside");
-  check("navigace desktop: počet odkazů", hrefs.length === NAV_TOTAL - DISABLED.size, String(hrefs.length));
+  check("navigace desktop: počet odkazů", hrefs.length === MENU_TOTAL, `${hrefs.length} / ${MENU_TOTAL}`);
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`navigace desktop: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
   const dead = await page.locator("a[href]").evaluateAll((as, off) => as.map((a) => a.getAttribute("href")).filter((h) => off.some((p) => h === p || h.startsWith(`${p}?`) || h.startsWith(`${p}/`))), [...DISABLED].map((id) => MODULE_PAGES[id]));
   check("dashboard: žádný odkaz na vypnutý modul", dead.length === 0, dead.join(", "));
   check("dashboard: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-dashboard.png`, fullPage: true });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-dashboard.png`, fullPage: true });
   await ctx.close();
 }
 {
@@ -70,14 +77,14 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   await page.getByRole("button", { name: "Otevřít menu" }).click();
   await page.waitForTimeout(400);
   const hrefs = await navHrefs(page, "[data-drawer-nav]");
-  check("mobilní menu: počet odkazů", hrefs.length === NAV_TOTAL - DISABLED.size, String(hrefs.length));
+  check("mobilní menu: počet odkazů", hrefs.length === MENU_TOTAL, `${hrefs.length} / ${MENU_TOTAL}`);
   for (const [id, href] of Object.entries(MODULE_PAGES)) {
     check(`mobilní menu: ${href} ${DISABLED.has(id) ? "chybí" : "je vidět"}`, hrefs.includes(href) === !DISABLED.has(id));
   }
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check("mobil: bez horizontálního přetečení", overflow <= 0, `${overflow}px`);
   check("mobil: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-mobile-menu.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-mobile-menu.png` });
   await ctx.close();
 }
 
@@ -88,7 +95,7 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const dialog = page.getByRole("dialog", { name: "Hledat v Standa Hubu" });
   const input = dialog.getByRole("combobox", { name: "Hledat stránku nebo záznam" });
   const navCount = await dialog.getByRole("group", { name: "Navigace" }).getByRole("option").count();
-  check("hledání: navigace bez stránek vypnutých modulů", navCount === NAV_TOTAL - DISABLED.size, String(navCount));
+  check("hledání: navigace bez stránek vypnutých modulů", navCount === SEARCH_TOTAL, `${navCount} / ${SEARCH_TOTAL}`);
   for (const [q, group, module] of [["tvp", "World of Tanks", "wot"], ["obed", "Finance", "finance"], ["luna", "Marvel FF", "mff"]]) {
     await input.fill(q);
     await page.waitForTimeout(600);
@@ -104,13 +111,14 @@ const navHrefs = (page, scope) => page.locator(`${scope} nav[aria-label="Hlavní
   const first = (await dialog.getByRole("option").first().innerText()).split("\n")[0];
   check("hledání: současné moduly beze změny („prace“ → Práce)", first === "Práce", first);
   check("hledání: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-search.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-search.png` });
   await ctx.close();
 }
 
 // 3) Dashboard: widgety, části smíšených widgetů, uložené rozložení
+await fetch(`${MOCK_API}/__mock/preferences/reset`, { method: "POST" }); // MRK-78: bez rozložení na serveru
 const STORED = {
-  version: 1,
+  version: 2,
   widgets: [
     "daily_briefing", "weekly_review", "today", "attention", "key_metrics", "goals", "upcoming", "work", "finance", "games", "quick_actions",
   ].map((id, i) => ({ id, visible: true, order: (i + 1) * 10, size: { daily_briefing: "large", weekly_review: "small", today: "large", attention: "small", key_metrics: "full", games: "full", quick_actions: "full", finance: "medium" }[id] ?? "small" })),
@@ -144,8 +152,9 @@ const STORED = {
   const fin = saved.widgets.find((w) => w.id === "finance");
   check("dashboard: uložený záznam Finance přežije úpravu (velikost i viditelnost)", Boolean(fin && fin.size === "medium" && fin.visible === true), JSON.stringify(fin));
   check("dashboard: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-dashboard-edit.png`, fullPage: true });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-dashboard-edit.png`, fullPage: true });
   await ctx.close();
+  await fetch(`${MOCK_API}/__mock/preferences/reset`, { method: "POST" });
 }
 
 // 4) Přímá adresa modulu: vypnutý = čistý stav „Modul není dostupný", žádná volání jeho API
@@ -167,7 +176,7 @@ for (const [id, path] of Object.entries(MODULE_PAGES).filter(([m]) => m === "wot
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     check(`${path} @${width}: bez přetečení`, overflow <= 0, `${overflow}px`);
     check(`${path} @${width}: bez chyb JS`, errors.length === 0, errors.join(" | "));
-    if (width === 390) await page.screenshot({ path: `${OUT}flags-${MODE}${path.replace("/", "-")}-mobile.png` });
+    if (width === 390) await page.screenshot({ path: `${OUT}flags-${FILE_MODE}${path.replace("/", "-")}-mobile.png` });
     await ctx.close();
   }
 }
@@ -190,7 +199,7 @@ for (const [id, path] of Object.entries(MODULE_PAGES).filter(([m]) => m === "wot
   await page.waitForTimeout(500);
   check("quick add: připomínka (jádro) funguje vždy", (await dialog.getByTestId("quick-add-preview").getAttribute("data-kind")) === "reminder");
   check("quick add: bez chyb JS", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${OUT}flags-${MODE}-quick-add.png` });
+  await page.screenshot({ path: `${OUT}flags-${FILE_MODE}-quick-add.png` });
   await ctx.close();
 }
 
@@ -329,7 +338,7 @@ if (!DISABLED.size) {
     setup: (p) => p.route(`${MOCK_API}/modules`, (route) => route.fulfill({ status: 503, body: "{}" })),
   });
   const hrefs = await navHrefs(page, "aside");
-  check("bez /modules: navigace jen jádro", Object.values(MODULE_PAGES).every((h) => !hrefs.includes(h)) && hrefs.includes("/today"), hrefs.join(","));
+  check("bez /modules: navigace jen jádro", Object.values(MODULE_PAGES).every((h) => !hrefs.includes(h)) && hrefs.includes("/planner"), hrefs.join(","));
   await page.goto(`${BASE}/wot`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   check("bez /modules: /wot ukáže chybu, ne obsah", (await page.getByTestId("module-error").count()) === 1 && (await page.locator("h1", { hasText: "World of Tanks" }).count()) === 0);
