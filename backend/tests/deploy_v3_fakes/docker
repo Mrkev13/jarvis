@@ -45,6 +45,8 @@ def log(*parts):
 
 
 def resolve(s, ref):
+    if ref == PG_IMAGE_ID:
+        return PG_IMAGE_ID
     if ref in s["tags"]:
         return s["tags"][ref]
     if ref in s["meta"]:
@@ -115,6 +117,7 @@ def compose(args, s):
 
 
 PG_IMAGE = "postgres:18.6"
+PG_IMAGE_ID = "sha256:" + "5" * 64  # the image ID the production database container runs
 OPTS_WITH_VALUE = {"--name", "--network", "--env-file", "-e", "--tmpfs", "--pull", "--entrypoint"}
 
 
@@ -185,7 +188,7 @@ def run_cmd(args, s):
     s.setdefault("apps", {})
     if "-d" in opts["flags"]:  # detached: throwaway database or rehearsal app
         name = opts["--name"]
-        if image == PG_IMAGE:
+        if image in (PG_IMAGE, PG_IMAGE_ID):
             s["copies"][name] = {"revision": None, "network": opts.get("--network")}
         else:
             image_id = resolve(s, image)
@@ -289,7 +292,7 @@ def main(argv):
         save(s)
         return 0
     if argv[0] == "inspect" and argv[1] == "standa-postgres":
-        print(PG_IMAGE)
+        print(PG_IMAGE_ID if "{{.Image}}" in argv else PG_IMAGE)
         return 0
     if argv[0] == "inspect":
         c = s["containers"].get(argv[1])

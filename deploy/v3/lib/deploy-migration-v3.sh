@@ -65,9 +65,12 @@ trusted_path() {
 }
 for p in "$TRUSTED" "$TRUSTED/migration-journal.py" "$TRUSTED/check-migration.py" "$TRUSTED/compat-smoke.py" \
          "$TRUSTED/check-backup.py" "$TRUSTED/verify-release.py" "$TRUSTED/check-ci.sh" "$BACKEND_MANAGED" \
-         "$FRONTEND_MANAGED" "$0" "$(dirname -- "$(readlink -f -- "$0")")"; do
+         "$FRONTEND_MANAGED" "$0" "$(dirname -- "$(readlink -f -- "$0")")" \
+         "$BACKUP_CMD" "$(dirname -- "$BACKUP_CMD")"; do
   trusted_path "$p" || { echo "UNTRUSTED_PATH: $p" >&2; exit 1; }
 done
+# BACKUP_CMD runs as root: a root-owned regular file, no symlink, in a trusted directory (Codex review P1)
+[[ -f $BACKUP_CMD && ! -L $BACKUP_CMD && $BACKUP_CMD == /* ]] || { echo "UNTRUSTED_PATH: $BACKUP_CMD" >&2; exit 1; }
 
 FINAL="$STATE_DIR/migration-v3-$TARGET"
 PROVENANCE="$STATE_DIR/provenance/$TARGET.json"
@@ -279,7 +282,9 @@ else: assert ",".join(sorted(d["migrations"].get("current") or []))==new
 rehearse() {  # dump old_image old_commit new_image old_head new_head
   local dump=$1 old_img=$2 old_commit=$3 new_img=$4 old_head=$5 new_head=$6 pw url pg_image i
   cleanup_rehearsal
-  pg_image=$(docker inspect "$PROD_DB_CONTAINER" --format '{{.Config.Image}}')
+  # the IMAGE ID the production database runs (a tag can be moved), verified to exist locally (Codex review P2)
+  pg_image=$(docker inspect "$PROD_DB_CONTAINER" --format '{{.Image}}')
+  [[ $pg_image =~ ^sha256:[0-9a-f]{64}$ && $(image_id "$pg_image") == "$pg_image" ]] || { echo 'POSTGRES_IMAGE_UNVERIFIED' >&2; return 1; }
   pw=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
   url="postgresql+psycopg2://$DB_USER:$pw@$REHEARSAL-db:5432/rehearsal"
   render_backend_env "$old_img" "$old_commit"
@@ -332,10 +337,33 @@ deploy_new() {
   advance deployed
   echo 'MIGRATION_DEPLOYMENT_OK'
 }
+# The managed templates rendered with the previous values must equal the snapshot saved at "prepared" (image aside):
+# otherwise the trusted Compose config changed since then and the rollback would start the old images with another
+# configuration (Codex review P2) -> manual recovery, like deploy-transaction-v3.sh.
+snapshot_matches() {  # service rollback-ref snapshot-file
+  local -a vars
+  if [[ $1 == backend ]]; then
+    vars=("BACKEND_IMAGE=$2" "BACKEND_ENV_FILE=$BACKEND_ENV_FILE" "APP_COMMIT=$(jval previous_commit)")
+  else
+    vars=("FRONTEND_IMAGE=$2" "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL")
+  fi
+  env "${vars[@]}" docker compose -p "$1" -f "$TRUSTED/$1-managed.yaml" config --format json |
+    python3 -I -c '
+import json,sys
+service, ref, snapshot = sys.argv[1], sys.argv[2], sys.argv[3]
+rendered = json.load(sys.stdin)["services"][service]
+saved = json.load(open(snapshot))["services"][service]
+saved["image"] = ref
+sys.exit(0 if rendered == saved else 1)
+' "$1" "$2" "$3"
+}
 rollback_app() {  # previous images through the managed templates; the database stays migrated
   local rb rf failures=0
   rb="standa-hub-backend:rollback-$TARGET"; rf="standa-hub-frontend:rollback-$TARGET"
+  [[ -f $OLD_B && -f $OLD_F ]] || { echo 'ROLLBACK_SNAPSHOT_MISSING' >&2; return 1; }
   [[ $(image_id "$rb") == "$(jval backend)" && $(image_id "$rf") == "$(jval frontend)" ]] || { echo 'ROLLBACK_IMAGE_ID_CHANGED' >&2; return 1; }
+  snapshot_matches backend "$rb" "$OLD_B" && snapshot_matches frontend "$rf" "$OLD_F" || {
+    echo 'MANAGED_CONFIG_CHANGED_SINCE_SNAPSHOT: MANUAL_RECOVERY_REQUIRED' >&2; return 1; }
   echo '=== RESTORE PREVIOUS APPLICATION (database stays migrated) ===' >&2
   env BACKEND_IMAGE="$rb" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" APP_COMMIT="$(jval previous_commit)" \
     docker compose -p backend -f "$BACKEND_MANAGED" up -d --no-deps --no-build --pull never --force-recreate --wait --wait-timeout 120 backend || failures=1
@@ -398,6 +426,7 @@ if [[ $MODE == --recover ]]; then
   [[ -f $JOURNAL ]] || { echo 'MIGRATION_JOURNAL_NOT_FOUND' >&2; exit 1; }
   case "$(jval state)" in
     prepared|rehearsed) abort_unchanged 'recovered before the migration'; exit 0 ;;
+    aborted) archive; exit 0 ;;   # power loss between "advance aborted" and the archive (Codex review P1)
     db_migrating) resolve_db_migrating; [[ -e $FINAL ]] || exit 0 ;;
   esac
   case "$(jval state)" in
@@ -411,7 +440,11 @@ fi
 
 # ---------- preflight (--check and --apply) ----------
 check_pending
-[[ ! -e $FINAL ]] || { echo 'MIGRATION_TRANSACTION_ALREADY_EXISTS (finished ones: see archive/ or --recover)' >&2; exit 1; }
+if [[ -f $JOURNAL && $(jval state) == aborted ]]; then  # aborted but not yet archived: nothing was changed
+  if [[ $MODE == --apply ]]; then archive; else echo 'ABORTED_MIGRATION_WILL_BE_ARCHIVED'; fi
+fi
+[[ ! -e $FINAL || ( $MODE == --check && -f $JOURNAL && $(jval state) == aborted ) ]] || {
+  echo 'MIGRATION_TRANSACTION_ALREADY_EXISTS (finished ones: see archive/ or --recover)' >&2; exit 1; }
 python3 -I - <<'PY'
 import json,subprocess
 for s in ('backend','frontend'):

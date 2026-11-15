@@ -358,3 +358,111 @@ def test_check_migration_refuses_merge_and_broken_chains(m, tmp_path):
                                      capture_output=True, text=True).stdout
     assert 'merge or root migration' in run('m')
     assert 'not found' in run('missing')
+
+
+# ---------- Codex review (BLOCK on a8d3e7e) regressions ----------
+
+def _migration_file(tmp_path, upgrade_body, module_extra=''):
+    v = tmp_path / 'versions'
+    v.mkdir(exist_ok=True)
+    (v / 'a.py').write_text('revision = "a"\ndown_revision = "z"\n\ndef upgrade() -> None:\n    pass\n')
+    (v / 'b.py').write_text(f'"""b"""\nfrom alembic import op\nimport sqlalchemy as sa\n{module_extra}\n'
+                            f'revision = "b"\ndown_revision = "a"\n\n\ndef upgrade() -> None:\n{upgrade_body}\n\n\n'
+                            'def downgrade() -> None:\n    op.drop_table("x")\n')
+    return v
+
+
+@pytest.mark.parametrize('upgrade_body, module_extra', [
+    ('    _helper()', 'def _helper():\n    op.drop_table("subjects")\n'),          # helper hides a drop
+    ('    o = op\n    o.drop_table("subjects")', ''),                               # alias
+    ('    getattr(op, "drop_table")("subjects")', ''),                              # dynamic attribute
+    ('    exec("op.drop_table(\'subjects\')")', ''),                                # arbitrary Python
+    ('    pass', 'import os\nos.system("true")\n'),                                 # module-level code
+    ('    with op.batch_alter_table("t") as b:\n        b.drop_column("c")', ''),    # drop inside batch
+    ('    with op.batch_alter_table("t") as op:\n        op.drop_table("c")', ''),    # alias shadows op
+    ('    op.add_column("t", sa.Column("c", sa.Text(), server_default=sa.text("1; DROP TABLE t")))', ''),
+    ('    op.add_column("t", sa.Column("c", sa.Text(), nullable=(lambda: True)()))', ''),
+    ('    for _ in range(1):\n        op.create_table("x")', ''),                  # control flow
+    ('    op.create_table("x", *cols)', 'cols = []\n'),                             # names / starred
+])
+def test_check_migration_bypasses_are_refused(m, tmp_path, upgrade_body, module_extra):
+    v = _migration_file(tmp_path, upgrade_body, module_extra)
+    r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and 'MIGRATION_OPS_NOT_ADDITIVE' in r.stdout, (upgrade_body, r.stdout)
+
+
+def test_check_migration_accepts_the_real_additive_shapes(m, tmp_path):
+    v = _migration_file(tmp_path, '    with op.batch_alter_table("subjects") as batch:\n'
+                                  '        batch.add_column(sa.Column("e", sa.Integer(), nullable=True))\n'
+                                  '    op.create_table("t", sa.Column("id", sa.Integer(), nullable=False),\n'
+                                  '                    sa.PrimaryKeyConstraint("id"))\n'
+                                  '    op.create_index(op.f("ix_t_id"), "t", ["id"], unique=False)')
+    r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize('how', ['writable', 'symlink', 'writable_dir'])
+def test_backup_command_must_be_trusted(m, how):
+    b = m.migration_release()
+    cmd = m.tmp / 'backup-cmd'
+    if how == 'writable':
+        cmd.chmod(0o777)
+    elif how == 'symlink':
+        real = m.tmp / 'backup-real'
+        cmd.rename(real)
+        cmd.symlink_to(real)
+    else:
+        sub = m.tmp / 'open'
+        sub.mkdir(mode=0o777)
+        sub.chmod(0o777)
+        moved = sub / 'backup-cmd'
+        cmd.rename(moved)
+        m.env['DEPLOY_BACKUP_CMD'] = str(moved)
+    r = m.mig('--apply', b)
+    assert r.returncode != 0 and 'UNTRUSTED_PATH' in out(r)
+    assert 'backup ' not in ((m.fake / 'calls.log').read_text() if (m.fake / 'calls.log').exists() else '')
+
+
+def test_power_loss_after_aborted_is_archived_by_recover_and_apply(m):
+    b = m.migration_release(old_compatible=False)
+    real = m.trusted / 'migration-journal.real.py'
+    shutil.move(m.trusted / 'migration-journal.py', real)
+    (m.trusted / 'migration-journal.py').write_text(f'''import os, signal, subprocess, sys
+rc = subprocess.call([sys.executable, "-I", {str(real)!r}, *sys.argv[1:]])
+if rc == 0 and sys.argv[2] == "aborted":
+    os.kill(os.getppid(), signal.SIGKILL)
+sys.exit(rc)
+''')
+    (m.trusted / 'migration-journal.py').chmod(0o644)
+    m.mig('--apply', b)
+    shutil.move(real, m.trusted / 'migration-journal.py')
+    (m.trusted / 'migration-journal.py').chmod(0o644)
+    assert m.mjournal(b)['state'] == 'aborted' and m.archived(b) == [], 'crash window: aborted, not archived'
+    assert 'ABORTED_MIGRATION_WILL_BE_ARCHIVED' in m.mig('--check', b).stdout
+    rec = m.mig('--recover', b)
+    assert rec.returncode == 0 and 'MIGRATION_TRANSACTION_ARCHIVED' in rec.stdout, out(rec)
+    assert len(m.archived(b)) == 1 and not (m.state / f'migration-v3-{b}').exists()
+    m.set_compat(m.running()[0], [OLD, NEW])
+    assert m.mig('--apply', b).returncode == 0 and m.prod_db() == NEW
+
+
+def test_rollback_refuses_when_managed_config_no_longer_matches_snapshot(m):
+    b = m.migration_release()
+    m.inject(kill_on_up=['backend'])
+    m.mig('--apply', b)
+    snap = m.state / f'migration-v3-{b}' / 'backend.json'
+    data = json.loads(snap.read_text())
+    data['services']['backend']['environment']['APP_COMMIT'] = '0' * 40
+    snap.write_text(json.dumps(data))
+    rec = m.mig('--recover', b)
+    assert rec.returncode != 0 and 'MANAGED_CONFIG_CHANGED_SINCE_SNAPSHOT' in out(rec)
+    assert m.mjournal(b)['state'] == 'app_rollback_required'
+
+
+def test_rehearsal_uses_the_immutable_postgres_image_id(m):
+    b = m.migration_release()
+    assert m.mig('--check', b).returncode == 0
+    runs = [c for c in (m.fake / 'calls.log').read_text().splitlines() if c.startswith('run -d') and 'POSTGRES_DB' in c]
+    assert runs and all(('sha256:' + '5' * 64) in c and 'postgres:18.6' not in c for c in runs)
