@@ -47,3 +47,20 @@ interrupted transaction) has passed on the isolated environment.
 - **Git ownership:** `verify-release.py` runs Git with `git -C DEPLOY_ROOT` under `DEPLOY_GIT_USER` (production: `standa`), avoiding root's `dubious ownership` rejection for the user's checkout. A simulated runuser boundary is tested in CI. An actual root/standa differing-UID integration test is still required.
 
 Regression tests are added in `backend/tests/test_deploy_v3.py`. These code changes are **not** installed on the production server. Do not change systemd to `--apply` or merge the draft PR until fresh CI and independent re-review are complete.
+
+## Update interval (MRK-108, 15 November 2026)
+
+The production timer polls every **10 minutes** (`systemd/standa-hub-auto-update.timer.d/20-interval.conf`; the
+audited base timer keeps `1h`). Install on the server:
+
+```bash
+sudo install -d -o root -g root -m 755 /etc/systemd/system/standa-hub-auto-update.timer.d
+sudo install -o root -g root -m 644 deploy/v3/systemd/standa-hub-auto-update.timer.d/20-interval.conf \
+  /etc/systemd/system/standa-hub-auto-update.timer.d/
+sudo systemctl daemon-reload && sudo systemctl restart standa-hub-auto-update.timer
+systemctl show standa-hub-auto-update.timer -p TimersMonotonic   # OnUnitInactiveUSec=10min
+```
+
+Delivery after a merge to `mrk-101-ubuntu-production` = up to 10 minutes of waiting + push CI on that SHA + image
+build. It is measured, not guaranteed. Commits that change the Alembic head are still blocked by the updater and
+need the controlled migration procedure.

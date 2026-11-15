@@ -583,3 +583,16 @@ def test_verify_release_git_invoked_with_configured_checkout_user(w):
     result = run('python3', '-I', str(verifier), b, cwd=w.tmp, env=env, check=False)
     assert result.returncode == 0, out(result)
     assert marker.exists() and '-u separate-git-user --' in marker.read_text()
+
+
+def test_timer_interval_drop_in_polls_every_ten_minutes():
+    """MRK-108 decision 2026-11-15: 10-minute polling; the empty assignment resets the audited base value (1h)."""
+    text = (V3 / 'systemd' / 'standa-hub-auto-update.timer.d' / '20-interval.conf').read_text()
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
+    assert lines == ['[Timer]', 'OnUnitInactiveSec=', 'OnUnitInactiveSec=10min']
+
+
+def test_aborted_archive_name_uses_the_process_id():
+    """Codex P3: `$-` expands to shell flags, not the PID."""
+    script = (V3 / 'lib' / 'deploy-transaction-v3.sh').read_text()
+    assert '$(utc_stamp)-$$-$RANDOM' in script and '$(utc_stamp)-$-$RANDOM' not in script
