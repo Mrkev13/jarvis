@@ -2631,7 +2631,32 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
   check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
   check(`docházka ${label}: po splnění zápočtu bez varování`, !(await fyz.innerText()).includes("povolená absence"));
+  // MRK-112: starší týdny jde doplnit (sbalená historie týdnů s výukou)
+  const older = fyz.locator("[data-older-weeks]");
+  await older.locator("summary").click();
+  const old = fyz.getByRole("button", { name: "Nebyl – Fyzika, týden od 14. 9.", exact: true });
+  check(`docházka ${label}: historie nabízí starší týdny`, await eventually(async () => (await old.count()) === 1));
+  await old.click();
+  check(`docházka ${label}: zápis staršího týdne`,
+    await eventually(async () => (await calls()).at(-1)?.body.week_start === "2026-09-14" && (await old.getAttribute("aria-pressed")) === "true"),
+    JSON.stringify((await calls()).at(-1)));
+  const more = fyz.getByRole("button", { name: "Zobrazit starší" });
+  check(`docházka ${label}: historie po částech`, (await more.count()) === 1);
+  await more.click();
+  check(`docházka ${label}: Zobrazit starší přidá týdny`, await eventually(async () => (await fyz.getByRole("button", { name: /^Byl – Fyzika, týden od/ }).count()) > 8));
+  // MRK-112: výuka ob týden – Matematika s výukou minulý týden: tento týden bez tlačítek, „Minulá výuka", historie ob týden
+  const math = card(1);
+  await math.getByLabel("Rytmus výuky – Matematika").selectOption("prev");
+  check(`docházka ${label}: ob týden – tento týden výuka není`, await eventually(async () => (await math.locator("[data-no-class-week]").count()) === 1),
+    await math.innerText());
+  check(`docházka ${label}: ob týden – minulá výuka`, (await math.getByRole("button", { name: "Byl – Matematika, Minulá výuka", exact: true }).count()) === 1);
+  check(`docházka ${label}: ob týden – štítek u docházky`, (await math.innerText()).includes("ob týden"));
+  await math.locator("[data-older-weeks] summary").click();
+  check(`docházka ${label}: ob týden – historie jen týdnů s výukou`,
+    (await math.getByRole("button", { name: "Byl – Matematika, týden od 14. 9.", exact: true }).count()) === 1
+      && (await math.getByRole("button", { name: "Byl – Matematika, týden od 21. 9.", exact: true }).count()) === 0);
   if (width < 500) check("docházka mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await math.screenshot({ path: `${OUT}school-progress-${label}-biweekly.png` });
   await fyz.screenshot({ path: `${OUT}school-progress-${label}-after.png` });
   check(`docházka ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
   await ctx.close();

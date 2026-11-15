@@ -142,10 +142,15 @@ function send(res, req, status, body, extraHeaders = {}) {
 const PROGRESS_WEEK = "2026-10-05";
 const PROGRESS_PREV = "2026-09-28";
 const CREDIT_LABELS = { pending: "nesplněn", passed: "splněn", failed: "neuznán" };
+// MRK-112: rytmus výuky jako backend (každý týden / ob týden od kotvy), 26 kalendářních týdnů zpět
+const isoAddWeeks = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 7 * 86400000).toISOString().slice(0, 10);
+const isClassWeek = (p, iso) => p.every !== 2 || Math.round((Date.parse(iso) - Date.parse(p.anchor)) / (7 * 86400000)) % 2 === 0;
 // stejné texty a úrovně jako backend modules/school/progress.py (zjednodušeně, jen pro UI kontroly)
 function subjectProgress(s) {
   const p = schoolState.progress[s.id] ?? (schoolState.progress[s.id] = { credit: "pending", creditDate: null, limit: null, weeks: {} });
-  const weeks = Object.entries(p.weeks).sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([week_start, present]) => ({ week_start, present }));
+  const classWeeks = Array.from({ length: 26 }, (_, i) => isoAddWeeks(PROGRESS_WEEK, -i)).filter((w) => isClassWeek(p, w));
+  const weeks = Object.entries(p.weeks).filter(([w]) => isClassWeek(p, w)).sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([week_start, present]) => ({ week_start, present }));
   const present = weeks.filter((w) => w.present).length;
   const absent = weeks.length - present;
   const remaining = p.limit === null ? null : p.limit - absent;
@@ -166,7 +171,9 @@ function subjectProgress(s) {
       results: closed.map((e) => ({ id: e.id, title: e.title, date: e.exam_date, outcome: e.status,
         outcome_label: { passed: "složeno", failed: "nesloženo" }[e.status] ?? "bez hodnocení", result: e.result_value ?? null })) },
     attendance: { present, absent, recorded: weeks.length, limit: p.limit, remaining, level, text, warning,
-      this_week: p.weeks[PROGRESS_WEEK] ?? null, weeks },
+      this_week: isClassWeek(p, PROGRESS_WEEK) ? p.weeks[PROGRESS_WEEK] ?? null : null, weeks,
+      class_weeks: classWeeks, class_this_week: isClassWeek(p, PROGRESS_WEEK) },
+    schedule: { every: p.every === 2 ? 2 : 1, anchor: p.every === 2 ? p.anchor : null },
   };
 }
 const progressCalls = [];
@@ -506,6 +513,9 @@ createServer(async (req, res) => {
     }
     subjectProgress(s);
     const p = schoolState.progress[s.id];
+    if (progressMatch[2] === "attendance" && b.present !== null && !isClassWeek(p, b.week_start)) {
+      return respond(422, { detail: { code: "no_class_week", message: "V tomhle týdnu předmět výuku nemá (ob týden)." } }, 100);
+    }
     if (progressMatch[2] === "credit") {
       p.credit = b.status;
       p.creditDate = b.status === "pending" ? null : b.date ?? "2026-10-11";
@@ -531,6 +541,15 @@ createServer(async (req, res) => {
     if ("absence_limit" in b) {  // MRK-86: limit absencí patří k docházce
       subjectProgress(item);
       schoolState.progress[item.id].limit = b.absence_limit;
+    }
+    if ("attendance_every" in b) {  // MRK-112: rytmus výuky
+      subjectProgress(item);
+      const p = schoolState.progress[item.id];
+      if (b.attendance_every === 2 && !b.attendance_anchor) {
+        return respond(422, { detail: { code: "attendance_anchor_required", message: "U výuky ob týden vyber týden, kdy výuka je." } }, 150);
+      }
+      p.every = b.attendance_every === 2 ? 2 : 1;
+      p.anchor = p.every === 2 ? b.attendance_anchor : null;
     }
     Object.assign(item, b);
     return respond(200, item, 300);

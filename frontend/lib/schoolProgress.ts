@@ -31,7 +31,12 @@ export interface SubjectProgress {
     warning: string | null;
     this_week: boolean | null;
     weeks: { week_start: string; present: boolean }[];
+    /** MRK-112: týdny s výukou, které jde zapsat (nejnovější první; tento týden jen když v něm výuka je). */
+    class_weeks: string[];
+    class_this_week: boolean;
   };
+  /** MRK-112: rytmus výuky – každý týden (1) nebo ob týden (2) od pondělí `anchor`. */
+  schedule: { every: 1 | 2; anchor: string | null };
 }
 
 export interface ProgressPayload {
@@ -71,6 +76,37 @@ export function weekLabel(iso: string): string {
 /** Stav daného týdne z posledních zapsaných týdnů (null = nezapsáno). */
 export function weekState(p: SubjectProgress, weekStart: string): boolean | null {
   return p.attendance.weeks.find((w) => w.week_start === weekStart)?.present ?? null;
+}
+
+/** MRK-112: volba rytmu ve formuláři – každý týden / ob týden s výukou tento týden / ob týden s výukou minulý týden. */
+export type ScheduleChoice = "weekly" | "this" | "prev";
+
+export const SCHEDULE_OPTIONS: { value: ScheduleChoice; label: string }[] = [
+  { value: "weekly", label: "Každý týden" },
+  { value: "this", label: "Ob týden – výuka tento týden" },
+  { value: "prev", label: "Ob týden – výuka minulý týden" },
+];
+
+export function scheduleChoice(p: SubjectProgress): ScheduleChoice {
+  if (p.schedule.every !== 2) return "weekly";
+  return p.attendance.class_this_week ? "this" : "prev";
+}
+
+/** Tělo PATCH /school/subject/{id} pro zvolený rytmus (kotva = pondělí týdne s výukou). */
+export function schedulePatch(choice: ScheduleChoice, weekStart: string, previousWeekStart: string) {
+  if (choice === "weekly") return { attendance_every: 1, attendance_anchor: null };
+  return { attendance_every: 2, attendance_anchor: choice === "this" ? weekStart : previousWeekStart };
+}
+
+/**
+ * MRK-112: rozdělení týdnů s výukou pro kartu – tento týden (jen když v něm výuka je), poslední výuka před ním
+ * a starší týdny k doplnění (nejnovější první).
+ */
+export function attendanceWeeks(p: SubjectProgress, weekStart: string): { current: string | null; previous: string | null; older: string[] } {
+  const weeks = p.attendance.class_weeks;
+  const current = weeks[0] === weekStart ? weekStart : null;
+  const rest = current ? weeks.slice(1) : weeks;
+  return { current, previous: rest[0] ?? null, older: rest.slice(1) };
 }
 
 /** „Zkoušky: 2 uzavřené (1 složeno, 1 nesloženo), 1 čeká" nebo null, když předmět žádné nemá. */
