@@ -15,5 +15,12 @@ if not c or not c["running"]:
 bad = c["image_id"] in state.get("unhealthy", [])
 if service == "frontend":
     sys.exit(22 if bad else 0)
+if "prod_db" in state:  # MRK-114: the backend compares the database revision with its own head
+    head = state["meta"][c["image_id"]]["head"]
+    rev = state["prod_db"]
+    current = rev == head
+    print(json.dumps({"status": "healthy" if current and not bad else "unhealthy", "database": {"status": "reachable"},
+                      "migrations": {"status": "current" if current else "mismatch", "current": [rev], "head": [head]}}))
+    sys.exit(0)
 print(json.dumps({"status": "unhealthy" if bad else "healthy", "database": {"status": "reachable"},
                   "migrations": {"status": "current"}}))

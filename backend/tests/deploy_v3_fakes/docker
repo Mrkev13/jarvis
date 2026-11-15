@@ -6,6 +6,14 @@ image labels and Alembic head, two containers with image, APP_COMMIT and Compose
 `compose up`, `build --iidfile`, `run ... alembic heads`. Failure injection via $FAKE_DIR/inject.json:
   {"fail_up": ["frontend"], "kill_on_up": ["backend"], "fail_build": true}
 Each "kill_on_up" entry is used once: the calling script gets SIGKILL before the container changes (power loss).
+
+MRK-114 (deploy-migration-v3.sh): state["prod_db"] = revision of the production database; image meta "compat" =
+revisions the code works on (default: its own head); throwaway PostgreSQL copies and rehearsal app containers on
+internal networks; `exec` answers psql (alembic_version, restore from a gzip dump "REVISION=<rev>"), the app /health
+and the ORM smoke (`python -`, passes when the database revision is in the image's compat list);
+`run ... alembic upgrade head` moves the copy (DATABASE_URL in -e) or production (network postgres_default) to the
+image's head. More injections: {"fail_migrate": ["copy"|"prod"], "kill_after_migrate": ["prod"],
+"kill_before_migrate": ["prod"]} (each used once).
 """
 import hashlib
 import json
@@ -106,6 +114,160 @@ def compose(args, s):
     return 2
 
 
+PG_IMAGE = "postgres:18.6"
+OPTS_WITH_VALUE = {"--name", "--network", "--env-file", "-e", "--tmpfs", "--pull", "--entrypoint"}
+
+
+def parse_run(args):
+    opts, i = {"-e": [], "flags": []}, 0
+    while i < len(args) and args[i].startswith("-"):
+        if args[i] in OPTS_WITH_VALUE:
+            if args[i] == "-e":
+                opts["-e"].append(args[i + 1])
+            else:
+                opts[args[i]] = args[i + 1]
+            i += 2
+        else:
+            opts["flags"].append(args[i])
+            i += 1
+    return opts, args[i], args[i + 1:]
+
+
+def env_value(opts, key):
+    for item in opts["-e"]:
+        if item.startswith(key + "="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def db_host(url):
+    return url.split("@", 1)[1].split(":", 1)[0] if url and "@" in url else None
+
+
+def take_injection(name, target):
+    inj = inject()
+    if target in inj.get(name, []):
+        inj[name].remove(target)
+        (FAKE / "inject.json").write_text(json.dumps(inj))
+        return True
+    return False
+
+
+def db_revision_for(s, container):
+    """Database revision seen by an app container: a rehearsal copy or production."""
+    app = s.get("apps", {}).get(container)
+    if app is not None:
+        return s["copies"][app["db"]]["revision"]
+    return s.get("prod_db")
+
+
+def image_of(s, container):
+    app = s.get("apps", {}).get(container)
+    return app["image_id"] if app else s["containers"][container]["image_id"]
+
+
+def health(s, container):
+    rev, image = db_revision_for(s, container), image_of(s, container)
+    head = s["meta"][image]["head"]
+    ok = rev == head and image not in s.get("unhealthy", [])
+    return {"status": "healthy" if ok else "unhealthy", "database": {"status": "reachable"},
+            "migrations": {"status": "current" if rev == head else "mismatch", "current": [rev], "head": [head]}}
+
+
+def smoke_ok(s, container):
+    image = image_of(s, container)
+    return db_revision_for(s, container) in s["meta"][image].get("compat", [s["meta"][image]["head"]])
+
+
+def run_cmd(args, s):
+    opts, image, cmd = parse_run(args)
+    s.setdefault("copies", {})
+    s.setdefault("apps", {})
+    if "-d" in opts["flags"]:  # detached: throwaway database or rehearsal app
+        name = opts["--name"]
+        if image == PG_IMAGE:
+            s["copies"][name] = {"revision": None, "network": opts.get("--network")}
+        else:
+            image_id = resolve(s, image)
+            if image_id is None:
+                return 1
+            s["apps"][name] = {"image_id": image_id, "db": db_host(env_value(opts, "DATABASE_URL"))}
+        save(s)
+        print(name)
+        return 0
+    image_id = resolve(s, image)
+    if opts.get("--entrypoint") == "alembic" and cmd == ["heads"]:
+        print(f"{s['meta'][image_id]['head']} (head)")
+        return 0
+    if opts.get("--entrypoint") == "alembic" and cmd == ["upgrade", "head"]:
+        host = db_host(env_value(opts, "DATABASE_URL"))
+        target = "copy" if host else "prod"
+        log("migrate", target, s["meta"][image_id]["head"])
+        if target == "prod" and take_injection("kill_before_migrate", "prod"):
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        if take_injection("fail_migrate", target):
+            print("alembic: migration failed", file=sys.stderr)
+            return 1
+        if host:
+            s["copies"][host]["revision"] = s["meta"][image_id]["head"]
+        else:
+            s["prod_db"] = s["meta"][image_id]["head"]
+        save(s)
+        if target == "prod" and take_injection("kill_after_migrate", "prod"):
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        return 0
+    print(f"fake docker: unsupported run {args}", file=sys.stderr)
+    return 2
+
+
+def exec_cmd(args, s):
+    interactive = args[0] == "-i"
+    if interactive:
+        args = args[1:]
+    name, cmd = args[0], args[1:]
+    copies = s.get("copies", {})
+    if name == "standa-postgres":
+        if "-tAc" in cmd:
+            print(s.get("prod_db") or "")
+            return 0
+        return 2
+    if name in copies:
+        if cmd[0] == "pg_isready":
+            return 0
+        if "-tAc" in cmd:
+            print(copies[name]["revision"] or "")
+            return 0
+        if "--single-transaction" in cmd:  # restore: the fake dump says which revision it holds
+            text = sys.stdin.read()
+            copies[name]["revision"] = text.split("REVISION=", 1)[1].split()[0]
+            save(s)
+            return 0
+        return 2
+    if name in s.get("apps", {}) or name in s["containers"]:
+        if cmd[:2] == ["python", "-c"]:
+            print(json.dumps(health(s, name)))
+            return 0
+        if cmd == ["python", "-"]:
+            sys.stdin.read()
+            if smoke_ok(s, name):
+                print("ORM_SMOKE_OK mapped=42")
+                return 0
+            print("sqlalchemy.exc.ProgrammingError: column does not exist", file=sys.stderr)
+            return 1
+    print(f"fake docker: unsupported exec {args}", file=sys.stderr)
+    return 2
+
+
+def remove(args, s):
+    for name in [a for a in args if not a.startswith("-")]:
+        s.get("apps", {}).pop(name, None)
+        s.get("copies", {}).pop(name, None)
+    save(s)
+    return 0
+
+
 def main(argv):
     s = load()
     log(*argv)
@@ -126,6 +288,9 @@ def main(argv):
         s["tags"][argv[3]] = image_id
         save(s)
         return 0
+    if argv[0] == "inspect" and argv[1] == "standa-postgres":
+        print(PG_IMAGE)
+        return 0
     if argv[0] == "inspect":
         c = s["containers"].get(argv[1])
         if c is None:
@@ -144,9 +309,22 @@ def main(argv):
         }[fmt]
         print(out)
         return 0
-    if argv[0] == "run":  # docker run --rm --network none --pull never --entrypoint alembic IMAGE heads
-        image_id = resolve(s, argv[-2])
-        print(f"{s['meta'][image_id]['head']} (head)")
+    if argv[0] == "run":
+        return run_cmd(argv[1:], s)
+    if argv[0] == "exec":
+        return exec_cmd(argv[1:], s)
+    if argv[0] == "rm":
+        return remove(argv[1:], s)
+    if argv[:2] == ["network", "create"]:
+        s.setdefault("networks", []).append(argv[-1])
+        save(s)
+        return 0
+    if argv[:2] == ["network", "rm"]:
+        nets = s.setdefault("networks", [])
+        if argv[-1] not in nets:
+            return 1
+        nets.remove(argv[-1])
+        save(s)
         return 0
     if argv[0] == "build":
         if inject().get("fail_build"):

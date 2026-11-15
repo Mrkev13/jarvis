@@ -47,3 +47,50 @@ interrupted transaction) has passed on the isolated environment.
 - **Git ownership:** `verify-release.py` runs Git with `git -C DEPLOY_ROOT` under `DEPLOY_GIT_USER` (production: `standa`), avoiding root's `dubious ownership` rejection for the user's checkout. A simulated runuser boundary is tested in CI. An actual root/standa differing-UID integration test is still required.
 
 Regression tests are added in `backend/tests/test_deploy_v3.py`. These code changes are **not** installed on the production server. Do not change systemd to `--apply` or merge the draft PR until fresh CI and independent re-review are complete.
+
+## Controlled migration deployment (MRK-114)
+
+A release that changes the Alembic head is never deployed by the timer: `deploy-transaction-v3.sh` compares the heads
+in the old and the new image (not the database state) and stops on `MIGRATION_HEAD_CHANGED`. Its run has already
+built the target images from the verified release and written their provenance record. Such a release is then
+deployed **by hand** with `lib/deploy-migration-v3.sh`, under the same maintenance lock:
+
+```bash
+TARGET=<40-character SHA of the release on mrk-101-ubuntu-production>
+L=/usr/local/lib/standa-hub
+sudo $L/with-deployment-lock.sh $L/deploy-migration-v3.sh --check "$TARGET"    # preflight + rehearsal, no production change
+sudo $L/with-deployment-lock.sh $L/deploy-migration-v3.sh --apply "$TARGET"    # backup, rehearsal, migrate, deploy
+sudo $L/with-deployment-lock.sh $L/deploy-migration-v3.sh --recover "$TARGET"  # after an interruption
+```
+
+(The systemd drop-in that holds `DEPLOY_NEXT_PUBLIC_API_URL` is not used here: pass it as for the updater, e.g.
+`sudo env DEPLOY_NEXT_PUBLIC_API_URL=... $L/with-deployment-lock.sh ...`.)
+
+What it does - journal `$STATE_DIR/migration-v3-<SHA>/journal.json`, helper `mrk108/migration-journal.py`:
+
+1. **Preflight** (both modes): no pending deployment or migration transaction; healthy production on an ancestor
+   commit; CI gate; verified release and image provenance; old and new head from the images (must differ, single
+   head each); the production database **exactly at the old head** (a database migrated outside this procedure is
+   never accepted); `mrk108/check-migration.py` allows only additive operations (`create_table`, `create_index`,
+   `add_column` with `nullable=True` or a `server_default`) - necessary, not sufficient.
+2. **Rehearsal** on a throwaway PostgreSQL (same image as production, internal network, tmpfs, no ports) restored from
+   the newest verified backup: the old app passes health + ORM smoke (baseline), `alembic upgrade head` with the new
+   image, the **new app** is healthy + ORM smoke, the **old app on the migrated copy** passes the ORM smoke of every
+   mapped entity (`mrk108/compat-smoke.py`) with the database at the new head. Rehearsal containers have every
+   outward feature switched off (scheduler, reminders, delivery, backups) and no network beyond the copy.
+3. **`--apply`**: a fresh backup (`backup.sh`) + `check-backup.py`; the rehearsal runs on that backup; then
+   `prepared → rehearsed → db_migrating → alembic upgrade head on production → database verified at the new head →
+   db_migrated → deploying → verifying → deployed` (deployment through the managed templates, as every deploy).
+4. **Failures**: before `db_migrating` → `aborted` (containers verified unchanged, database at the old head, archived to
+   `$STATE_DIR/archive/`, retry possible). Interrupted `db_migrating` → `--recover` reads the production revision: old
+   head → `aborted`; new head → `db_migrated` and roll forward (the old app keeps serving meanwhile, its compatibility
+   was rehearsed). Failure while deploying → previous images through the managed templates → `rolled_back_app` **only
+   after** the old app passes the compatibility check on the production database (ORM smoke + database at the new
+   head + `/login`); otherwise `app_rollback_required` and manual recovery. **The database is never downgraded**; the
+   way back is a manual restore of the backup taken in step 3.
+5. A pending migration journal blocks the automatic updater (`PENDING_MIGRATION`); after `rolled_back_app` the
+   updater's strict health check keeps failing until a fixed release is deployed - deliberate.
+
+Tests: `backend/tests/test_deploy_migration_v3.py` (fake docker models the production revision, throwaway copies,
+rehearsal apps and `alembic upgrade`). Before the first real migration (`0029_attendance_schedule`, PR #64): LXD test,
+restore of a real backup, old/new app compatibility on a real copy - MRK-114.

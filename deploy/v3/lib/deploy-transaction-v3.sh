@@ -105,6 +105,14 @@ for p in list(root.glob('transaction-v2-*/journal.json')) + list(root.glob('tran
 for p in root.glob('transaction-v3-*'):
     if p.name != 'transaction-v3-'+target and p.is_dir() and not (p/'journal.json').exists():
         raise SystemExit('INCOMPLETE_TRANSACTION_DIRECTORY: '+str(p)+' (run --recover for its target)')
+# MRK-114: an unfinished controlled migration (deploy-migration-v3.sh) blocks every automatic update.
+for p in root.glob('migration-v3-*'):
+    if not p.is_dir():
+        continue
+    try: state=json.loads((p/'journal.json').read_text())['state']
+    except (ValueError,KeyError,OSError): raise SystemExit('INCOMPLETE_MIGRATION_DIRECTORY: '+str(p)+' (deploy-migration-v3.sh --recover)')
+    if state not in ('deployed','aborted','rolled_back_app'):
+        raise SystemExit('PENDING_MIGRATION: '+str(p)+' (deploy-migration-v3.sh --recover)')
 staging=sorted(p.name for p in root.glob('.staging-v3-*'))
 if staging:
     print('STALE_STAGING_DIRECTORIES: '+str(len(staging))+' (removed by the next --apply or --recover)')
