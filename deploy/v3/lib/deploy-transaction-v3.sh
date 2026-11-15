@@ -248,7 +248,7 @@ archive_aborted() {
   if [[ $(running_id standa-hub-backend) != "$expected_b" || $(running_id standa-hub-frontend) != "$expected_f" ]]; then
     echo 'ABORTED_BUT_CONTAINERS_CHANGED: MANUAL_RECOVERY_REQUIRED' >&2; return 1
   fi
-  destination="$TX.aborted-$(utc_stamp)-$-$RANDOM"
+  destination="$TX.aborted-$(utc_stamp)-$$-$RANDOM"  # $$ = PID (was $-, shell flags)
   [[ ! -e $destination ]] || { echo 'ABORT_ARCHIVE_COLLISION' >&2; return 1; }
   mv -T -- "$TX" "$destination"
   fsync_dir "$STATE_DIR"
