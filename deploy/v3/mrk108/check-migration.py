@@ -8,8 +8,9 @@ aliases or arbitrary Python):
 
 module level  docstring; `from alembic import op`; `import sqlalchemy as sa`; `from sqlalchemy.dialects import ...`;
               `from typing import ...` / `from __future__ import ...`; constant assignments of revision,
-              down_revision, branch_labels, depends_on; `def upgrade()` and `def downgrade()` (downgrade is never run
-              automatically and is not checked). Nothing else runs at import time.
+              down_revision, branch_labels, depends_on (annotations only plain type names / None); `def upgrade()`
+              and `def downgrade()` without parameters, defaults or decorators, return annotation only None
+              (downgrade's body is never run automatically and is not checked). Nothing else runs at import time.
 upgrade()     docstring / pass; `op.create_table(...)`, `op.create_index(...)`, `op.add_column(...)`;
               `with op.batch_alter_table(...) as <name>:` whose body is only `<name>.add_column(...)`.
 arguments     constants, lists/tuples/dicts, keywords, `sa.<...>(...)` constructors, `op.f("...")` - no other names,
@@ -84,6 +85,43 @@ def is_op_f(node):
             and len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and not node.keywords)
 
 
+SAFE_TYPE_NAMES = {"str", "None", "Union", "Optional", "Sequence", "Tuple", "tuple", "list", "List"}
+
+
+def check_annotation(node, name):
+    """Annotations are evaluated at import time (Codex review P1): only plain type names, None and their
+    subscripts / unions, e.g. `str`, `Union[str, Sequence[str], None]`, `str | None`, `-> None`."""
+    if node is None:
+        return
+    if isinstance(node, ast.Constant) and (node.value is None or isinstance(node.value, str) and node.value.isidentifier()):
+        return
+    if isinstance(node, ast.Name) and node.id in SAFE_TYPE_NAMES:
+        return
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id in SAFE_TYPE_NAMES:
+        check_annotation(node.slice, name)
+        return
+    if isinstance(node, ast.Tuple):
+        for e in node.elts:
+            check_annotation(e, name)
+        return
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        check_annotation(node.left, name)
+        check_annotation(node.right, name)
+        return
+    raise NotAdditive(f"{where(node, name)}: annotation {ast.dump(node)[:60]}")
+
+
+def check_signature(fn, name):
+    """upgrade()/downgrade(): no parameters, defaults or decorators; return annotation only None (all of these are
+    evaluated when Alembic imports the revision)."""
+    a = fn.args
+    if (a.posonlyargs or a.args or a.vararg or a.kwonlyargs or a.kwarg or a.defaults or a.kw_defaults
+            or fn.decorator_list or getattr(fn, "type_params", None)):
+        raise NotAdditive(f"{where(fn, name)}: {fn.name}() must take no parameters and have no decorators")
+    if fn.returns is not None and not (isinstance(fn.returns, ast.Constant) and fn.returns.value is None):
+        raise NotAdditive(f"{where(fn, name)}: {fn.name}() return annotation must be None")
+
+
 def check_call(call, receiver, name, ops):
     if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
             and isinstance(call.func.value, ast.Name) and call.func.value.id == receiver):
@@ -111,8 +149,7 @@ def check_call(call, receiver, name, ops):
 
 def check_upgrade(fn, name):
     ops = []
-    if fn.args.args or fn.args.vararg or fn.args.kwarg or fn.args.kwonlyargs or fn.decorator_list:
-        raise NotAdditive(f"{name}: upgrade() must take no arguments and have no decorators")
+    check_signature(fn, name)
     for stmt in fn.body:
         if isinstance(stmt, ast.Pass) or (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
             continue
@@ -159,13 +196,16 @@ def check_module(tree, name):
         if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             if all(isinstance(t, ast.Name) and t.id in META for t in targets) and stmt.value is not None:
+                if isinstance(stmt, ast.AnnAssign):
+                    check_annotation(stmt.annotation, name)
                 check_expr(stmt.value, name)
                 continue
         if isinstance(stmt, ast.FunctionDef) and stmt.name == "upgrade":
             upgrade = stmt
             continue
-        if isinstance(stmt, ast.FunctionDef) and stmt.name == "downgrade" and not stmt.decorator_list:
-            continue  # never run automatically
+        if isinstance(stmt, ast.FunctionDef) and stmt.name == "downgrade":
+            check_signature(stmt, name)  # body never runs automatically, but its signature runs at import
+            continue
         raise NotAdditive(f"{where(stmt, name)}: {type(stmt).__name__} at module level")
     if upgrade is None:
         raise NotAdditive(f"{name}: no upgrade()")

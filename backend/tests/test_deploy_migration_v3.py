@@ -466,3 +466,48 @@ def test_rehearsal_uses_the_immutable_postgres_image_id(m):
     assert m.mig('--check', b).returncode == 0
     runs = [c for c in (m.fake / 'calls.log').read_text().splitlines() if c.startswith('run -d') and 'POSTGRES_DB' in c]
     assert runs and all(('sha256:' + '5' * 64) in c and 'postgres:18.6' not in c for c in runs)
+
+
+# Codex re-review (BLOCK on ffe647d): code that Python evaluates while importing the revision module
+IMPORT_TIME = [
+    ('module annotation', 'revision: __import__("os").system("true") = "b"', None),
+    ('upgrade return annotation', None, 'def upgrade() -> __import__("os").getcwd():\n    pass'),
+    ('upgrade default', None, 'def upgrade(x=__import__("os").getcwd()) -> None:\n    pass'),
+    ('downgrade default', None, 'def downgrade(x=__import__("subprocess").run(["true"])) -> None:\n    pass'),
+    ('downgrade annotation', None, 'def downgrade() -> __import__("os").getcwd():\n    pass'),
+    ('downgrade decorator', None, '@__import__("functools").lru_cache\ndef downgrade() -> None:\n    pass'),
+    ('downgrade kw default', None, 'def downgrade(*, x=print("side effect")) -> None:\n    pass'),
+]
+
+
+@pytest.mark.parametrize('label, meta_line, func', IMPORT_TIME, ids=[c[0] for c in IMPORT_TIME])
+def test_check_migration_refuses_import_time_code(m, tmp_path, label, meta_line, func):
+    v = tmp_path / 'versions'
+    v.mkdir()
+    (v / 'a.py').write_text('revision = "a"\ndown_revision = "z"\n\ndef upgrade() -> None:\n    pass\n')
+    upgrade = 'def upgrade() -> None:\n    op.create_table("x")'
+    downgrade = 'def downgrade() -> None:\n    op.drop_table("x")'
+    if func and 'def upgrade' in func:
+        upgrade = func
+    elif func:
+        downgrade = func
+    meta = meta_line or 'revision: str = "b"'
+    (v / 'b.py').write_text(f'from alembic import op\nimport sqlalchemy as sa\n{meta}\ndown_revision = "a"\n\n\n'
+                            f'{upgrade}\n\n\n{downgrade}\n')
+    r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and 'MIGRATION_OPS_NOT_ADDITIVE' in r.stdout, (label, r.stdout)
+
+
+def test_check_migration_accepts_the_usual_typed_alembic_header(m, tmp_path):
+    v = tmp_path / 'versions'
+    v.mkdir()
+    (v / 'a.py').write_text('revision = "a"\ndown_revision = "z"\n\ndef upgrade() -> None:\n    pass\n')
+    (v / 'b.py').write_text('from typing import Sequence, Union\nfrom alembic import op\nimport sqlalchemy as sa\n'
+                            'revision: str = "b"\ndown_revision: Union[str, None] = "a"\n'
+                            'branch_labels: Union[str, Sequence[str], None] = None\ndepends_on: str | None = None\n\n\n'
+                            'def upgrade() -> None:\n    op.create_table("x")\n\n\n'
+                            'def downgrade() -> None:\n    op.drop_table("x")\n')
+    r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout
