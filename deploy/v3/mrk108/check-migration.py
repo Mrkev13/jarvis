@@ -182,7 +182,7 @@ def check_upgrade(fn, name):
 
 
 def check_module(tree, name):
-    upgrade = None
+    upgrade, seen = None, set()
     for stmt in tree.body:
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
             continue
@@ -200,11 +200,15 @@ def check_module(tree, name):
                     check_annotation(stmt.annotation, name)
                 check_expr(stmt.value, name)
                 continue
-        if isinstance(stmt, ast.FunctionDef) and stmt.name == "upgrade":
-            upgrade = stmt
-            continue
-        if isinstance(stmt, ast.FunctionDef) and stmt.name == "downgrade":
-            check_signature(stmt, name)  # body never runs automatically, but its signature runs at import
+        # exactly one definition each: a first definition's defaults/decorators run at import even when a second,
+        # harmless one replaces it (Codex review P1) - every definition is checked and duplicates are refused
+        if isinstance(stmt, ast.FunctionDef) and stmt.name in ("upgrade", "downgrade"):
+            check_signature(stmt, name)
+            if stmt.name in seen:
+                raise NotAdditive(f"{where(stmt, name)}: second definition of {stmt.name}()")
+            seen.add(stmt.name)
+            if stmt.name == "upgrade":
+                upgrade = stmt
             continue
         raise NotAdditive(f"{where(stmt, name)}: {type(stmt).__name__} at module level")
     if upgrade is None:

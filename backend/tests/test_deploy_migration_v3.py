@@ -511,3 +511,21 @@ def test_check_migration_accepts_the_usual_typed_alembic_header(m, tmp_path):
     r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout
+
+
+# Codex re-review (BLOCK on f639fa0): duplicate definitions - the first one's defaults/decorators run at import
+@pytest.mark.parametrize('functions', [
+    'def upgrade(x=__import__("os").getcwd()) -> None:\n    pass\n\n\ndef upgrade() -> None:\n    op.create_table("x")',
+    '@__import__("functools").lru_cache\ndef upgrade() -> None:\n    pass\n\n\ndef upgrade() -> None:\n    op.create_table("x")',
+    'def upgrade() -> None:\n    op.create_table("x")\n\n\ndef downgrade(x=print("side effect")) -> None:\n    pass',
+    'def upgrade() -> None:\n    op.create_table("x")\n\n\ndef downgrade() -> None:\n    pass\n\n\ndef downgrade() -> None:\n    pass',
+], ids=['upgrade default then safe', 'upgrade decorator then safe', 'downgrade default', 'two downgrades'])
+def test_check_migration_refuses_duplicate_or_unsafe_definitions(m, tmp_path, functions):
+    v = tmp_path / 'versions'
+    v.mkdir()
+    (v / 'a.py').write_text('revision = "a"\ndown_revision = "z"\n\ndef upgrade() -> None:\n    pass\n')
+    (v / 'b.py').write_text(f'from alembic import op\nimport sqlalchemy as sa\nrevision = "b"\ndown_revision = "a"\n\n\n'
+                            f'{functions}\n')
+    r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and 'MIGRATION_OPS_NOT_ADDITIVE' in r.stdout, r.stdout
