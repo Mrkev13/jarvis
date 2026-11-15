@@ -37,8 +37,12 @@ def main():
     if destination == root or root.is_relative_to(destination) or destination.is_relative_to(root):
         parser.error("Unsafe destination")
 
+    # MRK-101 review: every absolute path is relative to "/", so "/" may only be refused as itself; the real
+    # production directories are refused in both directions (the directory, anything inside it, any ancestor).
+    if destination == Path("/"):
+        parser.error("Destination overlaps a protected production path")
+
     protected = (
-        Path("/"),
         Path("/srv/standa-hub-data/media"),
         Path("/srv/standa-hub-data/backups"),
     )

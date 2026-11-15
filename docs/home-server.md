@@ -27,7 +27,7 @@ Budoucí mini PC je Linuxová 24/7 platforma pro Standa Hub / Jarvis, PostgreSQL
 
 Ne všechny služby startují v první den. Nová služba přichází až tehdy, když je předchozí vlna stabilní, monitorovaná a její nenahraditelná data mají ověřenou obnovu.
 
-Současný produkční stav zůstává beze změny: MRK-23 provozuje Hub na Windows. Linuxový mini PC je budoucí cílové prostředí, nikoli zpětná změna současného runtime. Migrace Hubu nastane až podle samostatného, ověřeného plánu MRK-27.
+**Současný produkční stav (od listopadu 2026):** Hub / Jarvis běží na Ubuntu serveru v Docker Compose (MRK-101) s automatickým deploymentem v3 z větve `mrk-101-ubuntu-production` (MRK-108) – postupy: [Ubuntu deployment](ubuntu-deployment.md) a `deploy/v3/README.md`. Windows runtime (MRK-23) je **legacy**: jeho postupy v [operations.md](operations.md) platí jen pro starou instalaci a nesmí se spouštět proti Ubuntu serveru. Další služby z tohoto plánu se na Linuxový server přidávají postupně podle fází níže.
 
 ## 2. Role Hubu, Jarvise a externích aplikací
 
@@ -184,7 +184,7 @@ Linux, Docker Compose, Tailscale, Caddy, Pi-hole, backup tooling, Uptime Kuma, h
 
 ### Phase 2 — Standa Hub
 
-Standa Hub / Jarvis a PostgreSQL. Přesun z Windows až po ověřeném migračním plánu, restore drillu a kontrole `/health`, verzí i záloh. Windows runtime zůstává současným deploymentem do dokončení této fáze.
+Standa Hub / Jarvis a PostgreSQL. **Dokončeno v listopadu 2026:** Hub běží na Ubuntu (Docker Compose, MRK-101) s ověřenou obnovou PostgreSQL a médií a s automatickým deploymentem v3 (MRK-108). Windows runtime je od té doby legacy.
 
 ### Phase 3 — Smart home
 
