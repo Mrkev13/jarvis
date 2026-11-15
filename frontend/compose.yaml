@@ -1,0 +1,33 @@
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+    image: standa-hub-frontend:local
+    container_name: standa-hub-frontend
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:3000/login', r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      NODE_ENV: production
+      INTERNAL_API_URL: http://standa-hub-backend:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - default
+      - jarvis_api
+
+networks:
+  jarvis_api:
+    external: true
+    name: jarvis_api
