@@ -185,6 +185,18 @@ class MemoryLifecycleTestCase(unittest.TestCase):
         finally:
             db.close()
 
+    def test_expired_memory_is_not_a_duplicate(self):
+        """Codex review #71: vypršená vzpomínka nesmí potichu spolknout nové uložení stejného textu."""
+        old = tools.save_memory(content="Tento týden pracuji z domova.", kind="temporary",
+                                expires_at=NOW - timedelta(days=1))
+        self.assertEqual(tools.get_memories(), [])
+        renewed = tools.save_memory(content="Tento týden pracuji z domova.", kind="temporary",
+                                    expires_at=NOW + timedelta(days=7))
+        self.assertNotIn("deduplicated", renewed)
+        self.assertNotEqual(renewed["id"], old["id"])
+        self.assertEqual([m["id"] for m in tools.get_memories()], [renewed["id"]])
+        self.assertEqual([r["title"] for r in self.search("domova")], ["Tento týden pracuji z domova."])
+
     def test_inactive_or_different_text_is_not_a_duplicate(self):
         self.add(content="Stará vypnutá věc", active=False)
         self.assertNotIn("deduplicated", tools.save_memory(content="Stará vypnutá věc"))

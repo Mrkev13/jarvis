@@ -20,8 +20,9 @@ bez data = 422.
 
 ## Duplicity
 
-Uložení textu, který už má aktivní vzpomínka (po sjednocení mezer a velikosti písmen, bez ohledu na oblast), nový řádek
-nevytvoří: vrátí existující s `"deduplicated": true` a nic nezapíše (tedy ani do Aktivity).
+Uložení textu, který už má použitelná (aktivní a nevypršená) vzpomínka (po sjednocení mezer a velikosti písmen, bez
+ohledu na oblast), nový řádek nevytvoří: vrátí existující s `"deduplicated": true` a nic nezapíše (tedy ani do Aktivity).
+Vypršená vzpomínka duplicitou není – stejný text s novou platností se uloží jako nová vzpomínka.
 
 ## Vyhledávání
 

@@ -2,8 +2,9 @@
 
 - Použitelná vzpomínka = aktivní a nevypršená (`expires_at` je NULL nebo v budoucnosti, naive UTC). Jen takové jdou do
   AI kontextu (prefetch), do planneru, do read toolu `get_memories` a do globálního vyhledávání.
-- Duplicita = aktivní vzpomínka se stejným textem po sjednocení mezer a velikosti písmen (bez ohledu na oblast):
-  uložení duplicity nevytvoří nový řádek a vrátí existující (bez zápisu, tedy bez Aktivity).
+- Duplicita = použitelná (aktivní a nevypršená) vzpomínka se stejným textem po sjednocení mezer a velikosti písmen (bez ohledu na oblast):
+  uložení duplicity nevytvoří nový řádek a vrátí existující (bez zápisu, tedy bez Aktivity). Vypršená vzpomínka
+  duplicitou není: uložení stejného textu s novou platností vytvoří novou použitelnou vzpomínku.
 - Druhy: statuses.MEMORY_KINDS (fact | temporary | decision); `temporary` vyžaduje `expires_at`.
 """
 from __future__ import annotations
@@ -42,13 +43,13 @@ def normalize_content(text: str | None) -> str:
     return " ".join((text or "").split()).casefold()
 
 
-def find_duplicate(db, content: str) -> Memory | None:
-    """Aktivní vzpomínka se stejným (normalizovaným) textem."""
+def find_duplicate(db, content: str, now: datetime | None = None) -> Memory | None:
+    """Použitelná (aktivní a nevypršená) vzpomínka se stejným (normalizovaným) textem."""
     key = normalize_content(content)
     if not key:
         return None
     # jen id + text (zápisová cesta, ne vyhledávání); SQL LIKE neumí casefold mimo ASCII, proto porovnání tady
-    for mid, text in db.query(Memory.id, Memory.content).filter(Memory.active.is_(True)).all():
+    for mid, text in usable(db.query(Memory.id, Memory.content), now).all():
         if normalize_content(text) == key:
             return db.get(Memory, mid)
     return None
