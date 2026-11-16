@@ -380,6 +380,39 @@ for (const motion of ["no-preference", "reduce"]) {
   await ctx.close();
 }
 
+// 8b) MRK-79: zúžená navigace – hlavní položky + rozbalitelné skupiny „Další“ a „Systém“ (desktop i mobil).
+{
+  const groupOpen = (page, scope, id) => page.locator(`${scope} [data-nav-group="${id}"]`).evaluate((d) => d.open);
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  await page.getByRole("button", { name: "Otevřít menu" }).click();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  await menu.waitFor();
+  const mainCount = await menu.locator('nav[aria-label="Hlavní navigace"] > a').count();
+  check("navigace mobil: hlavní menu ≤ 8 položek", mainCount > 0 && mainCount <= 8, String(mainCount));
+  check("navigace mobil: Další a Systém zavřené", !(await groupOpen(page, "[data-drawer-nav]", "more")) && !(await groupOpen(page, "[data-drawer-nav]", "system")));
+  check("navigace mobil: Nastavení schované ve Systému", !(await menu.getByRole("link", { name: "Nastavení" }).isVisible()));
+  const summary = menu.locator('[data-nav-group="system"] summary');
+  check("navigace mobil: skupina ≥ 44 px", ((await summary.boundingBox())?.height ?? 0) >= 44);
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  check("navigace mobil: Enter rozbalí Systém", await eventually(() => menu.getByRole("link", { name: "Nastavení" }).isVisible()));
+  check("navigace mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}nav-groups-mobile.png` });
+  check("navigace mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/settings");
+  const aside = page.locator("[data-desktop-sidebar]");
+  check("navigace desktop: aktivní stránka rozbalí svou skupinu", await eventually(async () => (await aside.locator('[data-nav-group="system"]').evaluate((d) => d.open)) && (await aside.locator('a[href="/settings"][aria-current="page"]').isVisible())));
+  check("navigace desktop: ostatní skupina zůstane zavřená", !(await aside.locator('[data-nav-group="more"]').evaluate((d) => d.open)));
+  await aside.locator('[data-nav-group="more"] summary').click();
+  check("navigace desktop: klik rozbalí Další", await eventually(() => aside.getByRole("link", { name: "Plánovač" }).isVisible()));
+  await aside.screenshot({ path: `${OUT}nav-groups-desktop.png` });
+  check("navigace desktop: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 // 9) Panel notifikací: Drawer s popiskem, Escape, návrat fokusu, české texty.
 for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   const { ctx, page, errors } = await open("/", { width, height: width < 500 ? 844 : 900 });

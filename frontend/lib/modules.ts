@@ -18,6 +18,8 @@ import { CALENDAR_UI } from "../modules/calendar/manifest.ts";
 
 export const CAPABILITIES = ["nav", "search", "quick_add", "today", "dashboard", "ai_context"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
+/** MRK-79: skupiny navigace – hlavní menu, rozbalitelné „Další“ a „Systém“ (pod Nastavením). */
+export type NavGroup = "main" | "more" | "system";
 
 export interface ModuleDef {
   id: string;
@@ -64,7 +66,8 @@ export const MODULES: ModuleDef[] = [
  * Dnes, Připomínky, Paměť…) má své položky v navigation.ts / search.ts. Klíč = `ModuleDef.id`.
  */
 export interface ModuleUi {
-  nav?: { href: string; label: string; keywords: string[]; order: number };
+  /** `group` (MRK-79): skupina v menu – bez něj hlavní navigace, `more` = rozbalitelná skupina „Další“. */
+  nav?: { href: string; label: string; keywords: string[]; order: number; group?: NavGroup };
   searchParams?: string[];
   searchGroupOrder?: number;
   /** MRK-21: barva oblasti (celé názvy tříd doslova, ať je Tailwind najde) – štítky, skupiny vyhledávání. */
@@ -108,11 +111,11 @@ export const MODULE_UI: Record<string, ModuleUi> = {
     typeLabels: { study_material: "Studijní materiál", subject: "Předmět" },  // subject: varování o absencích v Dnes (MRK-86)
   },
   work: {
-    nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30 },
+    nav: { href: "/work", label: "Práce", keywords: ["work", "hodiny", "výdělek", "projekty"], order: 30, group: "more" },
     searchParams: ["session"], searchGroupOrder: 30,
   },
   finance: {
-    nav: { href: "/finance", label: "Finance", keywords: ["peníze", "transakce", "výdaj", "výdaje", "příjem", "příjmy", "bilance"], order: 40 },
+    nav: { href: "/finance", label: "Finance", keywords: ["peníze", "transakce", "výdaj", "výdaje", "příjem", "příjmy", "bilance"], order: 40, group: "more" },
     searchParams: ["transaction"], searchGroupOrder: 40,
   },
   wot: {
@@ -120,7 +123,7 @@ export const MODULE_UI: Record<string, ModuleUi> = {
     searchParams: ["grind", "replay"], searchGroupOrder: 70,
   },
   mff: {
-    nav: { href: "/mff", label: "Marvel Future Fight", keywords: ["mff", "marvel", "future fight", "postava", "postavy"], order: 60 },
+    nav: { href: "/mff", label: "Marvel Future Fight", keywords: ["mff", "marvel", "future fight", "postava", "postavy"], order: 60, group: "more" },
     searchParams: ["character"], searchGroupOrder: 80,
   },
 };

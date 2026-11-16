@@ -92,7 +92,7 @@ The orders reproduce the old hard-coded sequences exactly. A golden comparison a
 `frontend/lib/modules.ts`:
 - `MODULES`: id, label, default, implemented, capabilities, entity types, routes, Quick Add kinds. One line per
   module. The backend parity test reads it.
-- `MODULE_UI[id]`: `nav { href, label, keywords, order }`, `searchParams` (record params of the module's hrefs),
+- `MODULE_UI[id]`: `nav { href, label, keywords, order, group? }` (`group: "more"` = menu group „Další“, MRK-79), `searchParams` (record params of the module's hrefs),
   `searchGroupOrder`. Added in MRK-21, all pure data:
   - `area` (badge colour classes)
   - `typeLabels` (Today row type)
@@ -105,7 +105,7 @@ The orders reproduce the old hard-coded sequences exactly. A golden comparison a
 
 Derived from the manifest (core entries stay local):
 - `NAV_PAGES` (`lib/navigation.ts`): core pages before and after, module pages sorted by `nav.order`. Used by the
-  sidebar, mobile menu and Ctrl+K pages.
+  sidebar, mobile menu and Ctrl+K pages. `menuGroupsFor` splits the menu into main / „Další“ / „Systém“.
 - `SEARCH_TARGET_PARAMS`, `GROUP_ORDER` (`lib/search.ts`).
 - Quick Add `KIND_AREAS` / `KIND_HREFS` (`lib/quickAdd.ts`): area = owning module, page = its nav href.
 
