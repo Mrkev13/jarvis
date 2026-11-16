@@ -123,3 +123,44 @@ def test_diagnostic_main_never_prints_urls(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '[google]' in out and '[moodle]' in out
     _assert_no_secret(out.splitlines())
+
+
+# ---------- Codex review #74: malformed address must not leak through a traceback ----------
+
+MALFORMED = 'https://calendar.google.com／calendar／ical／private-secret-canary/basic.ics'
+
+
+@pytest.mark.parametrize('raw', [MALFORMED, 'https://[private-secret-canary/basic.ics'])
+def test_malformed_url_is_a_category_not_an_exception(raw):
+    ok, lines = _run({'GOOGLE_ICS_URL': raw})
+    assert not ok and lines[-1] == '  výsledek: invalid_feed_configuration (adresu nelze přečíst)'
+    assert 'canary' not in '\n'.join(lines)
+
+
+def test_unexpected_error_in_one_source_does_not_leak_or_stop_the_others(monkeypatch, capsys):
+    real = diag.check_source
+
+    def boom(key, *a, **kw):
+        if key == 'google':
+            raise ValueError(f'unexpected {GOOGLE_URL}')
+        return real(key, *a, **kw)
+
+    monkeypatch.setattr(diag, 'check_source', boom)
+    monkeypatch.setenv('MOODLE_ICS_URL', MOODLE_URL.replace('https', 'http'))
+    assert diag.main(['--no-db']) == 1
+    out = capsys.readouterr()
+    assert 'chyba diagnostiky' in out.out and '[moodle]' in out.out
+    assert 'canary' not in out.out + out.err
+
+
+def test_cli_malformed_url_prints_status_lines_only():
+    """Real CLI process (the way it runs in the container): no traceback, no token, the next source is still checked."""
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if not k.endswith('ICS_URL')}
+    env.update(GOOGLE_ICS_URL=MALFORMED, MOODLE_ICS_URL=MOODLE_URL.replace('https', 'http'), PYTHONIOENCODING='utf-8')
+    proc = subprocess.run([sys.executable, os.path.join(BACKEND_DIR, 'scripts', 'check_calendar_sources.py'), '--no-db'],
+                          cwd=BACKEND_DIR, env=env, capture_output=True, text=True, encoding='utf-8', timeout=60)
+    assert proc.returncode == 1, proc.stderr[-500:].replace('canary', '<redacted>')
+    assert 'canary' not in proc.stdout and 'canary' not in proc.stderr
+    assert 'Traceback' not in proc.stderr
+    assert 'adresu nelze přečíst' in proc.stdout and '[moodle]' in proc.stdout

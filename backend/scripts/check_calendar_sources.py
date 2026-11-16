@@ -51,17 +51,23 @@ def check_source(key, environ=None, *, fetch=None, resolve=None) -> tuple[bool, 
     lines.append(f'  proměnná: {set_name} (nastavená)')
     lines.append(f'  mezery kolem hodnoty: {_yes(raw != stripped)}; uvozovky kolem hodnoty: {_yes(quoted)}'
                  + (' (od MRK-103 se odstraní)' if quoted else ''))
-    parts = urlsplit(url)
-    https = parts.scheme == 'https' and bool(parts.hostname)
+    try:  # urlsplit/hostname raise ValueError quoting part of the address (Codex review #74) – never let it out
+        parts = urlsplit(url)
+        host = parts.hostname
+        https = parts.scheme == 'https' and bool(host)
+        invalid = not https or bool(parts.username or parts.password or parts.fragment)
+    except Exception:  # noqa: BLE001
+        lines.append('  výsledek: invalid_feed_configuration (adresu nelze přečíst)')
+        return False, lines
     lines.append(f'  https a host: {_yes(https)}; mezery uvnitř: {_yes(any(c.isspace() for c in url))}')
-    if not https or parts.username or parts.password or parts.fragment:
+    if invalid:
         lines.append('  výsledek: invalid_feed_configuration (adresa musí být https bez jména, hesla a #)')
         return False, lines
     expected = EXPECTED_HOSTS.get(key)
     if expected:
-        lines.append(f'  host odpovídá {expected}: {_yes(parts.hostname.lower() == expected)}')
+        lines.append(f'  host odpovídá {expected}: {_yes(host.lower() == expected)}')
     try:
-        (resolve or socket.getaddrinfo)(parts.hostname, 443)
+        (resolve or socket.getaddrinfo)(host, 443)
         lines.append('  DNS: ok')
     except Exception:  # noqa: BLE001 - only the category is reported
         lines.append('  DNS: selhalo (kontejner nepřeloží host – DNS / síť)')
@@ -113,7 +119,10 @@ def main(argv=None) -> int:
     states = {} if args.no_db else source_states()
     all_ok = True
     for key in service.SOURCES:
-        ok, lines = check_source(key)
+        try:
+            ok, lines = check_source(key)
+        except Exception:  # noqa: BLE001 - any unexpected error: category only, never a traceback with the URL
+            ok, lines = False, [f'[{key}]', '  výsledek: chyba diagnostiky (detail se z bezpečnostních důvodů nevypisuje)']
         if key in states:
             lines.insert(1, f'  zdroj v Hubu: {"zapnutý" if states[key] else "VYPNUTÝ (source_disabled)"}')
             ok = ok and states[key]
