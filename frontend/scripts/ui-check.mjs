@@ -393,9 +393,28 @@ for (const motion of ["no-preference", "reduce"]) {
   check("navigace mobil: Nastavení schované ve Systému", !(await menu.getByRole("link", { name: "Nastavení" }).isVisible()));
   const summary = menu.locator('[data-nav-group="system"] summary');
   check("navigace mobil: skupina ≥ 44 px", ((await summary.boundingBox())?.height ?? 0) >= 44);
+  // Past na fokus Draweru (Codex review #73): summary je v pasti, zavřená skupina se přeskočí, otevřená se projde.
+  const focused = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return el?.tagName === "SUMMARY" ? `summary:${el.closest("[data-nav-group]")?.getAttribute("data-nav-group")}` : el?.getAttribute("aria-label") || el?.textContent?.trim() || "";
+  });
+  await menu.locator('[data-nav-group="more"] summary').focus();
+  await page.keyboard.press("Tab");
+  check("navigace mobil: Tab ze zavřené Další na Systém", (await focused()) === "summary:system", await focused());
+  await page.keyboard.press("Shift+Tab");
+  check("navigace mobil: Shift+Tab zpět na Další", (await focused()) === "summary:more", await focused());
   await summary.focus();
   await page.keyboard.press("Enter");
   check("navigace mobil: Enter rozbalí Systém", await eventually(() => menu.getByRole("link", { name: "Nastavení" }).isVisible()));
+  await page.keyboard.press("Tab");
+  check("navigace mobil: Enter → Tab na první odkaz skupiny", (await focused()) === "Co se změnilo", await focused());
+  await page.keyboard.press("Shift+Tab");
+  check("navigace mobil: Shift+Tab zpět na Systém", (await focused()) === "summary:system", await focused());
+  await menu.locator('[data-nav-group="more"] summary').focus();
+  await page.keyboard.press("Enter");
+  await eventually(() => menu.getByRole("link", { name: "Plánovač" }).isVisible());
+  await page.keyboard.press("Tab");
+  check("navigace mobil: Další → Enter → Tab na Plánovač", (await focused()) === "Plánovač", await focused());
   check("navigace mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   await page.screenshot({ path: `${OUT}nav-groups-mobile.png` });
   check("navigace mobil: bez chyb JS", errors.length === 0, errors.join("; "));
