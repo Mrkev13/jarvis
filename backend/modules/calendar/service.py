@@ -36,10 +36,19 @@ SOURCES = {
 STAT_KEYS = ('created', 'updated', 'unchanged', 'cancelled', 'errors', 'missing', 'restored')
 
 
+def _unquote(value: str) -> str:
+    """MRK-103: one pair of matching outer quotes is not part of the URL. On Windows python-dotenv stripped them
+    (`production.load_production_environment`); Docker Compose `env_file` with `format: raw` keeps them literally,
+    so `GOOGLE_ICS_URL="https://…"` used to become an invalid `"https…` URL."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+        return value[1:-1].strip()
+    return value
+
+
 def feed_url(key='moodle'):
     # Moodle keeps its locally established name plus an optional alias for installations without it.
     _name, names = SOURCES[key]
-    return next((value for value in (env_str(name) for name in names) if value), '')
+    return next((value for value in (_unquote(env_str(name)) for name in names) if value), '')
 
 
 def configured_sources():
