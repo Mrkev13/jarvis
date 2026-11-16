@@ -13,7 +13,7 @@ _MFF_STATUS = {"built": "postaveno", "building": "rozpracováno", "in_progress":
 
 
 def search_mff(db, q):
-    for c in db.query(MffCharacter).limit(ROW_LIMIT).all():
+    for c in db.query(MffCharacter).order_by(MffCharacter.name, MffCharacter.id).limit(ROW_LIMIT).all():
         sub = join_parts(f"{c.tier} · Lv. {c.level}" if c.level else c.tier, _MFF_STATUS.get((c.status or "").lower(), ""), c.uniform)
         yield "mff_character", c.id, c.name, sub, f"{c.uniform} {c.team} {c.role} mff postava", "mff", f"/mff?character={c.id}"
 

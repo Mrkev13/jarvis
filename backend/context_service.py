@@ -21,6 +21,7 @@ from context_format import short
 from llm_budget import estimate_tokens
 from llm_config import DEFAULT_CONTEXT_TARGET_TOKENS, DEFAULT_MAX_CONTEXT_TOKENS
 from models import Memory
+import memory_service
 from module_contracts import ContextRequest
 from module_registry import MODULES, ModuleAccess, all_contributions, current_access
 from statuses import REMINDER_ACTIVE_STATUSES
@@ -212,7 +213,8 @@ def build_current_context(
             log.exception("context: section %s failed", sec.area)
             db.rollback()
 
-    memories = rank_memories(db.query(Memory).filter(Memory.active.is_(True)).all(), message, areas, planner=planner_like)
+    # MRK-84: jen použitelné vzpomínky (aktivní a nevypršené)
+    memories = rank_memories(memory_service.usable(db.query(Memory), now_utc).all(), message, areas, planner=planner_like)
     memory_lines = [f"- [{m.area}/{m.category}] {short(m.content, MEMORY_CHARS)}" for m in memories]
     memory_checked = planner_like or bool(memory_lines)
 
