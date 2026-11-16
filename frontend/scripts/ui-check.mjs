@@ -1711,7 +1711,7 @@ async function countTodayGets(page) {
   check("dnes akce: hotovo ohlášeno (role=status)", (await page.locator('[data-today-notice][role="status"]').innerText()).includes("je hotová"));
   check("dnes akce: jedno obnovení /today", gets.n - before === 1, String(gets.n - before));
   check("dnes akce: připomínka v Hotovo", (await rowOf(page, "reminder:7").getAttribute("data-status")) === "done" && (await page.locator('[data-section="timeline"] summary').innerText()).includes("2 položky"));
-  check("dnes akce: fokus na další akční řádek", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", await focusedLabel(page));
+  check("dnes akce: fokus na další akční řádek", await eventually(async () => (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", 5000), await focusedLabel(page));
   check("dnes akce: volání se zdrojem Dnes", JSON.stringify(await todayCalls()) === JSON.stringify(["done:reminder:7"]));
   await page.screenshot({ path: `${OUT}today-action-success.png` });
 
@@ -1723,11 +1723,11 @@ async function countTodayGets(page) {
   await toggle.click();
   const group = page.getByRole("group", { name: "Odložit „Vyndat prádlo“ – na kdy?" });
   check("dnes odložit: nabídka s pevnými volbami", JSON.stringify(await group.getByRole("button").allInnerTexts()) === JSON.stringify(["+15 min", "+1 h", "+3 h", "Zítra 8:00", "Zrušit"]) && (await toggle.getAttribute("aria-expanded")) === "true");
-  check("dnes odložit: fokus na první volbu", (await focusedLabel(page)) === "+15 min: Vyndat prádlo");
+  check("dnes odložit: fokus na první volbu", await eventually(async () => (await focusedLabel(page)) === "+15 min: Vyndat prádlo"), await focusedLabel(page));
   await page.screenshot({ path: `${OUT}today-snooze.png` });
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
-  check("dnes odložit: Esc zavře a vrátí fokus", (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
+  check("dnes odložit: Esc zavře a vrátí fokus", await eventually(async () => (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo"), await focusedLabel(page));
   check("dnes odložit: Esc nespustí globální zkratky", (await page.getByRole("dialog").count()) === 0);
   await toggle.click();
   await group.getByRole("button", { name: "Zítra 8:00: Vyndat prádlo" }).click();
@@ -1743,13 +1743,13 @@ async function countTodayGets(page) {
   await page.getByText("Úkol „Sada“ je hotový.").waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
   check("dnes úkol: prepare + confirm", JSON.stringify(await todayCalls()) === JSON.stringify(["prepare:assignment:1", "confirm:today-1"]));
-  check("dnes úkol: zmizí z Pozornosti", (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 0);
+  check("dnes úkol: zmizí z Pozornosti", await eventually(async () => (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 0, 5000));
   const undo = page.locator("[data-today-notice]").getByRole("button", { name: "Vrátit" });
   check("dnes úkol: nabídne Vrátit (existující undo)", (await undo.count()) === 1);
   await undo.click();
   await page.getByText(/^Vráceno/).waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
-  check("dnes úkol: vrácení přes /actions/undo + confirm", JSON.stringify((await todayCalls()).slice(2)) === JSON.stringify(["undo:today-1", "confirm:today-undo-today-1"]) && (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 1);
+  check("dnes úkol: vrácení přes /actions/undo + confirm", await eventually(async () => JSON.stringify((await todayCalls()).slice(2)) === JSON.stringify(["undo:today-1", "confirm:today-undo-today-1"]) && (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 1, 5000));
 
   // selhání: řádek zůstane, Zkusit znovu potvrdí TUTÉŽ pending akci
   await todayMock("/__mock/today/reset");
@@ -1815,16 +1815,17 @@ async function countTodayGets(page) {
   await page.keyboard.press("Enter");
   await page.getByText("Připomínka „Vyndat prádlo“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
-  check("klávesnice dnes: Enter dokončí, fokus dál", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie");
+  // fokus se přesune až po obnovení /today (useTodayActions.finish) – čekat na něj, ne pevně (MRK-115)
+  check("klávesnice dnes: Enter dokončí, fokus dál", await eventually(async () => (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", 5000), await focusedLabel(page));
   // Odložit jen u připomínky, která už zazněla (nadcházející „Fyzioterapie" ho nenabízí)
   await todayMock("/__mock/today/reset");
   await page.reload();
-  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).waitFor({ timeout: 5000 }).catch(() => undefined);
   await tabTo("Dokončit připomínku: Vyndat prádlo");
   await page.keyboard.press("Tab");
   check("klávesnice dnes: Tab na Odložit", (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(80);
+  await eventually(async () => (await focusedLabel(page)) === "+15 min: Vyndat prádlo");
   await page.keyboard.press("Tab");
   check("klávesnice dnes: Tab na volbu +1 h", (await focusedLabel(page)) === "+1 h: Vyndat prádlo");
   await page.keyboard.press("Enter");
