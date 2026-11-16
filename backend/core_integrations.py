@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
+import memory_service
 import quick_add_text as qt
 import reminder_service as rs
 from context_format import MAX_ITEMS, WEEKDAYS, list_or_none, short
@@ -47,12 +48,16 @@ _MEMORY_CATEGORY = {"context": "Kontext", "preference": "Preference", "plan": "P
 
 
 def search_memories(db, q):
-    for m in db.query(Memory).filter(Memory.active == True).limit(ROW_LIMIT).all():  # noqa: E712
+    # MRK-84: použitelné (aktivní, nevypršené), deterministické pořadí, celý text v haystacku (dřív jen prvních 79 znaků
+    # titulku - slovo dál v textu nešlo najít)
+    rows = memory_service.usable(db.query(Memory)).order_by(Memory.updated_at.desc(), Memory.id.desc()).limit(ROW_LIMIT)
+    for m in rows.all():
         content = " ".join((m.content or "").split())
         title = content if len(content) <= 80 else content[:79].rstrip() + "…"
         cat = _MEMORY_CATEGORY.get((m.category or "").lower(), m.category or "")
         area = _AREA.get((m.area or "").lower(), m.area or "")
-        yield "memory", m.id, title, join_parts("Paměť", cat, area), f"{cat} {area} pamet", "memory", f"/memory?memory={m.id}"
+        yield ("memory", m.id, title, join_parts("Paměť", cat, area), f"{cat} {area} pamet {content}", "memory",
+               f"/memory?memory={m.id}")
 
 
 # ---------- připomínky: Dnes ----------

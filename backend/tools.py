@@ -9,6 +9,7 @@ from models import WorkSession
 from models import MffCharacter
 from models import Goal
 from models import Memory
+import memory_service
 from models import GoalProgressHistory
 from models import (
     compute_mff_build_completeness,
@@ -1189,11 +1190,26 @@ def get_goals_summary():
         db.close()
 
 
+def _memory_dict(it: Memory) -> dict:
+    return {
+        "id": it.id,
+        "area": it.area,
+        "category": it.category,
+        "content": it.content,
+        "importance": it.importance,
+        "active": it.active,
+        "kind": it.kind or "fact",
+        "expires_at": it.expires_at.isoformat() if it.expires_at else None,
+        "created_at": it.created_at.isoformat() if it.created_at else None,
+        "updated_at": it.updated_at.isoformat() if it.updated_at else None,
+    }
+
+
 def get_memories(area: str | None = None, category: str | None = None):
     db = SessionLocal()
 
     try:
-        query = db.query(Memory).filter(Memory.active == True)
+        query = memory_service.usable(db.query(Memory))  # MRK-84: bez vypršených
         if area:
             query = query.filter(Memory.area == area)
         if category:
@@ -1201,19 +1217,7 @@ def get_memories(area: str | None = None, category: str | None = None):
 
         items = query.order_by(Memory.importance.desc(), Memory.updated_at.desc()).all()
 
-        return [
-            {
-                "id": it.id,
-                "area": it.area,
-                "category": it.category,
-                "content": it.content,
-                "importance": it.importance,
-                "active": it.active,
-                "created_at": it.created_at.isoformat() if it.created_at else None,
-                "updated_at": it.updated_at.isoformat() if it.updated_at else None,
-            }
-            for it in items
-        ]
+        return [_memory_dict(it) for it in items]
 
     finally:
         db.close()
@@ -1226,11 +1230,19 @@ def save_memory(
     importance: int = 5,
     active: bool = True,
     user_context: str = "manual",
+    kind: str | None = None,
+    expires_at=None,
 ):
     db = SessionLocal()
 
     try:
         importance_clamped = max(1, min(10, int(importance or 5)))
+        # MRK-84: druh a platnost; přesná duplicita aktivní vzpomínky nevytvoří nový řádek (bez zápisu = bez Aktivity)
+        kind = memory_service.validate_kind(kind, expires_at)
+        if active:
+            existing = memory_service.find_duplicate(db, content)
+            if existing is not None:
+                return {**_memory_dict(existing), "status": "ok", "deduplicated": True}
 
         item = Memory(
             area=area,
@@ -1238,6 +1250,8 @@ def save_memory(
             content=content,
             importance=importance_clamped,
             active=bool(active),
+            kind=kind,
+            expires_at=expires_at,
         )
         db.add(item)
         db.flush()
@@ -1248,24 +1262,14 @@ def save_memory(
         log_activity(
             db, "memory", "create", f"Poznámka přidána do paměti: {content_preview}",
             entity_type="Memory", entity_id=item.id,
-            delta=delta_dict(None, item, ["area", "category", "content", "importance", "active"]),
+            delta=delta_dict(None, item, ["area", "category", "content", "importance", "active", "kind", "expires_at"]),
             user_context=user_context
         )
 
         db.commit()
         db.refresh(item)
 
-        return {
-            "status": "ok",
-            "id": item.id,
-            "area": item.area,
-            "category": item.category,
-            "content": item.content,
-            "importance": item.importance,
-            "active": item.active,
-            "created_at": item.created_at.isoformat() if item.created_at else None,
-            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-        }
+        return {**_memory_dict(item), "status": "ok"}
 
     finally:
         db.close()

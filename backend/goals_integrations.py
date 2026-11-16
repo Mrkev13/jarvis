@@ -23,7 +23,7 @@ _GOAL_STATUS = {"active": "aktivní", "in_progress": "rozpracovaný", "completed
 
 
 def search_goals(db, q):
-    for g in db.query(Goal).limit(ROW_LIMIT).all():
+    for g in db.query(Goal).order_by(Goal.id.desc()).limit(ROW_LIMIT).all():
         # stejné procento jako stránka Cíle – automatické cíle mají `progress` ve sloupci 0, hodnota se počítá
         pct, _ = compute_goal_progress_and_value(db, g)
         sub = join_parts("Cíl", _GOAL_STATUS.get((g.status or "").lower(), ""), f"{pct} %", f"do {format_date_cz(g.target_date)}" if g.target_date else "")

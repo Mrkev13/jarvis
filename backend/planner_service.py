@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from finance_ai_policy import is_finance_goal
 from goal_history_service import compute_goal_progress_and_value, compute_goal_stagnation
+import memory_service
 from models import Assignment, Exam, Goal, Memory, PlannerRecommendationHistory
 from text_utils import days_left_cz, format_date_cz, format_hours_cz, memory_count_cz
 from time_utils import today_local
@@ -253,8 +254,7 @@ def _work_behind_actions(mode: str, db: Session, today: date) -> list[PlannerAct
 
 def _relevant_memories(db: Session) -> list[dict]:
     items = (
-        db.query(Memory)
-        .filter(Memory.active == True)
+        memory_service.usable(db.query(Memory))  # MRK-84: bez vypršených
         .order_by(Memory.importance.desc(), Memory.updated_at.desc())
         .limit(6)
         .all()
