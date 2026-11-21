@@ -329,6 +329,34 @@ request body. If the secret is absent, sync returns `feed_not_configured`; a
 configured flag reveals only presence, never value. If source sync is disabled,
 it returns `source_disabled` and doesn't fetch.
 
+## Troubleshooting on the Ubuntu server (MRK-103)
+
+Sync is manual only (**Synchronizovat** on Calendar); nothing syncs on a schedule. When a source fails:
+
+1. Run the read-only check in the running container (status lines only – never the URL, host or content; safe to
+   paste into the issue):
+
+   ```bash
+   docker exec standa-hub-backend python scripts/check_calendar_sources.py
+   ```
+
+   Per source it prints which env variable is set, outer quotes/whitespace, https, expected host (Google), DNS,
+   the download category (same as the sync) and the number of events. Exit code 0 = every configured source OK.
+2. Read the result:
+   - `feed_not_configured` → the variable is missing in `backend/.env.production`, **or the container still runs
+     with the old env**. Compose reads `env_file` only when the container is created: `docker compose restart`
+     keeps the old values. Recreate the backend with the verified v3 restart mechanism (docs/operations.md),
+     never by hand-editing the running container.
+   - outer quotes → harmless since MRK-103 (`feed_url` strips one matching pair). Before, Docker `env_file` with
+     `format: raw` kept them literally (on Windows python-dotenv stripped them), so a quoted URL failed as
+     `invalid_feed_configuration`. Writing the value without quotes is still preferred.
+   - `DNS: selhalo` / `feed_unavailable` → the container cannot reach the host (DNS, AdGuard, firewall) or Google
+     rejected the address.
+   - `ICS: nelze přečíst` → the address answers but not with a calendar: the secret iCal address was probably
+     reset in Google (Nastavení kalendáře → „Tajná adresa ve formátu iCal“) – put the new one into the env file and
+     recreate the container.
+   - `zdroj v Hubu: VYPNUTÝ` → the source is switched off in the Hub (`source_disabled`).
+
 The server fetcher requires HTTPS with normal TLS verification, rejects redirects
 and userinfo/fragment URLs, limits response size and uses a 15-second timeout.
 Standard-library fetching avoids HTTP-client URL logging. Failures are reduced
