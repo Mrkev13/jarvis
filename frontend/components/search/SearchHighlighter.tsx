@@ -24,6 +24,8 @@ function Highlighter() {
         if (Date.now() - started < WAIT_MS) timer = window.setTimeout(find, 100);
         return;
       }
+      // MRK-123: cíl ve sbalené skupině (např. Škola → Starší po termínu, Hotové a uzavřené) – nejdřív ji otevřít
+      for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
       el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
       if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
       el.focus({ preventScroll: true });

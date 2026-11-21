@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  ActionMenu,
+  CollapsibleGroup,
   Button,
   ButtonLink,
   Card,
@@ -85,6 +87,8 @@ type AgendaItem =
   | { kind: "exam"; key: string; date: string | null; item: Exam }
   | { kind: "moodle"; key: string; date: string | null; item: MoodleDeadline };
 
+/** MRK-123: po termínu víc dní → sbalená skupina „Starší po termínu“, bez červeného rámu. */
+const STALE_DAYS = 7;
 const PRIORITIES = ["low", "medium", "high"];
 const ASSIGNMENT_STATUSES = ["todo", "in_progress", "done"];
 const EXAM_TYPES = ["exam", "test", "quiz", "midterm", "oral", "other"];
@@ -483,7 +487,14 @@ export default function SchoolPage() {
       .map((e): AgendaItem => ({ kind: "exam", key: `e-${e.id}`, date: e.exam_date, item: e })),
     ...(closed ? [] : moodle.map((m): AgendaItem => ({ kind: "moodle", key: `m-${m.key}`, date: m.date, item: m }))),
   ];
-  const openAgenda = sortByDate(toAgenda(false), (x) => x.date);
+  const openAgendaAll = sortByDate(toAgenda(false), (x) => x.date);
+  // MRK-123: po termínu víc než STALE_DAYS dní → sbalená skupina (červená má znamenat „teď“, ne „někdy dřív“)
+  const isStale = (entry: AgendaItem) => {
+    const d = daysUntil(entry.date);
+    return d !== null && d < -STALE_DAYS;
+  };
+  const openAgenda = openAgendaAll.filter((x) => !isStale(x));
+  const staleAgenda = openAgendaAll.filter(isStale);
   const closedAgenda = sortByDate(toAgenda(true), (x) => x.date, true);
 
   function renderAgendaRow(entry: AgendaItem, idx: number) {
@@ -516,7 +527,8 @@ export default function SchoolPage() {
       const a = entry.item;
       const done = isDoneStatus(a.status);
       const days = daysUntil(a.due_date);
-      const overdue = deadlineMeta(days, "assignment", done).overdue;
+      // červený rám a pulz jen u čerstvě propadlých (≤ STALE_DAYS), starší jsou ve sbalené skupině jen s odznakem
+      const overdue = deadlineMeta(days, "assignment", done).overdue && (days === null || days >= -STALE_DAYS);
       const status = assignmentStatusMeta(a.status);
       const priority = priorityTone(a.priority);
       return (
@@ -554,9 +566,12 @@ export default function SchoolPage() {
                   Splnit
                 </Button>
               )}
-              <Button size="sm" variant="ghost" onClick={() => setDeletingAssignment(a)} aria-label={`Smazat úkol ${a.title}`}>
-                Smazat
-              </Button>
+              <ActionMenu
+                icon="more"
+                variant="ghost"
+                ariaLabel={`Další akce: ${a.title}`}
+                items={[{ label: "Smazat", ariaLabel: `Smazat úkol ${a.title}`, tone: "danger", onSelect: () => setDeletingAssignment(a) }]}
+              />
             </>
           }
         >
@@ -602,9 +617,12 @@ export default function SchoolPage() {
                 Uzavřít
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={() => setDeletingExam(e)} aria-label={`Smazat zkoušku ${e.title}`}>
-              Smazat
-            </Button>
+            <ActionMenu
+              icon="more"
+              variant="ghost"
+              ariaLabel={`Další akce: ${e.title}`}
+              items={[{ label: "Smazat", ariaLabel: `Smazat zkoušku ${e.title}`, tone: "danger", onSelect: () => setDeletingExam(e) }]}
+            />
           </>
         }
       >
@@ -886,13 +904,18 @@ export default function SchoolPage() {
 
             {openAgenda.length > 0 ? (
               <EntityList label="Otevřené úkoly a zkoušky">{openAgenda.map(renderAgendaRow)}</EntityList>
-            ) : (
+            ) : staleAgenda.length === 0 ? (
               <EmptyState compact>
                 {assignments.length === 0 && exams.length === 0
                   ? "Zatím žádné úkoly ani zkoušky."
                   : "Žádné otevřené úkoly ani zkoušky."}
               </EmptyState>
-            )}
+            ) : null}
+            {staleAgenda.length > 0 ? (
+              <CollapsibleGroup id="school-stale" label={`Starší po termínu (${staleAgenda.length})`} hint={`Po termínu víc než ${STALE_DAYS} dní`}>
+                <EntityList label="Starší po termínu">{staleAgenda.map(renderAgendaRow)}</EntityList>
+              </CollapsibleGroup>
+            ) : null}
           </PageSection>
 
           {/* ===== HOTOVÉ A UZAVŘENÉ ===== */}
@@ -902,7 +925,9 @@ export default function SchoolPage() {
               title="Hotové a uzavřené"
               description="Dokončené úkoly a zkoušky s výsledkem, nejnovější nahoře."
             >
-              <EntityList label="Hotové úkoly a uzavřené zkoušky">{closedAgenda.map(renderAgendaRow)}</EntityList>
+              <CollapsibleGroup id="school-closed-list" label={`Zobrazit (${closedAgenda.length})`}>
+                <EntityList label="Hotové úkoly a uzavřené zkoušky">{closedAgenda.map(renderAgendaRow)}</EntityList>
+              </CollapsibleGroup>
             </PageSection>
           )}
 
