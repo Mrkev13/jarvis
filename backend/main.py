@@ -401,6 +401,8 @@ class MemoryRequest(BaseModel):
     content: str
     importance: int = 5
     active: bool = True
+    kind: str | None = None  # MRK-84: fact | temporary | decision
+    expires_at: datetime | None = None  # naive UTC; temporary vyžaduje
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -1929,6 +1931,8 @@ def memories_list(
                 "content": it.content,
                 "importance": it.importance,
                 "active": it.active,
+                "kind": it.kind or "fact",
+                "expires_at": it.expires_at.isoformat() if it.expires_at else None,
                 "created_at": it.created_at.isoformat() if it.created_at else None,
                 "updated_at": it.updated_at.isoformat() if it.updated_at else None,
             }
@@ -1941,13 +1945,22 @@ def memories_list(
 @app.post("/memory")
 def add_memory(request: MemoryRequest):
     from tools import save_memory
-    return save_memory(
-        area=request.area,
-        category=request.category,
-        content=request.content,
-        importance=request.importance,
-        active=request.active,
-    )
+    import memory_service
+    expires = request.expires_at
+    if expires is not None and expires.tzinfo is not None:
+        expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+    try:
+        return save_memory(
+            area=request.area,
+            category=request.category,
+            content=request.content,
+            importance=request.importance,
+            active=request.active,
+            kind=request.kind,
+            expires_at=expires,
+        )
+    except memory_service.MemoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 # ===== NOTIFICATIONS =====

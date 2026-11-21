@@ -22,7 +22,7 @@ ROW_LIMIT = 500
 
 
 def search_habits(db, q):
-    for h in db.query(Habit).order_by(Habit.name).limit(ROW_LIMIT).all():
+    for h in db.query(Habit).order_by(Habit.name, Habit.id).limit(ROW_LIMIT).all():
         sub = join_parts("Návyk", f"cíl {service.target_label(h)}" if service.target_label(h) else "",
                          "" if h.active else "archivovaný")
         yield "habit", h.id, h.name, sub, "navyk habit rutina", "habits", f"/habits?habit={h.id}"

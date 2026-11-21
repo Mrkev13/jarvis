@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
+from sqlalchemy import func
+from sqlalchemy.orm import defer
+
 from context_format import short
 from modules.school.extract import PAGE_MARK_CLOSE, PAGE_MARK_OPEN
 from module_contracts import ContextRequest, ContextSection, EntityRef, SearchSource
@@ -34,16 +37,20 @@ def _plain(text: str | None) -> str:
 
 
 def search_materials(db, q):
-    courses = {c.id: c for c in db.query(StudyCourse).all()}
-    rows = (db.query(StudyMaterial).order_by(StudyMaterial.updated_at.desc(), StudyMaterial.id.desc())
+    # MRK-84: the full extracted text is never loaded for search - only a bounded SQL substring (defer + substr)
+    rows = (db.query(StudyMaterial, func.substr(StudyMaterial.extracted_text, 1, SEARCH_TEXT_CHARS).label('excerpt'))
+            .options(defer(StudyMaterial.extracted_text))
+            .order_by(StudyMaterial.updated_at.desc(), StudyMaterial.id.desc())
             .limit(SEARCH_LIMIT).all())
-    for m in rows:
+    course_ids = {m.course_id for m, _ in rows}
+    courses = {c.id: c for c in db.query(StudyCourse).filter(StudyCourse.id.in_(course_ids)).all()} if course_ids else {}
+    for m, excerpt in rows:
         course = courses.get(m.course_id)
         subtitle = ' · '.join(filter(None, ['Studijní materiál', TYPE_LABELS.get(m.material_type),
                                             course.name if course else None,
                                             'zmizelo z Moodlu' if m.source_missing_at else None]))
         haystack = ' '.join(filter(None, ['material podklady studijni', m.file_name, m.section_name,
-                                          course.short_name if course else None, _plain(m.extracted_text)]))
+                                          course.short_name if course else None, _plain(excerpt)]))
         yield 'study_material', m.id, m.title, subtitle, haystack, 'school', MATERIAL_HREF.format(id=m.id)
 
 

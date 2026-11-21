@@ -35,3 +35,6 @@ def is_exam_open(status) -> bool:
 
 def is_goal_inactive(status) -> bool:
     return norm(status) in GOAL_INACTIVE_STATUSES
+
+# MRK-84: druh vzpomínky (Memory.kind). temporary = s datem platnosti (expires_at), po něm se nepoužije.
+MEMORY_KINDS = ("fact", "temporary", "decision")

@@ -16,10 +16,10 @@ _GRIND_STATUS = {"active": "aktivní", "paused": "pozastaveno", "completed": "do
 
 
 def search_wot(db, q):
-    for g in db.query(WotGrind).limit(ROW_LIMIT).all():
+    for g in db.query(WotGrind).order_by(WotGrind.tank, WotGrind.id).limit(ROW_LIMIT).all():
         sub = join_parts("Grind", f"zbývá {format_num_cz(g.xp_remaining, 0)} XP", _GRIND_STATUS.get((g.status or "").lower(), ""), _PRIORITY.get((g.priority or "").lower(), ""))
         yield "wot_grind", g.id, g.tank, sub, "wot tank grind", "wot", f"/wot?grind={g.id}"
-    for r in db.query(WotReplay).order_by(WotReplay.uploaded_at.desc()).limit(ROW_LIMIT).all():
+    for r in db.query(WotReplay).order_by(WotReplay.uploaded_at.desc(), WotReplay.id.desc()).limit(ROW_LIMIT).all():
         # Game Enrichment C: replay – tank (nebo technický název vozidla / souboru), mapa, štítky, poznámka
         title = r.tank_name or (r.tank_tag.split(":", 1)[-1] if r.tank_tag else None) or r.original_filename or f"Replay #{r.id}"
         tags = " ".join(r.tags or [])
