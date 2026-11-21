@@ -54,8 +54,15 @@ Changed on the Ubuntu server (values never left the server; only names, states a
 | `/usr/local/lib/standa-hub/restart-v3.sh` (new, root 755) | `148e85cebb5eb0fe1eb46509e04120d3a38abb23bc62136fc42ed5cd325c41cb` = `deploy/v3/lib/restart-v3.sh` at `cf5d5b3` |
 | `/usr/local/lib/standa-hub/mrk108/restart-journal.py` (new, root 644) | `bbdf1cdb8f00e120c2590b2993d49c59dff57e0d42081bda07e235d04fd5aa35` = `deploy/v3/mrk108/restart-journal.py` at `cf5d5b3` |
 
-`deploy-transaction-v3.sh` was deliberately left at `02a965c`, so the updater does not yet wait for a pending
-restart (a crashed restart is still caught by the config-hash drift check).
+`deploy-transaction-v3.sh` was deliberately left at `02a965c`, which does **not** read restart journals. Known gap
+until a version with the pending-restart block (`7d6ba62` or later) is installed: the config-hash drift check catches
+a restart interrupted *before* the backend was recreated, but not one interrupted *after* the recreate and before a
+terminal journal state (e.g. `verifying`) - the container already runs the new env, its hash matches the live file,
+and the updater would carry on (`ALREADY_DEPLOYED` / deploy a new commit) before the restart is recovered (Codex
+review of PR #76, reproduced in the isolated tests). Operating rule until then: if `restart-v3.sh --apply` does not
+end with `RESTART_OK` or `ROLLBACK_VERIFIED`, stop the timer
+(`sudo systemctl stop standa-hub-auto-update.timer`), run `restart-v3.sh --recover`, and start the timer again only
+after the restart journal is terminal (`restarted`, `rolled_back` or `aborted`).
 
 Run: `restart-v3.sh --check` → `PREVIOUS_ENV_RECONSTRUCTED`, `ENV_VALID`, `RESTART_PREFLIGHT_OK`; `--apply` at
 2026-11-21T17:54:09Z (journal `restart-v3-20261121T175409Z-1152408`). Verified afterwards:
