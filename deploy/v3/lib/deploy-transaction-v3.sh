@@ -113,14 +113,15 @@ for p in root.glob('migration-v3-*'):
     except (ValueError,KeyError,OSError): raise SystemExit('INCOMPLETE_MIGRATION_DIRECTORY: '+str(p)+' (deploy-migration-v3.sh --recover)')
     if state not in ('deployed','aborted','rolled_back_app'):
         raise SystemExit('PENDING_MIGRATION: '+str(p)+' (deploy-migration-v3.sh --recover)')
-# MRK-120: an unfinished env-only backend restart (restart-v3.sh) blocks every automatic update.
-for p in root.glob('restart-v3-*'):
+# MRK-120 / MRK-121: an unfinished backend restart (restart-v3.sh) or frontend template change
+# (frontend-template-v3.sh) blocks every automatic update.
+for p in list(root.glob('restart-v3-*')) + list(root.glob('template-v3-*')):
     if not p.is_dir():
         continue
     try: state=json.loads((p/'journal.json').read_text())['state']
-    except (ValueError,KeyError,OSError): raise SystemExit('INVALID_RESTART_JOURNAL: '+str(p)+' (restart-v3.sh --recover)')
+    except (ValueError,KeyError,OSError): raise SystemExit('INVALID_RESTART_JOURNAL: '+str(p)+' (its script --recover)')
     if state not in ('restarted','rolled_back','aborted'):
-        raise SystemExit('PENDING_RESTART: '+str(p)+' (restart-v3.sh --recover)')
+        raise SystemExit('PENDING_RESTART: '+str(p)+' (its script --recover)')
 staging=sorted(p.name for p in root.glob('.staging-v3-*'))
 if staging:
     print('STALE_STAGING_DIRECTORIES: '+str(len(staging))+' (removed by the next --apply or --recover)')

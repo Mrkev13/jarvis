@@ -23,6 +23,11 @@ services:
       INTERNAL_API_URL: http://standa-hub-backend:8000
     ports:
       - "127.0.0.1:3000:3000"
+
+    # MRK-121: game images (not in Git/image) from the host; read-only. Next serves the files present at start,
+    # app/game-assets/[...path]/route.ts the ones fetched later. Missing directory -> fallback icons.
+    volumes:
+      - /srv/standa-hub-data/game-assets:/app/public/game-assets:ro
     networks:
       - default
       - jarvis_api
