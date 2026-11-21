@@ -1,0 +1,495 @@
+{
+ "about": "MRK-110: kontrolní sada pro deterministický výběr vzpomínek do kontextu (context_service.rank_memories). Všechna data jsou vymyšlená. Žádné finance (MRK-60). 'tune' = případy, na kterých se ladí; 'holdout' = stranou, při ladění se NEUPRAVUJÍ. 'known_gap' = správné očekávání, které dnešní výběr nesplňuje (důvod v 'note'); počítá se do metrik, ale nepadá test.",
+ "memories": [
+  {
+   "id": "fyzika-zkouska",
+   "area": "school",
+   "category": "plan",
+   "importance": 7,
+   "updated": "2026-11-01",
+   "content": "Zkoušku z fyziky chci mít hotovou do Vánoc, učím se po večerech."
+  },
+  {
+   "id": "rytmus-vyuky",
+   "area": "school",
+   "category": "routine",
+   "importance": 5,
+   "updated": "2026-10-20",
+   "content": "Angličtinu a tělocvik mám každý týden, ostatní předměty ob týden."
+  },
+  {
+   "id": "diplomka",
+   "area": "school",
+   "category": "routine",
+   "importance": 7,
+   "updated": "2026-10-28",
+   "content": "Diplomová práce: konzultace s vedoucím každé druhé pondělí."
+  },
+  {
+   "id": "fyzika-vzdat",
+   "area": "school",
+   "category": "decision",
+   "importance": 6,
+   "updated": "2026-09-30",
+   "active": false,
+   "content": "Fyziku vzdávám a zapíšu si ji příští rok."
+  },
+  {
+   "id": "lumen-prezentace",
+   "area": "work",
+   "category": "preference",
+   "importance": 6,
+   "updated": "2026-11-03",
+   "content": "Projekt Lumen: klient chce prezentaci ve čtvrtek a preferuje krátké slajdy."
+  },
+  {
+   "id": "atlas-dopoledne",
+   "area": "work",
+   "category": "routine",
+   "importance": 5,
+   "updated": "2026-10-15",
+   "content": "Na projektu Atlas pracuju jen dopoledne, odpoledne mám školu."
+  },
+  {
+   "id": "atlas-api-zruseno",
+   "area": "work",
+   "category": "decision",
+   "importance": 5,
+   "updated": "2026-11-05",
+   "content": "Plán přechodu Atlasu na nové API je zrušený, zůstává stará verze."
+  },
+  {
+   "id": "kranvagn",
+   "area": "wot",
+   "category": "routine",
+   "importance": 4,
+   "updated": "2026-10-10",
+   "content": "Grind na Kranvagn hraju jen o víkendu, cílem je Mko."
+  },
+  {
+   "id": "t57-patek",
+   "area": "wot",
+   "category": "routine",
+   "importance": 3,
+   "updated": "2026-10-02",
+   "content": "Na T57 Heavy hraju v pátek večer s kamarády v četě."
+  },
+  {
+   "id": "beh-cil",
+   "area": "goals",
+   "category": "plan",
+   "importance": 6,
+   "updated": "2026-11-02",
+   "content": "Cíl na listopad: běhat třikrát týdně a uběhnout 10 km."
+  },
+  {
+   "id": "cteni-cil",
+   "area": "goals",
+   "category": "routine",
+   "importance": 4,
+   "updated": "2026-10-25",
+   "content": "Chci číst 20 stran denně před spaním."
+  },
+  {
+   "id": "styl-odpovedi",
+   "area": "general",
+   "category": "preference",
+   "importance": 9,
+   "updated": "2026-09-01",
+   "content": "Preferuju krátké odpovědi v češtině, bez emoji."
+  },
+  {
+   "id": "rano-produktivni",
+   "area": "general",
+   "category": "preference",
+   "importance": 6,
+   "updated": "2026-09-15",
+   "content": "Nejproduktivnější jsem ráno mezi sedmou a desátou."
+  },
+  {
+   "id": "ticho-uceni",
+   "area": "general",
+   "category": "preference",
+   "importance": 3,
+   "updated": "2026-08-20",
+   "content": "Při učení potřebuju ticho, hudbu pouštím jen u práce."
+  },
+  {
+   "id": "pripominky-vecer",
+   "area": "reminders",
+   "category": "preference",
+   "importance": 7,
+   "updated": "2026-10-30",
+   "content": "Připomínky chci dostávat nejpozději ve 21:00, ne později v noci."
+  },
+  {
+   "id": "mff-luna",
+   "area": "mff",
+   "category": "plan",
+   "importance": 4,
+   "updated": "2026-10-18",
+   "content": "V Marvel Future Fight vylepšuju Lunu Snow na tier 3."
+  }
+ ],
+ "cases": [
+  {
+   "id": "fyzika-kdy",
+   "split": "tune",
+   "message": "Kdy chci mít hotovou fyziku?",
+   "must": [
+    "fyzika-zkouska"
+   ],
+   "must_not": [
+    "fyzika-vzdat",
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "lumen-prezentace",
+   "split": "tune",
+   "message": "Jak připravit prezentaci pro Lumen?",
+   "must": [
+    "lumen-prezentace"
+   ],
+   "must_not": [
+    "kranvagn",
+    "beh-cil"
+   ]
+  },
+  {
+   "id": "kranvagn-vikend",
+   "split": "tune",
+   "message": "Kdy grindím Kranvagn?",
+   "must": [
+    "kranvagn"
+   ],
+   "must_not": [
+    "lumen-prezentace"
+   ]
+  },
+  {
+   "id": "styl",
+   "split": "tune",
+   "message": "Odpovídej mi krátce",
+   "must": [
+    "styl-odpovedi"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "pripominky",
+   "split": "tune",
+   "message": "Do kolika hodin mi můžou chodit připomínky?",
+   "must": [
+    "pripominky-vecer"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "diplomka-konzultace",
+   "split": "tune",
+   "message": "Kdy mám konzultaci k diplomové práci?",
+   "must": [
+    "diplomka"
+   ],
+   "must_not": [
+    "t57-patek"
+   ]
+  },
+  {
+   "id": "beh",
+   "split": "tune",
+   "message": "Kolik mám běhat tento měsíc?",
+   "must": [
+    "beh-cil"
+   ],
+   "must_not": [
+    "fyzika-vzdat"
+   ]
+  },
+  {
+   "id": "cteni",
+   "split": "tune",
+   "message": "Kolik stran mám číst před spaním?",
+   "must": [
+    "cteni-cil"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "atlas-kdy",
+   "split": "tune",
+   "message": "Kdy pracuju na Atlasu?",
+   "must": [
+    "atlas-dopoledne"
+   ],
+   "must_not": [
+    "beh-cil"
+   ]
+  },
+  {
+   "id": "mff",
+   "split": "tune",
+   "message": "Co dělám s Lunou ve Future Fight?",
+   "must": [
+    "mff-luna"
+   ],
+   "must_not": [
+    "fyzika-zkouska"
+   ]
+  },
+  {
+   "id": "t57",
+   "split": "tune",
+   "message": "S kým hraju na T57 Heavy?",
+   "must": [
+    "t57-patek"
+   ],
+   "must_not": [
+    "lumen-prezentace"
+   ]
+  },
+  {
+   "id": "ticho",
+   "split": "tune",
+   "message": "Mám si při učení pustit hudbu?",
+   "must": [
+    "ticho-uceni"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "neaktivni-fyzika",
+   "split": "tune",
+   "message": "Vzdávám fyziku?",
+   "must": [],
+   "must_not": [
+    "fyzika-vzdat"
+   ]
+  },
+  {
+   "id": "rytmus",
+   "split": "tune",
+   "message": "Které předměty mám ob týden?",
+   "must": [
+    "rytmus-vyuky"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "planovani-rano",
+   "split": "tune",
+   "message": "Naplánuj mi zítřek",
+   "must": [
+    "rano-produktivni"
+   ],
+   "must_not": [
+    "kranvagn",
+    "t57-patek",
+    "mff-luna"
+   ],
+   "known_gap": true,
+   "note": "Planner bere kandidáty podle důležitosti a oblasti; ranní preference (general, 6) se nevejde do top 3 mezi školní a připomínkové vzpomínky s bonusem oblasti."
+  },
+  {
+   "id": "atlas-api",
+   "split": "tune",
+   "message": "Přecházíme s Atlasem na nové API?",
+   "must": [
+    "atlas-api-zruseno"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "atlas-plan-zruseny",
+   "split": "tune",
+   "message": "Jaký je plán pro Atlas tento týden?",
+   "must": [
+    "atlas-dopoledne"
+   ],
+   "must_not": [
+    "atlas-api-zruseno"
+   ],
+   "known_gap": true,
+   "note": "Zrušený plán vypadá jako platná vzpomínka; řeší MRK-111 (stav platnosti)."
+  },
+  {
+   "id": "obecny-dotaz",
+   "split": "tune",
+   "message": "Ahoj, jak se máš?",
+   "must": [],
+   "must_not": [
+    "kranvagn",
+    "lumen-prezentace",
+    "fyzika-zkouska",
+    "beh-cil"
+   ]
+  },
+  {
+   "id": "prezentace-ctvrtek",
+   "split": "tune",
+   "message": "Co mám ve čtvrtek za prezentaci?",
+   "must": [
+    "lumen-prezentace"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "skola-odpoledne",
+   "split": "tune",
+   "message": "Proč nedělám Atlas odpoledne?",
+   "must": [
+    "atlas-dopoledne"
+   ],
+   "must_not": [
+    "mff-luna"
+   ]
+  },
+  {
+   "id": "h-fyzika-vanoce",
+   "split": "holdout",
+   "message": "Stihnu zkoušku z fyziky do Vánoc?",
+   "must": [
+    "fyzika-zkouska"
+   ],
+   "must_not": [
+    "fyzika-vzdat"
+   ]
+  },
+  {
+   "id": "h-slajdy",
+   "split": "holdout",
+   "message": "Kolik slajdů má mít prezentace pro klienta Lumen?",
+   "must": [
+    "lumen-prezentace"
+   ],
+   "must_not": [
+    "beh-cil"
+   ]
+  },
+  {
+   "id": "h-mko",
+   "split": "holdout",
+   "message": "Jak daleko jsem s Mkem na Kranvagnu?",
+   "must": [
+    "kranvagn"
+   ],
+   "must_not": [
+    "diplomka"
+   ]
+  },
+  {
+   "id": "h-emoji",
+   "split": "holdout",
+   "message": "Můžeš používat emoji?",
+   "must": [
+    "styl-odpovedi"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "h-noc",
+   "split": "holdout",
+   "message": "Pošli mi připomínku ve 23:00",
+   "must": [
+    "pripominky-vecer"
+   ],
+   "must_not": [
+    "mff-luna"
+   ]
+  },
+  {
+   "id": "h-vedouci",
+   "split": "holdout",
+   "message": "Kdy jdu za vedoucím diplomky?",
+   "must": [
+    "diplomka"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "h-10km",
+   "split": "holdout",
+   "message": "Uběhnu do konce listopadu 10 km?",
+   "must": [
+    "beh-cil"
+   ],
+   "must_not": [
+    "lumen-prezentace"
+   ]
+  },
+  {
+   "id": "h-luna",
+   "split": "holdout",
+   "message": "Na jakém tieru je Luna Snow?",
+   "must": [
+    "mff-luna"
+   ],
+   "must_not": [
+    "t57-patek"
+   ]
+  },
+  {
+   "id": "h-ceta",
+   "split": "holdout",
+   "message": "Hraju v pátek večer v četě?",
+   "must": [
+    "t57-patek"
+   ],
+   "must_not": [
+    "fyzika-zkouska"
+   ],
+   "known_gap": true,
+   "note": "Slovo „pátek\" zapne plánovací režim (časová slova) a ten přidá nesouvisející vzpomínky s vysokou důležitostí (fyzika). Kandidát na úpravu is_planner_like."
+  },
+  {
+   "id": "h-angl",
+   "split": "holdout",
+   "message": "Mám angličtinu každý týden?",
+   "must": [
+    "rytmus-vyuky"
+   ],
+   "must_not": [
+    "kranvagn"
+   ]
+  },
+  {
+   "id": "h-vzdani",
+   "split": "holdout",
+   "message": "Zapíšu si fyziku příští rok?",
+   "must": [],
+   "must_not": [
+    "fyzika-vzdat"
+   ]
+  }
+ ],
+ "baseline": {
+  "note": "Stav k 2026-11-15 (MRK-110). Zlepšení = posunout čísla v tomtéž PR; zhoršení test zachytí.",
+  "tune": {
+   "passed": 18,
+   "recall": 0.944,
+   "violation_rate": 0.038
+  },
+  "holdout": {
+   "passed": 10,
+   "recall": 1.0,
+   "violation_rate": 0.091
+  }
+ }
+}
