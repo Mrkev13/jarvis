@@ -149,9 +149,9 @@ import json,sys
 from pathlib import Path
 root=Path(sys.argv[1]); target=sys.argv[2]
 terminal={'transaction':('deployed','rolled_back','aborted'),'migration':('deployed','aborted','rolled_back_app'),
-          'restart':('restarted','rolled_back','aborted')}  # MRK-120: restart-v3.sh
+          'restart':('restarted','rolled_back','aborted')}  # MRK-120 restart-v3.sh, MRK-121 frontend-template-v3.sh
 for kind, pattern in (('transaction','transaction-v2-*'),('transaction','transaction-v3-*'),('migration','migration-v3-*'),
-                      ('restart','restart-v3-*')):
+                      ('restart','restart-v3-*'),('restart','template-v3-*')):
     for d in root.glob(pattern):
         if not d.is_dir() or d.name == 'migration-v3-'+target:
             continue

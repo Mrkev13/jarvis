@@ -85,6 +85,44 @@ Install: `lib/restart-v3.sh` → `/usr/local/lib/standa-hub/` (root, 0755), `mrk
 `/usr/local/lib/standa-hub/mrk108/` (root, 0644), together with the updated `deploy-transaction-v3.sh` and
 `deploy-migration-v3.sh`. Tests: `backend/tests/test_restart_v3.py` (fake docker with `FAKE_COMPOSE_ENV_FILE=1`).
 
+## Frontend template change, e.g. the game-assets volume (MRK-121)
+
+`deploy-transaction-v3.sh` renders the **installed** `$TRUSTED/frontend-managed.yaml` and compares its config-hash
+with the running frontend. Installing a changed template alone makes every update stop on `FRONTEND_COMPOSE_DRIFT`.
+`lib/frontend-template-v3.sh` changes the template and recreates **only the frontend** with the **same image** as one
+transaction, under the maintenance lock:
+
+```bash
+L=/usr/local/lib/standa-hub; R=origin/mrk-101-ubuntu-production; T=$(mktemp -d)
+git show $R:deploy/v3/mrk108/frontend-managed.yaml > $T/frontend-managed.yaml
+sudo install -o root -g root -m 644 $T/frontend-managed.yaml /root/frontend-managed.new.yaml; rm -rf $T
+sudo $L/with-deployment-lock.sh $L/frontend-template-v3.sh --check /root/frontend-managed.new.yaml   # diff, no change
+sudo $L/with-deployment-lock.sh $L/frontend-template-v3.sh --apply /root/frontend-managed.new.yaml
+sudo $L/with-deployment-lock.sh $L/frontend-template-v3.sh --recover                                # after an interruption
+```
+
+1. Preflight: no pending deployment / migration / restart / template change; the frontend runs and is healthy, its
+   tag points at the running image ID. `NEXT_PUBLIC_API_URL` is read from the running container (nothing to pass, no
+   hostname printed or stored) and accepted only if the **installed** template rendered with it gives exactly the
+   running config-hash (`INSTALLED_TEMPLATE_DRIFT` otherwise).
+2. The new template must be root-owned and not group/other-writable; Compose validates it; the template diff is
+   printed (values stay variables). Same hash → `NOTHING_TO_CHANGE`.
+3. Journal `$STATE_DIR/template-v3-<UTC>-<pid>/journal.json` (states of `mrk108/restart-journal.py`), staging +
+   atomic rename: `prepared → recreating` (frontend recreated from the copy in the transaction; image ID, config-hash
+   and `/login` checked) `→ verifying` (only now the new template is installed atomically, root 0644)
+   `→ restarted` (`FRONTEND_TEMPLATE_APPLIED`).
+4. Failure or `--recover`: `rollback_required → rolled_back` = the previous template installed again **and** the
+   frontend recreated with it (hash and health verified). The proven API URL is saved in the transaction (0600) before
+   the first recreate, so recovery works even when Compose removed the old container and failed.
+5. A pending template change blocks the repository versions of `deploy-transaction-v3.sh` (`PENDING_RESTART`),
+   `deploy-migration-v3.sh` and `restart-v3.sh`. The installed updater is still `02a965c` (`PRODUCTION_CHANGES.md`):
+   if `--apply` does not end with `FRONTEND_TEMPLATE_APPLIED` or `ROLLBACK_VERIFIED`, stop
+   `standa-hub-auto-update.timer`, run `--recover`, start the timer again once the journal is terminal.
+
+Install: `lib/frontend-template-v3.sh` → `/usr/local/lib/standa-hub/` (root, 0755); `mrk108/restart-journal.py` is
+already installed (MRK-120). Tests: `backend/tests/test_frontend_template_v3.py` (fake docker with
+`FAKE_COMPOSE_TEMPLATE_HASH=1`). The game-assets directory and how to fill it: `docs/game-assets.md`.
+
 ## Controlled migration deployment (MRK-114)
 
 A release that changes the Alembic head is never deployed by the timer: `deploy-transaction-v3.sh` compares the heads

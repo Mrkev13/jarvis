@@ -20,6 +20,10 @@ backend template inlines the raw `env_file` (BACKEND_ENV_FILE) into `environment
 values), containers keep that environment, `inspect` lists image env + container env, `image inspect` the image env
 (meta "env", default PATH), and `run --env-file F --entrypoint python IMAGE -c CODE` really runs CODE with the file's
 variables (FAKE_PYTHON, cwd/PYTHONPATH = FAKE_BACKEND_DIR) - the restart's validation uses production.py itself.
+
+MRK-121 (frontend-template-v3.sh), opt-in with FAKE_COMPOSE_TEMPLATE_HASH=1: like real Compose the config-hash also
+covers the template itself (a volume added to the YAML changes it), and `inspect` shows the frontend's environment
+(NEXT_PUBLIC_API_URL) - the script reads the API URL from the running container.
 """
 import hashlib
 import json
@@ -107,6 +111,10 @@ def compose(args, s):
             if service == "backend" and os.environ.get("FAKE_COMPOSE_ENV_FILE") == "1":
                 env = {**read_env_file(os.environ["BACKEND_ENV_FILE"]), **env}  # `environment` wins over env_file
             resolved.update({"image": image, "environment": env})
+            if os.environ.get("FAKE_COMPOSE_TEMPLATE_HASH") == "1":
+                resolved["template_sha256"] = hashlib.sha256(Path(f).read_bytes()).hexdigest()
+                if "# FAKE_UNHEALTHY" in Path(f).read_text():  # a template that breaks the service
+                    resolved["fake_unhealthy"] = True
     resolved.pop("container_name", None)
     image = resolved.get("image")
     if sub == "config":
@@ -134,7 +142,7 @@ def compose(args, s):
             "image_ref": image, "image_id": image_id, "running": True,
             "app_commit": resolved.get("environment", {}).get("APP_COMMIT", ""),
             "hash": config_hash(resolved), "project": project, "service": service,
-            "env": resolved.get("environment", {})}
+            "env": resolved.get("environment", {}), "fake_unhealthy": bool(resolved.get("fake_unhealthy"))}
         save(s)
         return 0
     return 2
@@ -300,7 +308,8 @@ def remove(args, s):
 
 
 def container_env(s, c):
-    if "env" not in c or os.environ.get("FAKE_COMPOSE_ENV_FILE") != "1":
+    opted_in = os.environ.get("FAKE_COMPOSE_ENV_FILE") == "1" or os.environ.get("FAKE_COMPOSE_TEMPLATE_HASH") == "1"
+    if "env" not in c or not opted_in:
         return f"PATH=/usr/bin\nAPP_COMMIT={c['app_commit']}"
     own = c["env"]
     base = [line for line in image_env(s, c["image_id"]) if line.split("=", 1)[0] not in own]
