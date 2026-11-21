@@ -202,3 +202,23 @@ def test_lock_and_usage(t):
     no_lock = subprocess.run(['bash', str(t.script), '--check', str(t.candidate)], env=t.env, capture_output=True, text=True)
     assert no_lock.returncode != 0 and 'ROOT_AND_MAINTENANCE_LOCK_REQUIRED' in no_lock.stderr
     assert t.ft('--apply').returncode == 2
+
+
+def test_recover_when_compose_removed_the_old_frontend_and_failed(t):
+    """Codex review #77: Compose may remove the old container and fail before the new one exists. --recover must not
+    need the container (the API URL comes from the transaction) and must bring the previous frontend back."""
+    before = t.frontend()
+    t.inject(kill_on_up=['frontend'])
+    assert t.ft('--apply', str(t.candidate)).returncode != 0
+    t.mutate(lambda s: s['containers'].pop('standa-hub-frontend'))
+    (d,) = t.changes()
+    api_file = d / 'api_url'
+    assert oct(api_file.stat().st_mode & 0o777) == '0o600'
+    recovered = t.ft('--recover')
+    assert recovered.returncode == 0, out(recovered)
+    assert 'ROLLBACK_VERIFIED' in recovered.stdout and t.tjournal()['state'] == 'rolled_back'
+    after = t.frontend()
+    assert (after['image_id'], after['hash']) == (before['image_id'], before['hash'])
+    assert after['env']['NEXT_PUBLIC_API_URL'] == before['env']['NEXT_PUBLIC_API_URL']
+    assert t.installed.read_text() == OLD_TEMPLATE
+    no_host(recovered.stdout, recovered.stderr)

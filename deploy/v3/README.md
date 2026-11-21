@@ -112,7 +112,8 @@ sudo $L/with-deployment-lock.sh $L/frontend-template-v3.sh --recover            
    and `/login` checked) `→ verifying` (only now the new template is installed atomically, root 0644)
    `→ restarted` (`FRONTEND_TEMPLATE_APPLIED`).
 4. Failure or `--recover`: `rollback_required → rolled_back` = the previous template installed again **and** the
-   frontend recreated with it (hash and health verified).
+   frontend recreated with it (hash and health verified). The proven API URL is saved in the transaction (0600) before
+   the first recreate, so recovery works even when Compose removed the old container and failed.
 5. A pending template change blocks the repository versions of `deploy-transaction-v3.sh` (`PENDING_RESTART`),
    `deploy-migration-v3.sh` and `restart-v3.sh`. The installed updater is still `02a965c` (`PRODUCTION_CHANGES.md`):
    if `--apply` does not end with `FRONTEND_TEMPLATE_APPLIED` or `ROLLBACK_VERIFIED`, stop

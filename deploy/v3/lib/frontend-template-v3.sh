@@ -155,14 +155,16 @@ rollback() {
   advance rolled_back
   echo 'ROLLBACK_VERIFIED'
 }
-# After a crash the container may run either template; the image and the API URL are the same in both.
+# Never from the container: Compose may have removed it and failed before creating the new one (Codex review #77).
+# The hash-proven value was saved in the transaction (0600) before the first recreate.
 read_current_for_rollback() {
   IMAGE_REF=$(jget image_reference)
-  API_URL=$(docker inspect standa-hub-frontend --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^NEXT_PUBLIC_API_URL=//p' | head -n1)
+  [[ -f $TX/api_url ]] || { echo 'ROLLBACK_API_URL_MISSING: MANUAL_RECOVERY_REQUIRED' >&2; return 1; }
+  API_URL=$(cat -- "$TX/api_url")
   [[ $API_URL == https://* && $API_URL != *'<'* ]] || { echo 'NEXT_PUBLIC_API_URL_UNKNOWN: MANUAL_RECOVERY_REQUIRED' >&2; return 1; }
 }
 abort_prepared() {
-  [[ $(running_id) == "$(jget image_id)" && $(running_hash) == "$(jget previous_hash)" ]] || {
+  [[ $(running_id 2>/dev/null) == "$(jget image_id)" && $(running_hash 2>/dev/null) == "$(jget previous_hash)" ]] || {
     echo 'PREPARED_BUT_FRONTEND_CHANGED: MANUAL_RECOVERY_REQUIRED' >&2; return 1; }
   advance aborted
   echo 'TEMPLATE_CHANGE_ABORTED_NO_PRODUCTION_CHANGE'
@@ -213,6 +215,9 @@ cp -- "$CANDIDATE" "$TX/template.target"
 [[ $(render_hash "$TX/template.previous") == "$RUNNING_HASH" ]] || {
   echo 'INSTALLED_TEMPLATE_DRIFT: the installed template does not match the running frontend - MANUAL_REVIEW_REQUIRED' >&2; exit 1; }
 echo 'INSTALLED_TEMPLATE_MATCHES_RUNNING'
+# Rollback input that must not depend on the container (it can be gone after a failed recreate): 0600, never printed.
+printf '%s' "$API_URL" > "$TX/api_url"
+chmod 600 "$TX/api_url"
 env FRONTEND_IMAGE="$IMAGE_REF" NEXT_PUBLIC_API_URL="$API_URL" \
   docker compose -p frontend -f "$TX/template.target" config --quiet || { echo 'TEMPLATE_INVALID' >&2; exit 1; }
 TARGET_HASH=$(render_hash "$TX/template.target")
