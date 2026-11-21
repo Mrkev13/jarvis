@@ -143,6 +143,12 @@ Primitives fire only on a **transition** of real data (`useTransitionSignal(valu
 and loading → loaded never celebrate. Possible future categories (`achievement`, `level-up`) must reuse completion /
 milestone – no confetti, fireworks, overlays or full-screen effects.
 
+**MRK-124 (Standa: „animace, které jsou vidět“):** page entrance `motion-page-enter` (14 px, `normal`, `emphasized`);
+skeletons get a soft sheen (`motion-skeleton`, pseudo-element sweep, `shimmer` duration; the grey block stays without
+it); dashboard summary numbers count up from zero on first show (`<AnimatedNumber countUp>` – only there; elsewhere
+numbers still animate only on change); clickable dashboard rows lift on hover (`motion-hover-lift` + accent border).
+All off under reduced motion (ui-check § 5d checks both modes).
+
 **When to use motion:** confirming a user action (success), a state the user worked towards (completion, milestone,
 streak), a value that changed in place (progress, animated numbers), new content arriving (entrance, highlight).
 **When not to:** on page load for data that was already true, in long lists (no idle loops per row), on text that must

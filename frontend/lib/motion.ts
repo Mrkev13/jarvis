@@ -35,10 +35,13 @@ function easeOutCubic(t: number): number {
 /**
  * Plynulý přechod čísla při ZMĚNĚ hodnoty (první vykreslení ukáže rovnou cílovou hodnotu –
  * žádné „počítání od nuly" při načtení stránky). Při reduced-motion vrací cíl okamžitě.
+ * MRK-124: `startFrom` (např. 0) = při prvním zobrazení naběhne z této hodnoty – jen pro souhrnná čísla
+ * dashboardu, kde to Standa výslovně chce; reduced motion ukáže rovnou cíl.
  */
-export function useAnimatedNumber(target: number, durationMs: number = MOTION.slowMs): number {
-  const [display, setDisplay] = useState(target);
-  const fromRef = useRef(target);
+export function useAnimatedNumber(target: number, durationMs: number = MOTION.slowMs, startFrom?: number): number {
+  const initial = startFrom !== undefined && !prefersReducedMotion() ? startFrom : target;
+  const [display, setDisplay] = useState(initial);
+  const fromRef = useRef(initial);
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {

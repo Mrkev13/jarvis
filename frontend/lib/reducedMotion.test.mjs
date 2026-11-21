@@ -94,3 +94,10 @@ test("completion celebrations share the semantic motion primitive instead of mod
   );
   assert.ok(keyframes(semanticMotion).includes("motion-glow-once"));
 });
+
+// MRK-124: skeleton s leskem a vstup stránky – reduced-motion protějšek.
+test("skeleton shimmer and page enter stop under reduced motion", () => {
+  const block = reducedBlock(css("motion.css"));
+  assert.ok(block.includes(".motion-skeleton::after"), ".motion-skeleton::after není v reduced-motion bloku");
+  assert.ok(block.includes(".motion-page"), ".motion-page není v reduced-motion bloku");
+});
