@@ -14,11 +14,19 @@ import subprocess
 
 import pytest
 
-from tests.test_deploy_v3 import REPO_ROOT, V3, World, out
+from tests.test_deploy_v3 import V3, World, out
 
 NEW_TEMPLATE = V3 / 'mrk108' / 'frontend-managed.yaml'
-OLD_TEMPLATE = subprocess.run(['git', 'show', 'cf5d5b3:deploy/v3/mrk108/frontend-managed.yaml'], cwd=REPO_ROOT,
-                              capture_output=True, text=True, check=True).stdout
+# Production today = the template without the MRK-121 volume block (derived here: CI has a shallow checkout without
+# the older commit, so no `git show`).
+VOLUME_BLOCK = '''
+    # MRK-121: game images (not in Git/image) from the host; read-only. Next serves the files present at start,
+    # app/game-assets/[...path]/route.ts the ones fetched later. Missing directory -> fallback icons.
+    volumes:
+      - /srv/standa-hub-data/game-assets:/app/public/game-assets:ro
+'''
+assert NEW_TEMPLATE.read_text().count(VOLUME_BLOCK) == 1
+OLD_TEMPLATE = NEW_TEMPLATE.read_text().replace(VOLUME_BLOCK, '')
 API_HOST = 'hub.example.test'
 
 
