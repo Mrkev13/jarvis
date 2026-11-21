@@ -1,4 +1,4 @@
-// MRK-79: zúžená navigace – hlavní menu + skupiny „Další“ a „Systém“.
+// MRK-79 / MRK-122: zúžená navigace – hlavní menu, skupina „Další“, dole Nastavení.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -16,12 +16,14 @@ test("hlavní menu má nanejvýš 8 položek i se všemi moduly zapnutými", () 
   for (const href of ["/", "/school", "/goals", "/reminders", "/ai"]) assert.ok(hrefs(main).includes(href), href);
 });
 
-test("skupiny: Další a Systém v daném pořadí, Systém končí Nastavením", () => {
+test("skupiny: Další a dole Nastavení; Co se změnilo, Aktivita a Paměť nejsou v menu (MRK-122)", () => {
   const groups = menuGroupsFor(ALL_ON);
   assert.deepEqual(groups.map((g) => [g.id, g.label]), [["main", null], ["more", "Další"], ["system", "Systém"]]);
   const { more, system } = byId(groups);
   for (const href of ["/planner", "/finance", "/work", "/mff"]) assert.ok(hrefs(more).includes(href), href);
-  assert.deepEqual(hrefs(system), ["/changes", "/activity", "/memory", "/settings"]);
+  assert.deepEqual(hrefs(system), ["/settings"]);
+  const menu = menuPagesFor(ALL_ON).map((p) => p.href);
+  for (const href of ["/changes", "/activity", "/memory"]) assert.ok(!menu.includes(href), href);
 });
 
 test("skupiny dohromady = celé menu, každá stránka právě jednou", () => {
@@ -42,5 +44,5 @@ test("vypnutý modul zmizí ze všech skupin, prázdná skupina se nevykreslí",
 
 test("Ctrl+K dál najde všechny dostupné stránky bez ohledu na skupinu", () => {
   const found = navPagesFor(ALL_ON).map((p) => p.href);
-  for (const href of ["/planner", "/settings", "/changes", "/today", "/review", "/finance"]) assert.ok(found.includes(href), href);
+  for (const href of ["/planner", "/settings", "/changes", "/activity", "/memory", "/today", "/review", "/finance"]) assert.ok(found.includes(href), href);
 });

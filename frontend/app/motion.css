@@ -164,6 +164,33 @@
 
 /* Progress bar → `.motion-progress-fill` v motion-semantic.css (transform místo šířky). */
 
+/*
+ * MRK-122: postranní lišta. Indikátor aktivní položky je jeden prvek, který mezi položkami klouže (transform, normal,
+ * emphasized). Položky a nadpis skupiny reagují na hover jemným posunem doprava (fast, jen zařízení s hoverem),
+ * šipka skupiny se plynule otočí a obsah rozbalené skupiny se objeví (motion-enter, normal).
+ */
+.motion-nav-indicator {
+  transition-property: transform, opacity;
+  transition-duration: var(--motion-normal);
+  transition-timing-function: var(--motion-ease-emphasized);
+}
+.motion-nav-item {
+  transition-property: transform, background-color, color;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--motion-ease);
+}
+@media (hover: hover) {
+  .motion-nav-item:hover {
+    transform: translateX(2px);
+  }
+}
+.motion-nav-chevron {
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+.motion-nav-reveal {
+  animation: motion-enter var(--motion-normal) var(--motion-ease) backwards;
+}
+
 /* Boční panel (Drawer) – krátký vjezd zprava. */
 .motion-drawer {
   animation: motion-drawer-in var(--motion-normal) var(--motion-ease) backwards;
@@ -283,8 +310,17 @@
   .motion-undo-timer,
   .motion-palette,
   .search-target-active,
-  .motion-executing::after {
+  .motion-executing::after,
+  .motion-nav-reveal {
     animation: none !important;
+  }
+  /* MRK-122: lišta – indikátor skočí, žádný posun položek, šipka se otočí bez přechodu. */
+  .motion-nav-indicator,
+  .motion-nav-chevron {
+    transition: none !important;
+  }
+  .motion-nav-item:hover {
+    transform: none !important;
   }
   /* Stavová karta zůstane krátce viditelná bez pohybu (informace se neztratí). */
   .motion-outcome {
