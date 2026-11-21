@@ -48,6 +48,43 @@ interrupted transaction) has passed on the isolated environment.
 
 Regression tests are added in `backend/tests/test_deploy_v3.py`. These code changes are **not** installed on the production server. Do not change systemd to `--apply` or merge the draft PR until fresh CI and independent re-review are complete.
 
+## Restart after a change of `.env.production` (MRK-120)
+
+Compose reads `env_file` only when it **creates** the container and inlines the values into the service config. An
+edited `backend/.env.production` is therefore not used by the running backend, and it changes the backend config-hash:
+`deploy-transaction-v3.sh` (the timer) stops on `BACKEND_COMPOSE_DRIFT` until the backend is recreated. Never use a
+manual `docker compose up` / `restart` for that. `lib/restart-v3.sh` recreates **only the backend**, with the **same
+image and commit**, under the same maintenance lock:
+
+```bash
+L=/usr/local/lib/standa-hub
+sudo $L/with-deployment-lock.sh $L/restart-v3.sh --check     # preflight, lists changed variable NAMES, no change
+sudo $L/with-deployment-lock.sh $L/restart-v3.sh --apply     # recreate + verify, rollback on failure
+sudo $L/with-deployment-lock.sh $L/restart-v3.sh --recover   # after an interruption
+```
+
+1. Preflight: no pending deployment / migration / restart; the backend runs, is healthy, its image tag still points
+   at the running image ID.
+2. The **previous environment** is reconstructed from the running container (its env minus the image's own env and
+   `APP_COMMIT`) and accepted only if the managed template rendered with it gives exactly the running config-hash
+   (`PREVIOUS_ENV_NOT_RECONSTRUCTABLE` otherwise). It is the rollback source, so an in-place edit is fine.
+3. The new file must be root-owned, not group/other-writable. It is copied into the transaction (0600), rendered by
+   Compose and validated in a throwaway container of the running image **without network**:
+   `production.validate_environment` plus "Web Push on ⇒ `WEB_PUSH_VAPID_*` and `WEB_PUSH_CONTACT` set". Output:
+   `ENV_ADDED/REMOVED/CHANGED` with names only, `ENV_VALID` or `ENV_INVALID: <value-free message>`. Same hash as
+   running → `NOTHING_TO_RESTART`.
+4. Journal `$STATE_DIR/restart-v3-<UTC>-<pid>/journal.json` (helper `mrk108/restart-journal.py`), assembled in
+   `.staging-restart-v3-*` and published by an atomic rename: `prepared → recreating → verifying → restarted`. The
+   backend is recreated from the validated copy; image ID, config-hash and health are checked.
+5. Failure while recreating / verifying → `rollback_required → rolled_back`: the previous environment with the same
+   image, hash and health verified. The live file still holds the new values (`RESTART_ROLLED_BACK`), so the timer
+   keeps refusing until it is fixed and restarted. After a crash `--recover` rolls back (or aborts `prepared`).
+6. A pending restart blocks `deploy-transaction-v3.sh` (`PENDING_RESTART`) and `deploy-migration-v3.sh`.
+
+Install: `lib/restart-v3.sh` → `/usr/local/lib/standa-hub/` (root, 0755), `mrk108/restart-journal.py` →
+`/usr/local/lib/standa-hub/mrk108/` (root, 0644), together with the updated `deploy-transaction-v3.sh` and
+`deploy-migration-v3.sh`. Tests: `backend/tests/test_restart_v3.py` (fake docker with `FAKE_COMPOSE_ENV_FILE=1`).
+
 ## Controlled migration deployment (MRK-114)
 
 A release that changes the Alembic head is never deployed by the timer: `deploy-transaction-v3.sh` compares the heads

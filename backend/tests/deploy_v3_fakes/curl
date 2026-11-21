@@ -13,6 +13,7 @@ c = state["containers"].get(f"standa-hub-{service}")
 if not c or not c["running"]:
     sys.exit(7)
 bad = c["image_id"] in state.get("unhealthy", [])
+bad = bad or c.get("env", {}).get("FAKE_UNHEALTHY") == "1"  # MRK-120: an environment that breaks the app
 if service == "frontend":
     sys.exit(22 if bad else 0)
 if "prod_db" in state:  # MRK-114: the backend compares the database revision with its own head

@@ -14,6 +14,12 @@ and the ORM smoke (`python -`, passes when the database revision is in the image
 `run ... alembic upgrade head` moves the copy (DATABASE_URL in -e) or production (network postgres_default) to the
 image's head. More injections: {"fail_migrate": ["copy"|"prod"], "kill_after_migrate": ["prod"],
 "kill_before_migrate": ["prod"]} (each used once).
+
+MRK-120 (restart-v3.sh), opt-in with FAKE_COMPOSE_ENV_FILE=1 so the older tests keep their hashes: like real Compose the
+backend template inlines the raw `env_file` (BACKEND_ENV_FILE) into `environment` (so the config-hash covers the
+values), containers keep that environment, `inspect` lists image env + container env, `image inspect` the image env
+(meta "env", default PATH), and `run --env-file F --entrypoint python IMAGE -c CODE` really runs CODE with the file's
+variables (FAKE_PYTHON, cwd/PYTHONPATH = FAKE_BACKEND_DIR) - the restart's validation uses production.py itself.
 """
 import hashlib
 import json
@@ -54,6 +60,21 @@ def resolve(s, ref):
     return None
 
 
+def read_env_file(path):
+    """Compose `format: raw`: KEY=VALUE taken literally (no quote stripping); blank lines and # comments skipped."""
+    out = {}
+    for line in Path(path).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value
+    return out
+
+
+def image_env(s, image_id):
+    return s["meta"].get(image_id, {}).get("env", ["PATH=/usr/bin"])
+
+
 def config_hash(resolved):
     """Like Compose: the hash covers the whole resolved service config (image, environment, pull_policy...)."""
     return hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()
@@ -83,6 +104,8 @@ def compose(args, s):
                 return 1
             env = ({"APP_COMMIT": os.environ.get("APP_COMMIT", "")} if service == "backend"
                    else {"NEXT_PUBLIC_API_URL": os.environ.get("NEXT_PUBLIC_API_URL", "")})
+            if service == "backend" and os.environ.get("FAKE_COMPOSE_ENV_FILE") == "1":
+                env = {**read_env_file(os.environ["BACKEND_ENV_FILE"]), **env}  # `environment` wins over env_file
             resolved.update({"image": image, "environment": env})
     resolved.pop("container_name", None)
     image = resolved.get("image")
@@ -110,7 +133,8 @@ def compose(args, s):
         s["containers"][f"standa-hub-{service}"] = {
             "image_ref": image, "image_id": image_id, "running": True,
             "app_commit": resolved.get("environment", {}).get("APP_COMMIT", ""),
-            "hash": config_hash(resolved), "project": project, "service": service}
+            "hash": config_hash(resolved), "project": project, "service": service,
+            "env": resolved.get("environment", {})}
         save(s)
         return 0
     return 2
@@ -199,6 +223,10 @@ def run_cmd(args, s):
         print(name)
         return 0
     image_id = resolve(s, image)
+    if opts.get("--entrypoint") == "python" and cmd[:1] == ["-c"] and "--env-file" in opts:
+        if image_id is None:
+            return 1
+        return run_python(opts, image_id, cmd, s)
     if opts.get("--entrypoint") == "alembic" and cmd == ["heads"]:
         print(f"{s['meta'][image_id]['head']} (head)")
         return 0
@@ -271,6 +299,30 @@ def remove(args, s):
     return 0
 
 
+def container_env(s, c):
+    if "env" not in c or os.environ.get("FAKE_COMPOSE_ENV_FILE") != "1":
+        return f"PATH=/usr/bin\nAPP_COMMIT={c['app_commit']}"
+    own = c["env"]
+    base = [line for line in image_env(s, c["image_id"]) if line.split("=", 1)[0] not in own]
+    return "\n".join(base + [f"{k}={v}" for k, v in own.items()])
+
+
+def run_python(opts, image_id, cmd, s):
+    """`run --env-file F --entrypoint python IMAGE -c CODE`: really run CODE with the image env + the file's variables."""
+    import subprocess
+    log("run-python", opts.get("--network", ""), image_id)
+    env = dict(line.split("=", 1) for line in image_env(s, image_id))
+    env.update(read_env_file(opts["--env-file"]))
+    env["PATH"] = os.environ["PATH"]
+    backend = os.environ["FAKE_BACKEND_DIR"]
+    env["PYTHONPATH"] = backend
+    r = subprocess.run([os.environ.get("FAKE_PYTHON", sys.executable), *cmd], env=env, cwd=backend,
+                       capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
 def main(argv):
     s = load()
     log(*argv)
@@ -282,6 +334,9 @@ def main(argv):
             print(f"No such image: {argv[2]}", file=sys.stderr)
             return 1
         fmt = argv[argv.index("--format") + 1]
+        if fmt == "{{range .Config.Env}}{{println .}}{{end}}":
+            print("\n".join(image_env(s, image_id)))
+            return 0
         print(image_id if fmt == "{{.Id}}" else s["meta"][image_id]["revision"])
         return 0
     if argv[:2] == ["image", "tag"]:
@@ -306,7 +361,7 @@ def main(argv):
         out = {
             "{{.Image}}": c["image_id"],
             "{{.Config.Image}}": c["image_ref"],
-            "{{range .Config.Env}}{{println .}}{{end}}": f"PATH=/usr/bin\nAPP_COMMIT={c['app_commit']}",
+            "{{range .Config.Env}}{{println .}}{{end}}": container_env(s, c),
             '{{index .Config.Labels "com.docker.compose.config-hash"}}': c["hash"],
             '{{index .Config.Labels "com.docker.compose.project"}}': c["project"],
         }[fmt]
