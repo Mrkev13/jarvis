@@ -2592,6 +2592,7 @@ await wotReset();
 }
 {
   const { ctx, page, errors } = await open("/school", { width: 390, height: 844 });
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
   check("škola mobil: akce bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   const b = await page.getByRole("button", { name: "Splnit úkol Sada" }).boundingBox();
   check("škola mobil: Splnit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));

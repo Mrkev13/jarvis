@@ -79,12 +79,19 @@ export function ActionMenu({
     else if (e.key === "ArrowUp") { e.preventDefault(); focusItem(current - 1); }
     else if (e.key === "Home") { e.preventDefault(); focusItem(0); }
     else if (e.key === "End") { e.preventDefault(); focusItem(-1); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
     else if (e.key === "Tab") setOpen(false);
   };
 
   return (
-    <div ref={wrapRef} className={cx("relative inline-flex", className)} data-action-menu="">
+    <div
+      ref={wrapRef}
+      className={cx("relative inline-flex", className)}
+      data-action-menu=""
+      // Escape kdekoli v komponentě (i na tlačítku hned po otevření, než fokus přejde do nabídky)
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); close(true); }
+      }}
+    >
       <button
         ref={triggerRef}
         type="button"
