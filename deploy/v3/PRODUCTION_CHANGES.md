@@ -28,3 +28,47 @@ Verified on the server: the CI check for production commit `32db7b8` → `CI_APP
 afterwards → `Result=success`, `ExecMainStatus=0`, `NO_UPDATE_NEEDED`.
 
 Not deployed: the PR #65 review version (da866d5 and later). Automatic `--apply` stays off.
+
+## Before 2026-11-21 – reviewed `deploy-transaction-v3.sh` installed (recorded afterwards)
+
+Found on 21 November 2026: the installed `/usr/local/lib/standa-hub/deploy-transaction-v3.sh` is no longer the copy
+recorded above. Its SHA-256 `8fb0e6e8b7074f8c871795b5161077d5eefedbcfed059671e1c5e9ba4e432c83` is exactly
+`deploy/v3/lib/deploy-transaction-v3.sh` at `02a965c` (PR #65 review version with the normalized Compose hash). The
+install date was not recorded. The later repository changes of this file (`bfeb894` archive PID, `a8d3e7e` /
+`0e768a7` MRK-114 migration blocking, `7d6ba62` MRK-120 restart blocking) are **not** installed;
+`deploy-migration-v3.sh` is not installed. The updater has run the 10-minute timer with `--apply` (deployments of
+`d11a5f2` on 15 November and `cf5d5b3` on 21 November).
+
+## 2026-11-21 – env-only backend restart (MRK-120)
+
+Why: the Ubuntu `backend/.env.production` still had the cut-over values - scheduler, reminders, briefings and Web
+Push off, VAPID keys and calendar feeds empty (MRK-103). Compose reads `env_file` only when it creates a container and
+puts the values into the config-hash, so after the edit the updater stopped on `BACKEND_COMPOSE_DRIFT`.
+
+Changed on the Ubuntu server (values never left the server; only names, states and checksums are recorded):
+
+| Change | Detail |
+| --- | --- |
+| `/srv/standa-hub/backend/.env.production` owner | `standa:standa 600` → `root:root 600` (restart-v3.sh requires a root-owned env file) |
+| `.env.production` content | changed variables: `SCHEDULER_ENABLED`, `REMINDERS_CHECK_ENABLED`, `DAILY_BRIEFING_ENABLED`, `WEEKLY_REVIEW_ENABLED`, `EXTERNAL_DELIVERY_ENABLED` (all `true`), `WEB_PUSH_VAPID_PRIVATE_KEY`, `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_CONTACT` (the Windows keys), `GOOGLE_ICS_URL`, `MOODLE_ICS_URL`; `BACKUP_ENABLED` stays `false` (`standa-hub-backup.timer` owns backups) |
+| `/usr/local/lib/standa-hub/restart-v3.sh` (new, root 755) | `148e85cebb5eb0fe1eb46509e04120d3a38abb23bc62136fc42ed5cd325c41cb` = `deploy/v3/lib/restart-v3.sh` at `cf5d5b3` |
+| `/usr/local/lib/standa-hub/mrk108/restart-journal.py` (new, root 644) | `bbdf1cdb8f00e120c2590b2993d49c59dff57e0d42081bda07e235d04fd5aa35` = `deploy/v3/mrk108/restart-journal.py` at `cf5d5b3` |
+
+`deploy-transaction-v3.sh` was deliberately left at `02a965c`, which does **not** read restart journals. Known gap
+until a version with the pending-restart block (`7d6ba62` or later) is installed: the config-hash drift check catches
+a restart interrupted *before* the backend was recreated, but not one interrupted *after* the recreate and before a
+terminal journal state (e.g. `verifying`) - the container already runs the new env, its hash matches the live file,
+and the updater would carry on (`ALREADY_DEPLOYED` / deploy a new commit) before the restart is recovered (Codex
+review of PR #76, reproduced in the isolated tests). Operating rule until then: if `restart-v3.sh --apply` does not
+end with `RESTART_OK` or `ROLLBACK_VERIFIED`, stop the timer
+(`sudo systemctl stop standa-hub-auto-update.timer`), run `restart-v3.sh --recover`, and start the timer again only
+after the restart journal is terminal (`restarted`, `rolled_back` or `aborted`).
+
+Run: `restart-v3.sh --check` → `PREVIOUS_ENV_RECONSTRUCTED`, `ENV_VALID`, `RESTART_PREFLIGHT_OK`; `--apply` at
+2026-11-21T17:54:09Z (journal `restart-v3-20261121T175409Z-1152408`). Verified afterwards:
+
+- backend env: the five switches `true`, `BACKUP_ENABLED=false`, calendar feeds and VAPID key set; `/health`
+  healthy, commit unchanged (`d11a5f2`);
+- Calendar → Synchronizovat works (Google and Moodle); a test reminder arrived on the phone;
+- updater: `BACKEND_COMPOSE_DRIFT` before the restart, `ALREADY_DEPLOYED` after it, then deployed `cf5d5b3`
+  (`AUTO_UPDATE_DEPLOYED`) on its own.
