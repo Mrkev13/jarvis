@@ -439,9 +439,19 @@ for (const motion of ["no-preference", "reduce"]) {
   const scrolled = await page.evaluate(() => window.scrollY);
   check("navigace desktop: lišta zůstane při scrollu na místě", scrolled > 200 && Math.abs((after?.y ?? -1) - (before?.y ?? 0)) < 1 && (after?.height ?? 0) <= 768 + 1, JSON.stringify({ scrolled, before: before?.y, after: after?.y, h: after?.height }));
   check("navigace desktop: hledání vidět i po scrollu", await aside.getByRole("button", { name: /Hledat/ }).isVisible());
-  // kolečko myši nad lištou posouvá stránku (lišta nesmí scroll „spolknout“)
+  // kolečko nad lištou: rozbalená „Další“ se do 768 px nevejde → posune se lišta sama; sbalená se vejde → posune se
+  // stránka (lišta scroll nesmí „spolknout“ – overscroll-contain to dřív dělal)
   await page.evaluate(() => window.scrollTo(0, 0));
   const box = await aside.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  const overflows = await aside.evaluate((el) => el.scrollHeight > el.clientHeight);
+  await page.mouse.wheel(0, 400);
+  check("navigace desktop: nevejde-li se lišta, posune se sama", overflows && await eventually(() => aside.evaluate((el) => el.scrollTop > 0)), String(overflows));
+  await aside.locator('[data-nav-group="more"] summary').click();
+  await page.mouse.wheel(0, -2000);
+  await eventually(() => aside.evaluate((el) => el.scrollTop === 0));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check("navigace desktop: sbalená lišta se do okna vejde", await aside.evaluate((el) => el.scrollHeight <= el.clientHeight));
   await page.mouse.move(box.x + box.width / 2, box.y + 200);
   await page.mouse.wheel(0, 400);
   check("navigace desktop: kolečko nad lištou posune stránku", await eventually(async () => (await page.evaluate(() => window.scrollY)) > 100), String(await page.evaluate(() => window.scrollY)));
