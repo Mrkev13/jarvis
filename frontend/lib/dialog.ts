@@ -4,6 +4,7 @@
  */
 export const FOCUSABLE_SELECTOR = [
   "a[href]",
+  "details > summary", // rozbalitelná skupina (MRK-79: skupiny navigace v mobilním menu)
   "button:not([disabled])",
   "input:not([disabled]):not([type=hidden])",
   "select:not([disabled])",

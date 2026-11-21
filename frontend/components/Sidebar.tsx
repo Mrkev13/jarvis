@@ -13,7 +13,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
 import { useModuleAccess } from "@/hooks/useModules";
-import { menuPagesFor } from "@/lib/navigation";
+import { menuGroupsFor, menuPagesFor, type NavGroup } from "@/lib/navigation";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 import { cx } from "@/lib/ui";
 
@@ -35,12 +35,55 @@ export function isActiveLink(href: string, pathname: string | null): boolean {
   return href === "/" ? CONTROL_CENTER_PAGES.includes(pathname ?? "") : Boolean(pathname?.startsWith(href));
 }
 
+type NavLinkItem = { href: string; label: string };
+
+/** MRK-79: hlavní položky, pod nimi rozbalitelné skupiny „Další“ a „Systém“. Všechny odkazy zůstávají v jednom <nav>. */
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const pathname = usePathname();
-  const navLinks = useNavLinks();
+  const { access } = useModuleAccess();
+  const groups = menuGroupsFor(access);
   return (
     <nav aria-label="Hlavní navigace" className="space-y-0.5">
-      {navLinks.map((link) => {
+      {groups.map((group) =>
+        group.label === null ? (
+          <NavLinks key={group.id} links={group.pages} pathname={pathname} onNavigate={onNavigate} />
+        ) : (
+          <NavGroupSection key={group.id} id={group.id} label={group.label} links={group.pages} pathname={pathname} onNavigate={onNavigate} />
+        ),
+      )}
+    </nav>
+  );
+}
+
+/** Skupina je zavřená, dokud v ní není aktuální stránka; ručně rozbalená zůstane rozbalená. */
+function NavGroupSection({ id, label, links, pathname, onNavigate }: { id: NavGroup; label: string; links: NavLinkItem[]; pathname: string | null; onNavigate?: (href: string) => void }) {
+  const hasActive = links.some((l) => isActiveLink(l.href, pathname));
+  const [open, setOpen] = useState(hasActive);
+  useEffect(() => {
+    if (hasActive) queueMicrotask(() => setOpen(true));
+  }, [hasActive]);
+  return (
+    <details
+      data-nav-group={id}
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      className="group mt-3 border-t border-line pt-2"
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-3 text-xs font-medium uppercase tracking-wider text-ink-muted hover:bg-surface hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 [&::-webkit-details-marker]:hidden">
+        {label}
+        <Icon name="chevron-right" size="sm" className="transition-transform group-open:rotate-90" />
+      </summary>
+      <div className="mt-0.5 space-y-0.5">
+        <NavLinks links={links} pathname={pathname} onNavigate={onNavigate} />
+      </div>
+    </details>
+  );
+}
+
+function NavLinks({ links, pathname, onNavigate }: { links: NavLinkItem[]; pathname: string | null; onNavigate?: (href: string) => void }) {
+  return (
+    <>
+      {links.map((link) => {
         const active = isActiveLink(link.href, pathname);
         return (
           <Link
@@ -64,7 +107,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           </Link>
         );
       })}
-    </nav>
+    </>
   );
 }
 
