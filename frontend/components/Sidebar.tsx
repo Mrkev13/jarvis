@@ -275,7 +275,7 @@ export function DesktopSidebar() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // MRK-122: lišta zůstává při scrollu stránky na místě; když se do okna nevejde, scrolluje sama.
   return (
-    <aside data-desktop-sidebar className="hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:overscroll-contain w-60 shrink-0 border-r border-line bg-app/80 px-4 py-5">
+    <aside data-desktop-sidebar className="hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto w-60 shrink-0 border-r border-line bg-app/80 px-4 py-5">
       <div className="mb-6 flex items-center justify-between gap-2 px-1">
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}
