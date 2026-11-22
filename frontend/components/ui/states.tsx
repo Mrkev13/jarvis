@@ -62,7 +62,7 @@ export function ErrorState({
 
 /** Šedý blok místo obsahu při prvním načtení (při omezeném pohybu bez pulzu). */
 export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden="true" className={cx("animate-pulse rounded-[var(--radius-control)] bg-surface-2", className)} />;
+  return <div aria-hidden="true" className={cx("motion-skeleton rounded-[var(--radius-control)] bg-surface-2", className)} />;
 }
 
 /** Načítání s přístupným textem; `lines` = počet řádků skeletonu. */

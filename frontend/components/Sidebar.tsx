@@ -94,7 +94,8 @@ function useNavIndicator(navRef: React.RefObject<HTMLElement | null>, pathname: 
     if (!nav) return;
     const measure = () => {
       const link = nav.querySelector<HTMLElement>('a[aria-current="page"]');
-      if (!link || link.getClientRects().length === 0) return setBox(null);
+      // Obsah zavřeného <details> má v Chromu dál rozměry (content-visibility) – sbalenou skupinu proto hlídáme zvlášť.
+      if (!link || link.getClientRects().length === 0 || link.closest("details:not([open])")) return setBox(null);
       const n = nav.getBoundingClientRect();
       const r = link.getBoundingClientRect();
       setBox({ top: r.top - n.top + 8, height: Math.max(r.height - 16, 8) });

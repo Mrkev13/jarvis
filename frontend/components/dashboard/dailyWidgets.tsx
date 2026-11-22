@@ -31,7 +31,8 @@ function RowShell({
 }) {
   const border = tone === "danger" ? "border-l-2 border-l-danger" : tone === "warning" ? "border-l-2 border-l-warning" : null;
   return (
-    <li className={cx(ROW, border, className)}>
+    // MRK-124: klikací řádek se při hoveru jemně zvedne a zvýrazní okraj (jen zařízení s hoverem, reduced motion bez posunu)
+    <li className={cx(ROW, border, href && "motion-hover-lift hover:border-accent/40", className)}>
       {href ? (
         <Link href={href} className={ROW_LINK}>
           {children}
