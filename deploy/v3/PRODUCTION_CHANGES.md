@@ -113,3 +113,10 @@ real run first):
 
 Fixed in the follow-up PR (copy uses the production database name; rendered env unescaped) with regression tests on a
 production-like environment. Next: install the fixed `deploy-migration-v3.sh`, `--check`, `--apply`, start the timer.
+
+Second `--check` (fixed script `a11b90d1dfcd…`, #84): `REHEARSAL_OLD_APP_BASELINE_OK`, `REHEARSAL_MIGRATION_OK`,
+`REHEARSAL_NEW_APP_OK`, then `REHEARSAL_APP_UNHEALTHY: …-old (old-on-new)` – again no production change. Third defect:
+the old code cannot name a revision it does not know (backend `health_service` reports it as `"unknown"`), so the
+old-on-new comparison of that name with the new head could never pass – also in the app-rollback compatibility check.
+Fixed in the next PR: the old app's `/health` has to agree (reachable, the new head or `unknown`), the revision itself
+is read from the database (the copy, or production before an app rollback).

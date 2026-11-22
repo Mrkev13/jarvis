@@ -125,15 +125,23 @@ check_frontend() {
 }
 # Old code on the newer schema: reachable database whose revision is the NEW head (old code reports a mismatch, which
 # alone proves nothing) + the ORM smoke of every mapped entity inside the running container + frontend /login.
+# The old code cannot NAME a revision it does not know - backend health_service reports it as "unknown" - so its
+# /health only has to agree (reachable, mismatch, the new head or "unknown"); the revision itself is read from the
+# database (first real run: the strict name comparison could never pass).
+old_app_health_ok() {  # stdin: /health JSON of the old app; $1 new head
+  python3 -I -c '
+import json,sys
+d=json.load(sys.stdin); new=sys.argv[1].split(",")
+cur=sorted(d["migrations"].get("current") or [])
+assert d["database"]["status"]=="reachable"
+assert cur==sorted(new) or cur==["unknown"]*len(new)
+' "$1" 2>/dev/null
+}
 check_old_app_compatible() {
   local new_head=$1 i ok=0
+  [[ $(prod_db_revision) == "$new_head" ]] || { echo 'OLD_APP_DATABASE_CHECK_FAILED: database not at the new head' >&2; return 1; }
   for i in $(seq 1 "$HEALTH_TRIES"); do
-    if health_json | python3 -I -c '
-import json,sys
-d=json.load(sys.stdin); new=sys.argv[1]
-assert d["database"]["status"]=="reachable"
-assert ",".join(sorted(d["migrations"].get("current") or []))==new
-' "$new_head" 2>/dev/null; then ok=1; break; fi
+    if health_json | old_app_health_ok "$new_head"; then ok=1; break; fi
     sleep "$HEALTH_SLEEP"
   done
   (( ok )) || { echo 'OLD_APP_DATABASE_CHECK_FAILED' >&2; return 1; }
@@ -271,13 +279,11 @@ expect_app() {  # name mode(strict|old-on-new) new_head
   local i body
   for i in $(seq 1 "$HEALTH_TRIES"); do
     body=$(app_health "$1")
-    if [[ -n $body ]] && python3 -I -c '
+    if [[ -n $body ]] && { if [[ $2 == strict ]]; then python3 -I -c '
 import json,sys
-d=json.loads(sys.argv[1]); mode, new = sys.argv[2], sys.argv[3]
-assert d["database"]["status"]=="reachable"
-if mode=="strict": assert d["status"]=="healthy" and d["migrations"]["status"]=="current"
-else: assert ",".join(sorted(d["migrations"].get("current") or []))==new
-' "$body" "$2" "$3" 2>/dev/null; then
+d=json.loads(sys.argv[1])
+assert d["database"]["status"]=="reachable" and d["status"]=="healthy" and d["migrations"]["status"]=="current"
+' "$body" 2>/dev/null; else old_app_health_ok "$3" <<<"$body" && [[ $(copy_revision) == "$3" ]]; fi; }; then
       docker exec -i "$1" python - <"$TRUSTED/compat-smoke.py" | grep -q '^ORM_SMOKE_OK' || { echo "REHEARSAL_ORM_SMOKE_FAILED: $1" >&2; return 1; }
       return 0
     fi
