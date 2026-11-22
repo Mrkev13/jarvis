@@ -208,7 +208,9 @@ PY
 }
 
 # Rendered backend environment (env_file + compose environment) as a docker --env-file; values with a newline are
-# refused (docker env-files cannot hold them). Root-only, in $WORK, removed on exit.
+# refused (docker env-files cannot hold them). Root-only, in $WORK, removed on exit. `compose config` escapes every
+# literal `$` as `$$` (so its output stays valid Compose input) - a docker --env-file is taken literally, so undo it,
+# otherwise e.g. the bcrypt AUTH_PIN_HASH ($2b$12$...) is invalid and the app refuses to start (first real run).
 render_backend_env() {
   env BACKEND_IMAGE="$1" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" APP_COMMIT="$2" \
     docker compose -p backend -f "$BACKEND_MANAGED" config --format json |
@@ -217,7 +219,7 @@ import json,sys
 env=json.load(sys.stdin)["services"]["backend"].get("environment") or {}
 out=open(sys.argv[1],"w")
 for k,v in sorted(env.items()):
-    v="" if v is None else str(v)
+    v="" if v is None else str(v).replace("$$","$")
     if "\n" in v: raise SystemExit("MULTILINE_ENV_VALUE: "+k)
     out.write(f"{k}={v}\n")
 ' "$WORK/backend.env"
@@ -248,7 +250,9 @@ if not dump.is_relative_to(root) or not dump.is_file(): raise SystemExit('INVALI
 print(dump)
 PY
 }
-copy_revision() { docker exec "$REHEARSAL-db" psql -X -U "$DB_USER" -d rehearsal -tAc 'SELECT version_num FROM alembic_version' | awk 'NF {print $1}' | sort | paste -sd, -; }
+# The throwaway copy uses the production database NAME: the app refuses a DATABASE_URL whose database differs from
+# PRODUCTION_DATABASE_NAME (production.guard_production_environment). It is still a separate, internal-only container.
+copy_revision() { docker exec "$REHEARSAL-db" psql -X -U "$DB_USER" -d "$DB_NAME" -tAc 'SELECT version_num FROM alembic_version' | awk 'NF {print $1}' | sort | paste -sd, -; }
 app_health() {  # $1 container -> /health JSON (also on 503)
   docker exec "$1" python -c '
 import urllib.request, urllib.error
@@ -288,14 +292,14 @@ rehearse() {  # dump old_image old_commit new_image old_head new_head
   pg_image=$(docker inspect "$PROD_DB_CONTAINER" --format '{{.Image}}')
   [[ $pg_image =~ ^sha256:[0-9a-f]{64}$ && $(image_id "$pg_image") == "$pg_image" ]] || { echo 'POSTGRES_IMAGE_UNVERIFIED' >&2; return 1; }
   pw=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
-  url="postgresql+psycopg2://$DB_USER:$pw@$REHEARSAL-db:5432/rehearsal"
+  url="postgresql+psycopg2://$DB_USER:$pw@$REHEARSAL-db:5432/$DB_NAME"
   render_backend_env "$old_img" "$old_commit"
   docker network create --internal "$REHEARSAL" >/dev/null
   docker run -d --name "$REHEARSAL-db" --network "$REHEARSAL" --tmpfs /var/lib/postgresql --pull never \
-    -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=rehearsal "$pg_image" >/dev/null
-  for i in $(seq 1 30); do docker exec "$REHEARSAL-db" pg_isready -U "$DB_USER" -d rehearsal >/dev/null 2>&1 && break; sleep 1; done
+    -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB="$DB_NAME" "$pg_image" >/dev/null
+  for i in $(seq 1 30); do docker exec "$REHEARSAL-db" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break; sleep 1; done
   gzip -dc -- "$dump" | docker exec -i "$REHEARSAL-db" psql -X -q -v ON_ERROR_STOP=1 --single-transaction \
-    -U "$DB_USER" -d rehearsal >/dev/null
+    -U "$DB_USER" -d "$DB_NAME" >/dev/null
   [[ $(copy_revision) == "$old_head" ]] || { echo 'REHEARSAL_COPY_NOT_AT_OLD_HEAD' >&2; return 1; }
   echo 'REHEARSAL_RESTORE_OK'
   start_app "$REHEARSAL-old" "$old_img" "$old_commit" "$url"

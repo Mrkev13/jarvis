@@ -529,3 +529,49 @@ def test_check_migration_refuses_duplicate_or_unsafe_definitions(m, tmp_path, fu
     r = subprocess.run(['python3', '-I', str(m.trusted / 'check-migration.py'), str(v), 'a', 'b'],
                        capture_output=True, text=True)
     assert r.returncode == 1 and 'MIGRATION_OPS_NOT_ADDITIVE' in r.stdout, r.stdout
+
+
+# ---------- first real run (0029/0030, 22 Nov 2026): production-like backend environment ----------
+
+PROD_ENV = ('APP_ENV=production\n'
+            'DATABASE_URL=postgresql+psycopg2://standa_hub:secret@standa-postgres:5432/standa_hub\n'
+            'PRODUCTION_DATABASE_NAME=standa_hub\n'
+            'AUTH_PIN_HASH=$2b$12$abcdefghijklmnopqrstuuJ0123456789abcdefghijklmnopqrstu\n')
+
+
+def test_rehearsal_with_a_production_environment(m):
+    """The real app refuses a DATABASE_URL whose database is not PRODUCTION_DATABASE_NAME and an AUTH_PIN_HASH that is
+    not bcrypt; `compose config` prints every `$` as `$$`. Both stopped the first real --check at the old-app
+    baseline (REHEARSAL_APP_UNHEALTHY ... (strict)) before any production change."""
+    b = m.migration_release()
+    m.env_file.write_text(PROD_ENV)
+    m.env['FAKE_RENDER_ENV_FILE'] = '1'
+    r = m.mig('--check', b)
+    assert r.returncode == 0, out(r)
+    for marker in ('REHEARSAL_OLD_APP_BASELINE_OK', 'REHEARSAL_MIGRATION_OK', 'REHEARSAL_NEW_APP_OK',
+                   'REHEARSAL_OLD_APP_COMPATIBLE', 'NO_PRODUCTION_CHANGES'):
+        assert marker in r.stdout, marker
+    calls = (m.fake / 'calls.log').read_text()
+    assert 'POSTGRES_DB=standa_hub' in calls and '5432/standa_hub' in calls and '5432/rehearsal' not in calls
+    assert m.rehearsal_leftovers() == []
+    r = m.mig('--apply', b)
+    assert r.returncode == 0 and 'MIGRATION_DEPLOYMENT_OK' in r.stdout, out(r)
+    assert m.prod_db() == NEW and m.running_commit() == b
+
+
+def test_fake_app_rejects_what_the_real_app_rejects(m):
+    """Guard for the guard: without the two fixes the fake reproduces the production failure."""
+    b = m.migration_release()
+    m.env_file.write_text(PROD_ENV)
+    m.env['FAKE_RENDER_ENV_FILE'] = '1'
+    script = m.migration.read_text()
+    broken_name = script.replace('5432/$DB_NAME"', '5432/rehearsal"').replace('POSTGRES_DB="$DB_NAME"', 'POSTGRES_DB=rehearsal')
+    broken_name = broken_name.replace('-d "$DB_NAME"', '-d rehearsal')
+    broken_escape = script.replace('str(v).replace("$$","$")', 'str(v)')
+    for broken in (broken_name, broken_escape):
+        assert broken != script
+        m.migration.write_text(broken)
+        r = m.mig('--check', b)
+        assert r.returncode != 0 and 'REHEARSAL_APP_UNHEALTHY' in out(r), out(r)
+        assert m.prod_db() == OLD and m.rehearsal_leftovers() == []
+    m.migration.write_text(script)

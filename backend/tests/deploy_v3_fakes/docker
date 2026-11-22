@@ -84,6 +84,16 @@ def config_hash(resolved):
     return hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()
 
 
+def reread(svc, service):
+    """Re-reading a rendered config: `$$` is a literal `$` again; the env_file values (rendered only with
+    FAKE_RENDER_ENV_FILE) stay out of the config-hash, as in deploy_running."""
+    if os.environ.get("FAKE_RENDER_ENV_FILE") != "1" or service != "backend" or "environment" not in svc:
+        return svc
+    skip = set(read_env_file(os.environ["BACKEND_ENV_FILE"])) if os.environ.get("BACKEND_ENV_FILE") else set()
+    return {**svc, "environment": {k: v.replace("$$", "$") if isinstance(v, str) else v
+                                   for k, v in svc["environment"].items() if k not in skip}}
+
+
 def compose(args, s):
     project, files, i = None, [], 0
     while args[i] in ("-p", "-f"):
@@ -98,9 +108,9 @@ def compose(args, s):
     resolved = {}
     for f in files:
         if f == "-":
-            resolved.update(json.load(sys.stdin)["services"][service])
+            resolved.update(reread(json.load(sys.stdin)["services"][service], service))
         elif f.endswith(".json"):  # snapshot / override: merged over what came before
-            resolved.update(json.loads(Path(f).read_text())["services"][service])
+            resolved.update(reread(json.loads(Path(f).read_text())["services"][service], service))
         else:  # managed YAML template: values from the environment
             image = os.environ.get(env_key)
             if not image:
@@ -121,7 +131,16 @@ def compose(args, s):
         if "--hash" in rest:
             print(f"{service} {config_hash(resolved)}")
         elif "--format" in rest:
-            print(json.dumps({"name": project, "services": {service: {**resolved, "container_name": f"standa-hub-{service}"}}}))
+            out = {**resolved, "container_name": f"standa-hub-{service}"}
+            env = dict(resolved.get("environment") or {})
+            if service == "backend" and os.environ.get("FAKE_RENDER_ENV_FILE") == "1" and os.environ.get("BACKEND_ENV_FILE"):
+                # MRK-114: the rendered config carries the env_file values (only here, the config-hash stays as before)
+                env = {**read_env_file(os.environ["BACKEND_ENV_FILE"]), **env}
+            if os.environ.get("FAKE_RENDER_ENV_FILE") == "1":
+                # like real Compose (verified with v5.6): a literal `$` is printed as `$$`
+                env = {k: v.replace("$", "$$") if isinstance(v, str) else v for k, v in env.items()}
+            out["environment"] = env
+            print(json.dumps({"name": project, "services": {service: out}}))
         return 0
     if sub == "up":
         inj = inject()
@@ -172,6 +191,22 @@ def env_value(opts, key):
     for item in opts["-e"]:
         if item.startswith(key + "="):
             return item.split("=", 1)[1]
+    return None
+
+
+def app_start_error(opts):
+    """Like backend production.guard_production_environment at import: with APP_ENV=production the database NAME in
+    DATABASE_URL must equal PRODUCTION_DATABASE_NAME and AUTH_PIN_HASH must be a bcrypt hash (an escaped `$$` is not).
+    The env-file is read literally, as docker does; `-e` wins."""
+    env = read_env_file(opts["--env-file"]) if opts.get("--env-file") else {}
+    env.update(dict(item.split("=", 1) for item in opts["-e"] if "=" in item))
+    if env.get("APP_ENV") != "production":
+        return None
+    if (env.get("DATABASE_URL") or "").rsplit("/", 1)[-1] != env.get("PRODUCTION_DATABASE_NAME"):
+        return "PRODUCTION_DATABASE_NAME must match the selected database"
+    pin = env.get("AUTH_PIN_HASH") or ""
+    if not pin.startswith("$2") or "$$" in pin:
+        return "AUTH_PIN_HASH must be a valid bcrypt hash"
     return None
 
 
@@ -226,7 +261,8 @@ def run_cmd(args, s):
             image_id = resolve(s, image)
             if image_id is None:
                 return 1
-            s["apps"][name] = {"image_id": image_id, "db": db_host(env_value(opts, "DATABASE_URL"))}
+            s["apps"][name] = {"image_id": image_id, "db": db_host(env_value(opts, "DATABASE_URL")),
+                               "crashed": app_start_error(opts)}
         save(s)
         print(name)
         return 0
@@ -239,6 +275,9 @@ def run_cmd(args, s):
         print(f"{s['meta'][image_id]['head']} (head)")
         return 0
     if opts.get("--entrypoint") == "alembic" and cmd == ["upgrade", "head"]:
+        if app_start_error(opts):  # alembic env.py imports models -> database -> the same guard
+            print(f"ValueError: {app_start_error(opts)}", file=sys.stderr)
+            return 1
         host = db_host(env_value(opts, "DATABASE_URL"))
         target = "copy" if host else "prod"
         log("migrate", target, s["meta"][image_id]["head"])
@@ -284,6 +323,9 @@ def exec_cmd(args, s):
             save(s)
             return 0
         return 2
+    if s.get("apps", {}).get(name, {}).get("crashed"):  # the container exited at import
+        print(f"Error response from daemon: container {name} is not running", file=sys.stderr)
+        return 1
     if name in s.get("apps", {}) or name in s["containers"]:
         if cmd[:2] == ["python", "-c"]:
             print(json.dumps(health(s, name)))
