@@ -109,3 +109,9 @@ test("sidebar motion stops under reduced motion", () => {
     assert.ok(block.includes(cls), `${cls} není v reduced-motion bloku`);
   }
 });
+
+// MRK-126: mizení řádku – v omezeném pohybu bez animace.
+test("row exit stops under reduced motion", () => {
+  const block = reducedBlock(css("motion.css"));
+  assert.ok(block.includes(".motion-row-exit"), ".motion-row-exit není v reduced-motion bloku");
+});

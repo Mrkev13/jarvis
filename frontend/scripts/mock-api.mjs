@@ -180,6 +180,7 @@ const progressCalls = [];
 let failNextAttendance = false;
 // MRK-14: stavová Škola (splnění / uzavření / znovuotevření); /__mock/school/reset vrátí fixtures.
 const schoolState = {};
+const remindersState = { stateful: false, removed: new Set() };
 function resetSchool() {
   Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams"),
     subjects: fixture("school-subjects") });  // MRK-75: id 4 = archivovaný předmět
@@ -456,6 +457,22 @@ createServer(async (req, res) => {
     todayState.fixture = op === "done" ? "today-after-reminder-done" : "today-after-reminder-snooze";
     return respond(200, { id: Number(id), status: op === "done" ? "done" : "scheduled", next_label: "ne 11. 10. 2026 15:30" }, 400);
   }
+  // MRK-126: volitelně stavové připomínky – Hotovo (jednorázová) / Zrušit je odebere z GET /reminders?status=active.
+  // Zapíná /__mock/reminders/stateful (POST), /__mock/reminders/reset vrátí fixtures a vypne to (ostatní kontroly beze změny).
+  if (url.pathname === "/__mock/reminders/stateful") {
+    remindersState.stateful = true;
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/reminders/reset") {
+    Object.assign(remindersState, { stateful: false, removed: new Set() });
+    return respond(200, { ok: true });
+  }
+  const reminderOp = /^\/reminders\/(\d+)\/(done|cancel)$/.exec(url.pathname);
+  if (reminderOp && req.method === "POST" && remindersState.stateful) {
+    const r = fixture("reminders-active").find((x) => x.id === Number(reminderOp[1]));
+    if (r && (reminderOp[2] === "cancel" || r.recurrence === "none")) remindersState.removed.add(r.id);
+    return respond(200, { ok: true, id: Number(reminderOp[1]) }, 300);
+  }
   if (url.pathname === "/today/actions/prepare" && req.method === "POST") {
     todayState.calls.push(`prepare:${body?.ref}`);
     if (todayState.fail === "stale") {
@@ -721,7 +738,9 @@ createServer(async (req, res) => {
   if (handleAi(req, url, body, respond)) return;
   if (req.method === "GET") {
     if (url.pathname === "/reminders") {
-      return respond(200, fixture(url.searchParams.get("status") === "all" ? "reminders-all" : "reminders-active"));
+      const all = url.searchParams.get("status") === "all";
+      const rows = fixture(all ? "reminders-all" : "reminders-active");
+      return respond(200, all || !remindersState.stateful ? rows : rows.filter((r) => !remindersState.removed.has(r.id)));
     }
     if (url.pathname === "/planner") {
       const mode = url.searchParams.get("mode") || "daily";
