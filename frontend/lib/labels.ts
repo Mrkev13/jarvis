@@ -69,6 +69,7 @@ const SOURCE_LABELS: Record<string, string> = {
   ai_confirm: "AI, potvrzeno",
   quick_add: "Rychlé přidání",
   today: "Dnes",
+  push: "oznámení",
   ai: "AI",
   scheduler: "plánovač",
   system: "systém",

@@ -3383,6 +3383,29 @@ for (const reducedMotion of ["no-preference", "reduce"]) {
   await ctx.close();
 }
 
+// 28) MRK-80 – upozornění na telefon v Nastavení (s návodem na zvuk), z Připomínek odkaz
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  const { ctx, page, errors } = await open("/settings", { width, height: 900 });
+  const push = page.locator("[data-settings-push]");
+  await push.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check(`push nastavení ${label}: karta upozornění v Nastavení`, (await push.locator("#push-settings").count()) === 1);
+  check(`push nastavení ${label}: návod na zvuk na Androidu`, (await push.locator("[data-settings-android-sound] li").count()) === 4);
+  check(`push nastavení ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await push.screenshot({ path: `${OUT}settings-push-${label}.png` });
+  check(`push nastavení ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/reminders", { width: 1366, height: 900 });
+  const link = page.locator("[data-reminders-push-link] a");
+  await link.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("push připomínky: místo nastavení jen odkaz do Nastavení", (await page.locator("#push-settings").count()) === 0 && (await link.getAttribute("href")) === "/settings#push");
+  await link.click();
+  check("push připomínky: odkaz vede na kartu v Nastavení", await eventually(async () => page.url().endsWith("/settings#push") && (await page.locator("#push-settings").count()) === 1, 4000), page.url());
+  check("push připomínky: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

@@ -22,7 +22,7 @@ import main  # noqa: E402
 import reminder_service as rs  # noqa: E402
 import scheduler_service  # noqa: E402
 from database import Base  # noqa: E402
-from models import Notification, Reminder  # noqa: E402
+from models import ActivityLog, Notification, Reminder  # noqa: E402
 
 NOW = datetime(2026, 10, 4, 12, 0)  # neděle 14:00 Praha
 
@@ -102,6 +102,21 @@ class ReminderApiTestCase(unittest.TestCase):
         statuses = {i["title"]: i["status"] for i in self.client.get("/reminders?status=all").json()}
         self.assertEqual(statuses, {"rotoped 30 min": "done", "WoT plán": "cancelled"})
         self.assertEqual(self.client.get("/reminders").json(), [])
+
+    def test_push_actions_are_recorded_as_from_the_notification(self):
+        """MRK-80: Hotovo / Odložit z oznámení (?source=push) – v Aktivitě zdroj „push", neznámý zdroj = „manual"."""
+        self.login()
+        rid = self.client.post("/reminders", json={"title": "fyzio", "in_minutes": 30}).json()["id"]
+        self.assertEqual(self.client.post(f"/reminders/{rid}/snooze?source=push", json={"minutes": 10}).status_code, 200)
+        self.assertEqual(self.client.post(f"/reminders/{rid}/done?source=push").json()["status"], "done")
+        other = self.client.post("/reminders", json={"title": "jiné", "in_minutes": 30}).json()["id"]
+        self.client.post(f"/reminders/{other}/done?source=evil")
+        db = self.Session()
+        try:
+            contexts = [r.user_context for r in db.query(ActivityLog).order_by(ActivityLog.id) if r.action_type in ("snooze", "complete")]
+        finally:
+            db.close()
+        self.assertEqual(contexts[-3:], ["push", "push", "manual"], contexts)
 
     def test_scheduler_status_reports_reminder_job(self):
         self.login()

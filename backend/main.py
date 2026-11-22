@@ -2034,8 +2034,9 @@ def reminders_update(reminder_id: int, request: ReminderUpdateRequest):
 
 
 def _ui_source(source: str | None) -> str:
-    """Odkud přišla ruční akce (Aktivita „zdroj"): jen známé povrchy, jinak „manual" (Roadmap 4H)."""
-    return "today" if source == "today" else "manual"
+    """Odkud přišla ruční akce (Aktivita „zdroj"): jen známé povrchy, jinak „manual" (Roadmap 4H).
+    MRK-80: „push" = akce Hotovo / Odložit přímo z oznámení na telefonu."""
+    return source if source in ("today", "push") else "manual"
 
 
 @app.post("/reminders/{reminder_id}/snooze")

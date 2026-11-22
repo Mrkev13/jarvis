@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import PushSettings from "@/components/PushSettings";
+import Link from "next/link";
 import { useRowExit } from "@/components/motion/useRowExit";
 import {
   ActionMenu,
@@ -385,7 +385,16 @@ export default function RemindersPage() {
             </form>
           </Card>
 
-          <PushSettings />
+          {/* MRK-80: nastavení upozornění na telefon je v Nastavení */}
+          <Card data-reminders-push-link="">
+            <CardHeader title="Upozornění na telefon" description="Zapnutí, test a zvuk připomínek." />
+            <Link
+              href="/settings#push"
+              className="mt-2 inline-flex min-h-11 items-center gap-1 text-sm text-accent-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+            >
+              Nastavení upozornění →
+            </Link>
+          </Card>
         </div>
       </div>
 

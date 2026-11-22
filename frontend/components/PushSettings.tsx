@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Card, CardHeader, StatusBadge } from "@/components/ui";
-import { apiFetch } from "@/lib/api";
+import { API_URL, apiFetch } from "@/lib/api";
 import {
   currentPushEnv,
   detectPushSupport,
@@ -18,6 +18,7 @@ import {
   testResultText,
   UNSUPPORTED_TEXT,
   UNVERIFIED_TEXT,
+  serviceWorkerUrl,
   urlBase64ToUint8Array,
   type DeviceState,
 } from "@/lib/push";
@@ -43,6 +44,7 @@ async function postJson(path: string, body: unknown): Promise<Response> {
  */
 export default function PushSettings() {
   const [state, setState] = useState<DeviceState>("checking");
+  const [needsActions, setNeedsActions] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
   const [config, setConfig] = useState<PushConfig | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,6 +74,11 @@ export default function PushSettings() {
       }
       const sub = await existingSubscription();
       if (sub) {
+        // MRK-80: worker registrovaný před MRK-80 nezná adresu API → v oznámení nejsou tlačítka Hotovo / Odložit.
+        // Nic se tu neregistruje (jen kliknutím); nabídne se „Zapnout tlačítka v oznámení".
+        const reg = await navigator.serviceWorker.getRegistration("/");
+        const script = reg?.active?.scriptURL ?? reg?.waiting?.scriptURL ?? reg?.installing?.scriptURL ?? "";
+        setNeedsActions(!script.includes("api="));
         // MRK-102: klíč, pro který byl odběr opravdu vytvořen (ne aktuální klíč serveru – ten by starý odběr „potvrdil").
         const usedKey = subscriptionServerKey(sub.options?.applicationServerKey, sub.endpoint, readRememberedKey());
         const keyMatches = usedKey ? serverKeyMatches(urlBase64ToUint8Array(usedKey).buffer, cfg.public_key) === true : false;
@@ -111,7 +118,7 @@ export default function PushSettings() {
         setMessage("Bez povolení upozornění to nepůjde.");
         return;
       }
-      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
+      const reg = await navigator.serviceWorker.register(serviceWorkerUrl(API_URL), { scope: "/", updateViaCache: "none" });
       await navigator.serviceWorker.ready;
       const key = urlBase64ToUint8Array(config.public_key);
       // MRK-102: starý odběr k jiným klíčům serveru nejdřív zrušit, jinak by subscribe() vrátil ten starý.
@@ -136,6 +143,7 @@ export default function PushSettings() {
         throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
       rememberKey(sub.endpoint, usedKey);
+      setNeedsActions(false);
       setState("on");
       setDetail(null);
       setMessage("Hotovo. Zkus „Poslat test“.");
@@ -203,6 +211,11 @@ export default function PushSettings() {
         {(state === "off" || state === "stale" || doubtful) && (
           <Button variant={doubtful ? "secondary" : "primary"} size="sm" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
             {state === "off" ? "Zapnout na tomto zařízení" : "Znovu připojit"}
+          </Button>
+        )}
+        {on && needsActions && (
+          <Button size="sm" variant="secondary" busy={busy} busyLabel="Připojuji…" onClick={() => void enable()}>
+            Zapnout tlačítka v oznámení
           </Button>
         )}
         {(on || doubtful) && (

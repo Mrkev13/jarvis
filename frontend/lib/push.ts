@@ -204,3 +204,17 @@ export function deviceStateLabel(state: DeviceState): string {
       return "Zjišťuji…";
   }
 }
+
+/**
+ * MRK-80: adresa service workeru s originem API v query – worker z oznámení volá Hotovo / Odložit přímo na backend,
+ * který běží na jiném originu. Jen origin (žádná cesta); neplatná adresa = worker bez akcí.
+ */
+export function serviceWorkerUrl(apiUrl: string): string {
+  try {
+    const url = new URL(apiUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "/sw.js";
+    return `/sw.js?api=${encodeURIComponent(url.origin)}`;
+  } catch {
+    return "/sw.js";
+  }
+}

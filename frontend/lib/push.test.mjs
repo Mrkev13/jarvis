@@ -117,3 +117,13 @@ test("card state after sync: connected only with a known, matching key", async (
   assert.doesNotMatch(label("auth_error"), /Připojeno|znovu připojit/i);
   assert.match(label("unverified"), /není ověřené/);
 });
+
+// MRK-80: worker dostane jen origin API (akce Hotovo / Odložit z oznámení).
+test("service worker url carries only the API origin", async () => {
+  const { serviceWorkerUrl } = await import("./push.ts");
+  assert.equal(serviceWorkerUrl("https://hub.example.ts.net:8443"), "/sw.js?api=https%3A%2F%2Fhub.example.ts.net%3A8443");
+  assert.equal(serviceWorkerUrl("https://hub.example.ts.net:8443/api/x?y=1"), "/sw.js?api=https%3A%2F%2Fhub.example.ts.net%3A8443");
+  assert.equal(serviceWorkerUrl("http://127.0.0.1:8000"), "/sw.js?api=http%3A%2F%2F127.0.0.1%3A8000");
+  assert.equal(serviceWorkerUrl("javascript:alert(1)"), "/sw.js");
+  assert.equal(serviceWorkerUrl("not a url"), "/sw.js");
+});
