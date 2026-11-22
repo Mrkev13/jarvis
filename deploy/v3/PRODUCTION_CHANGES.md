@@ -120,3 +120,16 @@ the old code cannot name a revision it does not know (backend `health_service` r
 old-on-new comparison of that name with the new head could never pass – also in the app-rollback compatibility check.
 Fixed in the next PR: the old app's `/health` has to agree (reachable, the new head or `unknown`), the revision itself
 is read from the database (the copy, or production before an app rollback).
+
+Third `--check` (script `755ec8506356…`, #85): all rehearsal steps passed (`REHEARSAL_OLD_APP_COMPATIBLE`,
+`MIGRATION_PREFLIGHT_OK`, `NO_PRODUCTION_CHANGES`).
+
+`deploy-migration-v3.sh --apply 6526411…` (22 November 2026, updater timer stopped, maintenance lock): fresh backup
+(ID 60, `BACKUP_VERIFIED`, age 0.0 h) → rehearsal on a copy of that backup (all steps OK) → journal `prepared →
+rehearsed → db_migrating → db_migrated → deploying → verifying → deployed` → `MIGRATION_DEPLOYMENT_OK`. Production
+database `0028_school_progress` → `0030_memory_lifecycle`; backend and frontend recreated through the managed templates
+and healthy. Afterwards the timer was started again; backend `/health`: `healthy`, migrations `current`
+(`0030_memory_lifecycle`), commit `6526411`, scheduler `running`. The later commits on the production branch (#84,
+#85: deploy tooling and tests only, no Alembic change) are left to the updater.
+
+Installed `deploy-migration-v3.sh` is `755ec8506356…` (= repository after #85).
