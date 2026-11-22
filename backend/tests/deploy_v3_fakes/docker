@@ -240,8 +240,12 @@ def health(s, container):
     rev, image = db_revision_for(s, container), image_of(s, container)
     head = s["meta"][image]["head"]
     ok = rev == head and image not in s.get("unhealthy", [])
+    # like backend health_service: a revision the code does not know (newer than its head - the revision ids here are
+    # numbered) is reported as "unknown", never by name (MRK-114: old app on the migrated database)
+    known = rev is not None and rev <= head
     return {"status": "healthy" if ok else "unhealthy", "database": {"status": "reachable"},
-            "migrations": {"status": "current" if rev == head else "mismatch", "current": [rev], "head": [head]}}
+            "migrations": {"status": "current" if rev == head else "mismatch", "current": [rev if known else "unknown"],
+                           "head": [head]}}
 
 
 def smoke_ok(s, container):

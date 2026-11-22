@@ -575,3 +575,16 @@ def test_fake_app_rejects_what_the_real_app_rejects(m):
         assert r.returncode != 0 and 'REHEARSAL_APP_UNHEALTHY' in out(r), out(r)
         assert m.prod_db() == OLD and m.rehearsal_leftovers() == []
     m.migration.write_text(script)
+
+
+def test_old_app_names_the_new_revision_unknown(m):
+    """Backend health_service reports a revision the code does not know as "unknown" (the fake does too now). The
+    old-on-new check of the first real --check (6526411) compared that name with the new head and could never pass:
+    REHEARSAL_APP_UNHEALTHY: ...-old (old-on-new). The revision is read from the database instead."""
+    b = m.migration_release()
+    r = m.mig('--check', b)
+    assert r.returncode == 0 and 'REHEARSAL_OLD_APP_COMPATIBLE' in r.stdout, out(r)
+    m.mutate(lambda s: s.update(prod_db=NEW))  # the running (old) backend on a migrated database
+    health = json.loads(subprocess.run(['docker', 'exec', 'standa-hub-backend', 'python', '-c', 'x'], env=m.env,
+                                       capture_output=True, text=True, check=True).stdout)
+    assert health['migrations'] == {'status': 'mismatch', 'current': ['unknown'], 'head': [OLD]}
