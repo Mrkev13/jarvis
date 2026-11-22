@@ -167,7 +167,8 @@ What it does - journal `$STATE_DIR/migration-v3-<SHA>/journal.json`, helper `mrk
    updater's strict health check keeps failing until a fixed release is deployed - deliberate.
 
 Tests: `backend/tests/test_deploy_migration_v3.py` (fake docker models the production revision, throwaway copies,
-rehearsal apps and `alembic upgrade`). Before the first real migration (`0029_attendance_schedule`, PR #64): LXD test,
+rehearsal apps and `alembic upgrade`; a production-like backend environment with `FAKE_RENDER_ENV_FILE=1`: the
+throwaway copy carries the production database name, the rendered env is unescaped `$$` → `$`). Before the first real migration (`0029_attendance_schedule`, PR #64): LXD test,
 restore of a real backup, old/new app compatibility on a real copy - MRK-114.
 
 ## Update interval (MRK-108, 15 November 2026)

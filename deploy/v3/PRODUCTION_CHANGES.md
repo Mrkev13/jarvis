@@ -72,3 +72,44 @@ Run: `restart-v3.sh --check` → `PREVIOUS_ENV_RECONSTRUCTED`, `ENV_VALID`, `RES
 - Calendar → Synchronizovat works (Google and Moodle); a test reminder arrived on the phone;
 - updater: `BACKEND_COMPOSE_DRIFT` before the restart, `ALREADY_DEPLOYED` after it, then deployed `cf5d5b3`
   (`AUTO_UPDATE_DEPLOYED`) on its own.
+
+## 2026-11-22 – migration tooling installed, first `--check` of release `6526411` (MRK-114)
+
+Why: release PR #83 (`main@f2b9ac9`, Alembic `0028_school_progress` → `0030_memory_lifecycle`) needs the controlled
+migration deployment. Before installing, the root-only files were verified unchanged against the last recorded state
+(`deploy-transaction-v3.sh` `8fb0e6e8…` = `02a965c`, `backup.sh` `232c2892…`, `mrk108/check-ci.sh` `a0ee7354…`,
+`mrk108/backend-managed.yaml` `9c318778…`, `mrk108/frontend-managed.yaml` `088d3e88…`, updater service inactive).
+
+Installed from `mrk-101-ubuntu-production` at `adf962e` with the timer stopped (root, scripts 0755, helpers 0644;
+SHA-256 prefix):
+
+| File | SHA-256 |
+| --- | --- |
+| `/usr/local/lib/standa-hub/deploy-migration-v3.sh` (new) | `41a3642bcdde…` |
+| `/usr/local/lib/standa-hub/deploy-transaction-v3.sh` (`02a965c` → repo version: pending migration / restart / template journals block it) | `d3a5acebeb47…` |
+| `/usr/local/lib/standa-hub/restart-v3.sh` (MRK-121 version) | `1a20a47cd156…` |
+| `/usr/local/lib/standa-hub/frontend-template-v3.sh` (new) | `341e547fbb2f…` |
+| `/usr/local/lib/standa-hub/mrk108/check-migration.py` (new) | `350edc677e71…` |
+| `/usr/local/lib/standa-hub/mrk108/compat-smoke.py` (new) | `9704a6eecc4d…` |
+| `/usr/local/lib/standa-hub/mrk108/migration-journal.py` (new) | `c7a2c69db64f…` |
+
+`frontend-managed.yaml` deliberately **not** replaced (MRK-121 goes through `frontend-template-v3.sh`). The known gap of
+the 2026-11-21 entry (old updater not reading restart journals) is closed by the new `deploy-transaction-v3.sh`.
+
+After the merge of #83 the updater built the target images and stopped on `MIGRATION_HEAD_CHANGED` (as designed). The
+timer was then stopped for the controlled deployment (it held the maintenance lock while rebuilding every 10 minutes;
+`--check` ended with `MAINTENANCE_LOCK_TIMEOUT`).
+
+`deploy-migration-v3.sh --check 6526411…`: preflight passed (`CI_APPROVED`, `BACKUP_VERIFIED` 18.2 h,
+`TARGET_IMAGE_PROVENANCE_VERIFIED`, `PRODUCTION_DATABASE_AT_OLD_HEAD`, `MIGRATION_OPS_ADDITIVE`,
+`COMPOSE_HASHES_MATCH_RUNNING`, `REHEARSAL_RESTORE_OK`), then `REHEARSAL_APP_UNHEALTHY: …-old (strict)` – **no
+production change**. Two defects of the rehearsal that the fake docker could not show (the reason MRK-114 asked for a
+real run first):
+
+1. the throwaway copy was named `rehearsal`; the app refuses a `DATABASE_URL` whose database is not
+   `PRODUCTION_DATABASE_NAME` (`production.guard_production_environment`, also in `alembic` via `models`);
+2. `docker compose config --format json` prints every literal `$` as `$$` (verified with Compose v5.6); written to a
+   `docker --env-file` unchanged, the bcrypt `AUTH_PIN_HASH` becomes invalid and the app refuses to start.
+
+Fixed in the follow-up PR (copy uses the production database name; rendered env unescaped) with regression tests on a
+production-like environment. Next: install the fixed `deploy-migration-v3.sh`, `--check`, `--apply`, start the timer.
