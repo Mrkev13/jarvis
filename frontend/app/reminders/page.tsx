@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PushSettings from "@/components/PushSettings";
 import {
+  ActionMenu,
   Button,
   Card,
   CardHeader,
@@ -183,23 +184,27 @@ export default function RemindersPage() {
               >
                 Hotovo
               </Button>
-              {snoozeOptions().map((o) => (
-                <Button
-                  key={o.label}
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => void act(r.id, `/reminders/${r.id}/snooze`, o.body)}
-                >
-                  {o.label}
-                </Button>
-              ))}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => startEdit(r)}>
-                Upravit
-              </Button>
-              <Button size="sm" variant="danger" disabled={busy} onClick={() => setCancelTarget(r)}>
-                Zrušit
-              </Button>
+              {/* MRK-123: jedno hlavní tlačítko, odložení a ostatní akce v nabídkách (dřív 6 stejných tlačítek) */}
+              <ActionMenu
+                label="Odložit"
+                ariaLabel={`Odložit připomínku: ${r.title}`}
+                disabled={busy}
+                items={snoozeOptions().map((o) => ({
+                  label: o.label,
+                  ariaLabel: `${o.label}: ${r.title}`,
+                  onSelect: () => void act(r.id, `/reminders/${r.id}/snooze`, o.body),
+                }))}
+              />
+              <ActionMenu
+                icon="more"
+                variant="ghost"
+                ariaLabel={`Další akce: ${r.title}`}
+                disabled={busy}
+                items={[
+                  { label: "Upravit", ariaLabel: `Upravit připomínku: ${r.title}`, onSelect: () => startEdit(r) },
+                  { label: "Zrušit", ariaLabel: `Zrušit připomínku: ${r.title}`, tone: "danger", onSelect: () => setCancelTarget(r) },
+                ]}
+              />
             </>
           )
         }

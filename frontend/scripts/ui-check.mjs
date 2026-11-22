@@ -156,7 +156,12 @@ for (const scheme of ["light", "dark"]) {
 // 4) ConfirmDialog: role/aria, výchozí fokus, past na fokus, Escape, busy stav bez dvojího odeslání.
 {
   const { ctx, page } = await open("/reminders");
-  await page.getByRole("button", { name: "Zrušit", exact: true }).first().click();
+  // MRK-123: Zrušit je v nabídce ⋯ (Další akce)
+  const cancelFirst = async () => {
+    await page.getByRole("button", { name: /^Další akce: / }).first().click();
+    await page.getByRole("menuitem", { name: /^Zrušit připomínku: / }).click();
+  };
+  await cancelFirst();
   const dialog = page.getByRole("dialog");
   check("dialog: role=dialog + aria-modal", (await dialog.count()) === 1 && (await dialog.getAttribute("aria-modal")) === "true");
   check("dialog: má popisek (aria-labelledby)", Boolean(await dialog.getAttribute("aria-labelledby")));
@@ -169,8 +174,8 @@ for (const scheme of ["light", "dark"]) {
   check("dialog: Tab zůstává v dialogu", inside);
   await page.keyboard.press("Escape");
   check("dialog: Escape zavře", (await dialog.count()) === 0);
-  await page.getByRole("button", { name: "Zrušit", exact: true }).first().click();
-  const confirm = page.getByRole("button", { name: "Zrušit připomínku" });
+  await cancelFirst();
+  const confirm = page.getByRole("button", { name: "Zrušit připomínku", exact: true });
   await confirm.click();
   await page.waitForTimeout(100);
   const busyBtn = page.locator('[role="dialog"] button[aria-busy="true"]');
@@ -2572,11 +2577,15 @@ await wotReset();
   const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
   await schoolReset();
   const { ctx, page, errors } = await open("/school");
-  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  // MRK-123: otevřené = aktuální + sbalené „Starší po termínu“ (fixtury mají pevná data → většina je starší); skupiny
+  // se tu otevřou, ať jdou řádky číst a ovládat
+  await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+  const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
   const closedList = page.getByRole("list", { name: "Hotové úkoly a uzavřené zkoušky" });
   const inOpen = async (t) => (await openList.locator(`[data-search-target="${t}"]`).count()) === 1;
   const inClosed = async (t) => (await closedList.locator(`[data-search-target="${t}"]`).count()) === 1;
-  check("škola: otevřený úkol má Splnit i Smazat", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Smazat úkol Sada" }).count()) === 1);
+  check("škola: otevřený úkol má Splnit a ⋯", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Další akce: Sada" }).count()) === 1);
   check("škola: otevřená zkouška má Uzavřít", (await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).count()) === 1);
   check("škola: hotová položka má Znovu otevřít", (await closedList.getByRole("button", { name: "Znovu otevřít úkol Esej" }).count()) === 1);
 
@@ -2624,17 +2633,73 @@ await wotReset();
   await closedList.getByRole("button", { name: "Znovu otevřít úkol Sada" }).click();
   await page.waitForTimeout(800);
   check("škola: znovu otevřený úkol zpět v otevřených", (await inOpen("assignment-1")) && (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1);
-  check("škola: mazání zůstává samostatná akce", (await page.getByRole("button", { name: /^Smazat (úkol|zkoušku) / }).count()) === 10);
+  check("škola: mazání v nabídce ⋯ u každého úkolu a zkoušky", (await page.getByRole("button", { name: /^Další akce: / }).count()) === 10);
   check("škola akce: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
   await schoolReset();
 }
 {
   const { ctx, page, errors } = await open("/school", { width: 390, height: 844 });
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
   check("škola mobil: akce bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   const b = await page.getByRole("button", { name: "Splnit úkol Sada" }).boundingBox();
   check("škola mobil: Splnit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));
   check("škola mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// MRK-123 – méně šumu v řádcích: Škola (staré po termínu a hotové sbalené, červená jen čerstvé, Smazat v ⋯),
+// Připomínky (Hotovo + Odložit ▾ + ⋯, nabídka z klávesnice).
+{
+  const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  await schoolReset();
+  const { ctx, page, errors } = await open("/school", { width: 1366, height: 900 });
+  const stale = page.locator('details[data-collapsible-group="school-stale"]');
+  await stale.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("řádky škola: Starší po termínu sbalené s počtem", (await stale.count()) === 1 && !(await stale.evaluate((d) => d.open)) && /\(\d+\)/.test(await stale.locator("summary").innerText()));
+  check("řádky škola: Hotové a uzavřené sbalené", !(await page.locator('details[data-collapsible-group="school-closed-list"]').evaluate((d) => d.open)));
+  const tones = await page.evaluate(() => {
+    return [...document.querySelectorAll('[aria-label="Starší po termínu"] > li')].map((li) => li.className.includes("motion-attention"));
+  });
+  check("řádky škola: staré po termínu nepulzují", tones.length > 0 && tones.every((t) => !t), JSON.stringify(tones));
+  await stale.locator("summary").click();
+  const sada = page.getByRole("button", { name: "Další akce: Sada" });
+  await sada.click();
+  const menu = page.getByRole("menu", { name: "Další akce: Sada" });
+  check("řádky škola: ⋯ otevře nabídku se Smazat", (await menu.count()) === 1 && (await menu.getByRole("menuitem", { name: "Smazat úkol Sada" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  check("řádky škola: Escape zavře a vrátí fokus", (await menu.count()) === 0 && (await sada.evaluate((el) => el === document.activeElement)));
+  await sada.click();
+  await menu.getByRole("menuitem", { name: "Smazat úkol Sada" }).click();
+  check("řádky škola: Smazat dál potvrzuje", (await page.getByRole("dialog", { name: /Smazat úkol Sada/ }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: `${OUT}rows-school.png`, fullPage: true });
+  check("řádky škola: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await schoolReset();
+}
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  const { ctx, page, errors } = await open("/reminders", { width, height });
+  const row = page.locator('[data-search-target^="reminder-"]').first();
+  await row.waitFor({ timeout: 4000 }).catch(() => undefined);
+  const names = await row.getByRole("button").evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label") || b.textContent.trim()));
+  check(`řádky připomínky ${label}: jen Hotovo, Odložit a ⋯`, names.length === 3 && names[0] === "Hotovo" && /^Odložit připomínku: /.test(names[1]) && /^Další akce: /.test(names[2]), JSON.stringify(names));
+  const snooze = row.getByRole("button", { name: /^Odložit připomínku: / });
+  await snooze.focus();
+  await page.keyboard.press("Enter");
+  const snoozeMenu = page.getByRole("menu", { name: /^Odložit připomínku: / });
+  const items = await snoozeMenu.getByRole("menuitem").allInnerTexts();
+  check(`řádky připomínky ${label}: Odložit nabídne časy, fokus na první`, items.length >= 3 && items[0] === "+15 min" && await eventually(() => snoozeMenu.getByRole("menuitem").first().evaluate((el) => el === document.activeElement)), JSON.stringify(items));
+  await page.keyboard.press("ArrowDown");
+  check(`řádky připomínky ${label}: šipka dolů na další volbu`, await snoozeMenu.getByRole("menuitem").nth(1).evaluate((el) => el === document.activeElement));
+  const sizes = await snoozeMenu.getByRole("menuitem").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), Math.round(r.height)]; }));
+  check(`řádky připomínky ${label}: nabídka v okně`, sizes.every(([l, r]) => l >= 0 && r <= width), JSON.stringify(sizes));
+  if (width < 500) check("řádky připomínky mobil: položky ≥ 44 px", sizes.every(([, , h]) => h >= 44), JSON.stringify(sizes));
+  await page.screenshot({ path: `${OUT}rows-reminders-${label}.png` });
+  await page.keyboard.press("Escape");
+  check(`řádky připomínky ${label}: Escape vrátí fokus na Odložit`, (await snoozeMenu.count()) === 0 && (await snooze.evaluate((el) => el === document.activeElement)));
+  await page.mouse.click(5, 5);
+  check(`řádky připomínky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  check(`řádky připomínky ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 // MRK-75 – předměty: úprava, archivace / obnovení, archiv mimo nabídky (stavový mock).
@@ -2766,7 +2831,9 @@ await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
 // MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
 for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
   const { ctx, page, errors } = await open("/school", { width, height });
-  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+  const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
   const row = openList.locator('[data-search-target="moodle-41"]');
   await row.waitFor({ timeout: 4000 }).catch(() => undefined);
   check(`moodle ${label}: termín v otevřených se štítkem a předmětem`, (await row.count()) === 1 && (await row.innerText()).includes("Moodle") && (await row.innerText()).includes("Fyzika"));
