@@ -288,8 +288,13 @@ def subscription_view(sub: PushSubscription) -> dict:
 # ===== fronta a odesílání =====
 
 def notification_message(n: Notification) -> dict:
-    return {"title": n.title, "body": (n.message or "")[:300], "url": n.action_url or "/reminders",
-            "tag": f"standa-{n.source_type}-{n.source_id}", "ts": n.created_at.isoformat() + "Z" if n.created_at else None}
+    msg = {"title": n.title, "body": (n.message or "")[:300], "url": n.action_url or "/reminders",
+           "tag": f"standa-{n.source_type}-{n.source_id}", "ts": n.created_at.isoformat() + "Z" if n.created_at else None}
+    if n.source_type == "reminder" and n.source_id is not None:
+        # MRK-80: service worker připomínku nechá viset, zavibruje, znovu upozorní při stejném tagu (renotify)
+        # a nabídne akce Hotovo / Odložit 10 min (POST na existující endpointy připomínek).
+        msg.update(kind="reminder", reminder_id=int(n.source_id))
+    return msg
 
 
 def enqueue_deliveries(db: Session, providers: list[DeliveryProvider], now: datetime | None = None) -> int:

@@ -55,6 +55,22 @@ test("service worker never caches or intercepts requests, so private data is nev
   assert.match(sw, /new URL\(path, self\.location\.origin\)/);
 });
 
+// MRK-80: připomínky jsou všimnutelné a jdou vyřídit z oznámení – jen přes origin API z registrace.
+test("reminder notifications stay, vibrate, renotify and offer done / snooze actions", () => {
+  const sw = read("public/sw.js");
+  for (const flag of ["requireInteraction: true", "renotify: Boolean(tag)", "vibrate: REMINDER_VIBRATE"]) {
+    assert.ok(sw.includes(flag), flag);
+  }
+  assert.match(sw, /action: "done", title: "Hotovo"/);
+  assert.match(sw, /action: "snooze"/);
+  // the only network call is to the API origin from the registration URL, with the session cookie
+  assert.equal((sw.match(/\bfetch\(/g) || []).length, 1, "single fetch");
+  assert.match(sw, /fetch\(`\$\{api\}\$\{path\}\?source=push`/);
+  assert.match(sw, /url\.protocol === "https:" \|\| url\.protocol === "http:" \? url\.origin : null/);
+  // a failed action opens the app instead of failing silently
+  assert.match(sw, /ok \? undefined : openApp\(`\/reminders\?reminder=\$\{reminderId\}`\)/);
+});
+
 function sourceFiles(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -76,7 +92,7 @@ test("permission is requested and the worker registered only from the explicit o
   const settings = read("components/PushSettings.tsx");
   const enable = settings.slice(settings.indexOf("async function enable()"), settings.indexOf("async function sendTest()"));
   assert.ok(enable.includes("Notification.requestPermission()"), "prompt lives in enable()");
-  assert.ok(enable.includes('navigator.serviceWorker.register("/sw.js", { scope: "/"'), "worker scope is the whole app");
+  assert.ok(enable.includes('navigator.serviceWorker.register(serviceWorkerUrl(API_URL), { scope: "/"'), "worker scope is the whole app");
   const outside = settings.replace(enable, "");
   assert.doesNotMatch(outside, /requestPermission|serviceWorker\.register/, "nothing prompts or registers on load");
   assert.match(settings, /onClick=\{\(\) => void enable\(\)\}/, "enable() runs only from a click");
