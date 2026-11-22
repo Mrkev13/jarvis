@@ -104,6 +104,25 @@ Frontend, ve `frontend/`: `npm run lint && npx tsc --noEmit && npm test && npm r
    - co bylo ověřeno lokálně na reálné DB/Windows a co jen v cloudu.
 6. Po merge přejde issue na Done (Linear ↔ GitHub), jinak ho přepni ručně.
 
+## Produkce (Ubuntu, deploy v3) – jen přehled
+
+Podrobně: `docs/operations.md` → *Release to production*, na produkční větvi `deploy/v3/README.md` a záznamy
+`deploy/v3/PRODUCTION_CHANGES.md`.
+
+- Produkce nasazuje větev `mrk-101-ubuntu-production`, ne `main`. Z `main` se tam jde **jen přes release PR**
+  (Actions → *Release to production*, MRK-113). Změny `deploy/` jdou PR přímo do produkční větve, vždy `manual-merge`.
+- Updater (timer 10 min) nasadí sám jen commit se zeleným push CI na produkční větvi; změna Alembic head ho zastaví
+  (`MIGRATION_HEAD_CHANGED` je správně).
+- Migrace v produkci jen ručně: `deploy-migration-v3.sh --check SHA`, pak `--apply SHA` (MRK-114). DB se nikdy
+  automaticky nedowngraduje; cesta zpět = záloha pořízená při `--apply`.
+- Na serveru vše jen přes skripty v3 pod `with-deployment-lock.sh` (`restart-v3.sh`, `frontend-template-v3.sh`,
+  `deploy-migration-v3.sh`). Na delší ruční zásah zastavit timer updateru (drží zámek), po něm zase spustit.
+- Nikdy `git reset/checkout/pull` v živém `/srv/standa-hub`, `docker compose config` bez filtrů ani ruční
+  `docker compose up` produkčních kontejnerů. Diagnostika vypisuje jen stavové řádky – žádné secrets, `.env` hodnoty
+  ani hostname tailnetu (`<tailnet-host>`).
+- Uživateli posílej příkazy k vložení celé; upozorni, že výstup přijde až na konci (Ctrl+Z proces jen pozastaví a
+  drží zámek).
+
 ## Handoff (povinný při každém ukončení práce)
 
 Preferovaně vlož níže uvedený handoff jako komentář do Linear issue. Pokud Linear není
