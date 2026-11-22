@@ -3269,6 +3269,72 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   }
 }
 
+// 27) MRK-126 – řádek po Hotovo / Splnit / Zrušit plynule zmizí, fokus přejde na souseda (oba režimy pohybu)
+for (const reducedMotion of ["no-preference", "reduce"]) {
+  const mode = reducedMotion === "reduce" ? "reduce" : "plný pohyb";
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  const focusInfo = (page) => page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName ?? "", row: el?.closest("[data-row-key]")?.getAttribute("data-row-key") ?? null, label: el?.getAttribute("aria-label") || el?.textContent?.trim() || "" };
+  });
+  const exitAnim = (page, key) => page.evaluate((k) => {
+    const row = document.querySelector(`[data-row-key="${k}"][data-row-exiting]`);
+    return row ? { anim: getComputedStyle(row).animationName, inert: row.inert } : null;
+  }, key);
+
+  // Škola: Splnit → řádek odejde z otevřených, fokus na souseda
+  await fetch(`${MOCK}/school/reset`, { method: "POST" });
+  {
+    const { ctx, page, errors } = await open("/school", { width: 1366, height: 900, reducedMotion });
+    await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+    await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+    await page.getByRole("button", { name: "Splnit úkol Sada" }).click();
+    await page.getByRole("dialog", { name: "Splnit úkol Sada?" }).getByRole("button", { name: "Splnit", exact: true }).click();
+    const during = await eventually(() => exitAnim(page, "a-1"), 1000) ? await exitAnim(page, "a-1") : null;
+    check(`mizení řádků ${mode}: škola – řádek mizí (${reducedMotion === "reduce" ? "bez animace" : "motion-row-exit"}) a je inert`,
+      Boolean(during && during.inert && during.anim === (reducedMotion === "reduce" ? "none" : "motion-row-exit")), JSON.stringify(during));
+    const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
+    check(`mizení řádků ${mode}: škola – řádek odešel z otevřených`, await eventually(async () => (await openList.locator('[data-row-key="a-1"]').count()) === 0, 3000));
+    const f = await eventually(async () => { const x = await focusInfo(page); return x.row && x.row !== "a-1" ? x : null; }, 2000) ? await focusInfo(page) : await focusInfo(page);
+    check(`mizení řádků ${mode}: škola – fokus na sousedním řádku (ne body)`, Boolean(f.row && f.row !== "a-1" && f.tag !== "BODY"), JSON.stringify(f));
+    check(`mizení řádků ${mode}: škola – bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/school/reset`, { method: "POST" });
+
+  // Připomínky: Hotovo u jednorázové + Zrušit přes dialog – řádek zmizí, fokus na souseda; opakovaná zůstane
+  await fetch(`${MOCK}/reminders/reset`, { method: "POST" });
+  await fetch(`${MOCK}/reminders/stateful`, { method: "POST" });
+  {
+    const { ctx, page, errors } = await open("/reminders", { width: 1366, height: 900, reducedMotion });
+    const row = (id) => page.locator(`[data-row-key="reminder-${id}"]`);
+    await row(2).waitFor({ timeout: 4000 });
+    await row(2).getByRole("button", { name: "Hotovo" }).click();
+    const during = await eventually(() => exitAnim(page, "reminder-2"), 1000) ? await exitAnim(page, "reminder-2") : null;
+    check(`mizení řádků ${mode}: připomínka Hotovo – řádek mizí`, Boolean(during && during.anim === (reducedMotion === "reduce" ? "none" : "motion-row-exit")), JSON.stringify(during));
+    check(`mizení řádků ${mode}: připomínka Hotovo – řádek zmizel`, await eventually(async () => (await row(2).count()) === 0, 3000));
+    let f = await focusInfo(page);
+    await eventually(async () => { f = await focusInfo(page); return Boolean(f.row && f.row !== "reminder-2"); }, 2000);
+    check(`mizení řádků ${mode}: připomínka Hotovo – fokus na sousední řádek`, Boolean(f.row && f.row !== "reminder-2"), JSON.stringify(f));
+    // Zrušit přes ⋯ a potvrzovací dialog – po zavření dialogu fokus na sousedovi, ne v body
+    await page.getByRole("button", { name: "Další akce: Odeslat fakturu" }).click();
+    await page.getByRole("menuitem", { name: "Zrušit připomínku: Odeslat fakturu" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Zrušit připomínku", exact: true }).click();
+    check(`mizení řádků ${mode}: Zrušit – řádek zmizel a dialog zavřený`, await eventually(async () => (await row(3).count()) === 0 && (await page.getByRole("dialog").count()) === 0, 3000));
+    await eventually(async () => { f = await focusInfo(page); return Boolean(f.row && f.row !== "reminder-3"); }, 2000);
+    check(`mizení řádků ${mode}: Zrušit – fokus na sousední řádek (ne body)`, Boolean(f.row && f.row !== "reminder-3" && f.tag !== "BODY"), JSON.stringify(f));
+    // opakovaná připomínka po Hotovo v seznamu zůstává – bez mizení
+    await row(4).getByRole("button", { name: "Hotovo" }).click();
+    await page.waitForTimeout(150);
+    check(`mizení řádků ${mode}: opakovaná připomínka nemizí`, (await row(4).getAttribute("data-row-exiting")) === null && (await row(4).count()) === 1);
+    await page.waitForTimeout(500);
+    if (reducedMotion !== "reduce") await page.screenshot({ path: `${OUT}rows-exit-reminders.png` });
+    check(`mizení řádků ${mode}: připomínky – bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/reminders/reset`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

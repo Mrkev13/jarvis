@@ -26,6 +26,8 @@ export function EntityRow({
   busy,
   searchTarget,
   leading,
+  rowKey,
+  exiting,
 }: {
   title: React.ReactNode;
   badges?: React.ReactNode;
@@ -41,17 +43,25 @@ export function EntityRow({
   searchTarget?: string;
   /** Obrázek / ikona vlevo (např. GameImage tanku) – text zůstává hlavní. */
   leading?: React.ReactNode;
+  /** MRK-126: klíč řádku pro useRowExit (fokus na souseda po zmizení). */
+  rowKey?: string;
+  /** MRK-126: řádek právě mizí po akci – vybledne a nejde s ním pracovat. */
+  exiting?: boolean;
 }) {
   return (
     <li
       style={style}
       aria-busy={busy || undefined}
       data-search-target={searchTarget}
+      data-row-key={rowKey}
+      data-row-exiting={exiting ? "" : undefined}
+      inert={exiting || undefined}
       className={cx(
         "rounded-[var(--radius-control)] border px-3 py-3 md:px-4",
         tone === "neutral" ? "border-line-subtle bg-surface-2" : CARD_TONE[tone],
         muted && "opacity-70",
         className,
+        exiting && "motion-row-exit",
       )}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

@@ -25,6 +25,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { SuccessPulse } from "@/components/motion/SuccessPulse";
+import { useRowExit } from "@/components/motion/useRowExit";
 import { apiFetch, jsonBody } from "@/lib/api";
 import { formatDate, formatRelativeDays } from "@/lib/format";
 import { MAX_STAGGER, staggerStyle } from "@/lib/motion";
@@ -141,6 +142,8 @@ export default function SchoolPage() {
   const [reopening, setReopening] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; signal: number } | null>(null);
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  // MRK-126: odcházející řádek plynule zmizí, fokus přejde na souseda (jinak na nadpis Termíny)
+  const rowExit = useRowExit(() => document.getElementById("school-deadlines"));
 
   const [subjectDraft, setSubjectDraft] = useState({
     name: "",
@@ -356,12 +359,13 @@ export default function SchoolPage() {
 
   async function confirmDeleteAssignment() {
     if (!deletingAssignment) return;
+    const a = deletingAssignment;
     try {
-      const res = await apiFetch(`/school/assignment/${deletingAssignment.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete assignment");
-      await loadData();
+      await rowExit.run(`a-${a.id}`, async () => {
+        const res = await apiFetch(`/school/assignment/${a.id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed to delete assignment");
+        return true;
+      }, loadData);
     } catch (err) {
       console.error(err);
       setError("Nepodařilo se smazat úkol.");
@@ -372,12 +376,13 @@ export default function SchoolPage() {
 
   async function confirmDeleteExam() {
     if (!deletingExam) return;
+    const ex = deletingExam;
     try {
-      const res = await apiFetch(`/school/exam/${deletingExam.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete exam");
-      await loadData();
+      await rowExit.run(`e-${ex.id}`, async () => {
+        const res = await apiFetch(`/school/exam/${ex.id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed to delete exam");
+        return true;
+      }, loadData);
     } catch (err) {
       console.error(err);
       setError("Nepodařilo se smazat zkoušku.");
@@ -403,10 +408,15 @@ export default function SchoolPage() {
     const a = completingAssignment;
     if (!a) return;
     try {
-      const r = await schoolAction(`/school/assignment/${a.id}/complete`);
-      if (r === "error") throw new Error("complete failed");
-      if (r === "stale") await loadData();
-      else await afterTransition(`a-${a.id}`, `Úkol „${a.title}“ je splněný – najdeš ho v Hotové a uzavřené.`);
+      // MRK-126: řádek z otevřených plynule odejde (do sbalené skupiny Hotové), fokus na souseda
+      let stale = false;
+      await rowExit.run(`a-${a.id}`, async () => {
+        const r = await schoolAction(`/school/assignment/${a.id}/complete`);
+        if (r === "error") throw new Error("complete failed");
+        stale = r === "stale";
+        return !stale;
+      }, () => afterTransition(`a-${a.id}`, `Úkol „${a.title}“ je splněný – najdeš ho v Hotové a uzavřené.`));
+      if (stale) await loadData();
     } catch (err) {
       console.error(err);
       setError("Úkol se nepodařilo označit jako splněný.");
@@ -435,14 +445,14 @@ export default function SchoolPage() {
       return;
     }
     try {
-      const r = await schoolAction(`/school/exam/${e.id}/close`, parsed.body);
-      if (r === "error") {
-        setCloseError("Zkoušku se nepodařilo uzavřít.");
-        return;
-      }
-      setClosingExam(null);
-      if (r === "stale") await loadData();
-      else await afterTransition(`e-${e.id}`, `Zkouška „${e.title}“ je uzavřená.`);
+      let result: "ok" | "stale" | "error" = "error";
+      await rowExit.run(`e-${e.id}`, async () => {
+        result = await schoolAction(`/school/exam/${e.id}/close`, parsed.body);
+        if (result !== "error") setClosingExam(null);
+        return result === "ok";
+      }, () => afterTransition(`e-${e.id}`, `Zkouška „${e.title}“ je uzavřená.`));
+      if (result === "error") setCloseError("Zkoušku se nepodařilo uzavřít.");
+      else if (result === "stale") await loadData();
     } catch (err) {
       console.error(err);
       setCloseError("Zkoušku se nepodařilo uzavřít.");
@@ -504,6 +514,7 @@ export default function SchoolPage() {
       return (
         <EntityRow
           key={entry.key}
+          rowKey={entry.key}
           searchTarget={`moodle-${m.key}`}
           style={stagger}
           className="motion-card"
@@ -534,6 +545,8 @@ export default function SchoolPage() {
       return (
         <EntityRow
           key={entry.key}
+          rowKey={entry.key}
+          exiting={rowExit.exiting.has(entry.key)}
           searchTarget={`assignment-${a.id}`}
           style={stagger}
           className={cx("motion-card motion-done-transition", done && "motion-done", overdue && "motion-attention", highlightKey === entry.key && "motion-highlight-row")}
@@ -585,6 +598,8 @@ export default function SchoolPage() {
     return (
       <EntityRow
         key={entry.key}
+        rowKey={entry.key}
+        exiting={rowExit.exiting.has(entry.key)}
         searchTarget={`exam-${e.id}`}
         style={stagger}
         className={cx("motion-card motion-done-transition", closed && "motion-done", highlightKey === entry.key && "motion-highlight-row")}

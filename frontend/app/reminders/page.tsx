@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import PushSettings from "@/components/PushSettings";
+import { useRowExit } from "@/components/motion/useRowExit";
 import {
   ActionMenu,
   Button,
@@ -58,13 +59,22 @@ export default function RemindersPage() {
   const [cancelTarget, setCancelTarget] = useState<Reminder | null>(null);
 
   const groups = useMemo(() => groupReminders(reminders.data ?? []), [reminders.data]);
+  // MRK-126: řádek, který akcí ze seznamu odejde, plynule zmizí a fokus přejde na souseda (jinak na seznam)
+  const rowExit = useRowExit(() => document.getElementById("reminders-view-panel"));
 
-  async function act(id: number, path: string, body?: unknown, method = "POST"): Promise<boolean> {
+  async function act(id: number, path: string, body?: unknown, method = "POST", exit = false): Promise<boolean> {
     setBusyId(id);
     setActionError(null);
     try {
-      await apiJson(path, jsonBody(method, body));
-      await reminders.reload();
+      const call = async () => {
+        await apiJson(path, jsonBody(method, body));
+        return true;
+      };
+      if (exit) await rowExit.run(`reminder-${id}`, call, reminders.reload);
+      else {
+        await call();
+        await reminders.reload();
+      }
       return true;
     } catch (err) {
       setActionError(errorMessage(err, "Akce se nepovedla."));
@@ -118,9 +128,13 @@ export default function RemindersPage() {
     const closed = r.status === "done" || r.status === "cancelled";
     const busy = busyId === r.id;
     const editing = editingId === r.id;
+    // Odejde řádek ze seznamu? Jednorázová Hotovo, cokoli splatného (přesune se z „Teď“) a Zrušit; v historii nic.
+    const leaves = view === "upcoming" && (due || r.recurrence === "none");
     return (
       <EntityRow
         key={r.id}
+        rowKey={`reminder-${r.id}`}
+        exiting={rowExit.exiting.has(`reminder-${r.id}`)}
         searchTarget={`reminder-${r.id}`}
         style={staggerStyle(idx)}
         className={cx("motion-card", due && "motion-attention")}
@@ -180,7 +194,7 @@ export default function RemindersPage() {
                 size="sm"
                 variant={due ? "success" : "secondary"}
                 disabled={busy}
-                onClick={() => void act(r.id, `/reminders/${r.id}/done`)}
+                onClick={() => void act(r.id, `/reminders/${r.id}/done`, undefined, "POST", leaves)}
               >
                 Hotovo
               </Button>
@@ -192,7 +206,7 @@ export default function RemindersPage() {
                 items={snoozeOptions().map((o) => ({
                   label: o.label,
                   ariaLabel: `${o.label}: ${r.title}`,
-                  onSelect: () => void act(r.id, `/reminders/${r.id}/snooze`, o.body),
+                  onSelect: () => void act(r.id, `/reminders/${r.id}/snooze`, o.body, "POST", due && view === "upcoming"),
                 }))}
               />
               <ActionMenu
@@ -259,7 +273,7 @@ export default function RemindersPage() {
                     { value: "history", label: "Hotové a zrušené" },
                   ]}
                 />
-                <div role="tabpanel" id="reminders-view-panel" aria-labelledby={`reminders-view-${view}`} aria-busy={reminders.refreshing}>
+                <div role="tabpanel" id="reminders-view-panel" className="focus:outline-none" aria-labelledby={`reminders-view-${view}`} aria-busy={reminders.refreshing}>
                   {listItems.length ? (
                     <EntityList>{listItems.map(renderRow)}</EntityList>
                   ) : (
@@ -385,7 +399,7 @@ export default function RemindersPage() {
         onConfirm={async () => {
           const target = cancelTarget;
           // Dialog drží busy stav do odpovědi; chyba se pak ukáže na stránce.
-          if (target) await act(target.id, `/reminders/${target.id}/cancel`);
+          if (target) await act(target.id, `/reminders/${target.id}/cancel`, undefined, "POST", view === "upcoming");
           setCancelTarget(null);
         }}
         onCancel={() => setCancelTarget(null)}

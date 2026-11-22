@@ -164,6 +164,18 @@
   animation-delay: calc(var(--motion-i, 0) * var(--motion-stagger));
 }
 
+/* MRK-126: řádek po Hotovo / Smazat krátce vybledne a zmenší se, než ho obnova dat odebere (useRowExit). */
+@keyframes motion-row-exit {
+  to {
+    opacity: 0;
+    transform: translateX(var(--motion-row-exit-distance, 12px)) scale(0.98);
+  }
+}
+/* vyšší specificita: přebije i pozdější animace řádku (motion-attention, motion-highlight-row) */
+.motion-row-exit[data-row-exiting] {
+  animation: motion-row-exit var(--motion-normal) var(--motion-ease-exit) forwards;
+}
+
 /*
  * motion.css je mimo Tailwind vrstvy → jeho `transition-property` přebíjí `transition-colors`.
  * Interaktivní primitiva proto přechází i barvy, aby hover pozadí/okraje zůstaly plynulé.
@@ -337,6 +349,7 @@
   .motion-palette,
   .search-target-active,
   .motion-executing::after,
+  .motion-row-exit,
   .motion-skeleton::after,
   .motion-nav-reveal {
     animation: none !important;
