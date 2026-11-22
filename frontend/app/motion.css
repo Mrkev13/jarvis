@@ -45,6 +45,7 @@
 
   /* Vzdálenosti a měřítka */
   --motion-enter-distance: 6px;
+  --motion-page-distance: 14px; /* MRK-124: vstup stránky */
   --motion-hover-lift: -2px;
   --motion-press-scale: 0.97;
   --motion-pop-scale: 1.04;
@@ -108,6 +109,18 @@
   to   { transform: translateX(100%); }
 }
 
+/* MRK-124: vstup stránky – zřetelnější než vstup karty (delší dráha, emphasized), pořád jen opacity/transform. */
+@keyframes motion-page-enter {
+  from { opacity: 0; transform: translateY(var(--motion-page-distance)); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* MRK-124: skeleton – jemný lesk přejíždějící přes šedý blok (transform pseudo-prvku). */
+@keyframes motion-skeleton-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
 @keyframes motion-fade-out {
   0%, 70% { opacity: 1; }
   100%    { opacity: 0; }
@@ -127,9 +140,22 @@
 
 /* ===== Primitiva ===== */
 
-/* Vstup stránky (obal obsahu v layoutu, klíčovaný cestou). */
+/* Vstup stránky (obal obsahu v layoutu, klíčovaný cestou). MRK-124: delší dráha a emphasized, ať je přechod vidět. */
 .motion-page {
-  animation: motion-enter var(--motion-normal) var(--motion-ease) backwards;
+  animation: motion-page-enter var(--motion-normal) var(--motion-ease-emphasized) backwards;
+}
+
+/* MRK-124: skeleton s leskem (dřív Tailwind animate-pulse). Lesk je pseudo-prvek, blok zůstává vidět i bez animace. */
+.motion-skeleton {
+  position: relative;
+  overflow: hidden;
+}
+.motion-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  animation: motion-skeleton-sweep var(--motion-shimmer-duration) var(--motion-ease-standard) infinite;
 }
 
 /* Vstup karty; postupné zpoždění přes inline proměnnou --motion-i (index karty). */
@@ -311,6 +337,7 @@
   .motion-palette,
   .search-target-active,
   .motion-executing::after,
+  .motion-skeleton::after,
   .motion-nav-reveal {
     animation: none !important;
   }

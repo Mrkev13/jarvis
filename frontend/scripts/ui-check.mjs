@@ -355,6 +355,36 @@ for (const motion of ["no-preference", "reduce"]) {
   await ctx.close();
 }
 
+// 5d) MRK-124: animace, které jsou vidět – vstup stránky, skeleton s leskem, čísla dashboardu naběhnou, klikací řádky
+// se při hoveru zvednou; vše bez pohybu při omezeném pohybu.
+for (const reducedMotion of ["no-preference", "reduce"]) {
+  const reduced = reducedMotion === "reduce";
+  const tag = reduced ? "reduce" : "plný pohyb";
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 900, reducedMotion, delayPath: "/dashboard" });
+  const sk = await page.evaluate(() => {
+    const el = document.querySelector(".motion-skeleton");
+    return el ? getComputedStyle(el, "::after").animationName : null;
+  });
+  check(`animace ${tag}: skeleton ${reduced ? "bez lesku" : "s leskem"}`, sk !== null && (reduced ? sk === "none" : sk === "motion-skeleton-sweep"), String(sk));
+  const pageAnim = await page.evaluate(() => getComputedStyle(document.querySelector(".motion-page")).animationName);
+  check(`animace ${tag}: vstup stránky`, reduced ? pageAnim === "none" : pageAnim === "motion-page-enter", pageAnim);
+  // KPI: hned po načtení dat je číslo pod cílem (naběhá), po chvíli cíl; při reduce rovnou cíl
+  const tile = page.locator("div.rounded-\\[var\\(--radius-control\\)\\]").filter({ hasText: /Odpracováno · měsíc/i }).last();
+  await tile.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const read = () => tile.locator("span.tabular-nums span.tabular-nums").first().innerText().then((t) => Number(t.replace(/\s/g, "").replace(",", ".")));
+  const early = await read().catch(() => NaN);
+  await page.waitForTimeout(900);
+  const final = await read().catch(() => NaN);
+  check(`animace ${tag}: KPI ${reduced ? "hned cílová hodnota" : "naběhne na cíl"}`, final > 0 && (reduced ? early === final : early <= final), JSON.stringify({ early, final }));
+  const lift = await page.evaluate(() => {
+    const li = document.querySelector('[aria-labelledby="burning-title"] li.motion-hover-lift');
+    return Boolean(li);
+  });
+  check(`animace ${tag}: klikací řádky dashboardu mají hover`, lift);
+  check(`animace ${tag}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 // 8) Mobilní menu: dialog, fokus dovnitř, Escape zavře a vrátí fokus, po navigaci fokus na obsah.
 {
   const { ctx, page } = await open("/planner", { width: 390, height: 844 });
@@ -462,6 +492,20 @@ for (const motion of ["no-preference", "reduce"]) {
   check("navigace desktop: kolečko nad lištou posune stránku", await eventually(async () => (await page.evaluate(() => window.scrollY)) > 100), String(await page.evaluate(() => window.scrollY)));
   await page.screenshot({ path: `${OUT}nav-sidebar-sticky.png` });
   check("navigace desktop: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // MRK-124: aktivní odkaz ve sbalené „Další“ – indikátor se schová, po rozbalení se vrátí
+  const { ctx, page, errors } = await open("/planner", { width: 1366, height: 900 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  const more = aside.locator('[data-nav-group="more"]');
+  const indicatorShown = () => aside.locator("[data-nav-indicator]").evaluate((el) => getComputedStyle(el).opacity !== "0" && el.getBoundingClientRect().height > 0);
+  check("navigace desktop: na Plánovači je Další otevřené s indikátorem", (await more.evaluate((d) => d.open)) && await eventually(indicatorShown));
+  await more.locator("summary").click();
+  check("navigace desktop: sbalené Další schová indikátor", await eventually(async () => !(await indicatorShown())));
+  await more.locator("summary").click();
+  check("navigace desktop: rozbalené Další indikátor vrátí", await eventually(indicatorShown));
+  check("navigace desktop (indikátor): bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 {
