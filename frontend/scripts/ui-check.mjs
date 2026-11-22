@@ -1652,7 +1652,10 @@ async function openSeeded(value, opts = {}) {
 {
   await resetPrefs();
   const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
-  await page.getByRole("button", { name: "Upravit dashboard" }).tap();
+  // MRK-125: na mobilu jsou akce v menu ⋯ vedle nadpisu, řádek tlačítek není vidět
+  check("dashboard mobil: tlačítko Upravit dashboard není v řádku", !(await page.getByRole("button", { name: "Upravit dashboard" }).isVisible()));
+  await page.getByRole("button", { name: "Akce dashboardu" }).tap();
+  await page.getByRole("menuitem", { name: "Upravit dashboard" }).tap();
   await page.waitForTimeout(100);
   const groups = page.locator('[role="group"][aria-labelledby^="widget-"]');
   const boxes = await groups.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => [Math.round(r.x), Math.round(r.right)]));
@@ -1670,6 +1673,7 @@ async function openSeeded(value, opts = {}) {
   check("dashboard mobil: obnova", (await widgetOrder(page)).includes("goals"));
   await page.getByRole("button", { name: "Skrýt widget: Cíle" }).tap();
   await page.getByRole("button", { name: "Hotovo" }).tap();
+  check("dashboard mobil: po Hotovo fokus zpět na menu ⋯", await eventually(async () => (await focusedName(page)) === "Akce dashboardu"), await focusedName(page));
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   order = await widgetOrder(page);
@@ -3223,6 +3227,51 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
     if (path === "/school") await page.screenshot({ path: `${OUT}icons-school.png`, fullPage: true });
     await ctx.close();
   }
+}
+
+// 26) MRK-125 – jednotné hlavičky stránek: HUD štítek + jeden h1 v PageHeader; mobilní Řídicí centrum bez řádku tlačítek
+{
+  const PAGES = ["/", "/today", "/planner", "/school", "/school/materials", "/reminders", "/calendar", "/habits", "/goals", "/work",
+    "/finance", "/fitness", "/wot", "/wot/replays", "/mff", "/review", "/settings", "/changes", "/activity", "/memory"];
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  const bad = [];
+  for (const path of PAGES) {
+    await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
+    const ok = await eventually(() => page.evaluate(() => {
+      const headers = document.querySelectorAll("main header[data-page-header]");
+      const h1 = document.querySelectorAll("main h1");
+      const hud = headers[0]?.querySelector("[data-page-hud]");
+      return headers.length === 1 && h1.length === 1 && headers[0].contains(h1[0]) && Boolean(hud?.textContent?.trim());
+    }), 4000);
+    if (!ok) bad.push(path);
+  }
+  check("hlavičky: každá stránka má PageHeader s HUD štítkem a jedním h1", bad.length === 0, bad.join(", "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  const trigger = page.getByRole("button", { name: "Akce dashboardu" });
+  await trigger.waitFor();
+  const [h1Box, trigBox] = [await page.locator("main h1").boundingBox(), await trigger.boundingBox()];
+  check("dashboard mobil: menu ⋯ na řádku nadpisu", Boolean(h1Box && trigBox && Math.abs((trigBox.y + trigBox.height / 2) - (h1Box.y + h1Box.height / 2)) < 16 && trigBox.x + trigBox.width <= 390), JSON.stringify({ h1Box, trigBox }));
+  const headerH = await page.locator("main header[data-page-header]").evaluate((el) => el.getBoundingClientRect().height);
+  check("dashboard mobil: hlavička bez řádku tlačítek (nižší)", headerH < 110, String(headerH));
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  check("dashboard mobil: menu klávesnicí – fokus na Upravit dashboard", await eventually(async () => (await focusedName(page)) === "Upravit dashboard"), await focusedName(page));
+  await page.keyboard.press("ArrowDown");
+  check("dashboard mobil: šipka na Obnovit", (await focusedName(page)) === "Obnovit", await focusedName(page));
+  await page.keyboard.press("Enter");
+  check("dashboard mobil: Obnovit z menu zavře menu a vrátí fokus", await eventually(async () => (await page.getByRole("menu").count()) === 0 && (await focusedName(page)) === "Akce dashboardu"));
+  await page.screenshot({ path: `${OUT}dashboard-mobile-header.png` });
+  check("dashboard mobil (hlavička): bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  check("dashboard desktop: tlačítka v hlavičce, menu ⋯ skryté",
+    (await page.getByRole("button", { name: "Upravit dashboard" }).isVisible()) && !(await page.getByRole("button", { name: "Akce dashboardu" }).isVisible()));
+  await ctx.close();
 }
 
 await browser.close();
