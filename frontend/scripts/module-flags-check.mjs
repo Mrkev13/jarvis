@@ -243,6 +243,8 @@ for (const path of ["/wot/replays", "/wot/replays?replay=1"]) {
 {
   const { ctx, page, errors } = await open("/school");
   const school = DISABLED.has("school");
+  // MRK-123: úkoly po termínu > 7 dní jsou ve sbalené skupině (fixtury mají pevná data)
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
   check(`škola: akce Splnit ${school ? "nedostupná" : "je vidět"}`, ((await page.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1) === !school);
   check("škola: bez chyb JS", errors.length === 0, errors.join(" | "));
   await ctx.close();

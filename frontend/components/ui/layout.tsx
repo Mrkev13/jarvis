@@ -32,23 +32,33 @@ export function PageHeader({
   subtitle,
   eyebrow,
   actions,
+  mobileActions,
   meta,
 }: {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
+  /** HUD štítek nad nadpisem („Modul · škola") – MRK-125: má ho každá stránka. */
   eyebrow?: React.ReactNode;
   actions?: React.ReactNode;
+  /**
+   * MRK-125: náhrada `actions` na úzkém displeji (< sm) – typicky menu ⋯ vedle nadpisu, aby řádek tlačítek
+   * nezabral první obrazovku. Od sm se ukazují `actions`.
+   */
+  mobileActions?: React.ReactNode;
   meta?: React.ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0">
-        {eyebrow ? <div className="mb-2">{eyebrow}</div> : null}
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-ink">{title}</h1>
+    <header data-page-header="" className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0 flex-1">
+        {eyebrow ? <div data-page-hud="" className="mb-2">{eyebrow}</div> : null}
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="min-w-0 text-2xl md:text-3xl font-semibold tracking-tight text-ink">{title}</h1>
+          {mobileActions ? <div data-page-mobile-actions="" className="shrink-0 sm:hidden">{mobileActions}</div> : null}
+        </div>
         {subtitle ? <p className="mt-1.5 text-sm md:text-base text-ink-muted">{subtitle}</p> : null}
         {meta ? <div className="mt-1.5 text-xs text-ink-muted">{meta}</div> : null}
       </div>
-      {actions ? <div className="flex flex-wrap gap-2 sm:justify-end">{actions}</div> : null}
+      {actions ? <div className={cx("flex flex-wrap gap-2 sm:justify-end", mobileActions ? "hidden sm:flex" : null)}>{actions}</div> : null}
     </header>
   );
 }

@@ -36,17 +36,17 @@ _EXAM_TYPES = {"exam": "Zkouška", "test": "Test", "quiz": "Kvíz", "midterm": "
 
 
 def search_school(db, q):
-    subjects = {s.id: s for s in db.query(Subject).limit(ROW_LIMIT).all()}
+    subjects = {s.id: s for s in db.query(Subject).order_by(Subject.name, Subject.id).limit(ROW_LIMIT).all()}
     subj = lambda sid: subjects[sid].name if sid in subjects else ""  # noqa: E731
 
     for s in subjects.values():
         yield ("subject", s.id, s.name, join_parts("Předmět", s.code, s.semester, "archivovaný" if s.active is False else ""),
                f"{s.code} {s.semester}", "school", f"/school?subject={s.id}")
-    for a in db.query(Assignment).order_by(Assignment.due_date.desc()).limit(ROW_LIMIT).all():
+    for a in db.query(Assignment).order_by(Assignment.due_date.desc(), Assignment.id.desc()).limit(ROW_LIMIT).all():
         done = is_assignment_done(a.status)
         sub = join_parts("Úkol", subj(a.subject_id), f"termín {format_date_cz(a.due_date)}" if a.due_date else "", "hotovo" if done else "")
         yield "assignment", a.id, a.title, sub, f"{subj(a.subject_id)} {a.description or ''} úkol", "school", f"/school?assignment={a.id}"
-    for e in db.query(Exam).order_by(Exam.exam_date.desc()).limit(ROW_LIMIT).all():
+    for e in db.query(Exam).order_by(Exam.exam_date.desc(), Exam.id.desc()).limit(ROW_LIMIT).all():
         kind = _EXAM_TYPES.get((e.exam_type or "").lower(), "Zkouška")
         sub = join_parts(kind, subj(e.subject_id), format_date_cz(e.exam_date) if e.exam_date else "")
         yield "exam", e.id, e.title, sub, f"{subj(e.subject_id)} {kind} zkouska {e.notes or ''}", "school", f"/school?exam={e.id}"

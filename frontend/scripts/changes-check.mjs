@@ -86,10 +86,10 @@ await fetch(`${MOCK_API}/__mock/changes/reset`);
   await page.waitForTimeout(3500);
   check("bez pollingu: v klidu žádné další dotazy", (await calls()) === afterEvent, String((await calls()) - afterEvent));
 
-  const nav = await page.locator('aside nav[aria-label="Hlavní navigace"] a').evaluateAll((as) => as.map((a) => [a.getAttribute("href"), a.textContent?.trim()]));
-  const idx = nav.findIndex(([h]) => h === "/changes");
-  check("navigace: „Co se změnilo“ před Aktivitou", idx >= 0 && nav[idx + 1]?.[0] === "/activity" && nav[idx][1]?.includes("Co se změnilo"), JSON.stringify(nav[idx]));
-  check("aktivní položka navigace", (await page.locator('aside a[href="/changes"][aria-current="page"]').count()) === 1);
+  // MRK-122: Co se změnilo už není v liště – vede na ni karta v Nastavení, v liště svítí Nastavení.
+  const nav = await page.locator('aside nav[aria-label="Hlavní navigace"] a').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("navigace: „Co se změnilo“ není v liště", !nav.includes("/changes") && !nav.includes("/activity"), JSON.stringify(nav));
+  check("aktivní položka navigace (Nastavení)", (await page.locator('aside a[href="/settings"][aria-current="page"]').count()) === 1);
   await page.screenshot({ path: `${OUT}changes-desktop.png`, fullPage: true });
   check("bez chyb JS", errors.length === 0, errors.join(" | "));
   await ctx.close();

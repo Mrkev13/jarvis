@@ -349,22 +349,22 @@ function KeyMetricsWidget({ data, loading, index }: WidgetProps) {
         <StatGrid cols={shows("work") && shows("finance") ? 4 : 2}>
           {shows("work") ? (
             <>
-              <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber value={work?.this_month_hours} format={fmt1} />} unit="h" />
-              <MetricCard label="Výdělek · měsíc" value={<AnimatedNumber value={work?.this_month_earnings} format={fmt0} />} unit="Kč" />
+              <MetricCard label="Odpracováno · měsíc" value={<AnimatedNumber countUp value={work?.this_month_hours} format={fmt1} />} unit="h" />
+              <MetricCard label="Výdělek · měsíc" value={<AnimatedNumber countUp value={work?.this_month_earnings} format={fmt0} />} unit="Kč" />
             </>
           ) : null}
           {shows("finance") ? (
             <>
               <MetricCard
                 label="Bilance"
-                value={<AnimatedNumber value={finance?.balance} format={fmt0} />}
+                value={<AnimatedNumber countUp value={finance?.balance} format={fmt0} />}
                 unit="Kč"
                 tone={(finance?.balance ?? 0) < 0 ? "danger" : "neutral"}
                 hint={`${finance?.transactions_count ?? 0} transakcí`}
               />
               <MetricCard
                 label="Výdaje · měsíc"
-                value={<AnimatedNumber value={finance?.this_month_expenses} format={fmt0} />}
+                value={<AnimatedNumber countUp value={finance?.this_month_expenses} format={fmt0} />}
                 unit="Kč"
                 hint={`příjem ${formatNumber(finance?.this_month_income, 0)} Kč`}
               />

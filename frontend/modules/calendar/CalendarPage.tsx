@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Button, Card, CardHeader, ContentContainer, EmptyState, ErrorState, LoadingState, PageHeader } from '@/components/ui';
+import { Button, Card, CardHeader, ContentContainer, EmptyState, ErrorState, HudLabel, LoadingState, PageHeader } from '@/components/ui';
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiJson, jsonBody } from '@/lib/api';
 import { CalendarList } from './CalendarList';
@@ -39,7 +39,7 @@ export default function CalendarPage() {
   const configured = data ? anySourceConfigured(data) : false;
   const connected = data ? connectedSources(data) : '';
   return <ContentContainer>
-    <PageHeader title="Kalendář"
+    <PageHeader eyebrow={<HudLabel>Modul · kalendář</HudLabel>} title="Kalendář"
       subtitle={connected ? `Události dnes a v příštích týdnech · zdroje: ${connected}.` : 'Události dnes a v příštích týdnech.'}
       actions={<Button variant="secondary" busy={syncing} disabled={!configured} onClick={() => void sync()}>Synchronizovat</Button>} />
     {notice ? <p role="status" className="text-sm text-ink-muted">{notice}</p> : null}

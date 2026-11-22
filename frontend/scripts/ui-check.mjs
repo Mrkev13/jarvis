@@ -156,7 +156,12 @@ for (const scheme of ["light", "dark"]) {
 // 4) ConfirmDialog: role/aria, výchozí fokus, past na fokus, Escape, busy stav bez dvojího odeslání.
 {
   const { ctx, page } = await open("/reminders");
-  await page.getByRole("button", { name: "Zrušit", exact: true }).first().click();
+  // MRK-123: Zrušit je v nabídce ⋯ (Další akce)
+  const cancelFirst = async () => {
+    await page.getByRole("button", { name: /^Další akce: / }).first().click();
+    await page.getByRole("menuitem", { name: /^Zrušit připomínku: / }).click();
+  };
+  await cancelFirst();
   const dialog = page.getByRole("dialog");
   check("dialog: role=dialog + aria-modal", (await dialog.count()) === 1 && (await dialog.getAttribute("aria-modal")) === "true");
   check("dialog: má popisek (aria-labelledby)", Boolean(await dialog.getAttribute("aria-labelledby")));
@@ -169,8 +174,8 @@ for (const scheme of ["light", "dark"]) {
   check("dialog: Tab zůstává v dialogu", inside);
   await page.keyboard.press("Escape");
   check("dialog: Escape zavře", (await dialog.count()) === 0);
-  await page.getByRole("button", { name: "Zrušit", exact: true }).first().click();
-  const confirm = page.getByRole("button", { name: "Zrušit připomínku" });
+  await cancelFirst();
+  const confirm = page.getByRole("button", { name: "Zrušit připomínku", exact: true });
   await confirm.click();
   await page.waitForTimeout(100);
   const busyBtn = page.locator('[role="dialog"] button[aria-busy="true"]');
@@ -350,6 +355,36 @@ for (const motion of ["no-preference", "reduce"]) {
   await ctx.close();
 }
 
+// 5d) MRK-124: animace, které jsou vidět – vstup stránky, skeleton s leskem, čísla dashboardu naběhnou, klikací řádky
+// se při hoveru zvednou; vše bez pohybu při omezeném pohybu.
+for (const reducedMotion of ["no-preference", "reduce"]) {
+  const reduced = reducedMotion === "reduce";
+  const tag = reduced ? "reduce" : "plný pohyb";
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 900, reducedMotion, delayPath: "/dashboard" });
+  const sk = await page.evaluate(() => {
+    const el = document.querySelector(".motion-skeleton");
+    return el ? getComputedStyle(el, "::after").animationName : null;
+  });
+  check(`animace ${tag}: skeleton ${reduced ? "bez lesku" : "s leskem"}`, sk !== null && (reduced ? sk === "none" : sk === "motion-skeleton-sweep"), String(sk));
+  const pageAnim = await page.evaluate(() => getComputedStyle(document.querySelector(".motion-page")).animationName);
+  check(`animace ${tag}: vstup stránky`, reduced ? pageAnim === "none" : pageAnim === "motion-page-enter", pageAnim);
+  // KPI: hned po načtení dat je číslo pod cílem (naběhá), po chvíli cíl; při reduce rovnou cíl
+  const tile = page.locator("div.rounded-\\[var\\(--radius-control\\)\\]").filter({ hasText: /Odpracováno · měsíc/i }).last();
+  await tile.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const read = () => tile.locator("span.tabular-nums span.tabular-nums").first().innerText().then((t) => Number(t.replace(/\s/g, "").replace(",", ".")));
+  const early = await read().catch(() => NaN);
+  await page.waitForTimeout(900);
+  const final = await read().catch(() => NaN);
+  check(`animace ${tag}: KPI ${reduced ? "hned cílová hodnota" : "naběhne na cíl"}`, final > 0 && (reduced ? early === final : early <= final), JSON.stringify({ early, final }));
+  const lift = await page.evaluate(() => {
+    const li = document.querySelector('[aria-labelledby="burning-title"] li.motion-hover-lift');
+    return Boolean(li);
+  });
+  check(`animace ${tag}: klikací řádky dashboardu mají hover`, lift);
+  check(`animace ${tag}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 // 8) Mobilní menu: dialog, fokus dovnitř, Escape zavře a vrátí fokus, po navigaci fokus na obsah.
 {
   const { ctx, page } = await open("/planner", { width: 390, height: 844 });
@@ -377,6 +412,120 @@ for (const motion of ["no-preference", "reduce"]) {
   check("menu: po navigaci zavřené", (await page.getByRole("dialog").count()) === 0);
   const focusId = await page.evaluate(() => document.activeElement?.id);
   check("menu: po navigaci fokus na hlavní obsah", focusId === "main-content", String(focusId));
+  await ctx.close();
+}
+
+// 8b) MRK-79 / MRK-122: zúžená navigace – hlavní položky, rozbalitelná skupina „Další“, dole Nastavení (desktop i
+// mobil). Co se změnilo, Aktivita a Paměť nejsou v liště (karta v Nastavení, Ctrl+K). Desktop lišta zůstává při scrollu.
+{
+  const groupOpen = (page, scope, id) => page.locator(`${scope} [data-nav-group="${id}"]`).evaluate((d) => d.open);
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  await page.getByRole("button", { name: "Otevřít menu" }).click();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  await menu.waitFor();
+  const mainCount = await menu.locator('nav[aria-label="Hlavní navigace"] > a').count();
+  check("navigace mobil: hlavní menu ≤ 8 položek", mainCount > 0 && mainCount <= 8, String(mainCount));
+  check("navigace mobil: Další zavřené", !(await groupOpen(page, "[data-drawer-nav]", "more")));
+  check("navigace mobil: Nastavení vidět dole", await menu.locator('[data-nav-group="system"]').getByRole("link", { name: "Nastavení" }).isVisible());
+  const navHrefs = await menu.locator('nav[aria-label="Hlavní navigace"] a').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("navigace mobil: bez Co se změnilo, Aktivity a Paměti", !["/changes", "/activity", "/memory"].some((h) => navHrefs.includes(h)), navHrefs.join(","));
+  const summary = menu.locator('[data-nav-group="more"] summary');
+  check("navigace mobil: skupina ≥ 44 px", ((await summary.boundingBox())?.height ?? 0) >= 44);
+  // Past na fokus Draweru (Codex review #73): summary je v pasti, zavřená skupina se přeskočí, otevřená se projde.
+  const focused = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return el?.tagName === "SUMMARY" ? `summary:${el.closest("[data-nav-group]")?.getAttribute("data-nav-group")}` : el?.getAttribute("aria-label") || el?.textContent?.trim() || "";
+  });
+  await summary.focus();
+  await page.keyboard.press("Tab");
+  check("navigace mobil: Tab ze zavřené Další na Nastavení", (await focused()) === "Nastavení", await focused());
+  await page.keyboard.press("Shift+Tab");
+  check("navigace mobil: Shift+Tab zpět na Další", (await focused()) === "summary:more", await focused());
+  await page.keyboard.press("Enter");
+  check("navigace mobil: Enter rozbalí Další", await eventually(() => menu.getByRole("link", { name: "Plánovač" }).isVisible()));
+  await page.keyboard.press("Tab");
+  check("navigace mobil: Enter → Tab na první odkaz skupiny", (await focused()) === "Plánovač", await focused());
+  await page.keyboard.press("Shift+Tab");
+  check("navigace mobil: Shift+Tab zpět na Další", (await focused()) === "summary:more", await focused());
+  check("navigace mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}nav-groups-mobile.png` });
+  check("navigace mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 768 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  check("navigace desktop: Další zavřené", !(await aside.locator('[data-nav-group="more"]').evaluate((d) => d.open)));
+  await aside.locator('[data-nav-group="more"] summary').click();
+  check("navigace desktop: klik rozbalí Další", await eventually(() => aside.getByRole("link", { name: "Plánovač" }).isVisible()));
+  // indikátor aktivní položky: jeden prvek u Řídicího centra
+  const indicatorAt = () => page.evaluate(() => {
+    const nav = document.querySelector('[data-desktop-sidebar] nav[aria-label="Hlavní navigace"]');
+    const ind = nav.querySelector("[data-nav-indicator]").getBoundingClientRect();
+    const link = nav.querySelector('a[aria-current="page"]').getBoundingClientRect();
+    return Math.abs(ind.top + ind.height / 2 - (link.top + link.height / 2)) < 3 && ind.height > 0;
+  });
+  check("navigace desktop: indikátor u aktivní položky", await eventually(indicatorAt));
+  // lišta zůstává na místě, když stránka sjede dolů
+  const before = await aside.boundingBox();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(150);
+  const after = await aside.boundingBox();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  check("navigace desktop: lišta zůstane při scrollu na místě", scrolled > 200 && Math.abs((after?.y ?? -1) - (before?.y ?? 0)) < 1 && (after?.height ?? 0) <= 768 + 1, JSON.stringify({ scrolled, before: before?.y, after: after?.y, h: after?.height }));
+  check("navigace desktop: hledání vidět i po scrollu", await aside.getByRole("button", { name: /Hledat/ }).isVisible());
+  // kolečko nad lištou: rozbalená „Další“ se do 768 px nevejde → posune se lišta sama; sbalená se vejde → posune se
+  // stránka (lišta scroll nesmí „spolknout“ – overscroll-contain to dřív dělal)
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = await aside.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  const overflows = await aside.evaluate((el) => el.scrollHeight > el.clientHeight);
+  await page.mouse.wheel(0, 400);
+  check("navigace desktop: nevejde-li se lišta, posune se sama", overflows && await eventually(() => aside.evaluate((el) => el.scrollTop > 0)), String(overflows));
+  await aside.locator('[data-nav-group="more"] summary').click();
+  await page.mouse.wheel(0, -2000);
+  await eventually(() => aside.evaluate((el) => el.scrollTop === 0));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check("navigace desktop: sbalená lišta se do okna vejde", await aside.evaluate((el) => el.scrollHeight <= el.clientHeight));
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  await page.mouse.wheel(0, 400);
+  check("navigace desktop: kolečko nad lištou posune stránku", await eventually(async () => (await page.evaluate(() => window.scrollY)) > 100), String(await page.evaluate(() => window.scrollY)));
+  await page.screenshot({ path: `${OUT}nav-sidebar-sticky.png` });
+  check("navigace desktop: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // MRK-124: aktivní odkaz ve sbalené „Další“ – indikátor se schová, po rozbalení se vrátí
+  const { ctx, page, errors } = await open("/planner", { width: 1366, height: 900 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  const more = aside.locator('[data-nav-group="more"]');
+  const indicatorShown = () => aside.locator("[data-nav-indicator]").evaluate((el) => getComputedStyle(el).opacity !== "0" && el.getBoundingClientRect().height > 0);
+  check("navigace desktop: na Plánovači je Další otevřené s indikátorem", (await more.evaluate((d) => d.open)) && await eventually(indicatorShown));
+  await more.locator("summary").click();
+  check("navigace desktop: sbalené Další schová indikátor", await eventually(async () => !(await indicatorShown())));
+  await more.locator("summary").click();
+  check("navigace desktop: rozbalené Další indikátor vrátí", await eventually(indicatorShown));
+  check("navigace desktop (indikátor): bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // Co se změnilo / Aktivita / Paměť: mimo lištu, na nich svítí Nastavení, vede na ně karta v Nastavení
+  const { ctx, page, errors } = await open("/memory", { width: 1366, height: 900 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  check("navigace desktop: na Paměti svítí Nastavení", (await aside.locator('a[href="/settings"][aria-current="page"]').count()) === 1);
+  check("navigace desktop: Paměť není v liště", (await aside.locator('a[href="/memory"]').count()) === 0);
+  await page.goto(`${BASE}/settings`, { waitUntil: "domcontentloaded" });
+  const card = page.locator("[data-settings-history]");
+  await card.waitFor();
+  const links = await card.locator("a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("nastavení: karta vede na Co se změnilo, Aktivitu a Paměť", JSON.stringify(links) === JSON.stringify(["/changes", "/activity", "/memory"]), JSON.stringify(links));
+  check("nastavení: odkazy ≥ 44 px", (await card.locator("a").evaluateAll((as) => as.every((a) => a.getBoundingClientRect().height >= 44))));
+  await card.locator('a[href="/activity"]').click();
+  await page.waitForURL("**/activity", { timeout: 5000 }).catch(() => undefined);
+  check("nastavení: odkaz otevře Aktivitu", page.url().endsWith("/activity"), page.url());
+  await page.goto(`${BASE}/settings`, { waitUntil: "domcontentloaded" });
+  await card.screenshot({ path: `${OUT}settings-history.png` });
+  check("nastavení: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
@@ -1547,7 +1696,10 @@ async function openSeeded(value, opts = {}) {
 {
   await resetPrefs();
   const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
-  await page.getByRole("button", { name: "Upravit dashboard" }).tap();
+  // MRK-125: na mobilu jsou akce v menu ⋯ vedle nadpisu, řádek tlačítek není vidět
+  check("dashboard mobil: tlačítko Upravit dashboard není v řádku", !(await page.getByRole("button", { name: "Upravit dashboard" }).isVisible()));
+  await page.getByRole("button", { name: "Akce dashboardu" }).tap();
+  await page.getByRole("menuitem", { name: "Upravit dashboard" }).tap();
   await page.waitForTimeout(100);
   const groups = page.locator('[role="group"][aria-labelledby^="widget-"]');
   const boxes = await groups.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => [Math.round(r.x), Math.round(r.right)]));
@@ -1565,6 +1717,7 @@ async function openSeeded(value, opts = {}) {
   check("dashboard mobil: obnova", (await widgetOrder(page)).includes("goals"));
   await page.getByRole("button", { name: "Skrýt widget: Cíle" }).tap();
   await page.getByRole("button", { name: "Hotovo" }).tap();
+  check("dashboard mobil: po Hotovo fokus zpět na menu ⋯", await eventually(async () => (await focusedName(page)) === "Akce dashboardu"), await focusedName(page));
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   order = await widgetOrder(page);
@@ -1711,7 +1864,7 @@ async function countTodayGets(page) {
   check("dnes akce: hotovo ohlášeno (role=status)", (await page.locator('[data-today-notice][role="status"]').innerText()).includes("je hotová"));
   check("dnes akce: jedno obnovení /today", gets.n - before === 1, String(gets.n - before));
   check("dnes akce: připomínka v Hotovo", (await rowOf(page, "reminder:7").getAttribute("data-status")) === "done" && (await page.locator('[data-section="timeline"] summary').innerText()).includes("2 položky"));
-  check("dnes akce: fokus na další akční řádek", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", await focusedLabel(page));
+  check("dnes akce: fokus na další akční řádek", await eventually(async () => (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", 5000), await focusedLabel(page));
   check("dnes akce: volání se zdrojem Dnes", JSON.stringify(await todayCalls()) === JSON.stringify(["done:reminder:7"]));
   await page.screenshot({ path: `${OUT}today-action-success.png` });
 
@@ -1723,11 +1876,11 @@ async function countTodayGets(page) {
   await toggle.click();
   const group = page.getByRole("group", { name: "Odložit „Vyndat prádlo“ – na kdy?" });
   check("dnes odložit: nabídka s pevnými volbami", JSON.stringify(await group.getByRole("button").allInnerTexts()) === JSON.stringify(["+15 min", "+1 h", "+3 h", "Zítra 8:00", "Zrušit"]) && (await toggle.getAttribute("aria-expanded")) === "true");
-  check("dnes odložit: fokus na první volbu", (await focusedLabel(page)) === "+15 min: Vyndat prádlo");
+  check("dnes odložit: fokus na první volbu", await eventually(async () => (await focusedLabel(page)) === "+15 min: Vyndat prádlo"), await focusedLabel(page));
   await page.screenshot({ path: `${OUT}today-snooze.png` });
   await page.keyboard.press("Escape");
   await page.waitForTimeout(80);
-  check("dnes odložit: Esc zavře a vrátí fokus", (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
+  check("dnes odložit: Esc zavře a vrátí fokus", await eventually(async () => (await group.count()) === 0 && (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo"), await focusedLabel(page));
   check("dnes odložit: Esc nespustí globální zkratky", (await page.getByRole("dialog").count()) === 0);
   await toggle.click();
   await group.getByRole("button", { name: "Zítra 8:00: Vyndat prádlo" }).click();
@@ -1743,13 +1896,13 @@ async function countTodayGets(page) {
   await page.getByText("Úkol „Sada“ je hotový.").waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
   check("dnes úkol: prepare + confirm", JSON.stringify(await todayCalls()) === JSON.stringify(["prepare:assignment:1", "confirm:today-1"]));
-  check("dnes úkol: zmizí z Pozornosti", (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 0);
+  check("dnes úkol: zmizí z Pozornosti", await eventually(async () => (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 0, 5000));
   const undo = page.locator("[data-today-notice]").getByRole("button", { name: "Vrátit" });
   check("dnes úkol: nabídne Vrátit (existující undo)", (await undo.count()) === 1);
   await undo.click();
   await page.getByText(/^Vráceno/).waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
-  check("dnes úkol: vrácení přes /actions/undo + confirm", JSON.stringify((await todayCalls()).slice(2)) === JSON.stringify(["undo:today-1", "confirm:today-undo-today-1"]) && (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 1);
+  check("dnes úkol: vrácení přes /actions/undo + confirm", await eventually(async () => JSON.stringify((await todayCalls()).slice(2)) === JSON.stringify(["undo:today-1", "confirm:today-undo-today-1"]) && (await page.locator('[data-section="attention"] [data-item="assignment:1"]').count()) === 1, 5000));
 
   // selhání: řádek zůstane, Zkusit znovu potvrdí TUTÉŽ pending akci
   await todayMock("/__mock/today/reset");
@@ -1815,16 +1968,17 @@ async function countTodayGets(page) {
   await page.keyboard.press("Enter");
   await page.getByText("Připomínka „Vyndat prádlo“ je hotová.").waitFor({ timeout: 5000 }).catch(() => undefined);
   await page.waitForTimeout(300);
-  check("klávesnice dnes: Enter dokončí, fokus dál", (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie");
+  // fokus se přesune až po obnovení /today (useTodayActions.finish) – čekat na něj, ne pevně (MRK-115)
+  check("klávesnice dnes: Enter dokončí, fokus dál", await eventually(async () => (await focusedLabel(page)) === "Dokončit připomínku: Fyzioterapie", 5000), await focusedLabel(page));
   // Odložit jen u připomínky, která už zazněla (nadcházející „Fyzioterapie" ho nenabízí)
   await todayMock("/__mock/today/reset");
   await page.reload();
-  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Dokončit připomínku: Vyndat prádlo" }).waitFor({ timeout: 5000 }).catch(() => undefined);
   await tabTo("Dokončit připomínku: Vyndat prádlo");
   await page.keyboard.press("Tab");
   check("klávesnice dnes: Tab na Odložit", (await focusedLabel(page)) === "Odložit připomínku: Vyndat prádlo");
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(80);
+  await eventually(async () => (await focusedLabel(page)) === "+15 min: Vyndat prádlo");
   await page.keyboard.press("Tab");
   check("klávesnice dnes: Tab na volbu +1 h", (await focusedLabel(page)) === "+1 h: Vyndat prádlo");
   await page.keyboard.press("Enter");
@@ -2471,11 +2625,15 @@ await wotReset();
   const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
   await schoolReset();
   const { ctx, page, errors } = await open("/school");
-  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  // MRK-123: otevřené = aktuální + sbalené „Starší po termínu“ (fixtury mají pevná data → většina je starší); skupiny
+  // se tu otevřou, ať jdou řádky číst a ovládat
+  await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+  const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
   const closedList = page.getByRole("list", { name: "Hotové úkoly a uzavřené zkoušky" });
   const inOpen = async (t) => (await openList.locator(`[data-search-target="${t}"]`).count()) === 1;
   const inClosed = async (t) => (await closedList.locator(`[data-search-target="${t}"]`).count()) === 1;
-  check("škola: otevřený úkol má Splnit i Smazat", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Smazat úkol Sada" }).count()) === 1);
+  check("škola: otevřený úkol má Splnit a ⋯", (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1 && (await openList.getByRole("button", { name: "Další akce: Sada" }).count()) === 1);
   check("škola: otevřená zkouška má Uzavřít", (await openList.getByRole("button", { name: "Uzavřít zkoušku test" }).count()) === 1);
   check("škola: hotová položka má Znovu otevřít", (await closedList.getByRole("button", { name: "Znovu otevřít úkol Esej" }).count()) === 1);
 
@@ -2523,17 +2681,73 @@ await wotReset();
   await closedList.getByRole("button", { name: "Znovu otevřít úkol Sada" }).click();
   await page.waitForTimeout(800);
   check("škola: znovu otevřený úkol zpět v otevřených", (await inOpen("assignment-1")) && (await openList.getByRole("button", { name: "Splnit úkol Sada" }).count()) === 1);
-  check("škola: mazání zůstává samostatná akce", (await page.getByRole("button", { name: /^Smazat (úkol|zkoušku) / }).count()) === 10);
+  check("škola: mazání v nabídce ⋯ u každého úkolu a zkoušky", (await page.getByRole("button", { name: /^Další akce: / }).count()) === 10);
   check("škola akce: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
   await schoolReset();
 }
 {
   const { ctx, page, errors } = await open("/school", { width: 390, height: 844 });
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
   check("škola mobil: akce bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   const b = await page.getByRole("button", { name: "Splnit úkol Sada" }).boundingBox();
   check("škola mobil: Splnit ≥ 40 px", Boolean(b && b.height >= 40), JSON.stringify(b));
   check("škola mobil: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+// MRK-123 – méně šumu v řádcích: Škola (staré po termínu a hotové sbalené, červená jen čerstvé, Smazat v ⋯),
+// Připomínky (Hotovo + Odložit ▾ + ⋯, nabídka z klávesnice).
+{
+  const schoolReset = () => fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+  await schoolReset();
+  const { ctx, page, errors } = await open("/school", { width: 1366, height: 900 });
+  const stale = page.locator('details[data-collapsible-group="school-stale"]');
+  await stale.waitFor({ timeout: 4000 }).catch(() => undefined);
+  check("řádky škola: Starší po termínu sbalené s počtem", (await stale.count()) === 1 && !(await stale.evaluate((d) => d.open)) && /\(\d+\)/.test(await stale.locator("summary").innerText()));
+  check("řádky škola: Hotové a uzavřené sbalené", !(await page.locator('details[data-collapsible-group="school-closed-list"]').evaluate((d) => d.open)));
+  const tones = await page.evaluate(() => {
+    return [...document.querySelectorAll('[aria-label="Starší po termínu"] > li')].map((li) => li.className.includes("motion-attention"));
+  });
+  check("řádky škola: staré po termínu nepulzují", tones.length > 0 && tones.every((t) => !t), JSON.stringify(tones));
+  await stale.locator("summary").click();
+  const sada = page.getByRole("button", { name: "Další akce: Sada" });
+  await sada.click();
+  const menu = page.getByRole("menu", { name: "Další akce: Sada" });
+  check("řádky škola: ⋯ otevře nabídku se Smazat", (await menu.count()) === 1 && (await menu.getByRole("menuitem", { name: "Smazat úkol Sada" }).count()) === 1);
+  await page.keyboard.press("Escape");
+  check("řádky škola: Escape zavře a vrátí fokus", (await menu.count()) === 0 && (await sada.evaluate((el) => el === document.activeElement)));
+  await sada.click();
+  await menu.getByRole("menuitem", { name: "Smazat úkol Sada" }).click();
+  check("řádky škola: Smazat dál potvrzuje", (await page.getByRole("dialog", { name: /Smazat úkol Sada/ }).count()) === 1);
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: `${OUT}rows-school.png`, fullPage: true });
+  check("řádky škola: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await schoolReset();
+}
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  const { ctx, page, errors } = await open("/reminders", { width, height });
+  const row = page.locator('[data-search-target^="reminder-"]').first();
+  await row.waitFor({ timeout: 4000 }).catch(() => undefined);
+  const names = await row.getByRole("button").evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label") || b.textContent.trim()));
+  check(`řádky připomínky ${label}: jen Hotovo, Odložit a ⋯`, names.length === 3 && names[0] === "Hotovo" && /^Odložit připomínku: /.test(names[1]) && /^Další akce: /.test(names[2]), JSON.stringify(names));
+  const snooze = row.getByRole("button", { name: /^Odložit připomínku: / });
+  await snooze.focus();
+  await page.keyboard.press("Enter");
+  const snoozeMenu = page.getByRole("menu", { name: /^Odložit připomínku: / });
+  const items = await snoozeMenu.getByRole("menuitem").allInnerTexts();
+  check(`řádky připomínky ${label}: Odložit nabídne časy, fokus na první`, items.length >= 3 && items[0] === "+15 min" && await eventually(() => snoozeMenu.getByRole("menuitem").first().evaluate((el) => el === document.activeElement)), JSON.stringify(items));
+  await page.keyboard.press("ArrowDown");
+  check(`řádky připomínky ${label}: šipka dolů na další volbu`, await snoozeMenu.getByRole("menuitem").nth(1).evaluate((el) => el === document.activeElement));
+  const sizes = await snoozeMenu.getByRole("menuitem").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), Math.round(r.height)]; }));
+  check(`řádky připomínky ${label}: nabídka v okně`, sizes.every(([l, r]) => l >= 0 && r <= width), JSON.stringify(sizes));
+  if (width < 500) check("řádky připomínky mobil: položky ≥ 44 px", sizes.every(([, , h]) => h >= 44), JSON.stringify(sizes));
+  await page.screenshot({ path: `${OUT}rows-reminders-${label}.png` });
+  await page.keyboard.press("Escape");
+  check(`řádky připomínky ${label}: Escape vrátí fokus na Odložit`, (await snoozeMenu.count()) === 0 && (await snooze.evaluate((el) => el === document.activeElement)));
+  await page.mouse.click(5, 5);
+  check(`řádky připomínky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  check(`řádky připomínky ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 // MRK-75 – předměty: úprava, archivace / obnovení, archiv mimo nabídky (stavový mock).
@@ -2631,7 +2845,32 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   await fyz.getByLabel("Stav zápočtu – Fyzika").selectOption("passed");
   check(`docházka ${label}: zápočet splněn`, await eventually(async () => (await fyz.innerText()).includes("Zápočet splněn")));
   check(`docházka ${label}: po splnění zápočtu bez varování`, !(await fyz.innerText()).includes("povolená absence"));
+  // MRK-112: starší týdny jde doplnit (sbalená historie týdnů s výukou)
+  const older = fyz.locator("[data-older-weeks]");
+  await older.locator("summary").click();
+  const old = fyz.getByRole("button", { name: "Nebyl – Fyzika, týden od 14. 9.", exact: true });
+  check(`docházka ${label}: historie nabízí starší týdny`, await eventually(async () => (await old.count()) === 1));
+  await old.click();
+  check(`docházka ${label}: zápis staršího týdne`,
+    await eventually(async () => (await calls()).at(-1)?.body.week_start === "2026-09-14" && (await old.getAttribute("aria-pressed")) === "true"),
+    JSON.stringify((await calls()).at(-1)));
+  const more = fyz.getByRole("button", { name: "Zobrazit starší" });
+  check(`docházka ${label}: historie po částech`, (await more.count()) === 1);
+  await more.click();
+  check(`docházka ${label}: Zobrazit starší přidá týdny`, await eventually(async () => (await fyz.getByRole("button", { name: /^Byl – Fyzika, týden od/ }).count()) > 8));
+  // MRK-112: výuka ob týden – Matematika s výukou minulý týden: tento týden bez tlačítek, „Minulá výuka", historie ob týden
+  const math = card(1);
+  await math.getByLabel("Rytmus výuky – Matematika").selectOption("prev");
+  check(`docházka ${label}: ob týden – tento týden výuka není`, await eventually(async () => (await math.locator("[data-no-class-week]").count()) === 1),
+    await math.innerText());
+  check(`docházka ${label}: ob týden – minulá výuka`, (await math.getByRole("button", { name: "Byl – Matematika, Minulá výuka", exact: true }).count()) === 1);
+  check(`docházka ${label}: ob týden – štítek u docházky`, (await math.innerText()).includes("ob týden"));
+  await math.locator("[data-older-weeks] summary").click();
+  check(`docházka ${label}: ob týden – historie jen týdnů s výukou`,
+    (await math.getByRole("button", { name: "Byl – Matematika, týden od 14. 9.", exact: true }).count()) === 1
+      && (await math.getByRole("button", { name: "Byl – Matematika, týden od 21. 9.", exact: true }).count()) === 0);
   if (width < 500) check("docházka mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await math.screenshot({ path: `${OUT}school-progress-${label}-biweekly.png` });
   await fyz.screenshot({ path: `${OUT}school-progress-${label}-after.png` });
   check(`docházka ${label}: bez chyb JS`, errors.filter((e) => !/500|Failed to load resource/.test(e)).length === 0, errors.join("; "));
   await ctx.close();
@@ -2640,7 +2879,9 @@ await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
 // MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
 for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
   const { ctx, page, errors } = await open("/school", { width, height });
-  const openList = page.getByRole("list", { name: "Otevřené úkoly a zkoušky" });
+  await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+  await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+  const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
   const row = openList.locator('[data-search-target="moodle-41"]');
   await row.waitFor({ timeout: 4000 }).catch(() => undefined);
   check(`moodle ${label}: termín v otevřených se štítkem a předmětem`, (await row.count()) === 1 && (await row.innerText()).includes("Moodle") && (await row.innerText()).includes("Fyzika"));
@@ -3030,6 +3271,116 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
     if (path === "/school") await page.screenshot({ path: `${OUT}icons-school.png`, fullPage: true });
     await ctx.close();
   }
+}
+
+// 27) MRK-126 – řádek po Hotovo / Splnit / Zrušit plynule zmizí, fokus přejde na souseda (oba režimy pohybu)
+for (const reducedMotion of ["no-preference", "reduce"]) {
+  const mode = reducedMotion === "reduce" ? "reduce" : "plný pohyb";
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  const focusInfo = (page) => page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName ?? "", row: el?.closest("[data-row-key]")?.getAttribute("data-row-key") ?? null, label: el?.getAttribute("aria-label") || el?.textContent?.trim() || "" };
+  });
+  const exitAnim = (page, key) => page.evaluate((k) => {
+    const row = document.querySelector(`[data-row-key="${k}"][data-row-exiting]`);
+    return row ? { anim: getComputedStyle(row).animationName, inert: row.inert } : null;
+  }, key);
+
+  // Škola: Splnit → řádek odejde z otevřených, fokus na souseda
+  await fetch(`${MOCK}/school/reset`, { method: "POST" });
+  {
+    const { ctx, page, errors } = await open("/school", { width: 1366, height: 900, reducedMotion });
+    await page.locator("details[data-collapsible-group]").first().waitFor({ timeout: 4000 }).catch(() => undefined);
+    await page.evaluate(() => document.querySelectorAll("details[data-collapsible-group]").forEach((d) => { d.open = true; }));
+    await page.getByRole("button", { name: "Splnit úkol Sada" }).click();
+    await page.getByRole("dialog", { name: "Splnit úkol Sada?" }).getByRole("button", { name: "Splnit", exact: true }).click();
+    const during = await eventually(() => exitAnim(page, "a-1"), 1000) ? await exitAnim(page, "a-1") : null;
+    check(`mizení řádků ${mode}: škola – řádek mizí (${reducedMotion === "reduce" ? "bez animace" : "motion-row-exit"}) a je inert`,
+      Boolean(during && during.inert && during.anim === (reducedMotion === "reduce" ? "none" : "motion-row-exit")), JSON.stringify(during));
+    const openList = page.getByRole("list", { name: /^(Otevřené úkoly a zkoušky|Starší po termínu)$/ });
+    check(`mizení řádků ${mode}: škola – řádek odešel z otevřených`, await eventually(async () => (await openList.locator('[data-row-key="a-1"]').count()) === 0, 3000));
+    const f = await eventually(async () => { const x = await focusInfo(page); return x.row && x.row !== "a-1" ? x : null; }, 2000) ? await focusInfo(page) : await focusInfo(page);
+    check(`mizení řádků ${mode}: škola – fokus na sousedním řádku (ne body)`, Boolean(f.row && f.row !== "a-1" && f.tag !== "BODY"), JSON.stringify(f));
+    check(`mizení řádků ${mode}: škola – bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/school/reset`, { method: "POST" });
+
+  // Připomínky: Hotovo u jednorázové + Zrušit přes dialog – řádek zmizí, fokus na souseda; opakovaná zůstane
+  await fetch(`${MOCK}/reminders/reset`, { method: "POST" });
+  await fetch(`${MOCK}/reminders/stateful`, { method: "POST" });
+  {
+    const { ctx, page, errors } = await open("/reminders", { width: 1366, height: 900, reducedMotion });
+    const row = (id) => page.locator(`[data-row-key="reminder-${id}"]`);
+    await row(2).waitFor({ timeout: 4000 });
+    await row(2).getByRole("button", { name: "Hotovo" }).click();
+    const during = await eventually(() => exitAnim(page, "reminder-2"), 1000) ? await exitAnim(page, "reminder-2") : null;
+    check(`mizení řádků ${mode}: připomínka Hotovo – řádek mizí`, Boolean(during && during.anim === (reducedMotion === "reduce" ? "none" : "motion-row-exit")), JSON.stringify(during));
+    check(`mizení řádků ${mode}: připomínka Hotovo – řádek zmizel`, await eventually(async () => (await row(2).count()) === 0, 3000));
+    let f = await focusInfo(page);
+    await eventually(async () => { f = await focusInfo(page); return Boolean(f.row && f.row !== "reminder-2"); }, 2000);
+    check(`mizení řádků ${mode}: připomínka Hotovo – fokus na sousední řádek`, Boolean(f.row && f.row !== "reminder-2"), JSON.stringify(f));
+    // Zrušit přes ⋯ a potvrzovací dialog – po zavření dialogu fokus na sousedovi, ne v body
+    await page.getByRole("button", { name: "Další akce: Odeslat fakturu" }).click();
+    await page.getByRole("menuitem", { name: "Zrušit připomínku: Odeslat fakturu" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Zrušit připomínku", exact: true }).click();
+    check(`mizení řádků ${mode}: Zrušit – řádek zmizel a dialog zavřený`, await eventually(async () => (await row(3).count()) === 0 && (await page.getByRole("dialog").count()) === 0, 3000));
+    await eventually(async () => { f = await focusInfo(page); return Boolean(f.row && f.row !== "reminder-3"); }, 2000);
+    check(`mizení řádků ${mode}: Zrušit – fokus na sousední řádek (ne body)`, Boolean(f.row && f.row !== "reminder-3" && f.tag !== "BODY"), JSON.stringify(f));
+    // opakovaná připomínka po Hotovo v seznamu zůstává – bez mizení
+    await row(4).getByRole("button", { name: "Hotovo" }).click();
+    await page.waitForTimeout(150);
+    check(`mizení řádků ${mode}: opakovaná připomínka nemizí`, (await row(4).getAttribute("data-row-exiting")) === null && (await row(4).count()) === 1);
+    await page.waitForTimeout(500);
+    if (reducedMotion !== "reduce") await page.screenshot({ path: `${OUT}rows-exit-reminders.png` });
+    check(`mizení řádků ${mode}: připomínky – bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/reminders/reset`, { method: "POST" });
+}
+// 26) MRK-125 – jednotné hlavičky stránek: HUD štítek + jeden h1 v PageHeader; mobilní Řídicí centrum bez řádku tlačítek
+{
+  const PAGES = ["/", "/today", "/planner", "/school", "/school/materials", "/reminders", "/calendar", "/habits", "/goals", "/work",
+    "/finance", "/fitness", "/wot", "/wot/replays", "/mff", "/review", "/settings", "/changes", "/activity", "/memory"];
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  const bad = [];
+  for (const path of PAGES) {
+    await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
+    const ok = await eventually(() => page.evaluate(() => {
+      const headers = document.querySelectorAll("main header[data-page-header]");
+      const h1 = document.querySelectorAll("main h1");
+      const hud = headers[0]?.querySelector("[data-page-hud]");
+      return headers.length === 1 && h1.length === 1 && headers[0].contains(h1[0]) && Boolean(hud?.textContent?.trim());
+    }), 4000);
+    if (!ok) bad.push(path);
+  }
+  check("hlavičky: každá stránka má PageHeader s HUD štítkem a jedním h1", bad.length === 0, bad.join(", "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
+  const trigger = page.getByRole("button", { name: "Akce dashboardu" });
+  await trigger.waitFor();
+  const [h1Box, trigBox] = [await page.locator("main h1").boundingBox(), await trigger.boundingBox()];
+  check("dashboard mobil: menu ⋯ na řádku nadpisu", Boolean(h1Box && trigBox && Math.abs((trigBox.y + trigBox.height / 2) - (h1Box.y + h1Box.height / 2)) < 16 && trigBox.x + trigBox.width <= 390), JSON.stringify({ h1Box, trigBox }));
+  const headerH = await page.locator("main header[data-page-header]").evaluate((el) => el.getBoundingClientRect().height);
+  check("dashboard mobil: hlavička bez řádku tlačítek (nižší)", headerH < 110, String(headerH));
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  check("dashboard mobil: menu klávesnicí – fokus na Upravit dashboard", await eventually(async () => (await focusedName(page)) === "Upravit dashboard"), await focusedName(page));
+  await page.keyboard.press("ArrowDown");
+  check("dashboard mobil: šipka na Obnovit", (await focusedName(page)) === "Obnovit", await focusedName(page));
+  await page.keyboard.press("Enter");
+  check("dashboard mobil: Obnovit z menu zavře menu a vrátí fokus", await eventually(async () => (await page.getByRole("menu").count()) === 0 && (await focusedName(page)) === "Akce dashboardu"));
+  await page.screenshot({ path: `${OUT}dashboard-mobile-header.png` });
+  check("dashboard mobil (hlavička): bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  check("dashboard desktop: tlačítka v hlavičce, menu ⋯ skryté",
+    (await page.getByRole("button", { name: "Upravit dashboard" }).isVisible()) && !(await page.getByRole("button", { name: "Akce dashboardu" }).isVisible()));
+  await ctx.close();
 }
 
 await browser.close();

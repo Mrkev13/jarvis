@@ -44,6 +44,9 @@ export const ICONS = {
   search: [c(11, 11, 7), p("M20 20l-4-4")],
   menu: [p("M4 7h16"), p("M4 12h16"), p("M4 17h16")],
   "chevron-right": [p("M9 6l6 6-6 6")],
+  "chevron-down": [p("M6 9l6 6 6-6")],
+  // MRK-123: menu dalších akcí v řádku (⋯)
+  more: [c(5, 12, 1.25), c(12, 12, 1.25), c(19, 12, 1.25)],
   refresh: [p("M20 11a8 8 0 1 0-2.3 5.7"), p("M20 4v7h-7")],
   mic: [r(9, 3, 6, 11, 3), p("M5 11a7 7 0 0 0 14 0"), p("M12 18v3")],
   volume: [p("M4 9v6h4l5 4V5L8 9H4Z"), p("M16.5 9a4 4 0 0 1 0 6"), p("M19 6.5a7.5 7.5 0 0 1 0 11")],

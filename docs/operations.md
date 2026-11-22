@@ -407,6 +407,28 @@ they need a proper isolation boundary for the reviewer and the fixer (see that i
 2. Check: open a PR, watch "Review gate" stay pending ("Waiting for a Codex review…"), and turn green within
    10 minutes after a `MERGE` review (or at once with *Run workflow*). Then merge by hand.
 
+### Release to production (MRK-113)
+
+Production (Ubuntu) deploys the branch `mrk-101-ubuntu-production`, not `main`. Changes reach it only through a
+release PR:
+
+1. **Actions → Release to production → Run workflow** (branch `main`; optional SHA of a commit on `main`, empty =
+   current `main`).
+2. The workflow (`.github/scripts/release_pr.py`) requires a successful push run of `ci.yml` for exactly that commit
+   on `main` (otherwise it fails and creates nothing), pushes `release/main-<sha12>` pinned to that commit and opens
+   or updates the PR into the production branch: source commit, included commits/PRs, Alembic heads, trial-merge
+   conflicts.
+3. **No Alembic change** → label `release`; after Standa's merge and a green push CI on the production branch the
+   Ubuntu updater deploys it by itself (`deploy/v3`, every 10 minutes).
+4. **Alembic head changes** → labels `release`, `migration`, `manual-merge`, title `(MIGRACE)` and a warning. The
+   updater refuses such a commit (it compares the heads in the old and new image, not the database state, so a
+   database migrated in advance does not unlock it). It needs the controlled migration deployment (MRK-114).
+
+The workflow never merges. One-time setting: Settings → Actions → General → *Allow GitHub Actions to create and
+approve pull requests* (only creating is used). A PR created with the workflow token does not start other workflows;
+the release PR head is the source commit, so its CI checks from the `main` push are shown on it, the review gate
+picks it up on its 10-minute pass.
+
 ## LOCAL Windows acceptance (not performed in cloud)
 
 1. Verify isolated production DB/config/media/backup/log paths and ACLs; SYSTEM can

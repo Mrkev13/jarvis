@@ -212,6 +212,12 @@ class Memory(Base):
 
     importance = Column(Integer, default=5)
     active = Column(Boolean, default=True)
+    # MRK-84: fact | temporary | decision (statuses.MEMORY_KINDS); expires_at = naive UTC, vypršená se nepoužije;
+    # supersedes_id = vzpomínka, kterou tato nahrazuje (MRK-111)
+    kind = Column(String(20), nullable=False, default="fact", server_default="fact")
+    expires_at = Column(DateTime, nullable=True)
+    supersedes_id = Column(Integer, ForeignKey("memories.id", name="fk_memories_supersedes_id", ondelete="SET NULL"),
+                           nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(
@@ -348,6 +354,9 @@ class Subject(Base):
     credit_status = Column(String(20), nullable=True)  # pending | passed | failed
     credit_date = Column(Date, nullable=True)
     absence_limit = Column(Integer, nullable=True)
+    # MRK-112: rytmus výuky pro docházku – NULL/1 = každý týden, 2 = ob týden od pondělí `attendance_anchor`
+    attendance_every = Column(Integer, nullable=True)
+    attendance_anchor = Column(Date, nullable=True)
 
 
 class Assignment(Base):

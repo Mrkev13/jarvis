@@ -8,6 +8,8 @@ interface AnimatedNumberProps {
   /** Zobrazí se, když hodnota chybí (stejně jako dosavadní formátovače). */
   fallback?: string;
   className?: string;
+  /** MRK-124: při prvním zobrazení naběhne od nuly (souhrnná čísla dashboardu). */
+  countUp?: boolean;
 }
 
 const MAX_DECIMALS = 2;
@@ -22,10 +24,10 @@ function decimalsOf(value: number): number {
  * Mezihodnoty se zaokrouhlují na přesnost cílové hodnoty (žádné blikající desetiny),
  * tabular-nums brání poskakování šířky během přechodu.
  */
-export function AnimatedNumber({ value, format, fallback = "-", className = "" }: AnimatedNumberProps) {
+export function AnimatedNumber({ value, format, fallback = "-", className = "", countUp = false }: AnimatedNumberProps) {
   const missing = value === null || value === undefined || !Number.isFinite(Number(value));
   const target = missing ? 0 : Number(value);
-  const display = useAnimatedNumber(target);
+  const display = useAnimatedNumber(target, undefined, countUp ? 0 : undefined);
   const shown = Number(display.toFixed(decimalsOf(target)));
   return <span className={`tabular-nums ${className}`}>{missing ? fallback : format(shown)}</span>;
 }

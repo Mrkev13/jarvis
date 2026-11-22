@@ -43,6 +43,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 ## 3. Typography & spacing
 
 - Font: Geist (sans) for UI, Geist Mono only for technical micro-labels (`HudLabel`) and counters.
+- Every page header goes through `PageHeader` with a `HudLabel` eyebrow (`Modul · …` / `Systém · …`); ui-check section 26 checks all routes. Exception: `/ai` has its own chat header (also with a HUD label).
 - Hierarchy: page `h1` (PageHeader, `text-2xl md:text-3xl`), sections/cards `h2` (`text-base/lg`), inner blocks `h3`
   (`text-sm`). One `h1` per page; the shell has none.
 - Numbers: `tabular-nums`; formatting only via `lib/format.ts` (cs-CZ, real minus sign, Czech plurals,
@@ -54,7 +55,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 | Primitive | Use for | Don't |
 |---|---|---|
 | `ContentContainer` | every page root (width, gutters, section rhythm); `width="narrow"` for forms/reading | nest it |
-| `PageHeader` | `eyebrow` (HudLabel), `title`, one-line `subtitle`, optional `meta`, `actions` | put filters here |
+| `PageHeader` | `eyebrow` (HudLabel – required on every page, MRK-125), `title`, one-line `subtitle`, optional `meta`, `actions`, optional `mobileActions` (replaces `actions` below `sm`, e.g. a ⋯ `ActionMenu` next to the title) | put filters here |
 | `PageSection` / `SectionHeader` | titled groups of content outside cards | for card titles (use `CardHeader`) |
 | `Card` (+`CardHeader`) | a self-contained block; `tone` only if the card reports something; `inset` for nested | colour every card |
 | `MetricCard` + `StatGrid` | key numbers: label, value, unit, trend text + `trendTone`, hint | decorative gauges without meaning |
@@ -142,6 +143,12 @@ timings that stay as they are: highlight 1.6 s (new row, AI outcome), shimmer 1.
 Primitives fire only on a **transition** of real data (`useTransitionSignal(value, ready, trigger)`); first load
 and loading → loaded never celebrate. Possible future categories (`achievement`, `level-up`) must reuse completion /
 milestone – no confetti, fireworks, overlays or full-screen effects.
+
+**MRK-124 (Standa: „animace, které jsou vidět“):** page entrance `motion-page-enter` (14 px, `normal`, `emphasized`);
+skeletons get a soft sheen (`motion-skeleton`, pseudo-element sweep, `shimmer` duration; the grey block stays without
+it); dashboard summary numbers count up from zero on first show (`<AnimatedNumber countUp>` – only there; elsewhere
+numbers still animate only on change); clickable dashboard rows lift on hover (`motion-hover-lift` + accent border).
+All off under reduced motion (ui-check § 5d checks both modes).
 
 **When to use motion:** confirming a user action (success), a state the user worked towards (completion, milestone,
 streak), a value that changed in place (progress, animated numbers), new content arriving (entrance, highlight).
@@ -281,6 +288,17 @@ Every migrated page follows the same skeleton:
 - Mobile menu = `Drawer` titled „Menu": focus starts on the current page link, Tab is trapped, Escape closes and
   returns focus to ☰. Choosing another page closes the menu and moves focus to the new page's `#main-content`
   (choosing the current page just closes it).
+- Navigation groups (MRK-79, MRK-122), same on desktop and in the mobile menu: main items (at most 8 at 390 px), the
+  collapsible group „Další“ (Plánovač, Finance, Práce, MFF, Fitness when enabled; native `<details>`/`<summary>`
+  ≥ 44 px, keyboard Enter/Space, closed until it contains the current page), then Nastavení below a divider.
+  Co se změnilo, Aktivita and Paměť are not in the menu (`menu: false`): the „Historie a paměť“ card on Nastavení
+  and Ctrl+K lead to them, and on them Nastavení is the active item (as Řídicí centrum on Dnes / Týdenní přehled).
+  A disabled module disappears from every group and an empty group is not rendered.
+- Desktop sidebar (MRK-122): sticky, the full window height, scrolls by itself when the window is too low – the page
+  scrolls under it. Motion (`app/motion.css`, off under reduced motion): one active-item indicator that glides
+  between items (`transform`, `normal` + `emphasized`; placed without transition on first paint), items and the
+  group heading shift 2 px on hover (`fast`, hover devices only), the group chevron turns and the opened group
+  content enters (`motion-enter`).
 
 ## 13. AI assistant (Roadmap 4C)
 

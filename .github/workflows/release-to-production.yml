@@ -1,0 +1,58 @@
+name: Release to production
+
+# MRK-113: controlled propagation main -> mrk-101-ubuntu-production (the branch the Ubuntu updater deploys).
+# Run by hand: Actions -> Release to production -> Run workflow (branch main, optional commit SHA from main).
+# The logic is .github/scripts/release_pr.py (tests: backend/tests/test_release_pr.py):
+# - the source commit must be on main and its push run of ci.yml must be completed/success, otherwise it fails and
+#   creates nothing (a failed CI blocks the propagation);
+# - it pushes release/main-<sha12> pinned to the EXACT source commit and opens (or updates) a PR into the production
+#   branch with the included commits/PRs, the Alembic heads and trial-merge conflicts;
+# - a release that changes the Alembic head gets the labels `migration` + `manual-merge` and a warning: the automatic
+#   updater refuses it (it compares the heads in the images, not the database state), it needs the controlled
+#   migration deployment (MRK-114).
+# It NEVER merges. Standa merges by hand (AGENTS.md workflow); the production branch is protected by the ruleset.
+# Repository setting needed once: Settings -> Actions -> General -> "Allow GitHub Actions to create and approve pull
+# requests" (creating only; nothing approves).
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit z main (prázdné = aktuální main)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-to-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release PR (main → produkce)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write        # push only the release/main-<sha12> branch (production itself is ruleset-protected)
+      pull-requests: write   # create / update the release PR and its labels
+      issues: write          # labels live on the issues API
+      actions: read          # CI runs of the source commit
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Spouštěj z main (trusted copy), ne z ${GITHUB_REF}."
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch main and the production branch
+        run: git fetch --no-tags origin main mrk-101-ubuntu-production
+      - name: Release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.sha }}
+        run: python3 .github/scripts/release_pr.py --sha "$SOURCE_SHA"

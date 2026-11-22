@@ -48,7 +48,10 @@ export function useModal({
         e.preventDefault();
         latest.current.onClose();
       } else if (action === "trap" && panelRef.current) {
-        const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+        // Jen vykreslené prvky: odkazy v zavřeném <details> fokus dostat nemůžou a rozbily by konce pasti (MRK-79).
+        const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+          (el) => el.getClientRects().length > 0,
+        );
         if (!items.length) {
           e.preventDefault();
           return;

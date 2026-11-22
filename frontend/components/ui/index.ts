@@ -1,8 +1,10 @@
 // Sdílená UI primitiva (Roadmap 4A/4B) – viz docs/design-system.md.
+export { ActionMenu, type ActionMenuItem } from "./ActionMenu";
 export { AreaBadge } from "./AreaBadge";
 export { Button, ButtonLink, IconButton, TextLink, buttonClass } from "./Button";
 export { Icon, IconTile } from "./Icon";
 export { Card, CardHeader } from "./Card";
+export { CollapsibleGroup } from "./CollapsibleGroup";
 export { default as ConfirmDialog } from "./ConfirmDialog";
 export { Drawer } from "./Drawer";
 export { EntityList, EntityRow } from "./EntityRow";
