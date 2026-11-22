@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   CardHeader,
+  ActionMenu,
   ConfirmDialog,
   ContentContainer,
   EmptyState,
@@ -77,7 +78,8 @@ export default function Home() {
   // fokus po přesunu / skrytí / ukončení úprav (prvek se mohl přemístit do jiného bloku → nový uzel)
   useEffect(() => {
     if (!focusKey) return;
-    const el = document.querySelector<HTMLElement>(`[data-focus-key="${focusKey}"]`);
+    // první *vykreslený* prvek: na mobilu je „Upravit dashboard" v menu ⋯ a skryté tlačítko fokus nedostane (MRK-125)
+    const el = Array.from(document.querySelectorAll<HTMLElement>(`[data-focus-key="${focusKey}"]`)).find((x) => x.getClientRects().length > 0);
     if (el && !(el as HTMLButtonElement).disabled) el.focus();
     else if (focusKey.endsWith(":up") || focusKey.endsWith(":down")) {
       // na okraji je směrové tlačítko zakázané → druhé
@@ -151,6 +153,23 @@ export default function Home() {
           </HudLabel>
         }
         title="Řídicí centrum"
+        // MRK-125: na mobilu místo celého řádku tlačítek menu ⋯ vedle nadpisu (v režimu úprav zůstává „Hotovo" vidět)
+        mobileActions={
+          editing ? undefined : (
+            <ActionMenu
+              icon="more"
+              ariaLabel="Akce dashboardu"
+              variant="ghost"
+              focusKey="dashboard:edit"
+              items={[
+                { label: "Upravit dashboard", onSelect: startEditing, disabled: !layout },
+                ...(dashboard.status !== "idle"
+                  ? [{ label: dashboard.refreshing ? "Obnovuji…" : "Obnovit", onSelect: () => void dashboard.reload(), disabled: dashboard.refreshing }]
+                  : []),
+              ]}
+            />
+          )
+        }
         // na mobilu bez podtitulku: první obrazovka patří „Co hoří" a další položce dne (MRK-78/95)
         subtitle={<span className="hidden md:inline">Co hoří, co tě dnes čeká a co se změnilo – na jednom místě.</span>}
         actions={

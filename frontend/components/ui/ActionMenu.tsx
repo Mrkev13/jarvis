@@ -30,6 +30,7 @@ export function ActionMenu({
   variant = "secondary",
   disabled,
   className,
+  focusKey,
 }: {
   label?: string;
   icon?: IconName;
@@ -38,6 +39,8 @@ export function ActionMenu({
   variant?: ButtonVariant;
   disabled?: boolean;
   className?: string;
+  /** `data-focus-key` tlačítka – stránka na něj umí vrátit fokus (MRK-125: dashboard po „Hotovo"). */
+  focusKey?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [alignStart, setAlignStart] = useState(false);
@@ -96,6 +99,7 @@ export function ActionMenu({
         ref={triggerRef}
         type="button"
         aria-label={ariaLabel}
+        data-focus-key={focusKey}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

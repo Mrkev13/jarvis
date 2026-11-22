@@ -43,6 +43,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 ## 3. Typography & spacing
 
 - Font: Geist (sans) for UI, Geist Mono only for technical micro-labels (`HudLabel`) and counters.
+- Every page header goes through `PageHeader` with a `HudLabel` eyebrow (`Modul · …` / `Systém · …`); ui-check section 26 checks all routes. Exception: `/ai` has its own chat header (also with a HUD label).
 - Hierarchy: page `h1` (PageHeader, `text-2xl md:text-3xl`), sections/cards `h2` (`text-base/lg`), inner blocks `h3`
   (`text-sm`). One `h1` per page; the shell has none.
 - Numbers: `tabular-nums`; formatting only via `lib/format.ts` (cs-CZ, real minus sign, Czech plurals,
@@ -54,7 +55,7 @@ Tailwind 4 `@theme` variables → utilities (`bg-surface`, `border-line`, `text-
 | Primitive | Use for | Don't |
 |---|---|---|
 | `ContentContainer` | every page root (width, gutters, section rhythm); `width="narrow"` for forms/reading | nest it |
-| `PageHeader` | `eyebrow` (HudLabel), `title`, one-line `subtitle`, optional `meta`, `actions` | put filters here |
+| `PageHeader` | `eyebrow` (HudLabel – required on every page, MRK-125), `title`, one-line `subtitle`, optional `meta`, `actions`, optional `mobileActions` (replaces `actions` below `sm`, e.g. a ⋯ `ActionMenu` next to the title) | put filters here |
 | `PageSection` / `SectionHeader` | titled groups of content outside cards | for card titles (use `CardHeader`) |
 | `Card` (+`CardHeader`) | a self-contained block; `tone` only if the card reports something; `inset` for nested | colour every card |
 | `MetricCard` + `StatGrid` | key numbers: label, value, unit, trend text + `trendTone`, hint | decorative gauges without meaning |

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Button, Card, CardHeader, ContentContainer, EmptyState, ErrorState, LoadingState, PageHeader, Tabs } from '@/components/ui';
+import { Button, Card, CardHeader, ContentContainer, EmptyState, ErrorState, HudLabel, LoadingState, PageHeader, Tabs } from '@/components/ui';
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiJson, errorMessage, jsonBody } from '@/lib/api';
 import { DefinitionForm, DefinitionList, type DefinitionPayload } from './Definitions';
@@ -51,7 +51,7 @@ export default function FitnessPage() {
   async function createSession(body:WorkoutPayload|RehabPayload) {await mutate(rehab?'/fitness/rehab/sessions':'/fitness/workouts','POST',body);}
   function toggle(definition:Definition) {void mutate(`${rehab?'/fitness/rehab/exercises':'/fitness/exercises'}/${definition.id}`,'PATCH',{active:!definition.active});}
   return <ContentContainer>
-    <PageHeader title="Fitness & Rehab" subtitle="Záznamy provedených tréninků a rehabilitace." />
+    <PageHeader eyebrow={<HudLabel>Modul · fitness</HudLabel>} title="Fitness & Rehab" subtitle="Záznamy provedených tréninků a rehabilitace." />
     <Tabs id="fitness" label="Fitness a rehabilitace" items={[{value:'workouts',label:'Tréninky'},{value:'exercises',label:'Cviky'},{value:'rehab',label:'Rehab'}]} value={tab} onChange={value=>{setChosenTab({tab:value,query});setCreating(null);setNotice(null);setError(null);}} />
     {notice?<p role="status" className="text-sm text-ink-muted">{notice}</p>:null}
     {error?<ErrorState message={error} />:null}

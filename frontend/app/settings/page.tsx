@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { ModuleSettings } from "@/components/modules/ModuleSettings";
-import { Card, CardHeader, ContentContainer, PageHeader } from "@/components/ui";
+import { Card, CardHeader, ContentContainer, HudLabel, PageHeader } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
 
 // MRK-18 A2: Nastavení (jádro) – sekce Moduly. MRK-122: Co se změnilo, Aktivita a Paměť nejsou v liště, vedou sem.
@@ -16,7 +16,7 @@ const HISTORY_PAGES = [
 export default function SettingsPage() {
   return (
     <ContentContainer width="narrow">
-      <PageHeader title="Nastavení" subtitle="Moduly Standa Hubu – co se ukazuje v navigaci, vyhledávání, dashboardu a AI." />
+      <PageHeader eyebrow={<HudLabel>Systém · nastavení</HudLabel>} title="Nastavení" subtitle="Moduly Standa Hubu – co se ukazuje v navigaci, vyhledávání, dashboardu a AI." />
       <div className="space-y-6">
         <Card data-settings-history="">
           <CardHeader title="Historie a paměť" description="Stránky, které nejsou v liště – najde je i Ctrl+K." />
