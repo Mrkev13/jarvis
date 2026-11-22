@@ -3,7 +3,7 @@
  * `keywords` = další slova, pod kterými stránku najde Ctrl+K (bez diakritiky stačí, normalizuje se).
  * `module` = stránka patří modulu s feature flagem (Roadmap 6C, lib/modules.ts); bez něj = jádro, vždy vidět.
  * `menu: false` = stránka není v hlavní navigaci, ale najde ji Ctrl+K a vedou na ni odkazy (MRK-78: Dnes a Týdenní
- * přehled jsou za kartami Řídicího centra).
+ * přehled jsou za kartami Řídicího centra; MRK-122: Co se změnilo, Aktivita a Paměť jsou za kartou v Nastavení).
  * `group` (MRK-79) = skupina v menu: bez něj hlavní navigace, `more` = „Další“, `system` = „Systém“ (rozbalitelné).
  */
 import { MODULE_UI, MODULES, type ModuleAccess, type ModuleDef, type ModuleUi, type NavGroup } from "./modules.ts";
@@ -22,9 +22,9 @@ const CORE_BEFORE: NavPage[] = [
 
 /** Stránky jádra za stránkami modulů. */
 const CORE_AFTER: NavPage[] = [
-  { href: "/changes", label: "Co se změnilo", area: null, keywords: ["what changed", "změny", "novinky", "od minule", "přehled změn"], group: "system" },
-  { href: "/activity", label: "Aktivita", area: null, keywords: ["activity", "audit", "historie změn", "log"], group: "system" },
-  { href: "/memory", label: "Paměť", area: "memory", keywords: ["memory", "poznámka", "poznámky", "preference"], group: "system" },
+  { href: "/changes", label: "Co se změnilo", area: null, keywords: ["what changed", "změny", "novinky", "od minule", "přehled změn"], menu: false },
+  { href: "/activity", label: "Aktivita", area: null, keywords: ["activity", "audit", "historie změn", "log"], menu: false },
+  { href: "/memory", label: "Paměť", area: "memory", keywords: ["memory", "poznámka", "poznámky", "preference"], menu: false },
   { href: "/ai", label: "AI asistent", area: "ai", keywords: ["ai", "asistent", "chat", "jarvis", "standa ai"] },
   { href: "/settings", label: "Nastavení", area: null, keywords: ["settings", "nastavení", "moduly", "modul", "zapnout", "vypnout"], group: "system" },
 ];

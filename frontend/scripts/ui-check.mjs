@@ -410,7 +410,8 @@ for (const reducedMotion of ["no-preference", "reduce"]) {
   await ctx.close();
 }
 
-// 8b) MRK-79: zúžená navigace – hlavní položky + rozbalitelné skupiny „Další“ a „Systém“ (desktop i mobil).
+// 8b) MRK-79 / MRK-122: zúžená navigace – hlavní položky, rozbalitelná skupina „Další“, dole Nastavení (desktop i
+// mobil). Co se změnilo, Aktivita a Paměť nejsou v liště (karta v Nastavení, Ctrl+K). Desktop lišta zůstává při scrollu.
 {
   const groupOpen = (page, scope, id) => page.locator(`${scope} [data-nav-group="${id}"]`).evaluate((d) => d.open);
   const { ctx, page, errors } = await open("/", { width: 390, height: 844 });
@@ -419,46 +420,107 @@ for (const reducedMotion of ["no-preference", "reduce"]) {
   await menu.waitFor();
   const mainCount = await menu.locator('nav[aria-label="Hlavní navigace"] > a').count();
   check("navigace mobil: hlavní menu ≤ 8 položek", mainCount > 0 && mainCount <= 8, String(mainCount));
-  check("navigace mobil: Další a Systém zavřené", !(await groupOpen(page, "[data-drawer-nav]", "more")) && !(await groupOpen(page, "[data-drawer-nav]", "system")));
-  check("navigace mobil: Nastavení schované ve Systému", !(await menu.getByRole("link", { name: "Nastavení" }).isVisible()));
-  const summary = menu.locator('[data-nav-group="system"] summary');
+  check("navigace mobil: Další zavřené", !(await groupOpen(page, "[data-drawer-nav]", "more")));
+  check("navigace mobil: Nastavení vidět dole", await menu.locator('[data-nav-group="system"]').getByRole("link", { name: "Nastavení" }).isVisible());
+  const navHrefs = await menu.locator('nav[aria-label="Hlavní navigace"] a').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("navigace mobil: bez Co se změnilo, Aktivity a Paměti", !["/changes", "/activity", "/memory"].some((h) => navHrefs.includes(h)), navHrefs.join(","));
+  const summary = menu.locator('[data-nav-group="more"] summary');
   check("navigace mobil: skupina ≥ 44 px", ((await summary.boundingBox())?.height ?? 0) >= 44);
   // Past na fokus Draweru (Codex review #73): summary je v pasti, zavřená skupina se přeskočí, otevřená se projde.
   const focused = () => page.evaluate(() => {
     const el = document.activeElement;
     return el?.tagName === "SUMMARY" ? `summary:${el.closest("[data-nav-group]")?.getAttribute("data-nav-group")}` : el?.getAttribute("aria-label") || el?.textContent?.trim() || "";
   });
-  await menu.locator('[data-nav-group="more"] summary').focus();
+  await summary.focus();
   await page.keyboard.press("Tab");
-  check("navigace mobil: Tab ze zavřené Další na Systém", (await focused()) === "summary:system", await focused());
+  check("navigace mobil: Tab ze zavřené Další na Nastavení", (await focused()) === "Nastavení", await focused());
   await page.keyboard.press("Shift+Tab");
   check("navigace mobil: Shift+Tab zpět na Další", (await focused()) === "summary:more", await focused());
-  await summary.focus();
   await page.keyboard.press("Enter");
-  check("navigace mobil: Enter rozbalí Systém", await eventually(() => menu.getByRole("link", { name: "Nastavení" }).isVisible()));
+  check("navigace mobil: Enter rozbalí Další", await eventually(() => menu.getByRole("link", { name: "Plánovač" }).isVisible()));
   await page.keyboard.press("Tab");
-  check("navigace mobil: Enter → Tab na první odkaz skupiny", (await focused()) === "Co se změnilo", await focused());
+  check("navigace mobil: Enter → Tab na první odkaz skupiny", (await focused()) === "Plánovač", await focused());
   await page.keyboard.press("Shift+Tab");
-  check("navigace mobil: Shift+Tab zpět na Systém", (await focused()) === "summary:system", await focused());
-  await menu.locator('[data-nav-group="more"] summary').focus();
-  await page.keyboard.press("Enter");
-  await eventually(() => menu.getByRole("link", { name: "Plánovač" }).isVisible());
-  await page.keyboard.press("Tab");
-  check("navigace mobil: Další → Enter → Tab na Plánovač", (await focused()) === "Plánovač", await focused());
+  check("navigace mobil: Shift+Tab zpět na Další", (await focused()) === "summary:more", await focused());
   check("navigace mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   await page.screenshot({ path: `${OUT}nav-groups-mobile.png` });
   check("navigace mobil: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 {
-  const { ctx, page, errors } = await open("/settings");
+  const { ctx, page, errors } = await open("/", { width: 1366, height: 768 });
   const aside = page.locator("[data-desktop-sidebar]");
-  check("navigace desktop: aktivní stránka rozbalí svou skupinu", await eventually(async () => (await aside.locator('[data-nav-group="system"]').evaluate((d) => d.open)) && (await aside.locator('a[href="/settings"][aria-current="page"]').isVisible())));
-  check("navigace desktop: ostatní skupina zůstane zavřená", !(await aside.locator('[data-nav-group="more"]').evaluate((d) => d.open)));
+  check("navigace desktop: Další zavřené", !(await aside.locator('[data-nav-group="more"]').evaluate((d) => d.open)));
   await aside.locator('[data-nav-group="more"] summary').click();
   check("navigace desktop: klik rozbalí Další", await eventually(() => aside.getByRole("link", { name: "Plánovač" }).isVisible()));
-  await aside.screenshot({ path: `${OUT}nav-groups-desktop.png` });
+  // indikátor aktivní položky: jeden prvek u Řídicího centra
+  const indicatorAt = () => page.evaluate(() => {
+    const nav = document.querySelector('[data-desktop-sidebar] nav[aria-label="Hlavní navigace"]');
+    const ind = nav.querySelector("[data-nav-indicator]").getBoundingClientRect();
+    const link = nav.querySelector('a[aria-current="page"]').getBoundingClientRect();
+    return Math.abs(ind.top + ind.height / 2 - (link.top + link.height / 2)) < 3 && ind.height > 0;
+  });
+  check("navigace desktop: indikátor u aktivní položky", await eventually(indicatorAt));
+  // lišta zůstává na místě, když stránka sjede dolů
+  const before = await aside.boundingBox();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(150);
+  const after = await aside.boundingBox();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  check("navigace desktop: lišta zůstane při scrollu na místě", scrolled > 200 && Math.abs((after?.y ?? -1) - (before?.y ?? 0)) < 1 && (after?.height ?? 0) <= 768 + 1, JSON.stringify({ scrolled, before: before?.y, after: after?.y, h: after?.height }));
+  check("navigace desktop: hledání vidět i po scrollu", await aside.getByRole("button", { name: /Hledat/ }).isVisible());
+  // kolečko nad lištou: rozbalená „Další“ se do 768 px nevejde → posune se lišta sama; sbalená se vejde → posune se
+  // stránka (lišta scroll nesmí „spolknout“ – overscroll-contain to dřív dělal)
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = await aside.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  const overflows = await aside.evaluate((el) => el.scrollHeight > el.clientHeight);
+  await page.mouse.wheel(0, 400);
+  check("navigace desktop: nevejde-li se lišta, posune se sama", overflows && await eventually(() => aside.evaluate((el) => el.scrollTop > 0)), String(overflows));
+  await aside.locator('[data-nav-group="more"] summary').click();
+  await page.mouse.wheel(0, -2000);
+  await eventually(() => aside.evaluate((el) => el.scrollTop === 0));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check("navigace desktop: sbalená lišta se do okna vejde", await aside.evaluate((el) => el.scrollHeight <= el.clientHeight));
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  await page.mouse.wheel(0, 400);
+  check("navigace desktop: kolečko nad lištou posune stránku", await eventually(async () => (await page.evaluate(() => window.scrollY)) > 100), String(await page.evaluate(() => window.scrollY)));
+  await page.screenshot({ path: `${OUT}nav-sidebar-sticky.png` });
   check("navigace desktop: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // MRK-124: aktivní odkaz ve sbalené „Další“ – indikátor se schová, po rozbalení se vrátí
+  const { ctx, page, errors } = await open("/planner", { width: 1366, height: 900 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  const more = aside.locator('[data-nav-group="more"]');
+  const indicatorShown = () => aside.locator("[data-nav-indicator]").evaluate((el) => getComputedStyle(el).opacity !== "0" && el.getBoundingClientRect().height > 0);
+  check("navigace desktop: na Plánovači je Další otevřené s indikátorem", (await more.evaluate((d) => d.open)) && await eventually(indicatorShown));
+  await more.locator("summary").click();
+  check("navigace desktop: sbalené Další schová indikátor", await eventually(async () => !(await indicatorShown())));
+  await more.locator("summary").click();
+  check("navigace desktop: rozbalené Další indikátor vrátí", await eventually(indicatorShown));
+  check("navigace desktop (indikátor): bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  // Co se změnilo / Aktivita / Paměť: mimo lištu, na nich svítí Nastavení, vede na ně karta v Nastavení
+  const { ctx, page, errors } = await open("/memory", { width: 1366, height: 900 });
+  const aside = page.locator("[data-desktop-sidebar]");
+  check("navigace desktop: na Paměti svítí Nastavení", (await aside.locator('a[href="/settings"][aria-current="page"]').count()) === 1);
+  check("navigace desktop: Paměť není v liště", (await aside.locator('a[href="/memory"]').count()) === 0);
+  await page.goto(`${BASE}/settings`, { waitUntil: "domcontentloaded" });
+  const card = page.locator("[data-settings-history]");
+  await card.waitFor();
+  const links = await card.locator("a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  check("nastavení: karta vede na Co se změnilo, Aktivitu a Paměť", JSON.stringify(links) === JSON.stringify(["/changes", "/activity", "/memory"]), JSON.stringify(links));
+  check("nastavení: odkazy ≥ 44 px", (await card.locator("a").evaluateAll((as) => as.every((a) => a.getBoundingClientRect().height >= 44))));
+  await card.locator('a[href="/activity"]').click();
+  await page.waitForURL("**/activity", { timeout: 5000 }).catch(() => undefined);
+  check("nastavení: odkaz otevře Aktivitu", page.url().endsWith("/activity"), page.url());
+  await page.goto(`${BASE}/settings`, { waitUntil: "domcontentloaded" });
+  await card.screenshot({ path: `${OUT}settings-history.png` });
+  check("nastavení: bez chyb JS", errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
