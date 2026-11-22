@@ -281,11 +281,17 @@ Every migrated page follows the same skeleton:
 - Mobile menu = `Drawer` titled „Menu": focus starts on the current page link, Tab is trapped, Escape closes and
   returns focus to ☰. Choosing another page closes the menu and moves focus to the new page's `#main-content`
   (choosing the current page just closes it).
-- Navigation groups (MRK-79), same on desktop and in the mobile menu: main items (at most 8 at 390 px), then two
-  collapsible groups – „Další“ (Plánovač, Finance, Práce, MFF, Fitness when enabled) and „Systém“ (Co se změnilo,
-  Aktivita, Paměť, Nastavení). Native `<details>`/`<summary>` (≥ 44 px, keyboard Enter/Space); a group is closed
-  until it contains the current page, then it opens by itself. A disabled module disappears from every group and an
-  empty group is not rendered. Group = `group` on `NavPage` / module `nav`; Ctrl+K still finds every page.
+- Navigation groups (MRK-79, MRK-122), same on desktop and in the mobile menu: main items (at most 8 at 390 px), the
+  collapsible group „Další“ (Plánovač, Finance, Práce, MFF, Fitness when enabled; native `<details>`/`<summary>`
+  ≥ 44 px, keyboard Enter/Space, closed until it contains the current page), then Nastavení below a divider.
+  Co se změnilo, Aktivita and Paměť are not in the menu (`menu: false`): the „Historie a paměť“ card on Nastavení
+  and Ctrl+K lead to them, and on them Nastavení is the active item (as Řídicí centrum on Dnes / Týdenní přehled).
+  A disabled module disappears from every group and an empty group is not rendered.
+- Desktop sidebar (MRK-122): sticky, the full window height, scrolls by itself when the window is too low – the page
+  scrolls under it. Motion (`app/motion.css`, off under reduced motion): one active-item indicator that glides
+  between items (`transform`, `normal` + `emphasized`; placed without transition on first paint), items and the
+  group heading shift 2 px on hover (`fast`, hover devices only), the group chevron turns and the opened group
+  content enters (`motion-enter`).
 
 ## 13. AI assistant (Roadmap 4C)
 

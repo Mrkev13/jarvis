@@ -4,7 +4,7 @@ import { Icon } from "@/components/ui/Icon";
 import { CharlieMemorial, CharlieMemorialButton, CharlieMemorialDialog } from "@/components/CharlieMemorial";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import NotificationsBell from "@/components/NotificationsBell";
 import { JarvisCompanionToggle } from "@/components/jarvis/JarvisCompanionToggle";
 import { QuickAddButton } from "@/components/quick-add/QuickAddButton";
@@ -30,32 +30,90 @@ export function useNavLinks(): { href: string; label: string }[] {
 
 /** MRK-78: Dnes a Týdenní přehled nejsou v menu – jsou to podstránky Řídicího centra, to zůstane zvýrazněné. */
 const CONTROL_CENTER_PAGES = ["/", "/today", "/review"];
+/** MRK-122: Co se změnilo, Aktivita a Paměť jsou za kartou v Nastavení – na nich svítí Nastavení. */
+const SETTINGS_PAGES = ["/settings", "/changes", "/activity", "/memory"];
+
+const under = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(prefix + "/");
 
 export function isActiveLink(href: string, pathname: string | null): boolean {
-  return href === "/" ? CONTROL_CENTER_PAGES.includes(pathname ?? "") : Boolean(pathname?.startsWith(href));
+  const path = pathname ?? "";
+  if (href === "/") return CONTROL_CENTER_PAGES.includes(path);
+  if (href === "/settings") return SETTINGS_PAGES.some((p) => under(path, p));
+  return under(path, href);
 }
 
 type NavLinkItem = { href: string; label: string };
 
-/** MRK-79: hlavní položky, pod nimi rozbalitelné skupiny „Další“ a „Systém“. Všechny odkazy zůstávají v jednom <nav>. */
+/**
+ * MRK-79 / MRK-122: hlavní položky, rozbalitelná skupina „Další“ a dole Nastavení. Všechny odkazy jsou v jednom <nav>.
+ * Indikátor aktivní položky je jeden prvek, který mezi položkami plynule klouže (jen transform, viz useNavIndicator).
+ */
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const { access } = useModuleAccess();
   const groups = menuGroupsFor(access);
+  const navRef = useRef<HTMLElement>(null);
+  const indicator = useNavIndicator(navRef, pathname);
   return (
-    <nav aria-label="Hlavní navigace" className="space-y-0.5">
+    <nav ref={navRef} aria-label="Hlavní navigace" className="relative space-y-0.5">
+      <span
+        aria-hidden="true"
+        data-nav-indicator=""
+        className={cx("motion-nav-indicator pointer-events-none absolute left-0 top-0 w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgb(34_211_238/0.8)]", !indicator.box && "opacity-0")}
+        style={{
+          height: indicator.box?.height ?? 0,
+          transform: `translateY(${indicator.box?.top ?? 0}px)`,
+          transition: indicator.animate ? undefined : "none",
+        }}
+      />
       {groups.map((group) =>
-        group.label === null ? (
-          <NavLinks key={group.id} links={group.pages} pathname={pathname} onNavigate={onNavigate} />
-        ) : (
+        group.id === "more" && group.label ? (
           <NavGroupSection key={group.id} id={group.id} label={group.label} links={group.pages} pathname={pathname} onNavigate={onNavigate} />
+        ) : group.id === "system" ? (
+          <div key={group.id} data-nav-group="system" className="mt-3 border-t border-line pt-2">
+            <NavLinks links={group.pages} pathname={pathname} onNavigate={onNavigate} />
+          </div>
+        ) : (
+          <NavLinks key={group.id} links={group.pages} pathname={pathname} onNavigate={onNavigate} />
         ),
       )}
     </nav>
   );
 }
 
-/** Skupina je zavřená, dokud v ní není aktuální stránka; ručně rozbalená zůstane rozbalená. */
+/**
+ * Pozice indikátoru = aktivní odkaz uvnitř <nav>. Měří se asynchronně (ResizeObserver, rozbalení skupiny, změna
+ * stránky) – žádná smyčka. První umístění bez přechodu, další plynule (CSS `.motion-nav-indicator`, reduced motion
+ * ho vypne). Aktivní odkaz ve sbalené skupině není vidět → indikátor se schová.
+ */
+function useNavIndicator(navRef: React.RefObject<HTMLElement | null>, pathname: string | null) {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+  const [animate, setAnimate] = useState(false);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const measure = () => {
+      const link = nav.querySelector<HTMLElement>('a[aria-current="page"]');
+      if (!link || link.getClientRects().length === 0) return setBox(null);
+      const n = nav.getBoundingClientRect();
+      const r = link.getBoundingClientRect();
+      setBox({ top: r.top - n.top + 8, height: Math.max(r.height - 16, 8) });
+      requestAnimationFrame(() => setAnimate(true));
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    nav.addEventListener("toggle", measure, true); // <details> toggle nebublá – zachytí se ve fázi capture
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      nav.removeEventListener("toggle", measure, true);
+    };
+  }, [navRef, pathname]);
+  return { box, animate };
+}
+
+/** Skupina je zavřená, dokud v ní není aktuální stránka; ručně rozbalená zůstane rozbalená. Obsah se plynule objeví. */
 function NavGroupSection({ id, label, links, pathname, onNavigate }: { id: NavGroup; label: string; links: NavLinkItem[]; pathname: string | null; onNavigate?: (href: string) => void }) {
   const hasActive = links.some((l) => isActiveLink(l.href, pathname));
   const [open, setOpen] = useState(hasActive);
@@ -69,11 +127,11 @@ function NavGroupSection({ id, label, links, pathname, onNavigate }: { id: NavGr
       onToggle={(e) => setOpen(e.currentTarget.open)}
       className="group mt-3 border-t border-line pt-2"
     >
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-3 text-xs font-medium uppercase tracking-wider text-ink-muted hover:bg-surface hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 [&::-webkit-details-marker]:hidden">
+      <summary className="motion-nav-item flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-3 text-xs font-medium uppercase tracking-wider text-ink-muted hover:bg-surface hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 [&::-webkit-details-marker]:hidden">
         {label}
-        <Icon name="chevron-right" size="sm" className="transition-transform group-open:rotate-90" />
+        <Icon name="chevron-right" size="sm" className="motion-nav-chevron group-open:rotate-90" />
       </summary>
-      <div className="mt-0.5 space-y-0.5">
+      <div className="motion-nav-reveal mt-0.5 space-y-0.5">
         <NavLinks links={links} pathname={pathname} onNavigate={onNavigate} />
       </div>
     </details>
@@ -92,17 +150,11 @@ function NavLinks({ links, pathname, onNavigate }: { links: NavLinkItem[]; pathn
             onClick={() => onNavigate?.(link.href)}
             aria-current={active ? "page" : undefined}
             className={cx(
-              "relative block rounded-lg px-3 py-2.5 text-sm transition-colors",
+              "motion-nav-item relative block rounded-lg px-3 py-2.5 text-sm",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
               active ? "bg-surface-2 text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
             )}
           >
-            {active ? (
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgb(34_211_238/0.8)]"
-              />
-            ) : null}
             {link.label}
           </Link>
         );
@@ -221,8 +273,9 @@ export function MobileHeader() {
 
 export function DesktopSidebar() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  // MRK-122: lišta zůstává při scrollu stránky na místě; když se do okna nevejde, scrolluje sama.
   return (
-    <aside data-desktop-sidebar className="hidden md:flex md:flex-col w-60 min-h-screen shrink-0 border-r border-line bg-app/80 px-4 py-5">
+    <aside data-desktop-sidebar className="hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto w-60 shrink-0 border-r border-line bg-app/80 px-4 py-5">
       <div className="mb-6 flex items-center justify-between gap-2 px-1">
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}

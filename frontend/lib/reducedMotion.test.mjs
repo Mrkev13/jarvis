@@ -94,3 +94,11 @@ test("completion celebrations share the semantic motion primitive instead of mod
   );
   assert.ok(keyframes(semanticMotion).includes("motion-glow-once"));
 });
+
+// MRK-122: postranní lišta – posun indikátoru, hover a rozbalení skupiny mají reduced-motion protějšek.
+test("sidebar motion stops under reduced motion", () => {
+  const block = reducedBlock(css("motion.css"));
+  for (const cls of [".motion-nav-reveal", ".motion-nav-indicator", ".motion-nav-chevron", ".motion-nav-item:hover"]) {
+    assert.ok(block.includes(cls), `${cls} není v reduced-motion bloku`);
+  }
+});
