@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Button, ButtonLink, Card, CardHeader, ContentContainer, EmptyState, EntityList, EntityRow, ErrorState, FilterBar,
-  FilterSelect, LoadingState, PageHeader, StatusBadge, buttonClass,
+  FilterSelect, HudLabel, LoadingState, PageHeader, StatusBadge, buttonClass,
 } from '@/components/ui';
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiFetch, apiJson, apiUrl, errorMessage, jsonBody } from '@/lib/api';
@@ -117,7 +117,7 @@ export default function MaterialsPage() {
   const subjectOptions = [{ value: '', label: 'Všechny předměty' }, ...(data?.subjects ?? []).map(s => ({ value: String(s.id), label: s.active === false ? `${s.name} (archivovaný)` : s.name }))];
   const selectedDetail = detail.data;
   return <ContentContainer>
-    <PageHeader title="Studijní materiály" subtitle="Soubory z kurzů v Moodlu – prezentace, PDF a dokumenty."
+    <PageHeader eyebrow={<HudLabel>Modul · škola · materiály</HudLabel>} title="Studijní materiály" subtitle="Soubory z kurzů v Moodlu – prezentace, PDF a dokumenty."
       actions={<>
         <ButtonLink href="/school" variant="ghost">Zpět do Školy</ButtonLink>
         <input ref={zipInput} id="moodle-zip-input" type="file" accept=".zip,application/zip" className="sr-only"
