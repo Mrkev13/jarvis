@@ -133,3 +133,17 @@ and healthy. Afterwards the timer was started again; backend `/health`: `healthy
 #85: deploy tooling and tests only, no Alembic change) are left to the updater.
 
 Installed `deploy-migration-v3.sh` is `755ec8506356…` (= repository after #85).
+
+## 2026-11-22 – frontend template with the game-assets volume (MRK-121)
+
+Why: WoT/MFF images live outside Git and the image, in `/srv/standa-hub-data/game-assets` (1034 files, copied from the
+Windows machine; directory root 755, files 644). The frontend mounts it read-only (`frontend-managed.yaml` at
+`mrk-101-ubuntu-production`, SHA-256 `17223cfef4d4…`).
+
+With the updater timer stopped (it had just deployed `0f4f17d` by itself): new template installed as
+`/root/frontend-managed.new.yaml` (root 0644, `17223cfef4d4…`) → `frontend-template-v3.sh --check`
+(`INSTALLED_TEMPLATE_MATCHES_RUNNING`, diff = only the `volumes:` entry, `TEMPLATE_PREFLIGHT_OK`,
+`NO_PRODUCTION_CHANGES`) → `--apply`: journal `prepared → recreating → verifying → restarted`, frontend recreated with
+the same image and healthy, `FRONTEND_TEMPLATE_APPLIED` (the installed `mrk108/frontend-managed.yaml` is now the new
+template). Verified: mount `/srv/standa-hub-data/game-assets -> /app/public/game-assets ro=true`; timer started again
+(`active`).
