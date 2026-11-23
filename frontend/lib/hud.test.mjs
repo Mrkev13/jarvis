@@ -25,6 +25,7 @@ test("mission only for fresh completions", () => {
   assert.equal(missionFor(ev("wow.character.level_up", { level: 24, target_level: 60 }), NOW).title, "Level up");
   assert.equal(missionFor(ev("school.assignment.completed", {}, 5 * 60_000), NOW), null, "replay starých událostí neslaví");
   assert.equal(missionFor(ev("habits.entry.done"), NOW), null);
+  assert.deepEqual(missionFor(ev("goals.goal.completed", { goal_id: 3, previous_progress: 80 }), NOW), { title: "Mise splněna", detail: "Cíl splněný" });
   assert.equal(missionFor(ev("finance.import.completed"), NOW), null, "finance nikdy");
 });
 

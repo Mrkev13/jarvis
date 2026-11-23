@@ -9,7 +9,7 @@ from finance_ai_policy import is_finance_goal
 from goal_history_service import compute_goal_progress_and_value, ensure_goal_progress_snapshot_for_all_active_automatic_goals
 from models import Goal
 from module_contracts import (
-    ChangeSource, activity_changes,
+    ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, ScheduledStep, SearchSource,
 )
 from statuses import GOAL_INACTIVE_STATUSES
@@ -107,7 +107,9 @@ def context_goals(req: ContextRequest) -> list[str]:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    # MRK-135: splnění cíle = doménová událost (goals.goal.completed), ostatní změny z Aktivity
     changes=(ChangeSource("goals", areas=frozenset({"goals"}),
+                          from_event=event_changes({"goal": "/goals?goal={id}"}, {"goals.goal.completed": "Cíl splněn"}),
                           from_activity=activity_changes({"goal": "/goals?goal={id}"}, "/goals")),),
     search=(SearchSource("goals", 70, search_goals),),
     entity_refs=(EntityRef("goal", "/goals?goal={id}", notification_source=True),),
