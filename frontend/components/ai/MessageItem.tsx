@@ -134,13 +134,16 @@ export const MessageItem = memo(function MessageItem({
   );
 });
 
-/** Indikátor odpovídání (při omezeném pohybu bez poskakování – animate-* vypíná motion.css). */
+/**
+ * Indikátor odpovídání. MRK-132: Jarvisova „hlasová vlna" – sloupce pulzují jako při mluvení (jen scaleY),
+ * při omezeném pohybu stojí (app/hud.css .ai-wave-bar).
+ */
 export function ThinkingIndicator() {
   return (
-    <li role="status" className="flex items-center gap-2 text-sm text-ink-muted">
-      <span aria-hidden="true" className="flex gap-1">
-        {[0, 120, 240].map((d) => (
-          <span key={d} className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-2" style={{ animationDelay: `${d}ms` }} />
+    <li role="status" className="flex items-center gap-2.5 text-sm text-ink-muted">
+      <span aria-hidden="true" data-ai-wave="" className="ai-wave">
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <span key={i} className="ai-wave-bar" style={{ ["--i" as string]: i } as React.CSSProperties} />
         ))}
       </span>
       Standa AI přemýšlí…

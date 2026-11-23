@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
+import { JarvisCore } from "@/components/dashboard/JarvisCore";
 import { WIDGET_COMPONENTS, type DashboardPayload, type DayTimelinePayload, type TodayResource } from "@/components/dashboard/widgets";
 import { MODULE_WIDGET_COMPONENTS } from "@/modules/registry";
 import {
@@ -196,6 +197,9 @@ export default function Home() {
           )
         }
       />
+
+      {/* MRK-132: Jarvis jádro dne – reaktor s dnešními položkami a jedna věta stavu (jen z /today) */}
+      {todayData && !editing ? <JarvisCore today={todayData} /> : null}
 
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}

@@ -252,10 +252,9 @@
     position: relative;
     background-image: linear-gradient(180deg, rgb(var(--arc-rgb) / 0.04), transparent 9rem);
   }
-  /* sklo jen u neutrálních karet (Card přidá .hud-glass); tónované si nechávají svou barvu */
+  /* sklo jen u neutrálních karet: průsvitnou barvu dává Card utilitou md:bg-surface/80, tady jen rozmazání */
   @media (min-width: 768px) {
     .hud-glass {
-      background-color: rgb(10 17 28 / 0.8);
       backdrop-filter: blur(6px);
     }
   }
@@ -359,4 +358,118 @@
   pointer-events: none;
   background: linear-gradient(180deg, transparent, rgb(var(--arc-rgb) / 0.55) 18%, rgb(var(--arc-rgb) / 0.12) 60%, transparent);
   box-shadow: 0 0 12px rgb(var(--arc-rgb) / 0.35);
+}
+
+/* =====================================================================================================
+ * MRK-132 – Jarvis HUD vlna 2
+ * ===================================================================================================== */
+
+/* ---------- Jarvis jádro dne (components/dashboard/JarvisCore.tsx) ---------- */
+.jarvis-core {
+  --core-rgb: var(--arc-rgb);
+}
+.jarvis-core[data-jarvis-core="alert"] { --core-rgb: 251 191 36; }
+.jarvis-core[data-jarvis-core="done"]  { --core-rgb: 52 211 153; }
+.day-reactor {
+  width: 2.75rem;
+  height: 2.75rem;
+  overflow: visible;
+  filter: drop-shadow(0 0 8px rgb(var(--arc-rgb) / 0.45));
+}
+@media (min-width: 768px) {
+  .day-reactor { width: 6.5rem; height: 6.5rem; }
+}
+.day-reactor-halo { fill: rgb(var(--arc-rgb) / 0.06); }
+.day-reactor-rim { stroke: rgb(var(--arc-rgb) / 0.35); }
+.day-reactor-inner { stroke: rgb(var(--arc-strong-rgb) / 0.45); transform-box: view-box; transform-origin: 50% 50%; animation: arc-spin 30s linear infinite; }
+.day-seg { stroke: rgb(var(--arc-rgb) / 0.16); }
+.day-seg-lit {
+  stroke: rgb(var(--arc-strong-rgb));
+  /* „nabití" segmentu při vstupu – postupně po obvodu */
+  animation: day-seg-charge 420ms var(--motion-ease-enter) calc(var(--i) * 70ms + 200ms) backwards;
+}
+.day-reactor-core {
+  fill: rgb(var(--core-rgb));
+  filter: drop-shadow(0 0 10px rgb(var(--core-rgb) / 0.9));
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: arc-breathe 3.6s ease-in-out infinite;
+}
+@keyframes day-seg-charge {
+  from { opacity: 0.1; }
+}
+.jarvis-core-line {
+  animation: boot-line-in 480ms var(--motion-ease-enter) 160ms backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .day-reactor-inner,
+  .day-seg-lit,
+  .day-reactor-core,
+  .jarvis-core-line {
+    animation: none !important;
+  }
+}
+
+/* ---------- Segmentované ukazatele (components/ui/Progress.tsx) ---------- */
+.hud-progress {
+  /* dílky 7 px + mezera 2 px; stopa i výplň jsou rozsekané stejně */
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+  background-color: rgb(var(--arc-rgb) / 0.1);
+}
+.hud-progress > .motion-progress-fill {
+  /* rozsvícená špička – světlejší konec výplně */
+  background-image: linear-gradient(90deg, transparent 70%, rgb(255 255 255 / 0.35));
+}
+
+/* ---------- Ctrl+K jako Jarvisův terminál (components/search/CommandPalette.tsx) ---------- */
+.palette-reactor {
+  display: grid;
+  place-items: center;
+  opacity: 0.6;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-standard), filter var(--motion-duration-normal);
+}
+.palette-reactor-active {
+  opacity: 1;
+  filter: drop-shadow(0 0 8px rgb(var(--arc-rgb) / 0.8));
+}
+.palette-reactor-active .arc-reactor-live .arc-ring-outer { animation-duration: 3s; }
+.palette-reactor-active .arc-reactor-live .arc-ring-inner { animation-duration: 2s; }
+.palette-result {
+  animation: palette-result-in 260ms var(--motion-ease-enter) calc(var(--i, 0) * 28ms) backwards;
+}
+@keyframes palette-result-in {
+  from { opacity: 0; transform: translateX(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-result { animation: none !important; }
+  .palette-reactor-active .arc-reactor-live .arc-ring-outer,
+  .palette-reactor-active .arc-reactor-live .arc-ring-inner { animation: none !important; }
+}
+
+/* ---------- AI přemýšlí: hlasová vlna (components/ai/MessageItem.tsx ThinkingIndicator) ---------- */
+.ai-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 1rem;
+}
+.ai-wave-bar {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgb(var(--arc-strong-rgb)), rgb(167 139 250));
+  box-shadow: 0 0 6px rgb(167 139 250 / 0.6);
+  transform: scaleY(0.3);
+  animation: ai-wave 900ms ease-in-out calc(var(--i) * -130ms) infinite;
+}
+@keyframes ai-wave {
+  0%, 100% { transform: scaleY(0.25); }
+  50%      { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-wave-bar { animation: none !important; transform: scaleY(0.6); }
 }
