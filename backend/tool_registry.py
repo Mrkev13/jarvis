@@ -25,7 +25,7 @@ from tools import add_school_subject, add_school_assignment, add_school_exam
 from tools import update_wot_resource, upsert_wot_grind
 from tools import upsert_mff_character
 from goal_ai_tool import prepare_upsert_goal, run_upsert_goal
-from tools import save_memory
+from memory_ai_tool import prepare_save_memory, run_save_memory
 from mutation_service import (
     ENTITIES as MUTATION_ENTITIES,
     UNDO_AREAS,
@@ -397,9 +397,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "content": {"type": "string", "description": "1-3 clear sentences"},
             "importance": {"type": "integer", "description": "1-10, default 5"},
             "active": _BOOL,
+            # MRK-117: dočasná vzpomínka potřebuje platnost (pražský čas)
+            "kind": {"type": "string", "enum": ["fact", "temporary", "decision"], "description": "default fact"},
+            "expires_at": {"type": "string", "description": "Prague time YYYY-MM-DD or YYYY-MM-DDTHH:MM; required for temporary"},
         },
         ["content"],
-        func=save_memory, areas=[AREA_MEMORY],
+        func=run_save_memory, resolver=prepare_save_memory, areas=[AREA_MEMORY],
     ),
     _write(
         "modify_records",
