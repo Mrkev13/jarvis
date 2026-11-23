@@ -26,6 +26,7 @@ SYNC_EVERY = timedelta(hours=6)       # hodinový krok obnoví postavu nejvýš 
 SYNC_BATCH = 10                       # a nejvýš 10 postav za běh (limit API, krátký job)
 NAME_RE = re.compile(r"^[^\W\d_]{2,12}$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+NAME_KEY_MAX = 24                     # délka sloupců name / name_key (migrace 0031)
 
 GOAL_AT_TARGET = "wow_characters_at_target"
 GOAL_MAX_LEVEL = "wow_max_level"
@@ -39,7 +40,8 @@ SYNC_LABELS = {
 }
 ERROR_TEXT = {
     "not_configured": "WoW API není na serveru nastavené.",
-    "not_found": "Postava nenalezena – zkontroluj jméno a realm.",
+    "not_found": ("Postava nenalezena – zkontroluj jméno a realm (Forever: jméno i příjmení). Blizzard ji ukáže až od "
+                  "levelu 10 a po odhlášení ze hry."),
     "unauthorized": "Blizzard API odmítlo klíče serveru.",
     "rate_limited": "Blizzard API teď omezuje počet požadavků, zkus to za chvíli.",
     "unavailable": "Blizzard API teď neodpovídá.",
@@ -73,7 +75,27 @@ def realm_slug(raw: str) -> str:
     s = re.sub(r"-+", "-", s).strip("-")
     if not s or len(s) > 64 or not SLUG_RE.match(s):
         raise WowError(400, "Realm: název serveru (např. „Pyrewood Village“), jen písmena bez diakritiky, číslice a mezery.")
+    if s == battlenet.REALMLESS:
+        raise WowError(400, "WoW Forever nemá realmy – zadej jméno i příjmení postavy (např. „Zareth Malgrave“).")
     return s
+
+
+def parse_character(name: str, realm: str) -> tuple[str, str, str]:
+    """→ (zobrazované jméno, name_key, realm_slug).
+
+    MRK-130: „Jméno Příjmení“ (nebo `jmeno-prijmeni`) = postava WoW Forever – bez realmu, v API `jmeno-prijmeni`.
+    Jedno slovo = klasická postava na realmu (MRK-127).
+    """
+    parts = [p for p in re.split(r"[\s-]+", (name or "").strip()) if p]
+    if len(parts) != 2:
+        display, key = normalize_name(name)
+        return display, key, realm_slug(realm)
+    if not all(NAME_RE.match(p) for p in parts):
+        raise WowError(400, "Jméno a příjmení: každé 2–12 písmen, bez číslic.")
+    key = "-".join(p.lower() for p in parts)
+    if len(key) > NAME_KEY_MAX:
+        raise WowError(400, f"Jméno a příjmení: dohromady nejvýš {NAME_KEY_MAX - 1} písmen.")
+    return " ".join(p[:1].upper() + p[1:].lower() for p in parts), key, battlenet.REALMLESS
 
 
 def normalize_target(raw) -> int | None:
@@ -196,11 +218,14 @@ def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
     level = _int(data.get("level"), 1, MAX_LEVEL)
     if level is None:
         raise battlenet.BattleNetError("invalid_response")
-    if isinstance(data.get("name"), str) and NAME_RE.match(data["name"]):
-        ch.name = data["name"]
-    realm = data.get("realm")
-    if _name(realm):
-        ch.realm_name = _name(realm)
+    if ch.realm_slug == battlenet.REALMLESS:
+        _apply_forever_identity(ch, data)
+    else:
+        if isinstance(data.get("name"), str) and NAME_RE.match(data["name"]):
+            ch.name = data["name"]
+        realm = data.get("realm")
+        if _name(realm):
+            ch.realm_name = _name(realm)
     ch.level = level
     ch.class_name = _name(data.get("character_class"))
     ch.race_name = _name(data.get("race"))
@@ -213,6 +238,18 @@ def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
                         if isinstance(ts, (int, float)) and ts > 0 else None)
     if prof is not None:
         ch.professions_json = json.dumps(parse_professions(prof), ensure_ascii=False)
+
+
+def _apply_forever_identity(ch: WowCharacter, data: dict) -> None:
+    """Forever (MRK-130): profil má `name` + `surname` a `ruleset` místo realmu (Normal / PvP / RP / Hardcore)."""
+    first, surname = data.get("name"), data.get("surname")
+    if isinstance(first, str) and isinstance(surname, str) and NAME_RE.match(first) and NAME_RE.match(surname):
+        full = f"{first} {surname}"
+        if len(full) <= NAME_KEY_MAX:
+            ch.name = full
+    ruleset = data.get("ruleset")
+    label = ruleset[:40] if isinstance(ruleset, str) and ruleset.strip() else _name(ruleset)
+    ch.realm_name = f"Forever · {label}"[:64] if label else "Forever"
 
 
 def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | None, *, now: datetime | None = None,
@@ -333,15 +370,14 @@ def sync_due(db: Session, *, now: datetime | None = None, force: bool = False, u
 
 
 def add_character(db: Session, name: str, realm: str, target_level=None, *, user_context: str = "manual") -> dict:
-    display, key = normalize_name(name)
-    slug = realm_slug(realm)
+    display, key, slug = parse_character(name, realm)
     target = normalize_target(target_level)
     if db.query(WowCharacter).count() >= MAX_CHARACTERS:
         raise WowError(400, f"Nejvýš {MAX_CHARACTERS} postav.")
     if db.query(WowCharacter).filter(WowCharacter.realm_slug == slug, WowCharacter.name_key == key).first():
         raise WowError(409, "Tuhle postavu už sleduješ.")
     ch = WowCharacter(name=display, name_key=key, realm_slug=slug, target_level=target, sync_status="pending",
-                      created_at=utc_now())
+                      realm_name="Forever" if slug == battlenet.REALMLESS else None, created_at=utc_now())
     db.add(ch)
     db.flush()
     log_activity(db, AREA, "create", f"WoW postava: {display} ({slug})", entity_type="wow_character",

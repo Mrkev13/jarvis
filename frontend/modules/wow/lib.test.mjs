@@ -42,6 +42,21 @@ test("character form validation", () => {
   assert.match(validateCharacterForm("Thrall", "x", "200"), /1–100/);
 });
 
+// MRK-130: WoW Forever – jméno + příjmení bez realmu.
+test("forever character form", async () => {
+  const { foreverName, isForeverNamespace } = await import("./lib.ts");
+  assert.equal(validateCharacterForm("Zareth Malgrave", "", ""), null);
+  assert.equal(validateCharacterForm("zareth-malgrave", "", "60"), null);
+  assert.deepEqual(foreverName("  Zareth   Malgrave "), ["Zareth", "Malgrave"]);
+  assert.equal(foreverName("Thrall"), null);
+  assert.match(validateCharacterForm("Zareth M4lgrave", "", ""), /každé 2–12 písmen/);
+  assert.match(validateCharacterForm("Abcdefghijkl Abcdefghijkl", "", ""), /nejvýš 23/);
+  assert.match(validateCharacterForm("Thrall", "", ""), /realm/);
+  assert.equal(isForeverNamespace("profile-forever-eu"), true);
+  assert.equal(isForeverNamespace("profile-classic1x-eu"), false);
+  assert.equal(isForeverNamespace(null), false);
+});
+
 // Codex review #91: „Obnovit vše" nehlásí úspěch, když se nic nenačetlo.
 test("batch refresh message", async () => {
   const { batchMessage } = await import("./lib.ts");
