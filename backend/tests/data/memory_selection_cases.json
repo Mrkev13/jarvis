@@ -455,8 +455,7 @@
    "must_not": [
     "fyzika-zkouska"
    ],
-   "known_gap": true,
-   "note": "Slovo „pátek\" zapne plánovací režim (časová slova) a ten přidá nesouvisející vzpomínky s vysokou důležitostí (fyzika). Kandidát na úpravu is_planner_like."
+   "note": "MRK-118: dřív slovo „pátek\" zapnulo plánovací režim a implikované oblasti (škola) a ty přidaly nesouvisející vzpomínky (fyzika); teď se bez plánovacího záměru vybírá jen podle výslovných oblastí (context_service.wants_broad_memory) a samotná shoda v časovém slově („večer\") vzpomínku nezařadí (_TEMPORAL_TOKENS)."
   },
   {
    "id": "h-angl",
@@ -480,16 +479,16 @@
   }
  ],
  "baseline": {
-  "note": "Stav k 2026-11-15 (MRK-110). Zlepšení = posunout čísla v tomtéž PR; zhoršení test zachytí.",
+  "note": "Stav k 2026-11-23 (MRK-118: holdout 11/11, bez porušení; dřív 2026-11-15 MRK-110). Zlepšení = posunout čísla v tomtéž PR; zhoršení test zachytí.",
   "tune": {
    "passed": 18,
    "recall": 0.944,
    "violation_rate": 0.038
   },
   "holdout": {
-   "passed": 10,
+   "passed": 11,
    "recall": 1.0,
-   "violation_rate": 0.091
+   "violation_rate": 0.0
   }
  }
 }

@@ -1,15 +1,12 @@
 import { HudLabel } from "@/components/ui";
-
-const SUGGESTIONS = [
-  "Co mám dnes dělat?",
-  "Jaký mám plán na tento týden?",
-  "Jak si vedu s plněním cílů?",
-  "Kolik zbývá XP na VZ.55?",
-  "Jaká je moje aktuální finanční bilance?",
-];
+import { useModuleAccess } from "@/hooks/useModules";
+import { suggestionsFor } from "@/lib/aiSuggestions";
 
 /** Prázdná konverzace: krátké představení a návrhy otázek (vloží se do pole, neodesílají se samy). */
 export function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
+  // MRK-81: návrhy podle zapnutých modulů (lib/aiSuggestions), nikdy Finance (MRK-60)
+  const { access } = useModuleAccess();
+  const suggestions = suggestionsFor("ai", access).map((s) => s.prompt);
   return (
     <div className="mx-auto flex max-w-xl flex-col items-start py-6 md:py-10">
       <HudLabel className="flex items-center gap-2">
@@ -18,10 +15,10 @@ export function EmptyConversation({ onPick }: { onPick: (text: string) => void }
       </HudLabel>
       <h2 className="mt-2 text-xl font-semibold text-ink">Na co se chceš zeptat?</h2>
       <p className="mt-1.5 text-sm leading-6 text-ink-muted">
-        Vidím tvoje úkoly a zkoušky, práci, finance, cíle, připomínky, paměť i hry. Změny jen navrhuji – provedou se, až je potvrdíš.
+        Vidím tvoje úkoly a zkoušky, práci, cíle, připomínky, paměť i hry. Změny jen navrhuji – provedou se, až je potvrdíš.
       </p>
       <ul className="mt-5 grid w-full gap-2 sm:grid-cols-2" aria-label="Návrhy otázek">
-        {SUGGESTIONS.map((s) => (
+        {suggestions.map((s) => (
           <li key={s}>
             <button
               type="button"

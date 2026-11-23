@@ -1,5 +1,6 @@
 "use client";
 
+import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { areaMeta } from "@/lib/areas";
@@ -649,6 +650,7 @@ export default function GoalsPage() {
         onConfirm={confirmDeleteGoal}
         onCancel={() => setDeletingGoal(null)}
       />
+      <AskJarvis surface="goals" />
     </ContentContainer>
   );
 }
