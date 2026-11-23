@@ -1,5 +1,6 @@
 "use client";
 
+import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import Image from "next/image";
 import { useState } from "react";
 import { JarvisEyes, JarvisShellFallback } from "@/components/jarvis/JarvisAvatar";
@@ -30,21 +31,21 @@ function Limbs() {
       <ellipse className="jarvis-shadow" cx="32" cy="82" rx="17" ry="2.5" fill="#000" opacity=".45" />
       <g className="jarvis-arm jarvis-arm-l">
         <rect x="11" y="47" width="6" height="14" rx="3" fill="#0b1018" stroke="#2a3850" strokeWidth="1" />
-        <circle cx="14" cy="61" r="2.6" fill="#111827" stroke="#22cff3" strokeWidth=".8" />
+        <circle cx="14" cy="61" r="2.6" fill="#111827" stroke="#3cc8f5" strokeWidth=".8" />
       </g>
       <g className="jarvis-arm jarvis-arm-r">
         <rect x="47" y="47" width="6" height="14" rx="3" fill="#0b1018" stroke="#2a3850" strokeWidth="1" />
-        <circle cx="50" cy="61" r="2.6" fill="#111827" stroke="#22cff3" strokeWidth=".8" />
+        <circle cx="50" cy="61" r="2.6" fill="#111827" stroke="#3cc8f5" strokeWidth=".8" />
       </g>
       <g className="jarvis-leg jarvis-leg-l">
         <rect x="23" y="60" width="7" height="16" rx="3" fill="#080b11" stroke="#253149" strokeWidth="1" />
         <rect x="20" y="75" width="12" height="5" rx="2.5" fill="#111827" stroke="#2a3850" strokeWidth="1" />
-        <path d="M22 78h7" stroke="#2edcff" strokeWidth="1" strokeLinecap="round" />
+        <path d="M22 78h7" stroke="#9be3ff" strokeWidth="1" strokeLinecap="round" />
       </g>
       <g className="jarvis-leg jarvis-leg-r">
         <rect x="34" y="60" width="7" height="16" rx="3" fill="#080b11" stroke="#253149" strokeWidth="1" />
         <rect x="32" y="75" width="12" height="5" rx="2.5" fill="#111827" stroke="#2a3850" strokeWidth="1" />
-        <path d="M35 78h7" stroke="#2edcff" strokeWidth="1" strokeLinecap="round" />
+        <path d="M35 78h7" stroke="#9be3ff" strokeWidth="1" strokeLinecap="round" />
       </g>
     </svg>
   );
@@ -74,6 +75,10 @@ export function JarvisFigure({ state }: { state: CompanionState }) {
           )}
           <span className="jarvis-eyes absolute inset-0">
             <JarvisEyes state={EXPRESSION[state]} />
+          </span>
+          {/* MRK-132: arc reaktor na hrudi – postavička patří k HUD */}
+          <span aria-hidden="true" className="jarvis-chest-reactor absolute left-[26px] top-[49px] block">
+            <ArcReactor size={12} live={false} />
           </span>
         </span>
       </span>

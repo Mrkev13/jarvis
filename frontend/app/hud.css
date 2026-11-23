@@ -18,17 +18,20 @@
   z-index: -1;
   pointer-events: none;
   background-image:
-    radial-gradient(ellipse 80% 50% at 70% -10%, rgb(34 211 238 / 0.07), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 0% 0%, rgb(167 139 250 / 0.05), transparent 60%),
-    linear-gradient(rgb(148 163 184 / var(--hud-line-opacity)) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(148 163 184 / var(--hud-line-opacity)) 1px, transparent 1px);
-  background-size: auto, auto, 48px 48px, 48px 48px;
+    radial-gradient(ellipse 70% 55% at 82% -12%, rgb(var(--arc-rgb) / 0.11), transparent 62%),
+    radial-gradient(ellipse 55% 40% at 0% 0%, rgb(167 139 250 / 0.05), transparent 60%),
+    radial-gradient(circle at center, rgb(var(--arc-strong-rgb) / 0.07) 1px, transparent 1.5px),
+    linear-gradient(rgb(var(--arc-rgb) / var(--hud-line-opacity)) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--arc-rgb) / var(--hud-line-opacity)) 1px, transparent 1px);
+  /* MRK-131: body na průsečících + jemnější mřížka – plán hologramu, ne tabulka */
+  background-size: auto, auto, 48px 48px, 48px 48px, 48px 48px;
+  background-position: 0 0, 0 0, -24px -24px, 0 0, 0 0;
   mask-image: linear-gradient(to bottom, black, transparent 85%);
 }
 @media (max-width: 767px) {
   .hud-grid::before {
     background-image:
-      radial-gradient(ellipse 90% 40% at 70% -10%, rgb(34 211 238 / 0.06), transparent 60%);
+      radial-gradient(ellipse 90% 40% at 70% -10%, rgb(var(--arc-rgb) / 0.08), transparent 60%);
   }
 }
 
@@ -61,7 +64,7 @@
 /* Tenká světelná linka (oddělovač / horní hrana aktivního panelu). */
 .accent-line {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgb(34 211 238 / 0.6), rgb(167 139 250 / 0.45), transparent);
+  background: linear-gradient(90deg, transparent, rgb(60 200 245 / 0.6), rgb(167 139 250 / 0.45), transparent);
 }
 
 /* Stavová tečka s jemným pulzem (jen u „živých" stavů). */
@@ -94,4 +97,379 @@
     transform: scale(1.9);
     opacity: 0.25;
   }
+}
+
+/* =====================================================================================================
+ * MRK-131 – Jarvis HUD: arc reaktor, start systému, zaměřovač na pozadí, skleněné panely, zaměření v menu.
+ * Pravidla jako výše: jen dekorace, pointer-events: none, pohyb jen transform / opacity, reduced motion = klid.
+ * ===================================================================================================== */
+
+/* ---------- Arc reaktor (components/jarvis/ArcReactor.tsx) ---------- */
+.arc-reactor {
+  overflow: visible;
+  filter: drop-shadow(0 0 6px rgb(var(--arc-rgb) / 0.55));
+}
+.arc-reactor .arc-ring-outer,
+.arc-reactor .arc-ring-inner,
+.arc-reactor .arc-core {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+.arc-reactor-live .arc-ring-outer { animation: arc-spin 24s linear infinite; }
+.arc-reactor-live .arc-ring-inner { animation: arc-spin 16s linear infinite reverse; }
+.arc-reactor-live .arc-core { animation: arc-breathe 3.6s ease-in-out infinite; }
+@keyframes arc-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes arc-breathe {
+  0%, 100% { opacity: 0.85; transform: scale(0.94); }
+  50%      { opacity: 1;    transform: scale(1.06); }
+}
+
+/* ---------- Start systému (components/jarvis/BootSequence.tsx) – jednou za relaci, nikdy neblokuje ---------- */
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 45%, rgb(var(--arc-rgb) / 0.14), transparent 45%),
+    rgb(5 9 17 / 0.94);
+  animation: boot-overlay-out 520ms var(--motion-ease-exit) 1180ms forwards;
+}
+.boot-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.boot-reactor {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 9rem;
+  height: 9rem;
+  animation: boot-reactor-in 560ms var(--motion-ease-emphasized) backwards;
+}
+.boot-wave {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--arc-rgb) / 0.7);
+  box-shadow: 0 0 24px rgb(var(--arc-rgb) / 0.35);
+  opacity: 0;
+  animation: boot-wave 1100ms var(--motion-ease-enter) 260ms forwards;
+}
+.boot-wave-2 { animation-delay: 480ms; }
+.boot-greeting {
+  margin-top: 1.75rem;
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-ink);
+  animation: boot-line-in 420ms var(--motion-ease-enter) 380ms backwards;
+}
+.boot-status {
+  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: rgb(var(--arc-strong-rgb) / 0.85);
+  animation: boot-line-in 420ms var(--motion-ease-enter) 620ms backwards;
+}
+.boot-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgb(var(--arc-strong-rgb) / 0.9), transparent);
+  box-shadow: 0 0 18px rgb(var(--arc-rgb) / 0.8);
+  animation: boot-scan 900ms var(--motion-ease-standard) 120ms backwards;
+  opacity: 0;
+}
+@keyframes boot-overlay-out {
+  to { opacity: 0; }
+}
+@keyframes boot-reactor-in {
+  from { opacity: 0; transform: scale(0.55) rotate(-60deg); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes boot-wave {
+  0%   { opacity: 0.9; transform: scale(0.8); }
+  100% { opacity: 0;   transform: scale(2.6); }
+}
+@keyframes boot-line-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes boot-scan {
+  0%   { opacity: 0; transform: translateY(0); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(100vh); }
+}
+@media (max-width: 767px) {
+  .boot-reactor { width: 7rem; height: 7rem; }
+  .boot-greeting { font-size: 1.3rem; }
+}
+
+/* ---------- Zaměřovač na pozadí (AppShell) – jen široké obrazovky, za obsahem ---------- */
+.hud-reticle {
+  position: fixed;
+  z-index: -1;
+  top: -16rem;
+  right: -14rem;
+  width: 44rem;
+  height: 44rem;
+  pointer-events: none;
+  opacity: 0.75;
+  color: rgb(var(--arc-rgb) / 0.32);
+  filter: drop-shadow(0 0 6px rgb(var(--arc-rgb) / 0.35));
+  mask-image: radial-gradient(circle at center, black 35%, transparent 72%);
+}
+.hud-reticle svg { width: 100%; height: 100%; overflow: visible; }
+.hud-reticle .reticle-ticks,
+.hud-reticle .reticle-arcs {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+.hud-reticle .reticle-ticks { animation: arc-spin 240s linear infinite; }
+.hud-reticle .reticle-arcs { animation: arc-spin 150s linear infinite reverse; }
+@media (max-width: 1023px) {
+  .hud-reticle { display: none; }
+}
+
+/* Ve vrstvě components: utility třídy (sticky, absolute, bg-…) na konkrétní kartě mají přednost. */
+@layer components {
+  /* ---------- Skleněné panely (Card) – světelná horní hrana, zaměřovací rohy při najetí / fokusu ---------- */
+  .hud-panel {
+    position: relative;
+    background-image: linear-gradient(180deg, rgb(var(--arc-rgb) / 0.04), transparent 9rem);
+  }
+  /* sklo jen u neutrálních karet: průsvitnou barvu dává Card utilitou md:bg-surface/80, tady jen rozmazání */
+  @media (min-width: 768px) {
+    .hud-glass {
+      backdrop-filter: blur(6px);
+    }
+  }
+  .hud-panel:not(.motion-milestone)::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 14%;
+    right: 14%;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgb(var(--arc-strong-rgb) / 0.55), transparent);
+  }
+  .hud-panel:not(.hud-frame):not(.motion-executing):not(.motion-completion):not(.motion-milestone):not(.motion-skeleton)::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    pointer-events: none;
+    --c: rgb(var(--arc-strong-rgb) / 0.8);
+    --s: 12px;
+    background:
+      linear-gradient(var(--c), var(--c)) top left / var(--s) 1px no-repeat,
+      linear-gradient(var(--c), var(--c)) top left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c), var(--c)) top right / var(--s) 1px no-repeat,
+      linear-gradient(var(--c), var(--c)) top right / 1px var(--s) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom left / var(--s) 1px no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom right / var(--s) 1px no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom right / 1px var(--s) no-repeat;
+    opacity: 0;
+    transform: scale(1.012);
+    transition:
+      opacity var(--motion-duration-normal) var(--motion-ease-enter),
+      transform var(--motion-duration-normal) var(--motion-ease-enter);
+  }
+  @media (hover: hover) {
+    .hud-panel:hover::after { opacity: 1; transform: none; }
+  }
+  .hud-panel:focus-within::after { opacity: 1; transform: none; }
+
+  /* ---------- Menu: aktivní položka je „zaměřená" ---------- */
+  .nav-lock {
+    background-image: linear-gradient(90deg, rgb(var(--arc-rgb) / 0.14), rgb(var(--arc-rgb) / 0.03) 70%, transparent);
+  }
+  .nav-lock::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0.75rem;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-top: 1px solid rgb(var(--arc-strong-rgb) / 0.9);
+    border-right: 1px solid rgb(var(--arc-strong-rgb) / 0.9);
+    transform: translateY(-50%) rotate(45deg);
+    animation: nav-lock-in var(--motion-duration-normal) var(--motion-ease-enter) backwards;
+  }
+  @keyframes nav-lock-in {
+    from { opacity: 0; transform: translate(-6px, -50%) rotate(45deg); }
+  }
+
+  /* ---------- Titulek stránky: světelná linka, která se při vstupu „dokreslí" ---------- */
+  .page-title-rule {
+    display: block;
+    height: 1px;
+    width: 4.5rem;
+    margin-top: 0.625rem;
+    transform-origin: left center;
+    background: linear-gradient(90deg, rgb(var(--arc-strong-rgb)), rgb(var(--arc-rgb) / 0.5), transparent);
+    box-shadow: 0 0 10px rgb(var(--arc-rgb) / 0.6);
+    animation: title-rule-in 640ms var(--motion-ease-emphasized) 120ms backwards;
+  }
+  @keyframes title-rule-in {
+    from { transform: scaleX(0); opacity: 0; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arc-reactor-live .arc-ring-outer,
+  .arc-reactor-live .arc-ring-inner,
+  .arc-reactor-live .arc-core,
+  .hud-reticle .reticle-ticks,
+  .hud-reticle .reticle-arcs,
+  .nav-lock::after,
+  .page-title-rule {
+    animation: none !important;
+  }
+  .boot-overlay { display: none; }
+  .hud-panel::after { transition: none; }
+}
+
+/* ---------- MRK-131: svislá světelná hrana boční lišty (desktop) ---------- */
+/* lišta je sticky (= obsahující blok pro ::after) – vlastní position by přebila md:sticky */
+.hud-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -1px;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgb(var(--arc-rgb) / 0.55) 18%, rgb(var(--arc-rgb) / 0.12) 60%, transparent);
+  box-shadow: 0 0 12px rgb(var(--arc-rgb) / 0.35);
+}
+
+/* =====================================================================================================
+ * MRK-132 – Jarvis HUD vlna 2
+ * ===================================================================================================== */
+
+/* ---------- Jarvis jádro dne (components/dashboard/JarvisCore.tsx) ---------- */
+.jarvis-core {
+  --core-rgb: var(--arc-rgb);
+}
+.jarvis-core[data-jarvis-core="alert"] { --core-rgb: 251 191 36; }
+.jarvis-core[data-jarvis-core="done"]  { --core-rgb: 52 211 153; }
+.day-reactor {
+  width: 2.75rem;
+  height: 2.75rem;
+  overflow: visible;
+  filter: drop-shadow(0 0 8px rgb(var(--arc-rgb) / 0.45));
+}
+@media (min-width: 768px) {
+  .day-reactor { width: 6.5rem; height: 6.5rem; }
+}
+.day-reactor-halo { fill: rgb(var(--arc-rgb) / 0.06); }
+.day-reactor-rim { stroke: rgb(var(--arc-rgb) / 0.35); }
+.day-reactor-inner { stroke: rgb(var(--arc-strong-rgb) / 0.45); transform-box: view-box; transform-origin: 50% 50%; animation: arc-spin 30s linear infinite; }
+.day-seg { stroke: rgb(var(--arc-rgb) / 0.16); }
+.day-seg-lit {
+  stroke: rgb(var(--arc-strong-rgb));
+  /* „nabití" segmentu při vstupu – postupně po obvodu */
+  animation: day-seg-charge 420ms var(--motion-ease-enter) calc(var(--i) * 70ms + 200ms) backwards;
+}
+.day-reactor-core {
+  fill: rgb(var(--core-rgb));
+  filter: drop-shadow(0 0 10px rgb(var(--core-rgb) / 0.9));
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: arc-breathe 3.6s ease-in-out infinite;
+}
+@keyframes day-seg-charge {
+  from { opacity: 0.1; }
+}
+.jarvis-core-line {
+  animation: boot-line-in 480ms var(--motion-ease-enter) 160ms backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .day-reactor-inner,
+  .day-seg-lit,
+  .day-reactor-core,
+  .jarvis-core-line {
+    animation: none !important;
+  }
+}
+
+/* ---------- Segmentované ukazatele (components/ui/Progress.tsx) ---------- */
+.hud-progress {
+  /* dílky 7 px + mezera 2 px; stopa i výplň jsou rozsekané stejně */
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+  background-color: rgb(var(--arc-rgb) / 0.1);
+}
+.hud-progress > .motion-progress-fill {
+  /* rozsvícená špička – světlejší konec výplně */
+  background-image: linear-gradient(90deg, transparent 70%, rgb(255 255 255 / 0.35));
+}
+
+/* ---------- Ctrl+K jako Jarvisův terminál (components/search/CommandPalette.tsx) ---------- */
+.palette-reactor {
+  display: grid;
+  place-items: center;
+  opacity: 0.6;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-standard), filter var(--motion-duration-normal);
+}
+.palette-reactor-active {
+  opacity: 1;
+  filter: drop-shadow(0 0 8px rgb(var(--arc-rgb) / 0.8));
+}
+.palette-reactor-active .arc-reactor-live .arc-ring-outer { animation-duration: 3s; }
+.palette-reactor-active .arc-reactor-live .arc-ring-inner { animation-duration: 2s; }
+.palette-result {
+  animation: palette-result-in 260ms var(--motion-ease-enter) calc(var(--i, 0) * 28ms) backwards;
+}
+@keyframes palette-result-in {
+  from { opacity: 0; transform: translateX(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-result { animation: none !important; }
+  .palette-reactor-active .arc-reactor-live .arc-ring-outer,
+  .palette-reactor-active .arc-reactor-live .arc-ring-inner { animation: none !important; }
+}
+
+/* ---------- AI přemýšlí: hlasová vlna (components/ai/MessageItem.tsx ThinkingIndicator) ---------- */
+.ai-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 1rem;
+}
+.ai-wave-bar {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgb(var(--arc-strong-rgb)), rgb(167 139 250));
+  box-shadow: 0 0 6px rgb(167 139 250 / 0.6);
+  transform: scaleY(0.3);
+  animation: ai-wave 900ms ease-in-out calc(var(--i) * -130ms) infinite;
+}
+@keyframes ai-wave {
+  0%, 100% { transform: scaleY(0.25); }
+  50%      { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-wave-bar { animation: none !important; transform: scaleY(0.6); }
 }

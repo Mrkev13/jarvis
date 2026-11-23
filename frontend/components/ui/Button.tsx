@@ -8,7 +8,7 @@ export type ButtonSize = "sm" | "md";
 
 const VARIANT: Record<ButtonVariant, string> = {
   // Primární = cyan akcent s jemnou září; jediné „svítící" tlačítko na obrazovce.
-  primary: "bg-accent text-app font-semibold hover:bg-accent-strong shadow-[0_0_20px_-8px_rgb(34_211_238/0.6)]",
+  primary: "bg-accent text-app font-semibold hover:bg-accent-strong shadow-[0_0_20px_-8px_rgb(60_200_245/0.6)]",
   secondary: "border border-line bg-surface-2 text-ink hover:bg-hover hover:border-ink-faint",
   ghost: "text-ink-2 hover:bg-hover hover:text-ink",
   danger: "border border-danger/40 text-danger hover:bg-danger/10",

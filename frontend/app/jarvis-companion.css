@@ -64,7 +64,7 @@
   transform: translateY(-2px);
 }
 .jarvis-companion-hit:focus-visible {
-  outline: 2px solid rgb(34 211 238 / 0.7);
+  outline: 2px solid rgb(60 200 245 / 0.7);
   outline-offset: 3px;
 }
 
@@ -84,14 +84,14 @@
 }
 .jarvis-bubble {
   display: inline-block;
-  border: 1px solid rgb(46 220 255 / 0.35);
+  border: 1px solid rgb(var(--arc-rgb) / 0.35);
   border-radius: 12px;
   background: rgb(5 9 16 / 0.92);
   padding: 6px 10px;
   font-size: 12px;
   line-height: 1.2;
   color: rgb(226 244 255);
-  box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.8), 0 0 14px -6px rgb(46 220 255 / 0.6);
+  box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.8), 0 0 14px -6px rgb(var(--arc-rgb) / 0.6);
   animation: jarvis-bubble-in 180ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 [data-companion-state="success"] .jarvis-bubble {
@@ -191,7 +191,7 @@
   transform: translateY(-1px);
 }
 [data-companion-state="listening"] .jarvis-ring {
-  border-color: rgb(101 231 255 / 0.55);
+  border-color: rgb(var(--arc-strong-rgb) / 0.55);
   animation: jarvis-listen 1.6s ease-out infinite;
 }
 

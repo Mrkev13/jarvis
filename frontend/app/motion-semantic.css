@@ -99,10 +99,10 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: 0 0 0 1px rgb(34 211 238 / 0.35);
+  box-shadow: 0 0 0 1px rgb(60 200 245 / 0.35);
 }
 .motion-milestone::after {
-  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.5), 0 0 28px -6px rgb(34 211 238 / 0.6);
+  box-shadow: 0 0 0 2px rgb(60 200 245 / 0.5), 0 0 28px -6px rgb(60 200 245 / 0.6);
 }
 .motion-milestone-reached::after {
   animation: motion-glow-once var(--motion-duration-celebration) var(--motion-ease-emphasized);

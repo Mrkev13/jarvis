@@ -28,7 +28,8 @@ export function Progress({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={pct}
-      className={cx("w-full overflow-hidden rounded-full bg-surface-2 ring-1 ring-inset ring-line-subtle", size === "sm" ? "h-1.5" : "h-2", className)}
+      // MRK-132: segmentovaný ukazatel jako na HUD (app/hud.css .hud-progress) – dílky, výplň se při vstupu „nabije"
+      className={cx("hud-progress w-full overflow-hidden rounded-[2px] bg-surface-2", size === "sm" ? "h-1.5" : "h-2", className)}
     >
       <div
         className={cx("motion-progress-fill h-full w-full rounded-full", BAR_TONE[progressTone(pct, tone)])}

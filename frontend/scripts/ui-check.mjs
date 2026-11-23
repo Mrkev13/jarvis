@@ -137,7 +137,7 @@ for (const [path, name] of PAGES.filter(([, n]) => !ONLY || ONLY.includes(n))) {
 for (const scheme of ["light", "dark"]) {
   const { ctx, page } = await open("/", { scheme });
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  check(`dashboard (${scheme} OS): tmavé pozadí`, /rgb\(7, 9, 13\)|lab\(/.test(bg) && !bg.includes("255, 255, 255"), bg);
+  check(`dashboard (${scheme} OS): tmavé pozadí`, /rgb\(5, 9, 17\)|lab\(/.test(bg) && !bg.includes("255, 255, 255"), bg);
   await page.screenshot({ path: `${OUT}dashboard-${scheme}-os.png` });
   await ctx.close();
 }
@@ -890,7 +890,7 @@ async function aiSend(page, text) {
   }));
   check("jarvis reduced motion: thinking bez animace", avatarMotion.state === "thinking" && avatarMotion.self === "none" && avatarMotion.after === "none", JSON.stringify(avatarMotion));
   const dots = await page.evaluate(() => {
-    const d = document.querySelector(".animate-bounce");
+    const d = document.querySelector(".ai-wave-bar"); // MRK-132: hlasová vlna místo teček
     return d ? getComputedStyle(d).animationName : "missing";
   });
   check("ai reduced motion: indikátor bez animace", dots === "none", dots);
@@ -3565,6 +3565,107 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await ctx.close();
   }
   await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+}
+
+// 31) MRK-131 – Jarvis HUD: arc reaktor ve znaku, start systému (?boot=1), zaměřovač, skleněné panely, zaměřené menu
+{
+  const { ctx, page, errors } = await open("/?boot=1", { width: 1366, height: 900, delayPath: "/__hud-none" }); // bez čekání na networkidle – start trvá < 2 s
+  const boot = page.locator("[data-boot-sequence]");
+  check("hud: start systému se ukáže (?boot=1)", await eventually(async () => (await boot.count()) === 1, 3000));
+  check("hud: start má pozdrav a stav", await eventually(async () => /Stando/.test(await boot.innerText().catch(() => "")) && (await boot.innerText().catch(() => "")).includes("Všechny systémy online"), 2000));
+  check("hud: start neblokuje klikání", (await boot.evaluate((el) => getComputedStyle(el).pointerEvents).catch(() => "")) === "none");
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: `${OUT}hud-boot-desktop.png` });
+  check("hud: start se sám rozplyne", await eventually(async () => (await boot.count()) === 0, 4000));
+  check("hud: arc reaktor ve znaku menu", (await page.locator("[data-desktop-sidebar] [data-arc-reactor]").count()) === 1);
+  check("hud: zaměřovač na pozadí", (await page.locator(".hud-reticle").count()) === 1 && (await page.locator(".hud-reticle").evaluate((el) => getComputedStyle(el).pointerEvents)) === "none");
+  check("hud: karty jsou panely HUD", await eventually(async () => (await page.locator("main .hud-panel").count()) > 3, 4000));
+  // Codex review #99: sklo je opravdu průsvitné (alfa < 1), jinak blur nemá smysl
+  const glassBg = await page.locator("main .hud-glass").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  check("hud: skleněná karta je průsvitná", /\/ 0\.8|, 0\.8\)|rgba?\([^)]*0\.8\)/.test(glassBg), glassBg);
+  check("hud: aktivní položka menu je zaměřená", (await page.locator('[data-desktop-sidebar] a[aria-current="page"].nav-lock').count()) === 1);
+  const font = await page.locator("main h1").evaluate((el) => getComputedStyle(el).fontFamily);
+  check("hud: titulek v písmu Oxanium", font.includes("Oxanium"), font);
+  check("hud: písmo s češtinou načtené", await page.evaluate(async () => { await document.fonts.ready; return document.fonts.check('600 24px "Oxanium"', "Řídicí centrum ěščřžýáíé"); }));
+  await page.screenshot({ path: `${OUT}hud-dashboard-desktop.png` });
+  check("hud: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/?boot=1", { width: 390, height: 844, delayPath: "/__hud-none" });
+  check("hud mobil: start systému", await eventually(async () => (await page.locator("[data-boot-sequence]").count()) === 1, 3000));
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: `${OUT}hud-boot-mobile.png` });
+  check("hud mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  check("hud mobil: zaměřovač skrytý", (await page.locator(".hud-reticle").evaluate((el) => getComputedStyle(el).display)) === "none");
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/?boot=1", { width: 1366, height: 900, reducedMotion: "reduce" });
+  await page.waitForTimeout(400);
+  check("hud reduced motion: žádný start systému", (await page.locator("[data-boot-sequence]").count()) === 0);
+  const spin = await page.locator("[data-desktop-sidebar] .arc-ring-outer").evaluate((el) => getComputedStyle(el).animationName);
+  check("hud reduced motion: reaktor stojí", spin === "none", spin);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/login", {
+    width: 390, height: 844,
+    setup: async (p) => p.route("**/auth/session/validate", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) })),
+  });
+  check("hud login: arc reaktor", await eventually(async () => (await page.locator("main [data-arc-reactor]").count()) === 1, 4000));
+  await page.screenshot({ path: `${OUT}hud-login-mobile.png` });
+  await ctx.close();
+}
+
+// 32) MRK-132 – Jarvis HUD vlna 2: jádro dne, segmentované ukazatele, Ctrl+K terminál, hlasová vlna AI
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  await resetPrefs();
+  const { ctx, page, errors } = await open("/", { width, height: width < 500 ? 844 : 900 });
+  const core = page.locator("[data-jarvis-core]");
+  check(`jádro dne ${label}: zobrazené`, await eventually(async () => (await core.count()) === 1, 5000));
+  const line = (await core.locator("[data-jarvis-line]").innerText().catch(() => "")).trim();
+  check(`jádro dne ${label}: věta od Jarvise`, /hoří|Další je|Zbývá|hotovo|volno/.test(line), line);
+  check(`jádro dne ${label}: segmenty reaktoru`, (await core.locator(".day-seg").count()) >= 1);
+  check(`jádro dne ${label}: odkaz na režim Dnes`, (await core.getByRole("link").getAttribute("href")) === "/today");
+  check(`jádro dne ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}hud2-core-${label}.png` });
+  check(`jádro dne ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/goals", { width: 1366, height: 900 });
+  const bar = page.locator('[role="progressbar"]').first();
+  check("ukazatele: segmentované (HUD)", await eventually(async () => (await bar.count()) === 1 && (await bar.getAttribute("class")).includes("hud-progress"), 4000));
+  const mask = await bar.evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage);
+  check("ukazatele: dílky přes masku", mask.includes("repeating-linear-gradient"), mask);
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor({ timeout: 3000 }).catch(() => undefined);
+  check("terminál: reaktor v poli hledání", (await dialog.locator("[data-palette-reactor] [data-arc-reactor]").count()) === 1);
+  // přímo do pole (fokus po otevření je asynchronní – psaní z klávesnice mohlo přijít dřív)
+  await dialog.getByRole("combobox").fill("cíl");
+  check("terminál: při psaní se reaktor rozzáří", await eventually(async () => (await dialog.locator(".palette-reactor-active").count()) === 1, 2000));
+  check("terminál: výsledky naskakují", await eventually(async () => (await dialog.locator('[role="option"].palette-result').count()) > 0, 4000));
+  await page.screenshot({ path: `${OUT}hud2-terminal-desktop.png` });
+  await page.keyboard.press("Escape");
+  check("terminál: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
+  await aiSend(page, "Zapiš práci 1 h");
+  check("ai: hlasová vlna při přemýšlení", await eventually(async () => (await page.locator("[data-ai-wave] .ai-wave-bar").count()) === 7, 2000));
+  const anim = await page.locator(".ai-wave-bar").first().evaluate((el) => getComputedStyle(el).animationName).catch(() => "missing");
+  check("ai: vlna pulzuje", anim === "ai-wave", anim);
+  await page.screenshot({ path: `${OUT}hud2-ai-thinking.png` });
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  check("postavička: arc reaktor na hrudi", await eventually(async () => (await page.locator(".jarvis-chest-reactor [data-arc-reactor]").count()) >= 1, 4000));
+  await ctx.close();
 }
 
 await browser.close();

@@ -17,7 +17,21 @@ type CardProps = {
   className?: string;
 } & Omit<React.HTMLAttributes<HTMLElement>, "className" | "children">;
 
-/** Základní plocha. Čistá – HUD akcenty se přidávají jen přes HudFrame/AccentLine. */
+/**
+ * Základní plocha. MRK-131: karta je „skleněný panel" Jarvisova HUD – světelná horní hrana a zaměřovací rohy při
+ * najetí / fokusu (app/hud.css `.hud-panel`); neutrální tóny jsou na širších displejích průsvitné (`.hud-glass`).
+ * Vnořené plochy (inset) zůstávají čisté.
+ */
+const GLASS_TONES: Tone[] = ["neutral", "accent", "ai", "info"];
+
+/**
+ * Codex review #99: průsvitnost skla musí dát utilita (bg-surface/80 od md), jinak výchozí `bg-surface` z CARD_TONE
+ * (vrstva utilities) přebije barvu z `.hud-glass` a rozmazání se počítá pod neprůhlednou plochou.
+ */
+function toneClass(tone: Tone): string {
+  return GLASS_TONES.includes(tone) ? cx(CARD_TONE[tone].replace("bg-surface", "bg-surface md:bg-surface/80"), "hud-glass") : CARD_TONE[tone];
+}
+
 export function Card({ children, tone = "neutral", inset, flush, index, as: Tag = "section", className, style, ...rest }: CardProps) {
   return (
     <Tag
@@ -26,7 +40,9 @@ export function Card({ children, tone = "neutral", inset, flush, index, as: Tag 
       className={cx(
         index === undefined ? null : "motion-card",
         "border",
-        inset ? "rounded-[var(--radius-control)] border-line-subtle bg-surface-2" : cx("rounded-card shadow-card", CARD_TONE[tone]),
+        inset
+          ? "rounded-[var(--radius-control)] border-line-subtle bg-surface-2"
+          : cx("hud-panel rounded-card shadow-card", toneClass(tone)),
         flush ? null : inset ? "p-3" : "p-4 md:p-5",
         className,
       )}
@@ -56,7 +72,7 @@ export function CardHeader({
   return (
     <div className="mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <div className="min-w-0">
-        <Heading className="flex items-center gap-2 text-base md:text-lg font-semibold text-ink">
+        <Heading className="flex items-center gap-2 font-display text-base md:text-lg font-semibold tracking-wide text-ink">
           {isIconName(icon) ? (
             <IconTile name={icon} />
           ) : icon ? (
