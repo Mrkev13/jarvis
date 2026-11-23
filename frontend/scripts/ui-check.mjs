@@ -761,9 +761,9 @@ async function aiSend(page, text) {
   check("jarvis ai: dokončená akce = success", (await avatar.getAttribute("data-jarvis-state")) === "success");
   await page.screenshot({ path: `${OUT}jarvis-ai-success.png` });
   await outcome.getByRole("button", { name: /^Vrátit změnu/ }).click();
-  await page.waitForTimeout(700);
   const undoCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
-  check("ai: vrácení = nová karta k potvrzení", (await undoCard.getByText("Vrácení změny").count()) >= 1);
+  // čekat na kartu, ne pevných 700 ms (CI 22. 11.: karta dorazila později a kontrola padla)
+  check("ai: vrácení = nová karta k potvrzení", await eventually(async () => (await undoCard.getByText("Vrácení změny").count()) >= 1, 4000));
   await undoCard.getByRole("button", { name: "Zamítnout" }).click();
   await page.waitForTimeout(400);
   check("ai: zamítnutí – karta zmizí a zpráva v historii", (await page.getByRole("list", { name: "Akce čekající na potvrzení" }).count()) === 0 && (await page.getByText("Akce byla zrušena: Vrátit změnu.").count()) === 1);
