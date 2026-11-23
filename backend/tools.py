@@ -855,19 +855,15 @@ def upsert_goal(
                     user_context=user_context
                 )
 
-                db.commit()
-
+                # MRK-135: uzavření stavem completed i dosažení 100 % (snapshot) ve stejné transakci jako úprava
+                from goals_events import emit_goal_completed, goal_reached
                 after_pct, _ = compute_goal_progress_and_value(db, existing)
-                if ensure_goal_progress_snapshot(db, existing):
-                    after_snap_pct, _ = compute_goal_progress_and_value(db, existing)
-                    if after_pct != after_snap_pct:
-                        log_activity(
-                            db, "goals", "snapshot",
-                            f"Cíl '{existing.title}' {after_pct}% → {after_snap_pct}%",
-                            entity_type="Goal", entity_id=existing.id,
-                            user_context=user_context
-                        )
-                    db.commit()
+                if (existing.status or "").strip().lower() == "completed" and goal_reached(
+                        before_pct, old_obj.status, after_pct, existing.status):
+                    emit_goal_completed(db, existing, previous_progress=before_pct, user_context=user_context)
+                db.flush()
+                ensure_goal_progress_snapshot(db, existing, user_context=user_context)
+                db.commit()
                 return {
                     "id": existing.id,
                     "area": existing.area,

@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping
 
 import finance_integrations
+import goals_events
 import goals_integrations
 import mff_integrations
 import school_integrations
@@ -119,7 +120,8 @@ MODULES: tuple[ModuleDef, ...] = (
     ModuleDef("goals", "Cíle", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add"},
               entity_types=frozenset({"goal"}), context_areas=frozenset({"goals"}),
-              api_prefixes=("/goals", "/goal"), integrations=goals_integrations.INTEGRATIONS),
+              api_prefixes=("/goals", "/goal"), integrations=goals_integrations.INTEGRATIONS,
+              event_types=frozenset(goals_events.EVENTS)),  # MRK-135
     ModuleDef("wot", "World of Tanks", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},
               # wot_replay = Replay Library (Game Enrichment C) ve vyhledávání; /wot pokrývá i /wot/replays,
