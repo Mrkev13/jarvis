@@ -183,7 +183,7 @@ const schoolState = {};
 const remindersState = { stateful: false, removed: new Set() };
 
 // MRK-127: World of Warcraft – stavový mock tvaru skutečného `GET /wow` (modules/wow/service.overview).
-// /__mock/wow/reset vrátí výchozí stav; ?configured=0 = server bez klíčů Blizzard API.
+// /__mock/wow/reset vrátí výchozí stav; ?configured=0 = server bez klíčů Blizzard API; ?forever=1 = WoW Forever (MRK-130).
 const WOW_CHARS = () => [
   { id: 1, name: "Thrallík", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 42, target_level: 60,
     levels_to_go: 18, at_target: false, class_name: "Shaman", race_name: "Orc", faction: "Horde", active_spec: "Enhancement",
@@ -197,12 +197,12 @@ const WOW_CHARS = () => [
     at_target: false, class_name: null, race_name: null, faction: null, active_spec: null, item_level: null, professions: [],
     last_login_at: null, sync_status: "not_found", sync_label: "postava nenalezena", last_synced_at: null },
 ];
-const wowState = { configured: true, characters: WOW_CHARS(), seq: 10 };
+const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10 };
 function wowOverview() {
   const chars = [...wowState.characters].sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || a.name.localeCompare(b.name));
   const withTarget = chars.filter((c) => c.target_level != null);
   return {
-    config: wowState.configured ? { configured: true, region: "eu", namespace: "profile-classic1x-eu" } : { configured: false, region: null, namespace: null },
+    config: wowState.configured ? { configured: true, region: "eu", namespace: wowState.forever ? "profile-forever-eu" : "profile-classic1x-eu" } : { configured: false, region: null, namespace: null },
     summary: { characters: chars.length, max_level: Math.max(0, ...chars.map((c) => c.level ?? 0)), with_target: withTarget.length,
       at_target: withTarget.filter((c) => c.level != null && c.level >= c.target_level).length },
     characters: chars,
@@ -492,19 +492,25 @@ createServer(async (req, res) => {
   // MRK-126: volitelně stavové připomínky – Hotovo (jednorázová) / Zrušit je odebere z GET /reminders?status=active.
   // Zapíná /__mock/reminders/stateful (POST), /__mock/reminders/reset vrátí fixtures a vypne to (ostatní kontroly beze změny).
   if (url.pathname === "/__mock/wow/reset") {
-    Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", characters: WOW_CHARS(), seq: 10 });
+    Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", forever: url.searchParams.get("forever") === "1", characters: WOW_CHARS(), seq: 10 });
     return respond(200, { ok: true });
   }
   if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);
   if (url.pathname === "/wow/characters" && req.method === "POST") {
-    const name = String(body?.name ?? "").trim();
-    if (!/^\p{L}{2,12}$/u.test(name)) return respond(400, { detail: "Jméno postavy: 2–12 písmen, bez mezer a číslic." });
-    const slug = String(body?.realm ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+    const raw = String(body?.name ?? "").trim();
+    const parts = raw.split(/[\s-]+/).filter(Boolean);
+    const forever = parts.length === 2; // MRK-130: jméno + příjmení = WoW Forever bez realmu
+    if (forever ? !parts.every((p) => /^\p{L}{2,12}$/u.test(p)) : !/^\p{L}{2,12}$/u.test(raw)) {
+      return respond(400, { detail: "Jméno postavy: 2–12 písmen, bez mezer a číslic." });
+    }
+    const cap = (p) => p[0].toUpperCase() + p.slice(1).toLowerCase();
+    const name = forever ? parts.map(cap).join(" ") : raw;
+    const slug = forever ? "forever" : String(body?.realm ?? "").trim().toLowerCase().replace(/\s+/g, "-");
     if (wowState.characters.some((c) => c.realm_slug === slug && c.name.toLowerCase() === name.toLowerCase())) {
       return respond(409, { detail: "Tuhle postavu už sleduješ." }, 200);
     }
-    const c = { id: ++wowState.seq, name: name[0].toUpperCase() + name.slice(1).toLowerCase(), realm_slug: slug,
-      realm_name: String(body.realm).trim(), level: wowState.configured ? 12 : null, class_name: wowState.configured ? "Hunter" : null,
+    const c = { id: ++wowState.seq, name: forever ? name : cap(name), realm_slug: slug,
+      realm_name: forever ? "Forever · Normal" : String(body.realm).trim(), level: wowState.configured ? 12 : null, class_name: wowState.configured ? "Hunter" : null,
       race_name: wowState.configured ? "Night Elf" : null, faction: null, active_spec: null, item_level: null, professions: [],
       last_login_at: null, sync_status: wowState.configured ? "ok" : "pending", sync_label: wowState.configured ? "aktuální" : "čeká na načtení",
       last_synced_at: wowState.configured ? new Date().toISOString() : null };

@@ -59,6 +59,7 @@ class FakeApi:
         self.profiles = {("pyrewood-village", "thrallík"): dict(PROFILE)}
         self.professions = {("pyrewood-village", "thrallík"): PROFESSIONS_RETAIL}
         self.token_status = 200
+        self.namespace = "profile-classic1x-eu"
         self.calls = []
 
     def __call__(self, method, url, **kw):
@@ -69,10 +70,12 @@ class FakeApi:
                 return Resp(self.token_status)
             return Resp(200, {"access_token": "tok-123", "expires_in": 86399})
         assert url.startswith("https://eu.api.blizzard.com/profile/wow/character/"), url
-        assert kw["params"]["namespace"] == "profile-classic1x-eu"
+        assert kw["params"]["namespace"] == self.namespace
         path = url.split("/profile/wow/character/", 1)[1]
         parts = path.split("/")
         from urllib.parse import unquote
+        if self.namespace.startswith("profile-forever-"):  # MRK-130: bez realmu, /character/{jmeno-prijmeni}
+            parts = ["forever"] + parts
         key = (parts[0], unquote(parts[1]))
         table = self.professions if len(parts) > 2 else self.profiles
         value = table.get(key, 404)
@@ -129,6 +132,24 @@ class NormalizeTestCase(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(service.WowError):
                 service.realm_slug(bad)
         self.assertEqual(service.normalize_target("60"), 60)
+        with self.assertRaises(service.WowError):
+            service.realm_slug("Forever")  # Forever nemá realm – chce jméno + příjmení
+
+    def test_forever_name_and_surname(self):
+        """MRK-130: „Jméno Příjmení“ / jmeno-prijmeni = WoW Forever bez realmu; jedno slovo = klasický realm."""
+        for raw in ("Zareth Malgrave", "  zareth   MALGRAVE ", "zareth-malgrave"):
+            with self.subTest(raw=raw):
+                self.assertEqual(service.parse_character(raw, ""), ("Zareth Malgrave", "zareth-malgrave", "forever"))
+        self.assertEqual(service.parse_character("Zareth Malgrave", "Pyrewood Village")[2], "forever", "realm se ignoruje")
+        self.assertEqual(service.parse_character("Thrallík", "Pyrewood Village"),
+                         ("Thrallík", "thrallík", "pyrewood-village"))
+        for bad in ("Zareth M4lgrave", "Zareth X", "a b c", "Abcdefghijkl Abcdefghijkl", "Zareth"):
+            with self.subTest(bad=bad), self.assertRaises(service.WowError):
+                service.parse_character(bad, "")
+        self.assertEqual(battlenet.Client._char_path("forever", "zareth-malgrave"),
+                         "/profile/wow/character/zareth-malgrave")
+        self.assertEqual(battlenet.Client._char_path("pyrewood-village", "thrallík"),
+                         "/profile/wow/character/pyrewood-village/thrall%C3%ADk")
         self.assertIsNone(service.normalize_target(""))
         with self.assertRaises(service.WowError):
             service.normalize_target(101)
@@ -141,6 +162,10 @@ class NormalizeTestCase(unittest.TestCase):
             self.assertIsNone(battlenet.load_config(), "jen profile namespace")
         with patch.dict(os.environ, {**ENV, "WOW_NAMESPACE": "profile-classic1x-us"}):
             self.assertIsNone(battlenet.load_config(), "namespace musí patřit k regionu")
+        with patch.dict(os.environ, {**ENV, "WOW_NAMESPACE": "profile-forever-eu"}):
+            self.assertEqual(battlenet.load_config().namespace, "profile-forever-eu")
+        with patch.dict(os.environ, {**ENV, "WOW_NAMESPACE": "profile-forever-us"}):
+            self.assertIsNone(battlenet.load_config())
         with patch.dict(os.environ, ENV):
             status = battlenet.config_status()
             self.assertEqual(status, {"configured": True, "region": "eu", "namespace": "profile-classic1x-eu"})
@@ -333,6 +358,77 @@ class SyncTestCase(WowTestBase):
         self.assertIn("level 42", rows[0][3])
         lines = self.q(lambda db: integrations.context_wow(type("R", (), {"db": db})()))
         self.assertTrue(lines[0].startswith("WoW postavy: Thrallík Shaman lvl 42/60"), lines)
+
+
+class ForeverTestCase(WowTestBase):
+    """MRK-130: WoW Forever – namespace profile-forever-eu, postava jméno + příjmení bez realmu."""
+
+    FOREVER = {"name": "Zareth", "surname": "Malgrave", "level": 23, "character_class": {"name": "Warlock"},
+               "race": {"name": "Undead"}, "faction": {"name": "Horde"}, "ruleset": {"name": "Normal"},
+               "last_login_timestamp": 1763900000000}
+
+    def setUp(self):
+        super().setUp()
+        p = patch.dict(os.environ, {"WOW_NAMESPACE": "profile-forever-eu"})
+        p.start()
+        self._patches.append(p)
+        self.api.namespace = "profile-forever-eu"
+        self.api.profiles = {("forever", "zareth-malgrave"): dict(self.FOREVER)}
+        self.api.professions = {("forever", "zareth-malgrave"): PROFESSIONS_CLASSIC}
+
+    def test_add_forever_character(self):
+        out = self.q(lambda db: service.add_character(db, "zareth malgrave", "", 60))
+        self.assertEqual(out["result"], "ok", out)
+        c = out["character"]
+        self.assertEqual((c["name"], c["realm_slug"], c["realm_name"], c["level"], c["class_name"], c["levels_to_go"]),
+                         ("Zareth Malgrave", "forever", "Forever · Normal", 23, "Warlock", 37))
+        self.assertEqual(c["professions"], [{"name": "Herbalism", "skill": 150, "max": 225, "secondary": False}])
+        urls = [u for _m, u, _kw in self.api.calls if u != battlenet.TOKEN_URL]
+        self.assertEqual(urls, ["https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave",
+                                "https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave/professions"])
+        with self.assertRaises(service.WowError) as err:
+            self.q(lambda db: service.add_character(db, "Zareth-Malgrave", "", None))
+        self.assertEqual(err.exception.status, 409)
+
+    def test_ruleset_as_string_and_level_up(self):
+        self.api.profiles[("forever", "zareth-malgrave")] = {**self.FOREVER, "ruleset": "PvP"}
+        self.q(lambda db: service.add_character(db, "Zareth Malgrave", "", None))
+        self.api.profiles[("forever", "zareth-malgrave")] = {**self.FOREVER, "ruleset": "PvP", "level": 24}
+        c = self.q(lambda db: service.sync_one(db, 1))["character"]
+        self.assertEqual((c["realm_name"], c["level"]), ("Forever · PvP", 24))
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="level_up").one().summary),
+                         "Zareth Malgrave – level 24")
+
+    def test_not_found_explains_forever_visibility(self):
+        out = self.q(lambda db: service.add_character(db, "Nobody Here", "", None))
+        self.assertEqual(out["result"], "not_found")
+        self.assertIn("od levelu 10", out["message"])
+
+    def test_check_script_tries_the_forever_namespace(self):
+        import io
+        from contextlib import redirect_stdout
+
+        sys.path.insert(0, os.path.join(BACKEND_DIR, "scripts"))
+        import check_battlenet
+
+        api = self.api
+
+        def transport(method, url, **kw):
+            if "/collections/" in url or "/achievements/" in url:
+                return Resp(404)
+            return api(method, url, **kw)
+
+        out = io.StringIO()
+        with patch.object(battlenet.requests, "request", transport), redirect_stdout(out):
+            code = check_battlenet.main(["--name", "Zareth Malgrave"])
+        text = out.getvalue()
+        self.assertEqual(code, 0, text)
+        self.assertIn("profile-forever-eu: postava 200 · pole level, character_class, race, last_login_timestamp, "
+                      "surname, ruleset · profese 200", text)
+        self.assertIn("DOPORUČENÍ: WOW_NAMESPACE=profile-forever-eu", text)
+        self.assertNotIn("profile-classic1x-eu", text, "Forever postava nezkouší realmové namespace")
+        for secret in (SECRET, "tok-123", "Zareth", "zareth", "Malgrave", "malgrave"):
+            self.assertNotIn(secret, text)
 
 
 class CheckScriptTestCase(WowTestBase):

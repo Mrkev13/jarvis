@@ -836,7 +836,8 @@ print(_hash_pin("123456"))
   `wow_characters_at_target` / `wow_max_level` (goal_history_service, deterministicky). Výpadek API = poslední stav.
 - Hodinový krok nejvýš 1× za 6 h na postavu, max 10 postav; bez klíčů nic. REST `/wow`, stránka `/wow` (Další).
 - Env: `BATTLENET_CLIENT_ID`, `BATTLENET_CLIENT_SECRET`, `WOW_REGION`, `WOW_NAMESPACE`, `WOW_LOCALE`; namespace podle
-  verze hry ověří `scripts/check_battlenet.py` (jen stavy). Podrobně `docs/wow.md`. Testy `tests/test_wow.py`
+  verze hry ověří `scripts/check_battlenet.py` (jen stavy). WoW Forever (MRK-130): `profile-forever-<region>`, postava
+  „Jméno Příjmení“ bez realmu (`realm_slug="forever"`, cesta `/character/{jmeno-prijmeni}`). Podrobně `docs/wow.md`. Testy `tests/test_wow.py`
   (falešný transport, nikdy síť).
 
 ## 24. Architektonická pravidla (Roadmap 3.5)
