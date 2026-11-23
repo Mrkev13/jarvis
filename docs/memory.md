@@ -18,6 +18,16 @@ Stránka Paměť (`GET /memories`) ukazuje i vypršené, s polem `expires_at`.
 `POST /memory` přijímá `kind` a `expires_at` (s časovou zónou se převede na UTC); neplatný druh nebo dočasná vzpomínka
 bez data = 422.
 
+### Zadání druhu a platnosti (MRK-117)
+
+- **Jarvis:** `save_memory` má volitelné `kind` a `expires_at` v pražském čase (`YYYY-MM-DD` = do konce dne, nebo
+  `YYYY-MM-DDTHH:MM`). Resolver (`memory_ai_tool.prepare_save_memory`) ověří druh, budoucí platnost a že `temporary`
+  platnost má – jinak žádná pending akce a model se má doptat. Executor po potvrzení převede čas na naive UTC
+  (`time_utils.local_to_utc`). Náhled potvrzení ukáže „dočasná · platí do …“.
+- **Stránka Paměť:** odznak druhu (Dočasná / Rozhodnutí) a platnosti („Platí do …“ / „Vypršela …“, vypršelá je
+  ztlumená), filtr *Platnost* (vše / platné / vypršelé) a při přidání výběr druhu a pole *Platí do*. Úprava druh ani
+  platnost nemění.
+
 ## Duplicity
 
 Uložení textu, který už má použitelná (aktivní a nevypršená) vzpomínka (po sjednocení mezer a velikosti písmen, bez
