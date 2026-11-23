@@ -693,8 +693,10 @@ print(_hash_pin("123456"))
 - **Konfigurace**: `EXTERNAL_DELIVERY_ENABLED` (default true), `WEB_PUSH_VAPID_PRIVATE_KEY`,
   `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_CONTACT`; klíče vygeneruje `scripts/generate_vapid_keys.py`.
   Bez klíčů se nic externě neposílá. Vyžaduje běžící reminder job (`REMINDERS_CHECK_ENABLED=true`).
-- **Frontend**: `public/sw.js` (jen push + klik), `app/manifest.ts` + ikony, panel `PushSettings` na
-  `/reminders` (oprávnění jen po kliknutí, test, vypnutí, vysvětlení nepodporovaného prostředí).
+- **Frontend**: `public/sw.js` (push + klik; MRK-80: připomínka trvalá, vibrace, renotify, akce Hotovo / Odložit
+  10 min přes `POST /reminders/{id}/done|snooze?source=push` na origin API z `/sw.js?api=…`), `app/manifest.ts` +
+  ikony, panel `PushSettings` v **Nastavení** (`/settings#push`, MRK-80; oprávnění jen po kliknutí, test, vypnutí,
+  návod na zvuk na Androidu); z `/reminders` vede odkaz.
 - **HTTPS (nutné pro mobil, MRK-24)**: prohlížeč povolí Web Push a instalaci PWA jen na https nebo localhost.
   Produkce: Tailscale Serve jen v tailnetu (nikdy Funnel) – `https://<pc>.<tailnet>.ts.net` → :3000 a
   `:8443` → :8000 přes `scripts/windows/tailscale-serve.ps1`; `NEXT_PUBLIC_API_URL=https://<pc>.<tailnet>.ts.net:8443`,

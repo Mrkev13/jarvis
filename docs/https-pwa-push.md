@@ -139,10 +139,16 @@ origin.
 - `public/sw.js` handles only `push` and `notificationclick`. It has **no fetch handler and no Cache API**, so private
   data is always fetched live and never served stale from a cache. Clicks open only same-origin paths. Tests in
   `lib/pwa.test.mjs` enforce this.
+- Reminder pushes (MRK-80, payload `kind: "reminder"`, `reminder_id`) stay until dismissed (`requireInteraction`),
+  vibrate, re-alert for the same tag (`renotify`) and offer **Hotovo** / **Odložit 10 min**. The actions call
+  `POST /reminders/{id}/done|snooze?source=push` with the session cookie on the API origin – the worker's only
+  request – which it gets from its registration URL (`/sw.js?api=<origin>`, set by `PushSettings`); a failed action
+  opens `/reminders`. Devices registered before MRK-80 show *Zapnout tlačítka v oznámení* in Nastavení (one click
+  re-registers the worker, the subscription stays). Sound is the Android channel setting – Nastavení has a guide.
 - The worker is registered (scope `/`, `updateViaCache: "none"`) **only** when the user clicks *Zapnout upozornění*,
   and permission is asked only then, never on page load.
 - **Updates:** browsers re-check `/sw.js` on navigation (at least daily). `skipWaiting` + `clients.claim` let the
-  new version take over immediately. To remove: *Vypnout* on `/reminders` (unsubscribe + server-side disable) or
+  new version take over immediately. To remove: *Vypnout* in Nastavení (`/settings#push`) (unsubscribe + server-side disable) or
   the browser's site settings.
 
 ## Troubleshooting

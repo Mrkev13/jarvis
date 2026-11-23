@@ -67,6 +67,19 @@ class DeliveryTestBase(unittest.TestCase):
         return self.q(lambda db: db.query(Delivery).order_by(Delivery.id).all())
 
 
+class MessageTestCase(DeliveryTestBase):
+    def test_reminder_message_carries_kind_and_id_for_the_service_worker(self):
+        """MRK-80: připomínka → kind + reminder_id (trvalé oznámení, vibrace, akce Hotovo / Odložit); tag zůstává
+        na zdroj, aby renotify znovu upozornil u opakovaného výskytu."""
+        rid = self.fire()
+        note = self.q(lambda db: db.query(Notification).one())
+        msg = ds.notification_message(note)
+        self.assertEqual((msg["kind"], msg["reminder_id"]), ("reminder", rid))
+        self.assertEqual(msg["tag"], f"standa-reminder-{rid}")
+        other = Notification(title="x", message="y", source_type="system", source_id=None)
+        self.assertNotIn("kind", ds.notification_message(other))
+
+
 class QueueTestCase(DeliveryTestBase):
     def test_success_is_sent_once(self):
         self.fire()

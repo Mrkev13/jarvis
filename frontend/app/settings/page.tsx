@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import PushSettings from "@/components/PushSettings";
 import { ModuleSettings } from "@/components/modules/ModuleSettings";
 import { Card, CardHeader, ContentContainer, HudLabel, PageHeader } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
@@ -37,6 +38,22 @@ export default function SettingsPage() {
             ))}
           </ul>
         </Card>
+        {/* MRK-80: upozornění na telefon patří do Nastavení (dřív na stránce Připomínky) */}
+        <div id="push" data-settings-push="" className="scroll-mt-24 space-y-3">
+          <PushSettings />
+          <Card data-settings-android-sound="">
+            <CardHeader
+              title="Zvuk připomínek na Androidu"
+              description="Vibraci a trvalé oznámení nastaví Hub sám, zvuk určuje telefon."
+            />
+            <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm text-ink-2">
+              <li>Dlouze podrž oznámení od Standa Hubu (nebo Nastavení → Aplikace → Standa Hub / Chrome → Oznámení).</li>
+              <li>Otevři kategorii, do které připomínky chodí, a zvol <b>Upozorňování</b> (ne Tiché).</li>
+              <li>Zapni zvuk a vyber tón; případně „Přepsat režim Nerušit“.</li>
+              <li>Hotovo nebo Odložit 10 min jde rovnou z oznámení – appku nemusíš otevírat.</li>
+            </ol>
+          </Card>
+        </div>
         <ModuleSettings />
       </div>
     </ContentContainer>
