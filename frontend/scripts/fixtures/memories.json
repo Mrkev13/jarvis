@@ -1,52 +1,86 @@
 [
- {
-  "id": 3,
-  "area": "finance",
-  "category": "goal",
-  "content": "Chci mít rezervu na 3 měsíce výdajů.",
-  "importance": 9,
-  "active": true,
-  "created_at": "2026-10-05T17:00:00",
-  "updated_at": "2026-10-03T17:06:31.234741"
- },
- {
-  "id": 1,
-  "area": "school",
-  "category": "preference",
-  "content": "Nejlíp se učím ráno do 10:00.",
-  "importance": 8,
-  "active": true,
-  "created_at": "2026-10-11T17:00:00",
-  "updated_at": "2026-10-03T17:06:31.234738"
- },
- {
-  "id": 5,
-  "area": "school",
-  "category": "plan",
-  "content": "Zkoušku z fyziky dát v prvním termínu.",
-  "importance": 7,
-  "active": true,
-  "created_at": "2026-10-03T17:06:31.373603",
-  "updated_at": "2026-10-03T17:06:31.373606"
- },
- {
-  "id": 2,
-  "area": "work",
-  "category": "context",
-  "content": "Klient ABC platí do 14 dnů od faktury.",
-  "importance": 6,
-  "active": true,
-  "created_at": "2026-10-08T17:00:00",
-  "updated_at": "2026-10-03T17:06:31.234740"
- },
- {
-  "id": 4,
-  "area": "general",
-  "category": "context",
-  "content": "Fyzioterapie je každou neděli.",
-  "importance": 5,
-  "active": true,
-  "created_at": "2026-10-02T17:00:00",
-  "updated_at": "2026-10-03T17:06:31.234741"
- }
+  {
+    "id": 3,
+    "area": "finance",
+    "category": "goal",
+    "content": "Chci mít rezervu na 3 měsíce výdajů.",
+    "importance": 9,
+    "active": true,
+    "created_at": "2026-10-05T17:00:00",
+    "updated_at": "2026-10-03T17:06:31.234741",
+    "kind": "fact",
+    "expires_at": null
+  },
+  {
+    "id": 1,
+    "area": "school",
+    "category": "preference",
+    "content": "Nejlíp se učím ráno do 10:00.",
+    "importance": 8,
+    "active": true,
+    "created_at": "2026-10-11T17:00:00",
+    "updated_at": "2026-10-03T17:06:31.234738",
+    "kind": "fact",
+    "expires_at": null
+  },
+  {
+    "id": 5,
+    "area": "school",
+    "category": "plan",
+    "content": "Zkoušku z fyziky dát v prvním termínu.",
+    "importance": 7,
+    "active": true,
+    "created_at": "2026-10-03T17:06:31.373603",
+    "updated_at": "2026-10-03T17:06:31.373606",
+    "kind": "fact",
+    "expires_at": null
+  },
+  {
+    "id": 2,
+    "area": "work",
+    "category": "context",
+    "content": "Klient ABC platí do 14 dnů od faktury.",
+    "importance": 6,
+    "active": true,
+    "created_at": "2026-10-08T17:00:00",
+    "updated_at": "2026-10-03T17:06:31.234740",
+    "kind": "fact",
+    "expires_at": null
+  },
+  {
+    "id": 4,
+    "area": "general",
+    "category": "context",
+    "content": "Fyzioterapie je každou neděli.",
+    "importance": 5,
+    "active": true,
+    "created_at": "2026-10-02T17:00:00",
+    "updated_at": "2026-10-03T17:06:31.234741",
+    "kind": "fact",
+    "expires_at": null
+  },
+  {
+    "id": 90,
+    "area": "fitness",
+    "category": "context",
+    "content": "Tento týden jsem nemocný, netrénuju.",
+    "importance": 6,
+    "active": true,
+    "kind": "temporary",
+    "expires_at": "2099-11-29T22:59:00",
+    "created_at": "2026-10-10T08:00:00",
+    "updated_at": "2026-10-10T08:00:00"
+  },
+  {
+    "id": 91,
+    "area": "school",
+    "category": "plan",
+    "content": "Do pátku odevzdat referát z dějepisu.",
+    "importance": 5,
+    "active": true,
+    "kind": "temporary",
+    "expires_at": "2026-10-02T21:59:00",
+    "created_at": "2026-09-28T08:00:00",
+    "updated_at": "2026-09-28T08:00:00"
+  }
 ]

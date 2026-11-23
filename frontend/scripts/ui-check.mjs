@@ -3406,6 +3406,42 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 28) MRK-117 – Paměť: druh a platnost u vzpomínky, filtr vypršelých, dočasná vzpomínka při přidání
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  const posted = [];
+  const { ctx, page, errors } = await open("/memory", {
+    width, height: 900,
+    setup: async (p) => p.route("**/memory", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posted.push(JSON.parse(route.request().postData() || "{}"));
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", id: 99 }) });
+    }),
+  });
+  const list = page.getByRole("list", { name: "Poznámky paměti" });
+  await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const sick = list.locator('[data-search-target="memory-90"]');
+  check(`paměť ${label}: dočasná vzpomínka má druh a platnost`, (await sick.locator('[data-memory-kind="temporary"]').innerText()) === "Dočasná" && (await sick.locator('[data-memory-validity="valid"]').innerText()).startsWith("Platí do"));
+  const old = list.locator('[data-search-target="memory-91"]');
+  check(`paměť ${label}: vypršelá je odlišená`, (await old.locator('[data-memory-validity="expired"]').innerText()).startsWith("Vypršela"));
+  await page.getByLabel("Platnost").selectOption("expired");
+  check(`paměť ${label}: filtr Vypršelé`, await eventually(async () => (await list.locator("li[data-search-target]").count()) === 1 && (await list.locator('[data-search-target="memory-91"]').count()) === 1, 3000));
+  await page.getByLabel("Platnost").selectOption("all");
+  check(`paměť ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}memory-kinds-${label}.png`, fullPage: true });
+  if (label === "desktop") {
+    const form = page.locator("form").last();
+    await form.getByLabel("Obsah").fill("Tento týden mám zkouškové.");
+    await form.getByLabel("Druh").selectOption("temporary");
+    await form.getByRole("button", { name: "Uložit poznámku" }).click();
+    check("paměť: dočasná bez platnosti = chyba, nic se neodešle", (await form.innerText()).includes("potřebuje datum platnosti") && posted.length === 0);
+    await form.getByLabel("Platí do").fill("2099-12-31T18:00");
+    await form.getByRole("button", { name: "Uložit poznámku" }).click();
+    check("paměť: odešle druh a platnost (UTC ISO)", await eventually(() => posted.length === 1 && posted[0].kind === "temporary" && /^2099-12-31T\d\d:00:00\.000Z$/.test(posted[0].expires_at), 3000), JSON.stringify(posted));
+  }
+  check(`paměť ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

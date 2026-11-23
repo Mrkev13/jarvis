@@ -33,8 +33,15 @@ import {
   memoryCategoryLabel,
   memoryPayload,
   memoryQuery,
+  matchesValidity,
+  MEMORY_KIND_LABELS,
+  memoryKindLabel,
+  memoryValidity,
+  validateMemoryDraft,
   type MemoryDraft,
   type MemoryFilters,
+  type MemoryKind,
+  type ValidityFilter,
 } from "@/lib/memory";
 
 type MemoryItem = {
@@ -44,11 +51,14 @@ type MemoryItem = {
   content: string;
   importance: number;
   active: boolean;
+  kind?: string | null;
+  expires_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
 
 const EMPTY_DRAFT: MemoryDraft = { area: "general", category: "context", content: "", importance: 5, active: true };
+const EMPTY_CREATE_DRAFT: MemoryDraft = { ...EMPTY_DRAFT, kind: "fact", expiresLocal: "" };
 
 /** Formulář poznámky – stejný pro přidání i úpravu. */
 function MemoryForm({
@@ -61,7 +71,10 @@ function MemoryForm({
   submitLabel,
   areas,
   categories,
+  withKind = false,
 }: {
+  /** MRK-117: druh a platnost (jen při přidání – úprava je nemění). */
+  withKind?: boolean;
   draft: MemoryDraft;
   onChange: (d: MemoryDraft) => void;
   onSubmit: () => void;
@@ -80,8 +93,9 @@ function MemoryForm({
       aria-busy={busy}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!draft.content.trim()) {
-          setContentError("Vyplň obsah poznámky.");
+        const problem = withKind ? validateMemoryDraft(draft) : draft.content.trim() ? null : "Vyplň obsah poznámky.";
+        if (problem) {
+          setContentError(problem);
           return;
         }
         setContentError(null);
@@ -136,6 +150,26 @@ function MemoryForm({
           <textarea {...p} rows={4} value={draft.content} onChange={(e) => onChange({ ...draft, content: e.target.value })} className={`${fieldClass} resize-y`} />
         )}
       </FormField>
+      {withKind ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FormField label="Druh" hint="Dočasná vzpomínka po vypršení přestane platit (AI ji nepoužije).">
+            {(p) => (
+              <select {...p} value={draft.kind ?? "fact"} onChange={(e) => onChange({ ...draft, kind: e.target.value as MemoryKind })} className={fieldClass}>
+                {(Object.keys(MEMORY_KIND_LABELS) as MemoryKind[]).map((k) => (
+                  <option key={k} value={k}>
+                    {MEMORY_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
+          <FormField label="Platí do" hint={draft.kind === "temporary" ? "Povinné u dočasné vzpomínky." : "Nepovinné."}>
+            {(p) => (
+              <input {...p} type="datetime-local" value={draft.expiresLocal ?? ""} onChange={(e) => onChange({ ...draft, expiresLocal: e.target.value })} className={fieldClass} />
+            )}
+          </FormField>
+        </div>
+      ) : null}
       <label className="flex min-h-10 w-fit items-center gap-2 text-sm text-ink-2">
         <input type="checkbox" checked={draft.active} onChange={(e) => onChange({ ...draft, active: e.target.checked })} className="h-4 w-4 accent-[var(--color-accent)]" />
         Aktivní (AI ji používá)
@@ -162,7 +196,8 @@ export default function MemoryPage() {
   // Možnosti filtrů ze všech poznámek (ne jen z aktuálně vyfiltrovaných – výběr by se jinak zúžil sám na sebe).
   const all = useApiResource<MemoryItem[]>("/memories?include_inactive=true");
 
-  const [createDraft, setCreateDraft] = useState<MemoryDraft>(EMPTY_DRAFT);
+  const [createDraft, setCreateDraft] = useState<MemoryDraft>(EMPTY_CREATE_DRAFT);
+  const [validity, setValidity] = useState<ValidityFilter>("all");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -175,11 +210,14 @@ export default function MemoryPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null);
 
-  const items = useMemo(() => (Array.isArray(list.data) ? list.data : []), [list.data]);
+  const items = useMemo(
+    () => (Array.isArray(list.data) ? list.data : []).filter((m) => matchesValidity(m.expires_at, validity)),
+    [list.data, validity],
+  );
   const source = Array.isArray(all.data) ? all.data : items;
   const areas = useMemo(() => distinctSorted(source.map((m) => m.area)), [source]);
   const categories = useMemo(() => distinctSorted(source.map((m) => m.category)), [source]);
-  const active = countActiveFilters({ ...filters });
+  const active = countActiveFilters({ ...filters }) + (validity === "all" ? 0 : 1);
 
   async function reloadAll() {
     await Promise.all([list.reload(), all.reload()]);
@@ -190,7 +228,7 @@ export default function MemoryPage() {
     setCreateError(null);
     try {
       await apiJson("/memory", jsonBody("POST", memoryPayload(createDraft)));
-      setCreateDraft((d) => ({ ...d, content: "" }));
+      setCreateDraft((d) => ({ ...d, content: "", kind: "fact", expiresLocal: "" }));
       await reloadAll();
     } catch (err) {
       setCreateError(errorMessage(err, "Nepodařilo se uložit poznámku."));
@@ -268,7 +306,10 @@ export default function MemoryPage() {
           label: "Hledat v paměti",
         }}
         activeCount={active}
-        onReset={() => setFilters(EMPTY_MEMORY_FILTERS)}
+        onReset={() => {
+          setFilters(EMPTY_MEMORY_FILTERS);
+          setValidity("all");
+        }}
         result={list.data ? `${items.length} ${plural(items.length, "poznámka", "poznámky", "poznámek")}` : null}
       >
         <FilterSelect
@@ -282,6 +323,12 @@ export default function MemoryPage() {
           value={filters.category}
           onChange={(category) => setFilters((f) => ({ ...f, category }))}
           options={[{ value: "all", label: "Všechny" }, ...categories.map((c) => ({ value: c, label: memoryCategoryLabel(c) }))]}
+        />
+        <FilterSelect
+          label="Platnost"
+          value={validity}
+          onChange={(v) => setValidity(v as ValidityFilter)}
+          options={[{ value: "all", label: "Vše" }, { value: "valid", label: "Platné" }, { value: "expired", label: "Vypršelé" }]}
         />
         <label className="flex min-h-10 items-center gap-2 text-sm text-ink-2">
           <input
@@ -318,17 +365,24 @@ export default function MemoryPage() {
             <EntityList label="Poznámky paměti">
               {items.map((it) => {
                 const editing = editingId === it.id;
+                const valid = memoryValidity(it.expires_at);
                 return (
                   <EntityRow
                     key={it.id}
                     searchTarget={`memory-${it.id}`}
-                    muted={!it.active}
+                    muted={!it.active || valid.expired}
                     busy={busyId === it.id}
                     badges={
                       <>
                         <AreaBadge area={it.area} />
                         <StatusBadge>{memoryCategoryLabel(it.category)}</StatusBadge>
                         {!it.active ? <StatusBadge>Neaktivní</StatusBadge> : null}
+                        {it.kind && it.kind !== "fact" ? <span data-memory-kind={it.kind}><StatusBadge tone="info">{memoryKindLabel(it.kind)}</StatusBadge></span> : null}
+                        {valid.label ? (
+                          <span data-memory-validity={valid.expired ? "expired" : "valid"}>
+                            <StatusBadge tone={valid.expired ? "danger" : "neutral"}>{valid.label}</StatusBadge>
+                          </span>
+                        ) : null}
                         <span className="text-xs tabular-nums text-ink-muted">Důležitost {it.importance}/10</span>
                       </>
                     }
@@ -384,6 +438,7 @@ export default function MemoryPage() {
           submitLabel="Uložit poznámku"
           areas={areas}
           categories={categories}
+          withKind
         />
       </Card>
 

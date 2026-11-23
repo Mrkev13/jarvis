@@ -185,6 +185,11 @@ def ai_action_details(tool, arguments) -> str:
     elif tool == "save_memory":
         if a.get("content"):
             parts.append(clip(a["content"], 60))
+        # MRK-117: druh a platnost v náhledu potvrzení
+        if a.get("kind") in ("temporary", "decision"):
+            parts.append({"temporary": "dočasná", "decision": "rozhodnutí"}[a["kind"]])
+        if a.get("expires_at"):
+            parts.append(f"platí do {str(a['expires_at']).replace('T', ' ')}")
     elif a.get("title"):
         parts.append(clip(a["title"], 60))
     return " · ".join(p for p in parts if p)
