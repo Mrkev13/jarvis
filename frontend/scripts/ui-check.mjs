@@ -3644,7 +3644,8 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ timeout: 3000 }).catch(() => undefined);
   check("terminál: reaktor v poli hledání", (await dialog.locator("[data-palette-reactor] [data-arc-reactor]").count()) === 1);
-  await page.keyboard.type("cíl");
+  // přímo do pole (fokus po otevření je asynchronní – psaní z klávesnice mohlo přijít dřív)
+  await dialog.getByRole("combobox").fill("cíl");
   check("terminál: při psaní se reaktor rozzáří", await eventually(async () => (await dialog.locator(".palette-reactor-active").count()) === 1, 2000));
   check("terminál: výsledky naskakují", await eventually(async () => (await dialog.locator('[role="option"].palette-result').count()) > 0, 4000));
   await page.screenshot({ path: `${OUT}hud2-terminal-desktop.png` });
