@@ -97,6 +97,15 @@ def is_planner_like(message: str) -> bool:
     return _has(folded, _TIME_PLAN_WORDS) or _has(folded, _OVERVIEW_WORDS)
 
 
+def wants_broad_memory(message: str) -> bool:
+    """MRK-118: široký výběr vzpomínek (i bez překryvu slov / oblasti) jen při plánovacím nebo přehledovém ZÁMĚRU
+    („naplánuj", „co mám dělat", „co mám zítra", „jak jsem na tom") – ne kvůli samotné zmínce dne („v pátek").
+    Bez záměru se vzpomínky vybírají jen podle VÝSLOVNĚ zmíněných oblastí (classify_areas implied=False).
+    Routing toolů a sekce dál řídí is_planner_like (časové slovo tam pomáhá)."""
+    folded = f" {_fold(message)} "
+    return _has(folded, _PLAN_INTENT_WORDS) or _has(folded, _OVERVIEW_WORDS) or _has(folded, (" co mam ",))
+
+
 def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bool = True,
                    hints: dict[str, list[str]] | None = None,
                    words: dict[str, tuple[str, ...]] | None = None) -> frozenset[str]:
@@ -129,6 +138,13 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     return frozenset(areas)
 
 
+# MRK-118: časová slova (den, část dne) – samotná shoda v nich vzpomínku nezařadí („v pátek večer" ≠ „učím se po
+# večerech"); k ostatní shodě ale body přidávají.
+_TEMPORAL_TOKENS = frozenset(w[:5] for w in (
+    "pondeli", "utery", "streda", "ctvrtek", "patek", "sobota", "nedele", "vikend", "dnes", "dneska", "zitra",
+    "vcera", "tyden", "tydnu", "vecer", "vecerech", "rano", "odpoledne", "dopoledne", "noc", "vecery"))
+
+
 def _tokens(text: str) -> set[str]:
     return {w[:5] for w in re.findall(r"[a-z0-9.]{3,}", _fold(text)) if w not in _STOPWORDS}
 
@@ -140,9 +156,10 @@ def rank_memories(memories: list[Memory], message: str, areas: frozenset[str], *
     for m in memories:
         if not m.active:
             continue
-        overlap = len(msg_tokens & _tokens(m.content or ""))
+        shared = msg_tokens & _tokens(m.content or "")
+        overlap = len(shared)
         area_match = (m.area or "") in areas
-        if not (overlap or area_match or planner):
+        if not ((shared - _TEMPORAL_TOKENS) or area_match or planner):
             continue
         score = overlap * 3 + (3 if area_match else 0) + int(m.importance or 0)
         recency = (m.updated_at or m.created_at or datetime.min).timestamp() if (m.updated_at or m.created_at) else 0
@@ -214,7 +231,10 @@ def build_current_context(
             db.rollback()
 
     # MRK-84: jen použitelné vzpomínky (aktivní a nevypršené)
-    memories = rank_memories(memory_service.usable(db.query(Memory), now_utc).all(), message, areas, planner=planner_like)
+    # MRK-118: bez plánovacího záměru jen výslovně zmíněné oblasti (časové slovo samo nepřidá školu, cíle…)
+    broad = wants_broad_memory(message)
+    memories = rank_memories(memory_service.usable(db.query(Memory), now_utc).all(), message,
+                             areas if broad else explicit, planner=broad)
     memory_lines = [f"- [{m.area}/{m.category}] {short(m.content, MEMORY_CHARS)}" for m in memories]
     memory_checked = planner_like or bool(memory_lines)
 
