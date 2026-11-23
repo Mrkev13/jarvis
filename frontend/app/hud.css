@@ -252,10 +252,9 @@
     position: relative;
     background-image: linear-gradient(180deg, rgb(var(--arc-rgb) / 0.04), transparent 9rem);
   }
-  /* sklo jen u neutrálních karet (Card přidá .hud-glass); tónované si nechávají svou barvu */
+  /* sklo jen u neutrálních karet: průsvitnou barvu dává Card utilitou md:bg-surface/80, tady jen rozmazání */
   @media (min-width: 768px) {
     .hud-glass {
-      background-color: rgb(10 17 28 / 0.8);
       backdrop-filter: blur(6px);
     }
   }
