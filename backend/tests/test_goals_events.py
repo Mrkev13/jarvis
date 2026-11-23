@@ -106,6 +106,45 @@ class GoalCompletedEventTestCase(unittest.TestCase):
                 db.close()
         self.assertEqual(len(self.events()), 1, "nad 100 % ani další přepočet nic nezopakuje")
 
+    def test_goal_edit_rolls_back_when_the_event_fails(self):
+        """Codex review #100: změna cíle, snapshot a událost jsou jedna transakce – chyba události vrátí i 100 %."""
+        import goals_events
+        gid = self.client.post("/goal", json={"area": "personal", "title": "Atomický", "progress": 50}).json()["id"]
+
+        def boom(*_a, **_k):
+            raise RuntimeError("event store down")
+
+        with patch.object(goals_events, "emit_goal_completed", boom), self.assertRaises(RuntimeError):
+            self.client.post("/goal", json={"id": gid, "area": "personal", "title": "Atomický", "progress": 100})
+        db = self.Session()
+        try:
+            self.assertEqual(db.get(Goal, gid).progress, 50, "úprava se vrátila spolu s událostí")
+        finally:
+            db.close()
+        self.assertEqual(self.events(), [])
+        self.client.post("/goal", json={"id": gid, "area": "personal", "title": "Atomický", "progress": 100})
+        self.assertEqual(self.events(), [(GOAL_COMPLETED, {"goal_id": gid, "previous_progress": 50})])
+
+    def test_automatic_goal_heals_after_a_failed_snapshot(self):
+        """Automatický cíl se počítá živě a porovnává s posledním snapshotem: když zápis snapshotu po změně zdroje
+        selže, událost doplní další snapshot (hodinový job) – nic se neztratí."""
+        today = date.today().isoformat()
+        with patch.object(ghs, "today_local", lambda: date.today()):
+            self.client.post("/work/session", json={"date": today, "hours": 5, "hourly_rate": 200})
+            gid = self.client.post("/goal", json={"area": "work", "title": "10 h", "tracking_type": "automatic",
+                                                   "source": "work_month_hours", "target_value": 10}).json()["id"]
+            with patch.object(main, "ensure_goal_progress_snapshot", side_effect=RuntimeError("snapshot down")), \
+                    self.assertRaises(RuntimeError):
+                self.client.post("/work/session", json={"date": today, "hours": 6, "hourly_rate": 200})
+            self.assertEqual(self.events(), [])
+            db = self.Session()
+            try:
+                ghs.ensure_goal_progress_snapshot_for_all_active_automatic_goals(db)
+                db.commit()
+            finally:
+                db.close()
+        self.assertEqual(self.events(), [(GOAL_COMPLETED, {"goal_id": gid, "previous_progress": 50})])
+
     def test_status_completed_and_100_at_once_emits_once(self):
         gid = self.client.post("/goal", json={"area": "personal", "title": "Maraton", "progress": 60}).json()["id"]
         self.client.post("/goal", json={"id": gid, "area": "personal", "title": "Maraton", "progress": 100, "status": "completed"})

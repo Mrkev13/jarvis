@@ -1841,18 +1841,11 @@ def add_or_update_goal(request: GoalRequest):
                         before_done_pct, before_status, after_done_pct, existing.status):
                     emit_goal_completed(db, existing, previous_progress=before_done_pct, user_context="manual")
 
+                # MRK-135 (Codex review #100): změna, snapshot i případná událost „cíl splněn" v JEDNÉ transakci
+                # (dřív dva commity – pád mezi nimi nechal splněný cíl bez události)
+                db.flush()
+                ensure_goal_progress_snapshot(db, existing, user_context="manual")
                 db.commit()
-                before_pct, _ = compute_goal_progress_and_value(db, existing)
-                if ensure_goal_progress_snapshot(db, existing, user_context="manual"):
-                    after_pct, _ = compute_goal_progress_and_value(db, existing)
-                    if before_pct != after_pct:
-                        log_activity(
-                            db, "goals", "snapshot",
-                            f"Cíl '{existing.title}' {before_pct}% → {after_pct}%",
-                            entity_type="Goal", entity_id=existing.id,
-                            user_context="manual"
-                        )
-                    db.commit()
                 return {"status": "ok", "id": existing.id, "updated": True}
 
         item = Goal(
