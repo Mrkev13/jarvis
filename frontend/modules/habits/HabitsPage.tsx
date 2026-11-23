@@ -1,5 +1,6 @@
 "use client";
 
+import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useState } from "react";
 import {
   Button,
@@ -292,6 +293,7 @@ export default function HabitsPage() {
         }}
         onCancel={() => setArchiveTarget(null)}
       />
+      <AskJarvis surface="habits" />
     </ContentContainer>
   );
 }

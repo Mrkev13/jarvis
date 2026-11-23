@@ -1,5 +1,6 @@
 "use client";
 
+import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActionMenu,
@@ -1133,6 +1134,7 @@ export default function SchoolPage() {
         onConfirm={confirmDeleteExam}
         onCancel={() => setDeletingExam(null)}
       />
+      <AskJarvis surface="school" />
     </ContentContainer>
   );
 }

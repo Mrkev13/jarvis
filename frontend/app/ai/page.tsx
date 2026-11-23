@@ -10,6 +10,7 @@ import { useAiChat } from "@/hooks/useAiChat";
 import { useAiVoice } from "@/hooks/useAiVoice";
 import { useConversations } from "@/hooks/useConversations";
 import { useJarvisSource } from "@/hooks/useJarvisCompanion";
+import { askFromSearch } from "@/lib/aiSuggestions";
 import { aiJarvisState } from "@/lib/jarvisAvatar";
 import { MAIN_CONTENT_ID } from "@/lib/shell";
 
@@ -57,6 +58,15 @@ export default function AiPage() {
   useEffect(() => {
     sendRef.current = send;
   }, [send]);
+
+  // MRK-81: „Zeptej se Jarvise" ze stránky modulu – dotaz z ?ask= jen předvyplní pole (neodešle se sám)
+  useEffect(() => {
+    const ask = askFromSearch(window.location.search);
+    if (!ask) return;
+    queueMicrotask(() => setDraft(ask));
+    window.history.replaceState(null, "", window.location.pathname);
+    queueMicrotask(() => textareaRef.current?.focus());
+  }, []);
 
   // první načtení: seznam → aktivní konverzace → její zprávy (prázdný seznam založí nový chat)
   useEffect(() => {
