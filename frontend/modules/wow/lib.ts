@@ -71,10 +71,27 @@ export function syncedAgo(iso: string | null, now: Date = new Date()): string {
   return d === 1 ? "včera" : `před ${d} dny`;
 }
 
+/** MRK-130: WoW Forever (namespace `profile-forever-<region>`) nemá realmy – postava = jméno + příjmení. */
+export function isForeverNamespace(namespace: string | null | undefined): boolean {
+  return /^profile-forever-[a-z]{2}$/.test(namespace ?? "");
+}
+
+/** „Jméno Příjmení" / „jmeno-prijmeni" = Forever postava; jinak null. Délka jako backend (name_key ≤ 24). */
+export function foreverName(name: string): string[] | null {
+  const parts = name.trim().split(/[\s-]+/).filter(Boolean);
+  return parts.length === 2 ? parts : null;
+}
+
 /** Kontrola formuláře před odesláním (backend kontroluje znovu). Vrací chybu česky nebo null. */
 export function validateCharacterForm(name: string, realm: string, target: string): string | null {
-  if (!/^\p{L}{2,12}$/u.test(name.trim())) return "Jméno postavy: 2–12 písmen, bez mezer a číslic.";
-  if (!realm.trim()) return "Vyplň realm (název serveru).";
+  const forever = foreverName(name);
+  if (forever) {
+    if (!forever.every((p) => /^\p{L}{2,12}$/u.test(p))) return "Jméno a příjmení: každé 2–12 písmen, bez číslic.";
+    if (forever.join("-").length > 24) return "Jméno a příjmení: dohromady nejvýš 23 písmen.";
+  } else {
+    if (!/^\p{L}{2,12}$/u.test(name.trim())) return "Jméno postavy: 2–12 písmen, bez mezer a číslic (Forever: jméno a příjmení).";
+    if (!realm.trim()) return "Vyplň realm (název serveru).";
+  }
   if (target.trim()) {
     const n = Number(target);
     if (!Number.isInteger(n) || n < 1 || n > 100) return "Cílový level: 1–100.";

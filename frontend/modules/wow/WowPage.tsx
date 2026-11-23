@@ -34,6 +34,7 @@ import {
   syncTone,
   targetProgress,
   validateCharacterForm,
+  isForeverNamespace,
   type WowBatchResult,
   type WowCharacter,
   type WowOverview,
@@ -60,6 +61,8 @@ export default function WowPage() {
 
   const data = wow.data;
   const configured = data?.config.configured ?? false;
+  // MRK-130: WoW Forever nemá realmy – formulář chce jméno + příjmení a pole Realm skryje
+  const forever = isForeverNamespace(data?.config.namespace);
 
   async function run(id: number | null, path: string, init: RequestInit, ok?: string): Promise<boolean> {
     setBusyId(id);
@@ -99,12 +102,12 @@ export default function WowPage() {
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    const invalid = validateCharacterForm(name, realm, target);
+    const invalid = validateCharacterForm(name, forever ? "" : realm, target);
     setFormError(invalid);
     if (invalid) return;
     setSaving(true);
     const ok = await run(null, "/wow/characters", jsonBody("POST", {
-      name: name.trim(), realm: realm.trim(), target_level: target.trim() ? Number(target) : null,
+      name: name.trim(), realm: forever ? "" : realm.trim(), target_level: target.trim() ? Number(target) : null,
     }), `Postava ${name.trim()} přidaná.`);
     setSaving(false);
     if (ok) {
@@ -223,7 +226,7 @@ export default function WowPage() {
                 <CardHeader title="Blizzard API ještě není nastavené" description="Bez klíčů jdou postavy přidat, ale data se nenačtou." />
                 <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-2">
                   <li>Na develop.battle.net si vytvoř API client (zdarma).</li>
-                  <li>Na serveru doplň do <code>.env.production</code> <code>BATTLENET_CLIENT_ID</code> a <code>BATTLENET_CLIENT_SECRET</code> (případně <code>WOW_NAMESPACE</code> pro Classic).</li>
+                  <li>Na serveru doplň do <code>.env.production</code> <code>BATTLENET_CLIENT_ID</code> a <code>BATTLENET_CLIENT_SECRET</code> (případně <code>WOW_NAMESPACE</code> – Classic, WoW Forever <code>profile-forever-eu</code>).</li>
                   <li>Restartuj backend (<code>restart-v3.sh</code>) – postavy se pak načtou samy.</li>
                 </ol>
               </Card>
@@ -239,20 +242,22 @@ export default function WowPage() {
               {data.characters.length ? (
                 <EntityList label="WoW postavy">{data.characters.map(renderRow)}</EntityList>
               ) : (
-                <EmptyState compact>Zatím žádná postava. Přidej první vpravo – stačí jméno a realm.</EmptyState>
+                <EmptyState compact>Zatím žádná postava. Přidej první vpravo – stačí {forever ? "jméno a příjmení" : "jméno a realm"}.</EmptyState>
               )}
             </PageSection>
           </div>
 
           <Card as="section" aria-labelledby="wow-add">
-            <CardHeader as="h2" title={<span id="wow-add">Přidat postavu</span>} description="Jméno a realm jako ve hře; level a zbytek se načte z API." />
+            <CardHeader as="h2" title={<span id="wow-add">Přidat postavu</span>} description={forever ? "Jméno a příjmení jako ve hře (WoW Forever nemá realmy); level a zbytek se načte z API." : "Jméno a realm jako ve hře; level a zbytek se načte z API."} />
             <form onSubmit={add} className="space-y-3" noValidate>
-              <FormField label="Jméno postavy" error={formError && formError.startsWith("Jméno") ? formError : undefined}>
-                {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} placeholder="Thrall" className={fieldClass} autoComplete="off" />}
+              <FormField label="Jméno postavy" hint={forever ? "Jméno i příjmení, např. Zareth Malgrave" : undefined} error={formError && formError.startsWith("Jméno") ? formError : undefined}>
+                {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} placeholder={forever ? "Zareth Malgrave" : "Thrall"} className={fieldClass} autoComplete="off" />}
               </FormField>
-              <FormField label="Realm" hint="Název serveru, např. Pyrewood Village" error={formError && formError.includes("realm") ? formError : undefined}>
-                {(p) => <input {...p} value={realm} onChange={(e) => setRealm(e.target.value)} className={fieldClass} autoComplete="off" />}
-              </FormField>
+              {forever ? null : (
+                <FormField label="Realm" hint="Název serveru, např. Pyrewood Village (WoW Forever: místo realmu jméno a příjmení)" error={formError && formError.includes("realm") ? formError : undefined}>
+                  {(p) => <input {...p} value={realm} onChange={(e) => setRealm(e.target.value)} className={fieldClass} autoComplete="off" />}
+                </FormField>
+              )}
               <FormField label="Cílový level" hint="Nepovinné – např. 60" error={formError && formError.startsWith("Cílový") ? formError : undefined}>
                 {(p) => <input {...p} value={target} inputMode="numeric" onChange={(e) => setTarget(e.target.value)} className={fieldClass} />}
               </FormField>

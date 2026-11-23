@@ -4,8 +4,8 @@ Konfigurace (env, hodnoty jen na serveru – nikdy v repu, logu ani v odpovědi 
 - `BATTLENET_CLIENT_ID`, `BATTLENET_CLIENT_SECRET` – API client z develop.battle.net (client credentials);
 - `WOW_REGION` (`eu` | `us` | `kr` | `tw`, výchozí `eu`);
 - `WOW_NAMESPACE` – profile namespace verze hry: retail `profile-eu`, Classic varianty např. `profile-classic1x-eu`,
-  `profile-classicann-eu` (výchozí `profile-<region>`). Která patří k „Forever" serveru, ověří
-  `backend/scripts/check_battlenet.py` (vypisuje jen stavy);
+  `profile-classicann-eu`, WoW: Forever `profile-forever-eu` (výchozí `profile-<region>`). Který zná tvou postavu,
+  ověří `backend/scripts/check_battlenet.py` (vypisuje jen stavy);
 - `WOW_LOCALE` (výchozí `en_GB` – Blizzard češtinu nemá).
 
 Bezpečnost: HTTPS na pevné hosty Blizzardu, bez přesměrování, timeout, omezená velikost odpovědi. Token se drží jen
@@ -25,7 +25,9 @@ import requests
 from env_config import env_str
 
 REGIONS = ("eu", "us", "kr", "tw")
-NAMESPACE_RE = re.compile(r"^profile(-classic[a-z0-9]*)?-(eu|us|kr|tw)$")
+NAMESPACE_RE = re.compile(r"^profile(-classic[a-z0-9]*|-forever)?-(eu|us|kr|tw)$")
+# MRK-130: WoW Forever nemá realmy (jeden megaserver) – postava = „jméno-příjmení", v DB s tímhle realm_slug.
+REALMLESS = "forever"
 LOCALE_RE = re.compile(r"^[a-z]{2}_[A-Z]{2}$")
 TOKEN_URL = "https://oauth.battle.net/token"
 TIMEOUT = 10
@@ -162,6 +164,8 @@ class Client:
 
     @staticmethod
     def _char_path(realm_slug: str, name_key: str) -> str:
+        if realm_slug == REALMLESS:  # Forever: /profile/wow/character/{jmeno-prijmeni}
+            return f"/profile/wow/character/{quote(name_key, safe='-')}"
         return f"/profile/wow/character/{quote(realm_slug, safe='-')}/{quote(name_key, safe='')}"
 
     def character(self, realm_slug: str, name_key: str) -> dict:

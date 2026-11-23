@@ -3542,6 +3542,28 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("wow bez klíčů: bez chyb JS", errors.length === 0, errors.join("; "));
     await ctx.close();
   }
+  // MRK-130: WoW Forever – bez realmu, postava = jméno + příjmení
+  await fetch(`${MOCK}/wow/reset?forever=1`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wow", { width, height: 900 });
+    const list = page.getByRole("list", { name: "WoW postavy" });
+    await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const form = page.locator('section[aria-labelledby="wow-add"]');
+    check(`wow forever ${label}: bez pole Realm`, (await form.getByLabel("Realm").count()) === 0 && (await form.innerText()).includes("Jméno i příjmení"));
+    if (label === "desktop") {
+      await form.getByLabel("Jméno postavy").fill("Zareth M4lgrave");
+      await form.getByRole("button", { name: "Přidat postavu" }).click();
+      check("wow forever: neplatné příjmení = chyba, nic se neodešle", (await form.innerText()).includes("každé 2–12 písmen") && (await list.locator("li[data-row-key]").count()) === 3);
+      await form.getByLabel("Jméno postavy").fill("zareth malgrave");
+      await form.getByRole("button", { name: "Přidat postavu" }).click();
+      const row = list.locator("li[data-row-key]").filter({ hasText: "Zareth Malgrave" });
+      check("wow forever: postava jméno + příjmení v seznamu", await eventually(async () => (await row.count()) === 1 && (await row.innerText()).includes("Forever · Normal"), 4000));
+    }
+    check(`wow forever ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wow-forever-${label}.png`, fullPage: true });
+    check(`wow forever ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
   await fetch(`${MOCK}/wow/reset`, { method: "POST" });
 }
 
