@@ -3580,6 +3580,9 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   check("hud: arc reaktor ve znaku menu", (await page.locator("[data-desktop-sidebar] [data-arc-reactor]").count()) === 1);
   check("hud: zaměřovač na pozadí", (await page.locator(".hud-reticle").count()) === 1 && (await page.locator(".hud-reticle").evaluate((el) => getComputedStyle(el).pointerEvents)) === "none");
   check("hud: karty jsou panely HUD", await eventually(async () => (await page.locator("main .hud-panel").count()) > 3, 4000));
+  // Codex review #99: sklo je opravdu průsvitné (alfa < 1), jinak blur nemá smysl
+  const glassBg = await page.locator("main .hud-glass").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  check("hud: skleněná karta je průsvitná", /\/ 0\.8|, 0\.8\)|rgba?\([^)]*0\.8\)/.test(glassBg), glassBg);
   check("hud: aktivní položka menu je zaměřená", (await page.locator('[data-desktop-sidebar] a[aria-current="page"].nav-lock').count()) === 1);
   const font = await page.locator("main h1").evaluate((el) => getComputedStyle(el).fontFamily);
   check("hud: titulek v písmu Oxanium", font.includes("Oxanium"), font);
