@@ -238,6 +238,29 @@ class SyncTestCase(WowTestBase):
         self.assertEqual(events, 1)
         self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="level_up").count()), 1)
 
+    def test_losing_sync_does_not_overwrite_the_winner_with_an_older_answer(self):
+        """Codex review #91 (2. kolo): A uloží 43, B má starší odpověď 42 – B ji zahodí; další sync 43 nic nezopakuje."""
+        self.add()
+        a, b = self.Session(), self.Session()
+        try:
+            ca, cb = a.get(WowCharacter, 1), b.get(WowCharacter, 1)
+            self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 43, "equipped_item_level": 60}
+            self.assertEqual(service.sync_character(a, ca, battlenet.client()), "ok")
+            a.commit()
+            self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 42}  # starší odpověď pro B
+            self.assertEqual(service.sync_character(b, cb, battlenet.client()), "ok")
+            b.commit()
+        finally:
+            a.close()
+            b.close()
+        state = self.q(lambda db: (lambda c: (c.level, c.item_level))(db.get(WowCharacter, 1)))
+        self.assertEqual(state, (43, 60), "vítězný snapshot zůstal")
+        self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 43, "equipped_item_level": 60}
+        self.q(lambda db: service.sync_one(db, 1))
+        self.assertEqual(self.q(lambda db: db.query(DomainEvent).count()), 1, "žádná druhá událost 42→43")
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="sync").count()), 1,
+                         "jen vítězova změna item levelu")
+
     def test_snapshot_changes_without_level_up_are_audited(self):
         """Codex review #91: item level / profese / pokles levelu = řádek Aktivity s deltou; beze změny nic."""
         self.add()

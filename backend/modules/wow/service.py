@@ -239,9 +239,11 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
     won = db.query(WowCharacter).filter(WowCharacter.id == ch.id, level_filter).update(
         {WowCharacter.level: new_level}, synchronize_session=False) == 1
     if not won:
-        db.refresh(ch)  # vítězův stav; čas pokusu se nastaví znovu
+        # Prohraný souběh: mezitím zapsal jiný sync. Naše odpověď může být starší než vítězova (42 vs. 43) – zahodit
+        # ji celou, nechat vítězný snapshot a nic neemitovat ani neauditovat (Codex review #91, 2. kolo).
+        db.refresh(ch)
         ch.last_attempt_at = now
-        previous = ch.level
+        return "ok"
     before = _snapshot(ch)
     apply_profile(ch, data, prof)
     ch.sync_status = "ok"
