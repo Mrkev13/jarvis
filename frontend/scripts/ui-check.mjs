@@ -3606,7 +3606,11 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 {
-  const { ctx, page } = await open("/login", { width: 390, height: 844 });
+  const { ctx, page } = await open("/login", {
+    width: 390, height: 844,
+    setup: async (p) => p.route("**/auth/session/validate", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) })),
+  });
   check("hud login: arc reaktor", await eventually(async () => (await page.locator("main [data-arc-reactor]").count()) === 1, 4000));
   await page.screenshot({ path: `${OUT}hud-login-mobile.png` });
   await ctx.close();
