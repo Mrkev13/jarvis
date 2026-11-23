@@ -3406,6 +3406,46 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 28) MRK-81 – návrhy otázek pro Jarvise: prázdný chat podle modulů (nikdy Finance), „Zeptej se Jarvise" na stránkách
+{
+  const { ctx, page, errors } = await open("/ai", { width: 1366, height: 900 });
+  const rail = page.getByRole("complementary", { name: "Konverzace" });
+  await rail.getByRole("button", { name: "+ Nový chat" }).click();
+  const list = page.getByRole("list", { name: "Návrhy otázek" });
+  await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const items = await list.getByRole("button").allInnerTexts();
+  check("ai návrhy: nejvýš 6, žádná Finance", items.length >= 4 && items.length <= 6 && !items.some((t) => /financ|bilanc|peníz/i.test(t)), items.join(" | "));
+  await list.getByRole("button", { name: "Jak jsem na tom s cíli?" }).click();
+  check("ai návrhy: klik vloží otázku do pole (neodešle)", (await page.getByLabel("Zpráva pro Standa AI").inputValue()) === "Jak jsem na tom s cíli?");
+  check("ai návrhy: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  const { ctx, page, errors } = await open("/school", { width, height: 900 });
+  const card = page.locator('[data-ask-jarvis="school"]');
+  await card.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const links = card.getByRole("link");
+  check(`zeptej se ${label}: karta ve Škole s otázkami`, (await links.count()) >= 2 && (await links.first().getAttribute("href")).startsWith("/ai?ask="));
+  check(`zeptej se ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await card.screenshot({ path: `${OUT}ask-jarvis-school-${label}.png` });
+  if (label === "desktop") {
+    const prompt = await links.first().innerText();
+    await links.first().click();
+    await page.waitForURL("**/ai**", { timeout: 5000 }).catch(() => undefined);
+    const input = page.getByLabel("Zpráva pro Standa AI");
+    check("zeptej se: chat s předvyplněnou otázkou", await eventually(async () => (await input.inputValue()) === prompt, 5000), await input.inputValue().catch(() => ""));
+    check("zeptej se: ?ask= zmizí z adresy", await eventually(async () => !page.url().includes("ask="), 3000), page.url());
+  }
+  check(`zeptej se ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+for (const path of ["/goals", "/wot", "/habits"]) {
+  const { ctx, page } = await open(path, { width: 1366, height: 900 });
+  const card = page.locator("[data-ask-jarvis]");
+  check(`zeptej se ${path}: karta s otázkami`, await eventually(async () => (await card.getByRole("link").count()) >= 1, 5000));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

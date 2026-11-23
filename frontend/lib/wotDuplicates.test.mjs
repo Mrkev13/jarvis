@@ -45,6 +45,7 @@ test("MRK-12: actual WoT page renders both records from the API list", () => {
     "@/components/wot/CompletedGrinds": { CompletedGrinds: () => null },
     "@/components/wot/GrindRow": { GrindRow: () => null },
     "@/components/games/GameImage": { GameImage: () => null },
+    "@/components/ai/AskJarvis": { AskJarvis: () => null },  // MRK-81
     "@/lib/format": { formatNumber: String, plural: () => "", pragueDayKey: () => "2026-10-07" },
     "@/lib/jarvisSignals": { pulseJarvis: () => {} },
     "@/lib/motion": { prefersReducedMotion: () => true },
