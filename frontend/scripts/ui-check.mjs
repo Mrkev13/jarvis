@@ -890,7 +890,7 @@ async function aiSend(page, text) {
   }));
   check("jarvis reduced motion: thinking bez animace", avatarMotion.state === "thinking" && avatarMotion.self === "none" && avatarMotion.after === "none", JSON.stringify(avatarMotion));
   const dots = await page.evaluate(() => {
-    const d = document.querySelector(".animate-bounce");
+    const d = document.querySelector(".ai-wave-bar"); // MRK-132: hlasová vlna místo teček
     return d ? getComputedStyle(d).animationName : "missing";
   });
   check("ai reduced motion: indikátor bez animace", dots === "none", dots);
@@ -3613,6 +3613,54 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   });
   check("hud login: arc reaktor", await eventually(async () => (await page.locator("main [data-arc-reactor]").count()) === 1, 4000));
   await page.screenshot({ path: `${OUT}hud-login-mobile.png` });
+  await ctx.close();
+}
+
+// 32) MRK-132 – Jarvis HUD vlna 2: jádro dne, segmentované ukazatele, Ctrl+K terminál, hlasová vlna AI
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  await resetPrefs();
+  const { ctx, page, errors } = await open("/", { width, height: width < 500 ? 844 : 900 });
+  const core = page.locator("[data-jarvis-core]");
+  check(`jádro dne ${label}: zobrazené`, await eventually(async () => (await core.count()) === 1, 5000));
+  const line = (await core.locator("[data-jarvis-line]").innerText().catch(() => "")).trim();
+  check(`jádro dne ${label}: věta od Jarvise`, /hoří|Další je|Zbývá|hotovo|volno/.test(line), line);
+  check(`jádro dne ${label}: segmenty reaktoru`, (await core.locator(".day-seg").count()) >= 1);
+  check(`jádro dne ${label}: odkaz na režim Dnes`, (await core.getByRole("link").getAttribute("href")) === "/today");
+  check(`jádro dne ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}hud2-core-${label}.png` });
+  check(`jádro dne ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page, errors } = await open("/goals", { width: 1366, height: 900 });
+  const bar = page.locator('[role="progressbar"]').first();
+  check("ukazatele: segmentované (HUD)", await eventually(async () => (await bar.count()) === 1 && (await bar.getAttribute("class")).includes("hud-progress"), 4000));
+  const mask = await bar.evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage);
+  check("ukazatele: dílky přes masku", mask.includes("repeating-linear-gradient"), mask);
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor({ timeout: 3000 }).catch(() => undefined);
+  check("terminál: reaktor v poli hledání", (await dialog.locator("[data-palette-reactor] [data-arc-reactor]").count()) === 1);
+  await page.keyboard.type("cíl");
+  check("terminál: při psaní se reaktor rozzáří", await eventually(async () => (await dialog.locator(".palette-reactor-active").count()) === 1, 2000));
+  check("terminál: výsledky naskakují", await eventually(async () => (await dialog.locator('[role="option"].palette-result').count()) > 0, 4000));
+  await page.screenshot({ path: `${OUT}hud2-terminal-desktop.png` });
+  await page.keyboard.press("Escape");
+  check("terminál: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
+  await aiSend(page, "Zapiš práci 1 h");
+  check("ai: hlasová vlna při přemýšlení", await eventually(async () => (await page.locator("[data-ai-wave] .ai-wave-bar").count()) === 7, 2000));
+  const anim = await page.locator(".ai-wave-bar").first().evaluate((el) => getComputedStyle(el).animationName).catch(() => "missing");
+  check("ai: vlna pulzuje", anim === "ai-wave", anim);
+  await page.screenshot({ path: `${OUT}hud2-ai-thinking.png` });
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/", { width: 1366, height: 900 });
+  check("postavička: arc reaktor na hrudi", await eventually(async () => (await page.locator(".jarvis-chest-reactor [data-arc-reactor]").count()) >= 1, 4000));
   await ctx.close();
 }
 

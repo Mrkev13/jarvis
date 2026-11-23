@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Button, EmptyState, ErrorState, StatusPulse } from "@/components/ui";
-import { SearchIcon } from "./SearchIcon";
+import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { useModal } from "@/components/ui/useModal";
 import { useGlobalSearch } from "@/hooks/useGlobalSearch";
 import { flatten, moveSelection, parseRecent, pushRecent, RECENT_KEY, type SearchResult } from "@/lib/search";
@@ -124,7 +124,10 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
           Hledat v Standa Hubu
         </h2>
         <div className="flex items-center gap-2 border-b border-line px-3 py-2 sm:px-4">
-          <SearchIcon className="h-5 w-5 shrink-0 text-ink-muted" />
+          {/* MRK-132: Jarvisův terminál – reaktor v poli; při psaní / hledání se rozzáří a roztočí rychleji */}
+          <span data-palette-reactor="" className={cx("palette-reactor shrink-0", (query.trim() || search.searching) && "palette-reactor-active")}>
+            <ArcReactor size={24} />
+          </span>
           <label htmlFor={ids.input} className="sr-only">
             Hledat stránku nebo záznam
           </label>
@@ -165,7 +168,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
                 <div id={`${ids.list}-g-${g.key}`} className="px-2 pb-1 pt-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
                   {g.label}
                 </div>
-                {g.results.map((r) => {
+                {g.results.map((r, i) => {
                   const selected = activeOption?.id === r.id;
                   return (
                     <div
@@ -179,8 +182,10 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
                         if (i !== activeIndex) setActive(i);
                       }}
                       onClick={() => openResult(r)}
+                      style={{ ["--i" as string]: Math.min(i, 8) } as React.CSSProperties}
                       className={cx(
-                        "relative flex min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-control)] px-2.5 py-1.5 pointer-coarse:min-h-12",
+                        // MRK-132: výsledky naskakují jako výstup systému (app/hud.css .palette-result)
+                        "palette-result relative flex min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-control)] px-2.5 py-1.5 pointer-coarse:min-h-12",
                         selected ? "bg-accent/10 text-ink" : "text-ink-2 hover:bg-surface",
                       )}
                     >
