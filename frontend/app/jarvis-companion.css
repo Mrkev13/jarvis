@@ -64,7 +64,7 @@
   transform: translateY(-2px);
 }
 .jarvis-companion-hit:focus-visible {
-  outline: 2px solid rgb(34 211 238 / 0.7);
+  outline: 2px solid rgb(60 200 245 / 0.7);
   outline-offset: 3px;
 }
 

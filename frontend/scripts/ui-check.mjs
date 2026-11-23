@@ -137,7 +137,7 @@ for (const [path, name] of PAGES.filter(([, n]) => !ONLY || ONLY.includes(n))) {
 for (const scheme of ["light", "dark"]) {
   const { ctx, page } = await open("/", { scheme });
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  check(`dashboard (${scheme} OS): tmavé pozadí`, /rgb\(7, 9, 13\)|lab\(/.test(bg) && !bg.includes("255, 255, 255"), bg);
+  check(`dashboard (${scheme} OS): tmavé pozadí`, /rgb\(5, 9, 17\)|lab\(/.test(bg) && !bg.includes("255, 255, 255"), bg);
   await page.screenshot({ path: `${OUT}dashboard-${scheme}-os.png` });
   await ctx.close();
 }
@@ -3565,6 +3565,55 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await ctx.close();
   }
   await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+}
+
+// 31) MRK-131 – Jarvis HUD: arc reaktor ve znaku, start systému (?boot=1), zaměřovač, skleněné panely, zaměřené menu
+{
+  const { ctx, page, errors } = await open("/?boot=1", { width: 1366, height: 900, delayPath: "/__hud-none" }); // bez čekání na networkidle – start trvá < 2 s
+  const boot = page.locator("[data-boot-sequence]");
+  check("hud: start systému se ukáže (?boot=1)", await eventually(async () => (await boot.count()) === 1, 3000));
+  check("hud: start má pozdrav a stav", await eventually(async () => /Stando/.test(await boot.innerText().catch(() => "")) && (await boot.innerText().catch(() => "")).includes("Všechny systémy online"), 2000));
+  check("hud: start neblokuje klikání", (await boot.evaluate((el) => getComputedStyle(el).pointerEvents).catch(() => "")) === "none");
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: `${OUT}hud-boot-desktop.png` });
+  check("hud: start se sám rozplyne", await eventually(async () => (await boot.count()) === 0, 4000));
+  check("hud: arc reaktor ve znaku menu", (await page.locator("[data-desktop-sidebar] [data-arc-reactor]").count()) === 1);
+  check("hud: zaměřovač na pozadí", (await page.locator(".hud-reticle").count()) === 1 && (await page.locator(".hud-reticle").evaluate((el) => getComputedStyle(el).pointerEvents)) === "none");
+  check("hud: karty jsou panely HUD", await eventually(async () => (await page.locator("main .hud-panel").count()) > 3, 4000));
+  check("hud: aktivní položka menu je zaměřená", (await page.locator('[data-desktop-sidebar] a[aria-current="page"].nav-lock').count()) === 1);
+  const font = await page.locator("main h1").evaluate((el) => getComputedStyle(el).fontFamily);
+  check("hud: titulek v písmu Oxanium", font.includes("Oxanium"), font);
+  check("hud: písmo s češtinou načtené", await page.evaluate(async () => { await document.fonts.ready; return document.fonts.check('600 24px "Oxanium"', "Řídicí centrum ěščřžýáíé"); }));
+  await page.screenshot({ path: `${OUT}hud-dashboard-desktop.png` });
+  check("hud: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/?boot=1", { width: 390, height: 844, delayPath: "/__hud-none" });
+  check("hud mobil: start systému", await eventually(async () => (await page.locator("[data-boot-sequence]").count()) === 1, 3000));
+  await page.waitForTimeout(650);
+  await page.screenshot({ path: `${OUT}hud-boot-mobile.png` });
+  check("hud mobil: bez přetečení", (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  check("hud mobil: zaměřovač skrytý", (await page.locator(".hud-reticle").evaluate((el) => getComputedStyle(el).display)) === "none");
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/?boot=1", { width: 1366, height: 900, reducedMotion: "reduce" });
+  await page.waitForTimeout(400);
+  check("hud reduced motion: žádný start systému", (await page.locator("[data-boot-sequence]").count()) === 0);
+  const spin = await page.locator("[data-desktop-sidebar] .arc-ring-outer").evaluate((el) => getComputedStyle(el).animationName);
+  check("hud reduced motion: reaktor stojí", spin === "none", spin);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/login", {
+    width: 390, height: 844,
+    setup: async (p) => p.route("**/auth/session/validate", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ valid: false, auth_disabled: false }) })),
+  });
+  check("hud login: arc reaktor", await eventually(async () => (await page.locator("main [data-arc-reactor]").count()) === 1, 4000));
+  await page.screenshot({ path: `${OUT}hud-login-mobile.png` });
+  await ctx.close();
 }
 
 await browser.close();

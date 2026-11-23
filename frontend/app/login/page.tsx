@@ -3,6 +3,7 @@
 import { FormEvent, Suspense, useEffect, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AccentLine, Button, Card, ErrorState, fieldClass, HudFrame, HudLabel, StatusPulse } from "@/components/ui";
+import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { API_URL, readErrorDetail } from "@/lib/api";
 import { loginErrorMessage } from "@/lib/loginError";
 import { safeNextPath } from "@/lib/safeNext";
@@ -21,16 +22,12 @@ function AuthFrame({ children }: { children: React.ReactNode }) {
   return (
     <main id="main-content" className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <span
-            aria-hidden="true"
-            className="grid h-11 w-11 place-items-center rounded-xl border border-accent/40 bg-accent/10 font-mono text-sm font-semibold text-accent-strong shadow-[0_0_24px_-8px_rgb(34_211_238/0.8)]"
-          >
-            SH
-          </span>
+        {/* MRK-131: arc reaktor jako první, co Standa vidí */}
+        <div className="mb-7 flex flex-col items-center gap-4 text-center">
+          <ArcReactor size={84} />
           <div>
-            <p className="text-lg font-semibold leading-tight text-ink">Standa Hub</p>
-            <HudLabel className="flex items-center gap-1.5 text-[10px]">
+            <p className="font-display text-2xl font-semibold leading-tight tracking-wide text-ink">Standa Hub</p>
+            <HudLabel className="mt-1 flex items-center justify-center gap-1.5 text-[10px]">
               <StatusPulse tone="accent" className="h-1.5 w-1.5" /> osobní řídicí centrum
             </HudLabel>
           </div>

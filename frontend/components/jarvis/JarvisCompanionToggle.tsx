@@ -31,7 +31,7 @@ export function JarvisCompanionToggle({ className }: { className?: string }) {
         <span
           className={cx(
             "absolute h-3.5 w-3.5 rounded-full transition-transform",
-            enabled ? "translate-x-[18px] bg-accent-strong shadow-[0_0_8px_rgb(34_211_238/0.8)]" : "translate-x-[2px] bg-ink-muted",
+            enabled ? "translate-x-[18px] bg-accent-strong shadow-[0_0_8px_rgb(60_200_245/0.8)]" : "translate-x-[2px] bg-ink-muted",
           )}
         />
       </span>

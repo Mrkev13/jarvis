@@ -109,10 +109,22 @@
   to   { transform: translateX(100%); }
 }
 
-/* MRK-124: vstup stránky – zřetelnější než vstup karty (delší dráha, emphasized), pořád jen opacity/transform. */
+/*
+ * MRK-124: vstup stránky – zřetelnější než vstup karty, pořád jen opacity/transform.
+ * MRK-131: „zhmotnění hologramu" – obsah se krátce rozsvítí (opacity v krocích jako naskakující projekce),
+ * lehce se zaostří z měřítka a shora přes něj projede světelný paprsek (.motion-page::before).
+ */
 @keyframes motion-page-enter {
-  from { opacity: 0; transform: translateY(var(--motion-page-distance)); }
-  to   { opacity: 1; transform: none; }
+  0%   { opacity: 0;    transform: translateY(var(--motion-page-distance)) scale(0.992); }
+  35%  { opacity: 0.55; }
+  45%  { opacity: 0.35; }
+  100% { opacity: 1;    transform: none; }
+}
+
+@keyframes motion-page-scan {
+  0%   { opacity: 0; transform: translateY(0); }
+  12%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(min(70vh, 36rem)); }
 }
 
 /* MRK-124: skeleton – jemný lesk přejíždějící přes šedý blok (transform pseudo-prvku). */
@@ -142,7 +154,22 @@
 
 /* Vstup stránky (obal obsahu v layoutu, klíčovaný cestou). MRK-124: delší dráha a emphasized, ať je přechod vidět. */
 .motion-page {
-  animation: motion-page-enter var(--motion-normal) var(--motion-ease-emphasized) backwards;
+  position: relative;
+  animation: motion-page-enter 420ms var(--motion-ease-emphasized) backwards;
+}
+.motion-page::before {
+  content: "";
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(var(--arc-strong-rgb) / 0.8) 30%, rgb(var(--arc-rgb) / 0.9) 70%, transparent);
+  box-shadow: 0 0 16px 1px rgb(var(--arc-rgb) / 0.55);
+  opacity: 0;
+  animation: motion-page-scan 620ms var(--motion-ease-standard) forwards;
 }
 
 /* MRK-124: skeleton s leskem (dřív Tailwind animate-pulse). Lesk je pseudo-prvek, blok zůstává vidět i bez animace. */
@@ -285,7 +312,7 @@
 
 /* Roadmap 4D: záznam otevřený z vyhledávání – zřetelný obrys, který po chvíli zmizí (třídu odebere JS). */
 .search-target-active {
-  outline: 2px solid rgb(34 211 238 / 0.75);
+  outline: 2px solid rgb(60 200 245 / 0.75);
   outline-offset: 3px;
   animation: motion-highlight var(--motion-highlight-duration) ease-out;
 }
@@ -336,6 +363,7 @@
 /* ===== Omezený pohyb ===== */
 @media (prefers-reduced-motion: reduce) {
   .motion-page,
+  .motion-page::before,
   .motion-card,
   .motion-drawer,
   .motion-success,

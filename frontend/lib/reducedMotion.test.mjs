@@ -27,7 +27,7 @@ test("design tokens are imported and the app stays dark", () => {
   const globals = css("globals.css");
   assert.ok(globals.indexOf('@import "./tokens.css"') > globals.indexOf('@import "tailwindcss"'));
   assert.ok(globals.includes('@import "./hud.css"'));
-  assert.match(css("tokens.css"), /--color-app:\s*#07090d/);
+  assert.match(css("tokens.css"), /--color-app:\s*#050911/); // MRK-131: hlubší noční modrá
 });
 
 // Roadmap 6A: sémantická primitiva (motion-semantic.css) – každá animace má reduced-motion protějšek.
