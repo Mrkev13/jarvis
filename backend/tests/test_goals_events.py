@@ -87,6 +87,30 @@ class GoalCompletedEventTestCase(unittest.TestCase):
         self.client.post("/goal", json={"id": gid, "area": "personal", "title": "Kurz", "progress": 30, "status": "completed"})
         self.assertEqual(self.events(), [(GOAL_COMPLETED, {"goal_id": gid, "previous_progress": 30})])
 
+    def test_work_session_endpoint_completes_automatic_goal(self):
+        """Codex review #100: skutečný producent zdroje (POST /work/session) – 5 h, cíl 10 h (50 %), +6 h → událost."""
+        today = date.today().isoformat()
+        with patch.object(ghs, "today_local", lambda: date.today()):
+            self.assertEqual(self.client.post("/work/session", json={"date": today, "hours": 5, "hourly_rate": 200}).status_code, 200)
+            gid = self.client.post("/goal", json={"area": "work", "title": "10 h práce", "tracking_type": "automatic",
+                                                   "source": "work_month_hours", "target_value": 10}).json()["id"]
+            self.assertEqual(self.events(), [])
+            self.assertEqual(self.client.post("/work/session", json={"date": today, "hours": 6, "hourly_rate": 200}).status_code, 200)
+            self.assertEqual(self.events(), [(GOAL_COMPLETED, {"goal_id": gid, "previous_progress": 50})])
+            self.client.post("/work/session", json={"date": today, "hours": 1, "hourly_rate": 200})
+            db = self.Session()
+            try:
+                ghs.refresh_automatic_goals(db, {"work_month_hours"})
+                db.commit()
+            finally:
+                db.close()
+        self.assertEqual(len(self.events()), 1, "nad 100 % ani další přepočet nic nezopakuje")
+
+    def test_status_completed_and_100_at_once_emits_once(self):
+        gid = self.client.post("/goal", json={"area": "personal", "title": "Maraton", "progress": 60}).json()["id"]
+        self.client.post("/goal", json={"id": gid, "area": "personal", "title": "Maraton", "progress": 100, "status": "completed"})
+        self.assertEqual(self.events(), [(GOAL_COMPLETED, {"goal_id": gid, "previous_progress": 60})])
+
     def test_automatic_goal_crossing_100_on_refresh(self):
         today = date(2026, 11, 23)
         db = self.Session()

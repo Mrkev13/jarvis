@@ -193,9 +193,23 @@ def record_goal_progress_snapshot(
     return True
 
 
-def ensure_goal_progress_snapshot(db: Session, goal: Goal, today: date | None = None) -> bool:
+def ensure_goal_progress_snapshot(db: Session, goal: Goal, today: date | None = None, *, user_context: str = "system") -> bool:
+    """Zapíše snapshot, pokud se změnil. MRK-135 (Codex review #100): jediné společné místo, kudy jdou všichni
+    producenti postupu (POST /goal, POST /work/session, Finance, AI mutace, hodinový job…) – tady se proto pozná
+    i přechod na 100 % a vyšle `goals.goal.completed` do transakce volajícího (ten commituje)."""
     progress, current_value = compute_goal_progress_and_value(db, goal, today=today)
-    return record_goal_progress_snapshot(db, goal.id, progress, current_value)
+    last = (
+        db.query(GoalProgressHistory.progress)
+        .filter(GoalProgressHistory.goal_id == goal.id)
+        .order_by(GoalProgressHistory.recorded_at.desc(), GoalProgressHistory.id.desc())
+        .first()
+    )
+    recorded = record_goal_progress_snapshot(db, goal.id, progress, current_value)
+    if recorded and last is not None:
+        from goals_events import emit_goal_completed, progress_crossed
+        if progress_crossed(int(last[0] or 0), progress, goal.status):
+            emit_goal_completed(db, goal, previous_progress=int(last[0] or 0), user_context=user_context)
+    return recorded
 
 
 def refresh_automatic_goals(db: Session, sources: set[str], *, user_context: str = "manual") -> None:
@@ -213,15 +227,12 @@ def refresh_automatic_goals(db: Session, sources: set[str], *, user_context: str
             .first()
         )
         before = int(last[0] or 0) if last else 0
-        if ensure_goal_progress_snapshot(db, g):
+        if ensure_goal_progress_snapshot(db, g, user_context=user_context):
             after, _ = compute_goal_progress_and_value(db, g)
             if before != after:
                 log_activity(db, "goals", "snapshot", f"Cíl '{g.title}' {before}% → {after}%",
                              entity_type="Goal", entity_id=g.id, user_context=user_context)
-            # MRK-135: automatický cíl poprvé na 100 % = doménová událost „cíl splněn" (stejná transakce)
-            from goals_events import emit_goal_completed, goal_reached
-            if last is not None and goal_reached(before, g.status, after, g.status):
-                emit_goal_completed(db, g, previous_progress=before, user_context=user_context)
+            # MRK-135: přechod na 100 % hlídá ensure_goal_progress_snapshot (společné pro všechny producenty)
 
 
 @dataclass(frozen=True)

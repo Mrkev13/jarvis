@@ -24,6 +24,11 @@ def goal_reached(before_pct: int | None, before_status: str | None, after_pct: i
     return _done(after_pct, after_status) and not _done(before_pct, before_status)
 
 
+def progress_crossed(previous_progress: int, progress: int, status: str | None) -> bool:
+    """Snapshot postupu: poprvé ≥ 100 % u cíle, který ještě není uzavřený stavem (ten vysílá POST /goal sám)."""
+    return previous_progress < 100 <= progress and norm(status) not in ("completed", "cancelled")
+
+
 def emit_goal_completed(db, goal, *, previous_progress: int | None, user_context: str = "manual"):
     return append_domain_event(
         db,

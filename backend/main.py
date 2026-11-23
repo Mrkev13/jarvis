@@ -1835,13 +1835,15 @@ def add_or_update_goal(request: GoalRequest):
                     delta=delta_dict(old_obj, existing, ["area", "title", "description", "status", "priority", "progress", "tracking_type", "target_value", "source", "target_date"]),
                     user_context="manual"
                 )
+                # uzavření stavem „completed" se vyšle tady (stejná transakce); dosažení 100 % pozná snapshot níže
                 after_done_pct, _ = compute_goal_progress_and_value(db, existing)
-                if goal_reached(before_done_pct, before_status, after_done_pct, existing.status):
+                if (existing.status or "").strip().lower() == "completed" and goal_reached(
+                        before_done_pct, before_status, after_done_pct, existing.status):
                     emit_goal_completed(db, existing, previous_progress=before_done_pct, user_context="manual")
 
                 db.commit()
                 before_pct, _ = compute_goal_progress_and_value(db, existing)
-                if ensure_goal_progress_snapshot(db, existing):
+                if ensure_goal_progress_snapshot(db, existing, user_context="manual"):
                     after_pct, _ = compute_goal_progress_and_value(db, existing)
                     if before_pct != after_pct:
                         log_activity(
