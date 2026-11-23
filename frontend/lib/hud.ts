@@ -52,6 +52,8 @@ export function daypartFor(hour: number): Daypart {
 export type Mission = { title: string; detail: string };
 const MISSIONS: Record<string, (e: DomainEvent) => Mission | null> = {
   "school.assignment.completed": () => ({ title: "Mise splněna", detail: "Úkol hotový" }),
+  // MRK-135: splnění cíle (backend goals.goal.completed) – bez názvu cíle, jen fakt
+  "goals.goal.completed": () => ({ title: "Mise splněna", detail: "Cíl splněný" }),
   "school.exam.closed": (e) => (e.payload.outcome === "failed" ? null : { title: "Mise splněna", detail: "Zkouška uzavřená" }),
   "wow.character.level_up": (e) => {
     const level = typeof e.payload.level === "number" ? e.payload.level : null;
