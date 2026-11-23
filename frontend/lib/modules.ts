@@ -13,6 +13,7 @@
 
 import type { WidgetDef } from "./dashboardLayout.ts";
 import { HABITS_UI } from "../modules/habits/manifest.ts";
+import { WOW_UI } from "../modules/wow/manifest.ts";
 import { FITNESS_UI } from "../modules/fitness/manifest.ts";
 import { CALENDAR_UI } from "../modules/calendar/manifest.ts";
 
@@ -51,6 +52,7 @@ export const MODULES: ModuleDef[] = [
   { id: "fitness", label: "Fitness & Rehab", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["fitness_exercise", "fitness_workout", "fitness_rehab_exercise", "fitness_rehab_session"], routes: ["/fitness"], quickAddKinds: [] },
   { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
   { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
+  { id: "wow", label: "World of Warcraft", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "ai_context"], entityTypes: ["wow_character"], routes: ["/wow"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),
@@ -99,6 +101,7 @@ export interface ModuleTodayAction {
 
 export const MODULE_UI: Record<string, ModuleUi> = {
   habits: HABITS_UI,
+  wow: WOW_UI,
   calendar: CALENDAR_UI,
   fitness: FITNESS_UI,
   goals: {
