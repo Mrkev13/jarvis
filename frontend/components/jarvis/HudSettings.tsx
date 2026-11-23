@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button, Card, CardHeader } from "@/components/ui";
-import { HUD_PREFS_EVENT, readHudPrefs, voiceGreeting, writeHudPrefs, type HudPrefs } from "@/lib/hud";
+import { BOOT_REPLAY_EVENT, HUD_PREFS_EVENT, readHudPrefs, voiceGreeting, writeHudPrefs, type HudPrefs } from "@/lib/hud";
 import { bootGreeting, pragueHour } from "@/lib/boot";
 import { playHudSound } from "@/lib/hudSound";
 import { isSpeechSynthesisSupported, speakText } from "@/lib/speech";
@@ -63,12 +62,9 @@ export function HudSettings() {
         >
           Zkusit hlas
         </Button>
-        <Link
-          href="/?boot=1"
-          className="inline-flex min-h-9 items-center rounded-[var(--radius-control)] border border-line px-3 text-sm text-ink-2 hover:bg-surface hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-        >
+        <Button size="sm" variant="secondary" onClick={() => window.dispatchEvent(new Event(BOOT_REPLAY_EVENT))}>
           Přehrát start systému
-        </Link>
+        </Button>
       </div>
     </Card>
   );

@@ -3680,7 +3680,12 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   check("hud nastavení: zvuky zapnuté", await eventually(async () => (await sounds.getAttribute("aria-checked")) === "true", 2000));
   const stored = await page.evaluate(() => localStorage.getItem("sh:hud:prefs"));
   check("hud nastavení: uloženo v prohlížeči", stored === '{"sounds":true,"voice":false}', String(stored));
-  check("hud nastavení: odkaz na start systému", (await card.getByRole("link", { name: "Přehrát start systému" }).getAttribute("href")) === "/?boot=1");
+  // Codex review #102: skutečný klik přehraje start na místě (žádná navigace) a ten sám zmizí
+  await card.getByRole("button", { name: "Přehrát start systému" }).click();
+  const replay = page.locator("[data-boot-sequence]");
+  check("hud nastavení: Přehrát start systému – start se ukáže", await eventually(async () => (await replay.count()) === 1, 2000));
+  check("hud nastavení: start zůstane na Nastavení", new URL(page.url()).pathname === "/settings", page.url());
+  check("hud nastavení: přehraný start sám zmizí", await eventually(async () => (await replay.count()) === 0, 4000));
   await card.screenshot({ path: `${OUT}hud3-settings.png` });
   const daypart = await page.evaluate(() => document.documentElement.dataset.daypart);
   check("hud: denní doba na <html>", ["morning", "day", "evening", "night"].includes(daypart), String(daypart));

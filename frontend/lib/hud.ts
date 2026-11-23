@@ -77,6 +77,9 @@ export function voiceGreeting(greeting: string): string {
   return `${greeting.replace(/[?]$/, "?")}${/[?!.]$/.test(greeting) ? "" : "."} Všechny systémy jsou online.`;
 }
 
+/** Okno-událost: znovu přehrát start systému (Nastavení → Jarvis HUD → BootSequence). */
+export const BOOT_REPLAY_EVENT = "sh:hud:boot";
+
 /** Okno-událost pro „Mise splněna" (DomainEventsBridge → MissionComplete). */
 export const MISSION_EVENT = "sh:hud:mission";
 export function announceMission(m: Mission): void {
