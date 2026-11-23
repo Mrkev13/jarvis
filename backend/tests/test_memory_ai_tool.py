@@ -108,6 +108,12 @@ class MemoryAiToolTestCase(unittest.TestCase):
             ({"kind": "temporary", "expires_at": "2026-11-20"}, "expires_in_past"),
             ({"kind": "temporary", "expires_at": "příští týden"}, "invalid_expires_at"),
             ({"kind": "forever"}, "invalid_kind"),
+            # Codex review #95: časová zóna ani jiný suffix se neořezává potichu
+            ({"kind": "temporary", "expires_at": "2026-11-29T18:30Z"}, "invalid_expires_at"),
+            ({"kind": "temporary", "expires_at": "2026-11-29T18:30+09:00"}, "invalid_expires_at"),
+            ({"kind": "temporary", "expires_at": "2026-11-29T18:30garbage"}, "invalid_expires_at"),
+            ({"kind": "temporary", "expires_at": "2026-11-29T18:30:00"}, "invalid_expires_at"),
+            ({"kind": "temporary", "expires_at": "2026-11-29x"}, "invalid_expires_at"),
         ):
             with self.subTest(code=code):
                 result = self._ask("pamatuj si to", [

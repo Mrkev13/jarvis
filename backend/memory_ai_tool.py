@@ -20,11 +20,15 @@ def parse_expires_local(value) -> datetime | None:
     if value in (None, ""):
         return None
     text = str(value).strip()
+    # Celý řetězec přesně v deklarovaném formátu – nic se neořezává. Časová zóna (Z, +09:00) ani jiný suffix se
+    # nepřijímá: náhled potvrzení ukazuje původní text, uložený čas mu musí odpovídat (Codex review #95).
     try:
         if len(text) == 10:
             local = datetime.combine(datetime.strptime(text, "%Y-%m-%d").date(), time(23, 59))
+        elif len(text) == 16:
+            local = datetime.strptime(text, "%Y-%m-%dT%H:%M")
         else:
-            local = datetime.strptime(text[:16], "%Y-%m-%dT%H:%M")
+            raise ValueError(text)
     except ValueError:
         raise MutationRefused("invalid_expires_at", "expires_at musí být YYYY-MM-DD nebo YYYY-MM-DDTHH:MM (pražský čas).") from None
     return local_to_utc(local)
