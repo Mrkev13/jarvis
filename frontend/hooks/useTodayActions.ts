@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { apiFetch, jsonBody } from "@/lib/api";
+import { focusWithRetry } from "@/lib/focusRetry";
 import {
   classifyActionError,
   entityKind,
@@ -60,12 +61,12 @@ export function useTodayActions(reload: () => Promise<void>) {
   const busyRef = useRef(false);
 
   const focusAfter = useCallback((targetId: string | null) => {
-    window.requestAnimationFrame(() => {
-      const el =
+    // MRK-129: několik snímků – řádek může React nahradit až po prvním (fokus by pak spadl do body)
+    focusWithRetry(
+      () =>
         (targetId && document.querySelector<HTMLElement>(`[data-item="${CSS.escape(targetId)}"] [data-action-primary]`)) ||
-        document.querySelector<HTMLElement>("[data-today-notice]");
-      el?.focus();
-    });
+        document.querySelector<HTMLElement>("[data-today-notice]"),
+    );
   }, []);
 
   const finish = useCallback(

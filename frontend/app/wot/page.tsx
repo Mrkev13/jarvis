@@ -1,5 +1,6 @@
 "use client";
 
+import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useEffect, useRef, useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
 import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
@@ -627,6 +628,7 @@ export default function WotPage() {
         onConfirm={confirmDeleteGrind}
         onCancel={() => setDeletingGrind(null)}
       />
+      <AskJarvis surface="wot" />
     </ContentContainer>
   );
 }

@@ -1,7 +1,7 @@
 """MRK-110: kontrolní sada pro deterministický výběr vzpomínek do kontextu (bez LLM, bez DB, bez sítě).
 
 Data: backend/tests/data/memory_selection_cases.json - vymyšlené vzpomínky a dotazy ve dvou částech:
-- `tune`: případy, na kterých se výběr (context_service.rank_memories / classify_areas / is_planner_like) ladí;
+- `tune`: případy, na kterých se výběr (context_service.rank_memories / classify_areas / wants_broad_memory) ladí;
 - `holdout`: stranou - při ladění se NEUPRAVUJÍ; ukazují, jestli změna pomohla obecně, ne jen na opraveném příkladu.
 Každý případ: `must` (musí se vybrat), `must_not` (nesmí se vybrat). `known_gap` = správné očekávání, které dnešní
 výběr nesplňuje (důvod v `note`) - počítá se do metrik, test kvůli němu nepadá.
@@ -35,9 +35,10 @@ def memories():
 
 
 def select(message):
-    """Stejný výběr jako build_current_context: oblasti dotazu, plánovací režim, rank_memories."""
-    areas = cs.classify_areas(message)
-    return [m.case_id for m in cs.rank_memories(memories(), message, areas, planner=cs.is_planner_like(message))]
+    """Stejný výběr jako build_current_context: oblasti dotazu (bez záměru jen výslovné), široký výběr, rank_memories."""
+    broad = cs.wants_broad_memory(message)
+    areas = cs.classify_areas(message, implied=broad)
+    return [m.case_id for m in cs.rank_memories(memories(), message, areas, planner=broad)]
 
 
 def outcome(case):
@@ -96,3 +97,17 @@ def test_known_gaps_are_still_gaps():
     """Opravený known_gap se má přeřadit mezi běžné případy (a posunout baseline), ne zůstat označený."""
     fixed = [c['id'] for c in DATA['cases'] if c.get('known_gap') and outcome(c)['ok']]
     assert not fixed, f'Tyto případy už projdou - odeber known_gap a posuň baseline: {fixed}'
+
+
+def test_broad_memory_only_with_planning_intent():
+    """MRK-118: zmínka dne nezapne široký výběr; plánovací / přehledový záměr ano."""
+    assert not cs.wants_broad_memory('Hraju v pátek večer v četě?')
+    for message in ('Naplánuj mi pátek', 'Co mám zítra?', 'Co mám dneska dělat?', 'Jak jsem na tom se školou?'):
+        assert cs.wants_broad_memory(message), message
+    # routing toolů dál bere časová slova
+    assert cs.is_planner_like('Hraju v pátek večer v četě?')
+
+
+def test_time_word_alone_does_not_select_a_memory():
+    mems = [m for m in memories() if m.case_id == 'fyzika-zkouska']
+    assert cs.rank_memories(mems, 'Hraju v pátek večer v četě?', frozenset(), planner=False) == []
