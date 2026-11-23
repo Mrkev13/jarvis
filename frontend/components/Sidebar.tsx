@@ -11,6 +11,7 @@ import { QuickAddButton } from "@/components/quick-add/QuickAddButton";
 import { SearchButton } from "@/components/search/SearchButton";
 import { Drawer } from "@/components/ui/Drawer";
 import { HudLabel, StatusPulse } from "@/components/ui/hud";
+import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
 import { useModuleAccess } from "@/hooks/useModules";
 import { menuGroupsFor, menuPagesFor, type NavGroup } from "@/lib/navigation";
@@ -59,7 +60,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
       <span
         aria-hidden="true"
         data-nav-indicator=""
-        className={cx("motion-nav-indicator pointer-events-none absolute left-0 top-0 w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgb(34_211_238/0.8)]", !indicator.box && "opacity-0")}
+        className={cx("motion-nav-indicator pointer-events-none absolute left-0 top-0 w-0.5 rounded-full bg-accent shadow-[0_0_10px_rgb(60_200_245/0.8)]", !indicator.box && "opacity-0")}
         style={{
           height: indicator.box?.height ?? 0,
           transform: `translateY(${indicator.box?.top ?? 0}px)`,
@@ -153,7 +154,8 @@ function NavLinks({ links, pathname, onNavigate }: { links: NavLinkItem[]; pathn
             className={cx(
               "motion-nav-item relative block rounded-lg px-3 py-2.5 text-sm",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
-              active ? "bg-surface-2 text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
+              // MRK-131: aktivní položka je „zaměřená" (paprsek zleva + závorka vpravo, app/hud.css .nav-lock)
+              active ? "nav-lock bg-surface-2 text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
             )}
           >
             {link.label}
@@ -167,11 +169,9 @@ function NavLinks({ links, pathname, onNavigate }: { links: NavLinkItem[]; pathn
 function Brand({ as: Tag = "div" }: { as?: "div" | "p" }) {
   return (
     <Tag className="flex items-center gap-2.5">
-      <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-lg border border-accent/40 bg-accent/10 font-mono text-xs font-semibold text-accent-strong shadow-[0_0_16px_-6px_rgb(34_211_238/0.8)]">
-        SH
-      </span>
+      <ArcReactor size={34} className="shrink-0" />
       <span className="leading-tight">
-        <span className="block whitespace-nowrap text-base font-semibold text-ink">Standa Hub</span>
+        <span className="block whitespace-nowrap font-display text-base font-semibold tracking-wide text-ink">Standa Hub</span>
         <HudLabel className="flex items-center gap-1.5 text-[10px]">
           <StatusPulse tone="success" className="h-1.5 w-1.5" /> online
         </HudLabel>
@@ -276,7 +276,7 @@ export function DesktopSidebar() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // MRK-122: lišta zůstává při scrollu stránky na místě; když se do okna nevejde, scrolluje sama.
   return (
-    <aside data-desktop-sidebar className="hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto w-60 shrink-0 border-r border-line bg-app/80 px-4 py-5">
+    <aside data-desktop-sidebar className="hud-rail hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto w-60 shrink-0 border-r border-line bg-app/80 px-4 py-5">
       <div className="mb-6 flex items-center justify-between gap-2 px-1">
         <Brand />
         {isDesktop === true ? <NotificationsBell /> : null}

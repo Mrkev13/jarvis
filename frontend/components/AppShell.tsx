@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
 import { JarvisCompanion } from "@/components/jarvis/JarvisCompanion";
+import { BootSequence } from "@/components/jarvis/BootSequence";
+import { HudReticle } from "@/components/jarvis/HudReticle";
 import { ModuleRouteGuard } from "@/components/modules/ModuleRouteGuard";
 import { ModuleRuntimeLoader } from "@/components/modules/ModuleRuntimeLoader";
 import { DomainEventsBridge } from "@/components/events/DomainEventsBridge";
@@ -35,6 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </a>
           <DesktopSidebar />
           <div className="hud-grid flex min-w-0 flex-1 flex-col">
+            <HudReticle />
             <MobileHeader />
             <div className="flex-1" data-jarvis-lane={companionLayout(pathname) === "ai" ? "ai" : "dock"}>
               <PageTransition>
@@ -46,6 +49,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <ModuleRuntimeLoader />
           <DomainEventsBridge />
           <JarvisCompanion />
+          <BootSequence />
         </div>
       </QuickAddProvider>
     </SearchProvider>

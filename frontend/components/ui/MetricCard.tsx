@@ -29,7 +29,7 @@ export function MetricCard({
     <div className={cx("min-w-0 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3 md:p-4", className)}>
       <HudLabel as="div">{label}</HudLabel>
       <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5">
-        <span className={cx("text-xl md:text-2xl font-semibold tabular-nums tracking-tight", tone === "neutral" ? "text-ink" : TEXT_TONE[tone])}>
+        <span className={cx("font-display text-xl md:text-2xl font-semibold tabular-nums", tone === "neutral" ? "text-ink" : TEXT_TONE[tone])}>
           {value}
         </span>
         {unit ? <span className="text-sm text-ink-muted">{unit}</span> : null}

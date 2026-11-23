@@ -52,7 +52,11 @@ export function PageHeader({
       <div className="min-w-0 flex-1">
         {eyebrow ? <div data-page-hud="" className="mb-2">{eyebrow}</div> : null}
         <div className="flex items-start justify-between gap-3">
-          <h1 className="min-w-0 text-2xl md:text-3xl font-semibold tracking-tight text-ink">{title}</h1>
+          <h1 className="min-w-0 font-display text-2xl md:text-[2rem] font-semibold tracking-wide text-ink">
+            {title}
+            {/* MRK-131: světelná linka pod titulkem – při vstupu stránky se dokreslí */}
+            <span aria-hidden="true" className="page-title-rule" />
+          </h1>
           {mobileActions ? <div data-page-mobile-actions="" className="shrink-0 sm:hidden">{mobileActions}</div> : null}
         </div>
         {subtitle ? <p className="mt-1.5 text-sm md:text-base text-ink-muted">{subtitle}</p> : null}
