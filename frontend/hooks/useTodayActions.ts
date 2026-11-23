@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { apiFetch, jsonBody } from "@/lib/api";
 import { focusWithRetry } from "@/lib/focusRetry";
+import { playHudSound } from "@/lib/hudSound";
 import {
   classifyActionError,
   entityKind,
@@ -147,6 +148,8 @@ export function useTodayActions(reload: () => Promise<void>) {
         } else {
           return;
         }
+        // MRK-133: tichý tón dokončení (jen když má Standa zvuky HUD zapnuté)
+        if (action !== "snooze") playHudSound("complete");
         await finish({ tone: "success", message: successMessage(item, action, option?.label), undo }, focusId);
       } catch (error) {
         const failure = error instanceof ActionFailure ? error : new ActionFailure(null, null);
