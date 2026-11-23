@@ -218,6 +218,10 @@ def refresh_automatic_goals(db: Session, sources: set[str], *, user_context: str
             if before != after:
                 log_activity(db, "goals", "snapshot", f"Cíl '{g.title}' {before}% → {after}%",
                              entity_type="Goal", entity_id=g.id, user_context=user_context)
+            # MRK-135: automatický cíl poprvé na 100 % = doménová událost „cíl splněn" (stejná transakce)
+            from goals_events import emit_goal_completed, goal_reached
+            if last is not None and goal_reached(before, g.status, after, g.status):
+                emit_goal_completed(db, g, previous_progress=before, user_context=user_context)
 
 
 @dataclass(frozen=True)

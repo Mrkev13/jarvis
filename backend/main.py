@@ -41,6 +41,7 @@ from llm_config import LLM_SETTINGS
 from llm_usage import log_history
 
 from goal_history_service import ensure_goal_progress_snapshot, compute_goal_progress_and_value
+from goals_events import emit_goal_completed, goal_reached
 from notifications_service import generate_notifications, list_notifications, notifications_summary, mark_read, mark_all_read, resolve
 from planner_service import generate_plan
 import reminder_service
@@ -1809,6 +1810,9 @@ def add_or_update_goal(request: GoalRequest):
         if request.id is not None:
             existing = db.query(Goal).filter(Goal.id == request.id).first()
             if existing:
+                # MRK-135: stav před změnou pro událost „cíl splněn"
+                before_done_pct, _ = compute_goal_progress_and_value(db, existing)
+                before_status = existing.status
                 old_obj = Goal()
                 for f in ["area", "title", "description", "status", "priority", "tracking_type", "target_value", "source", "target_date", "progress"]:
                     setattr(old_obj, f, getattr(existing, f, None))
@@ -1831,6 +1835,9 @@ def add_or_update_goal(request: GoalRequest):
                     delta=delta_dict(old_obj, existing, ["area", "title", "description", "status", "priority", "progress", "tracking_type", "target_value", "source", "target_date"]),
                     user_context="manual"
                 )
+                after_done_pct, _ = compute_goal_progress_and_value(db, existing)
+                if goal_reached(before_done_pct, before_status, after_done_pct, existing.status):
+                    emit_goal_completed(db, existing, previous_progress=before_done_pct, user_context="manual")
 
                 db.commit()
                 before_pct, _ = compute_goal_progress_and_value(db, existing)
