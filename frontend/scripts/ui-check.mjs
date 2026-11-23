@@ -3699,6 +3699,35 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 34) MRK-134 – Jarvis HUD v modulech: jádra (reaktor + věta), AI výpis, fronta misí v Plánovači
+for (const [path, module] of [["/habits", "habits"], ["/work", "work"], ["/finance", "finance"], ["/mff", "mff"], ["/wot", "wot"], ["/wow", "wow"], ["/reminders", "reminders"]]) {
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    if (label === "mobil" && !["habits", "wot", "reminders"].includes(module)) continue;
+    const { ctx, page, errors } = await open(path, { width, height: width < 500 ? 844 : 900 });
+    const core = page.locator(`[data-hud-core="${module}"]`);
+    check(`hud ${module} ${label}: jádro modulu`, await eventually(async () => (await core.count()) === 1, 5000));
+    const line = (await core.locator("[data-hud-line]").innerText().catch(() => "")).trim();
+    check(`hud ${module} ${label}: věta stavu`, line.length > 5, line);
+    check(`hud ${module} ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    if (label === "desktop" || module === "habits") await page.screenshot({ path: `${OUT}hud4-${module}-${label}.png` });
+    check(`hud ${module} ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+{
+  const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
+  await aiSend(page, "Ahoj");
+  check("ai: čerstvá odpověď se vypíše (terminál)", await eventually(async () => (await page.locator("[data-ai-answer].ai-reveal").count()) >= 1, 4000));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/planner", { width: 1366, height: 900 });
+  check("plánovač: fronta misí", await eventually(async () => (await page.locator(".plan-step").count()) >= 1, 4000));
+  check("plánovač: nejvyšší priorita zaměřená", (await page.locator(".plan-step-top").count()) >= 1);
+  await page.screenshot({ path: `${OUT}hud4-planner.png` });
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import PlannerCardRenderer, { type PlannerCard } from "@/components/PlannerCards";
 import { messageVariant, stripStatusSymbol, type ChatMessage } from "@/lib/aiChat";
 import { formatTime } from "@/lib/format";
@@ -53,6 +53,8 @@ export const MessageItem = memo(function MessageItem({
   showAuthor: boolean;
   tts: MessageTts | null;
 }) {
+  // MRK-134: čerstvá odpověď (právě přišla) se vypíše animací; historie ne. Spočítá se jednou při vzniku řádku.
+  const [fresh] = useState(() => Date.now() - m.createdAt < 4000);
   if (m.role === "user") {
     return (
       <li className="flex justify-end">
@@ -108,7 +110,8 @@ export const MessageItem = memo(function MessageItem({
       <div className="space-y-3">
         {m.content ? (
           <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
+            {/* MRK-134: čerstvá odpověď se „vypíše" shora dolů jako výstup terminálu (jen nová, ne historie) */}
+            <div className={cx("min-w-0 flex-1", fresh && "ai-reveal")} data-ai-answer="">
               <Markdown content={m.content} />
             </div>
             {tts?.enabled ? <SpeakButton ttsKey={`text-${m.id}`} text={m.content} label="odpověď" tts={tts} /> : null}

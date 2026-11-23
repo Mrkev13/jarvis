@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { wowCore } from "@/lib/hudModules";
 import { useState } from "react";
 import {
   ActionMenu,
@@ -231,6 +233,9 @@ export default function WowPage() {
                 </ol>
               </Card>
             ) : null}
+
+            {/* MRK-134: „flotila" altů – kolik postav je na cílovém levelu */}
+            <HudCore module="wow" label="Jarvis · flotila altů" {...wowCore(data.summary)} />
 
             <StatGrid cols={3}>
               <MetricCard label="Postav" value={data.summary.characters} />

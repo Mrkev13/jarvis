@@ -86,7 +86,8 @@ function ActionItem(props: { action: PlannerAction; idx: number; compact?: boole
   const priority = Number.isFinite(action.priority) ? action.priority : idx + 1;
   const isTop = priority === 1;
   return (
-    <li className="flex items-start gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
+    // MRK-134: fronta misí – kroky naskakují postupně, nejvyšší priorita má zaměřovač (app/hud.css .plan-step)
+    <li className={cx("plan-step flex items-start gap-3 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3", isTop && "plan-step-top")} style={{ ["--i" as string]: Math.min(idx, 8) } as React.CSSProperties}>
       <span
         aria-label={`Priorita ${priority}`}
         className={cx(

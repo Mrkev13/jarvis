@@ -371,6 +371,8 @@
 }
 .jarvis-core[data-jarvis-core="alert"] { --core-rgb: 251 191 36; }
 .jarvis-core[data-jarvis-core="done"]  { --core-rgb: 52 211 153; }
+.jarvis-core[data-hud-mood="alert"] { --core-rgb: 251 191 36; }
+.jarvis-core[data-hud-mood="done"]  { --core-rgb: 52 211 153; }
 .day-reactor {
   width: 2.75rem;
   height: 2.75rem;
@@ -550,4 +552,79 @@ html[data-daypart="night"] {
 }
 @media (prefers-reduced-motion: reduce) {
   .mission-overlay { display: none; }
+}
+
+/* =====================================================================================================
+ * MRK-134 – Jarvis HUD vlna 4: moduly
+ * ===================================================================================================== */
+
+/* ---------- Kalendář: ryska „teď" jako skener (modules/calendar/DayTimelineList.tsx) ---------- */
+.now-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 1.25rem;
+  list-style: none;
+}
+.now-line::before {
+  content: "";
+  flex: 1;
+  height: 1px;
+  margin-left: 6.5rem;
+  background: linear-gradient(90deg, rgb(var(--arc-strong-rgb)), rgb(var(--arc-rgb) / 0.4) 60%, transparent);
+  box-shadow: 0 0 10px rgb(var(--arc-rgb) / 0.7);
+  transform-origin: left center;
+  animation: title-rule-in 700ms var(--motion-ease-emphasized) backwards;
+}
+.now-line-time {
+  position: absolute;
+  left: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: rgb(var(--arc-strong-rgb));
+  padding: 0 0.375rem;
+  border: 1px solid rgb(var(--arc-rgb) / 0.5);
+  border-radius: 9999px;
+  background: rgb(var(--arc-rgb) / 0.1);
+}
+
+/* ---------- Kalendář týden: dnešní den rozsvícený ---------- */
+.week-today {
+  border-color: rgb(var(--arc-rgb) / 0.55);
+  box-shadow: var(--shadow-glow);
+  background-image: linear-gradient(180deg, rgb(var(--arc-rgb) / 0.08), transparent 6rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-line::before { animation: none !important; }
+}
+
+/* ---------- AI: čerstvá odpověď se vypíše shora dolů (components/ai/MessageItem.tsx) ---------- */
+.ai-reveal {
+  -webkit-mask-image: linear-gradient(180deg, #000 45%, transparent 55%);
+  mask-image: linear-gradient(180deg, #000 45%, transparent 55%);
+  -webkit-mask-size: 100% 220%;
+  mask-size: 100% 220%;
+  mask-position: 0 0;
+  animation: ai-reveal 1100ms var(--motion-ease-standard) backwards;
+}
+@keyframes ai-reveal {
+  from { -webkit-mask-position: 0 100%; mask-position: 0 100%; }
+  to   { -webkit-mask-position: 0 0;    mask-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-reveal { animation: none !important; -webkit-mask-image: none; mask-image: none; }
+}
+
+/* ---------- Plánovač: fronta misí (components/PlannerCards.tsx) ---------- */
+.plan-step {
+  animation: palette-result-in 320ms var(--motion-ease-enter) calc(var(--i, 0) * 60ms + 80ms) backwards;
+}
+.plan-step-top {
+  border-color: rgb(var(--arc-rgb) / 0.45);
+  box-shadow: inset 2px 0 0 rgb(var(--arc-strong-rgb) / 0.9), 0 0 22px -12px rgb(var(--arc-rgb) / 0.8);
+  background-image: linear-gradient(90deg, rgb(var(--arc-rgb) / 0.08), transparent 55%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-step { animation: none !important; }
 }

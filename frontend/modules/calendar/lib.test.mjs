@@ -152,7 +152,7 @@ function renderTimeline(props) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const compiledModule = { exports: {} };
-  new Function('require', 'module', 'exports', compiled)(name => name === '@/components/ui' ? ui : name === './lib' ? calendar : require(name), compiledModule, compiledModule.exports);
+  new Function('require', 'module', 'exports', compiled)(name => name === '@/components/ui' ? ui : name === './lib' ? calendar : name === '@/lib/hudModules' ? { pragueNow: () => ({ date: '1999-01-01', time: '00:00' }), nowLineIndex: () => -1 } : require(name), compiledModule, compiledModule.exports);
   return renderToStaticMarkup(React.createElement(compiledModule.exports.DayTimelineList, { moduleLabels: { calendar: 'Kalendář', school: 'Škola' }, ...props }));
 }
 
