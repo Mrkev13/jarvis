@@ -761,9 +761,9 @@ async function aiSend(page, text) {
   check("jarvis ai: dokončená akce = success", (await avatar.getAttribute("data-jarvis-state")) === "success");
   await page.screenshot({ path: `${OUT}jarvis-ai-success.png` });
   await outcome.getByRole("button", { name: /^Vrátit změnu/ }).click();
-  await page.waitForTimeout(700);
   const undoCard = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li").first();
-  check("ai: vrácení = nová karta k potvrzení", (await undoCard.getByText("Vrácení změny").count()) >= 1);
+  // čekat na kartu, ne pevných 700 ms (CI 22. 11.: karta dorazila později a kontrola padla)
+  check("ai: vrácení = nová karta k potvrzení", await eventually(async () => (await undoCard.getByText("Vrácení změny").count()) >= 1, 4000));
   await undoCard.getByRole("button", { name: "Zamítnout" }).click();
   await page.waitForTimeout(400);
   check("ai: zamítnutí – karta zmizí a zpráva v historii", (await page.getByRole("list", { name: "Akce čekající na potvrzení" }).count()) === 0 && (await page.getByText("Akce byla zrušena: Vrátit změnu.").count()) === 1);
@@ -3341,7 +3341,7 @@ for (const reducedMotion of ["no-preference", "reduce"]) {
 // 26) MRK-125 – jednotné hlavičky stránek: HUD štítek + jeden h1 v PageHeader; mobilní Řídicí centrum bez řádku tlačítek
 {
   const PAGES = ["/", "/today", "/planner", "/school", "/school/materials", "/reminders", "/calendar", "/habits", "/goals", "/work",
-    "/finance", "/fitness", "/wot", "/wot/replays", "/mff", "/review", "/settings", "/changes", "/activity", "/memory"];
+    "/finance", "/fitness", "/wot", "/wot/replays", "/wow", "/mff", "/review", "/settings", "/changes", "/activity", "/memory"];
   const { ctx, page } = await open("/", { width: 1366, height: 900 });
   const bad = [];
   for (const path of PAGES) {
@@ -3480,6 +3480,69 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   }
   check(`paměť ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
+}
+
+// 30) MRK-127 – World of Warcraft: alti s postupem k cíli, přidání postavy, cílový level, odebrání, bez klíčů návod
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wow", { width, height: 900 });
+    const list = page.getByRole("list", { name: "WoW postavy" });
+    await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+    check(`wow ${label}: seznam postav (nejvyšší level nahoře)`, (await list.locator("li[data-row-key]").count()) === 3 && (await list.locator("li[data-row-key]").first().innerText()).includes("Jaina"));
+    const thrall = list.locator('[data-search-target="wowchar-1"]');
+    check(`wow ${label}: level a zbývá do cíle`, (await thrall.locator("[data-wow-level]").innerText()) === "Level 42 / 60 · zbývá 18");
+    check(`wow ${label}: progress k cíli`, (await thrall.getByRole("progressbar").getAttribute("aria-valuenow")) === "70");
+    check(`wow ${label}: profese a třída`, (await thrall.innerText()).includes("Mining 150/225") && (await thrall.innerText()).includes("Shaman"));
+    check(`wow ${label}: nenalezená postava je označená`, (await list.locator('[data-search-target="wowchar-3"]').innerText()).includes("postava nenalezena"));
+    check(`wow ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wow-${label}.png`, fullPage: true });
+    check(`wow ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/wow", { width: 1366, height: 900 });
+    const list = page.getByRole("list", { name: "WoW postavy" });
+    await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const form = page.locator('section[aria-labelledby="wow-add"]');
+    await form.getByLabel("Jméno postavy").fill("x1");
+    await form.getByRole("button", { name: "Přidat postavu" }).click();
+    check("wow: neplatné jméno = chyba u pole, nic se neodešle", (await form.innerText()).includes("2–12 písmen") && (await list.locator("li[data-row-key]").count()) === 3);
+    await form.getByLabel("Jméno postavy").fill("Sylvanas");
+    await form.getByLabel("Realm").fill("Pyrewood Village");
+    await form.getByLabel("Cílový level").fill("60");
+    await form.getByRole("button", { name: "Přidat postavu" }).click();
+    check("wow: přidaná postava v seznamu", await eventually(async () => (await list.locator("li[data-row-key]").count()) === 4, 4000));
+    check("wow: hláška o přidání", await eventually(async () => (await page.getByRole("status").filter({ hasText: "Sylvanas přidaná" }).count()) === 1, 3000));
+    // Codex review #91: Obnovit vše s nenalezenou postavou = upozornění s počty, ne „vše aktualizováno"
+    await page.getByRole("button", { name: "Obnovit vše" }).click();
+    check("wow: Obnovit vše hlásí i selhání", await eventually(async () => (await page.locator("main").innerText()).includes("Aktualizováno: 3 · selhalo: 1× nenalezeno."), 4000));
+    // cílový level přes ⋯
+    await page.getByRole("button", { name: "Další akce: Thrallík" }).click();
+    await page.getByRole("menuitem", { name: "Nastavit cílový level: Thrallík" }).click();
+    await page.getByLabel("Cílový level: Thrallík").fill("40");
+    await page.getByLabel("Cílový level: Thrallík").press("Enter");
+    check("wow: nový cíl → cíl splněn", await eventually(async () => (await list.locator('[data-search-target="wowchar-1"] [data-wow-level]').innerText()) === "Level 42 / 40 · cíl splněn", 4000));
+    // odebrání s potvrzením
+    await page.getByRole("button", { name: "Další akce: Rexxar" }).click();
+    await page.getByRole("menuitem", { name: "Přestat sledovat: Rexxar" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Přestat sledovat" }).click();
+    check("wow: odebraná postava zmizí", await eventually(async () => (await list.locator('[data-search-target="wowchar-3"]').count()) === 0, 4000));
+    check("wow (akce): bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/wow/reset?configured=0`, { method: "POST" });
+  {
+    const { ctx, page, errors } = await open("/wow", { width: 390, height: 844 });
+    const setup = page.locator("[data-wow-setup]");
+    check("wow bez klíčů: návod na Blizzard API", await eventually(async () => (await setup.count()) === 1 && (await setup.innerText()).includes("BATTLENET_CLIENT_ID"), 5000));
+    check("wow bez klíčů: Obnovit vypnuté", await page.getByRole("button", { name: "Obnovit vše" }).isDisabled());
+    await page.screenshot({ path: `${OUT}wow-setup-mobil.png`, fullPage: true });
+    check("wow bez klíčů: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
 }
 
 await browser.close();

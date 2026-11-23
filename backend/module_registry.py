@@ -49,6 +49,7 @@ import wot_integrations
 from modules.habits import integrations as habits_integrations
 from modules.calendar import integrations as calendar_integrations
 from modules.fitness import integrations as fitness_integrations
+from modules.wow import integrations as wow_integrations
 from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
 from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
@@ -147,6 +148,11 @@ MODULES: tuple[ModuleDef, ...] = (
               integrations=calendar_integrations.INTEGRATIONS,
               event_types=frozenset({"calendar.event.created", "calendar.event.updated", "calendar.event.cancelled",
                                      "calendar.event.source_missing", "calendar.event.restored"})),
+    # MRK-127: World of Warcraft – postavy a alti ze snapshotu Blizzard API (docs/wow.md).
+    ModuleDef("wow", "World of Warcraft", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "search", "ai_context"}),
+              entity_types=frozenset({"wow_character"}), context_areas=frozenset({"wow"}), api_prefixes=("/wow",),
+              integrations=wow_integrations.INTEGRATIONS, event_types=frozenset(wow_integrations.EVENTS)),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),
