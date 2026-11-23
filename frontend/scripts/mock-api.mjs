@@ -527,7 +527,13 @@ createServer(async (req, res) => {
       return respond(200, { ok: true }, 300);
     }
   }
-  if (url.pathname === "/wow/refresh" && req.method === "POST") return respond(200, { synced: wowState.characters.length, results: {} }, 400);
+  if (url.pathname === "/wow/refresh" && req.method === "POST") {
+    // tvar service.sync_due: nenalezená postava = selhání, ostatní ok
+    if (!wowState.configured) return respond(200, { synced: 0, skipped: "not_configured" }, 200);
+    const results = {};
+    for (const c of wowState.characters) results[c.sync_status === "not_found" ? "not_found" : "ok"] = (results[c.sync_status === "not_found" ? "not_found" : "ok"] ?? 0) + 1;
+    return respond(200, { synced: results.ok ?? 0, results, due: wowState.characters.length, remaining: 0 }, 400);
+  }
   if (url.pathname === "/__mock/reminders/stateful") {
     remindersState.stateful = true;
     return respond(200, { ok: true });

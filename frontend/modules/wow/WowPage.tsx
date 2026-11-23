@@ -27,12 +27,14 @@ import { useApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import { staggerStyle } from "@/lib/motion";
 import {
+  batchMessage,
   levelLabel,
   professionLabel,
   syncedAgo,
   syncTone,
   targetProgress,
   validateCharacterForm,
+  type WowBatchResult,
   type WowCharacter,
   type WowOverview,
 } from "./lib";
@@ -72,6 +74,24 @@ export default function WowPage() {
     } catch (err) {
       setActionError(errorMessage(err, "Akce se nepovedla."));
       return false;
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Codex review #91: hromadná obnova má vlastní tvar odpovědi – úspěch jen když se něco opravdu načetlo
+  async function refreshAll() {
+    setBusyId(-1);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const res = (await apiJson("/wow/refresh", jsonBody("POST", {}))) as WowBatchResult;
+      await wow.reload();
+      const msg = batchMessage(res);
+      if (msg.tone === "success") setNotice(msg.text);
+      else setActionError(msg.text);
+    } catch (err) {
+      setActionError(errorMessage(err, "Obnova se nepovedla."));
     } finally {
       setBusyId(null);
     }
@@ -181,7 +201,7 @@ export default function WowPage() {
         actions={
           data && data.characters.length > 0 ? (
             <Button variant="secondary" disabled={!configured || busyId !== null} busy={busyId === -1} busyLabel="Obnovuji…"
-              onClick={() => void run(-1, "/wow/refresh", jsonBody("POST", {}), "Postavy aktualizované.")}>
+              onClick={() => void refreshAll()}>
               Obnovit vše
             </Button>
           ) : null

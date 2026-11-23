@@ -41,3 +41,15 @@ test("character form validation", () => {
   assert.match(validateCharacterForm("Thrall", " ", ""), /realm/);
   assert.match(validateCharacterForm("Thrall", "x", "200"), /1–100/);
 });
+
+// Codex review #91: „Obnovit vše" nehlásí úspěch, když se nic nenačetlo.
+test("batch refresh message", async () => {
+  const { batchMessage } = await import("./lib.ts");
+  assert.deepEqual(batchMessage({ synced: 3, results: { ok: 3 }, due: 3, remaining: 0 }), { tone: "success", text: "Aktualizováno: 3." });
+  assert.deepEqual(batchMessage({ synced: 0, results: { unavailable: 1 }, due: 1, remaining: 0 }),
+    { tone: "warning", text: "Nic se neaktualizovalo · selhalo: 1× API neodpovídá." });
+  // zbytek nad limit dávky není chyba – úspěch s informací
+  assert.deepEqual(batchMessage({ synced: 10, results: { ok: 10 }, due: 12, remaining: 2 }),
+    { tone: "success", text: "Aktualizováno: 10 · zbývá 2 (další se načtou při příští obnově)." });
+  assert.equal(batchMessage({ synced: 0, skipped: "not_configured" }).tone, "warning");
+});

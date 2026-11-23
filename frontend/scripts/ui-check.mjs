@@ -3439,6 +3439,9 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await form.getByRole("button", { name: "Přidat postavu" }).click();
     check("wow: přidaná postava v seznamu", await eventually(async () => (await list.locator("li[data-row-key]").count()) === 4, 4000));
     check("wow: hláška o přidání", await eventually(async () => (await page.getByRole("status").filter({ hasText: "Sylvanas přidaná" }).count()) === 1, 3000));
+    // Codex review #91: Obnovit vše s nenalezenou postavou = upozornění s počty, ne „vše aktualizováno"
+    await page.getByRole("button", { name: "Obnovit vše" }).click();
+    check("wow: Obnovit vše hlásí i selhání", await eventually(async () => (await page.locator("main").innerText()).includes("Aktualizováno: 3 · selhalo: 1× nenalezeno."), 4000));
     // cílový level přes ⋯
     await page.getByRole("button", { name: "Další akce: Thrallík" }).click();
     await page.getByRole("menuitem", { name: "Nastavit cílový level: Thrallík" }).click();

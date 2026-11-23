@@ -81,3 +81,31 @@ export function validateCharacterForm(name: string, realm: string, target: strin
   }
   return null;
 }
+
+/** Výsledek `POST /wow/refresh` (service.sync_due). */
+export type WowBatchResult = {
+  synced: number;
+  results?: Record<string, number>;
+  due?: number;
+  remaining?: number;
+  skipped?: string;
+};
+
+const BATCH_ERRORS: Record<string, string> = {
+  not_found: "nenalezeno",
+  unauthorized: "API odmítlo klíče",
+  rate_limited: "API omezuje požadavky",
+  unavailable: "API neodpovídá",
+  invalid_response: "nečekaná odpověď API",
+};
+
+/** Hláška po „Obnovit vše" – úspěch jen když se opravdu něco načetlo; chyby a zbytek nad limit dávky. */
+export function batchMessage(r: WowBatchResult): { tone: "success" | "warning"; text: string } {
+  if (r.skipped === "not_configured") return { tone: "warning", text: "WoW API není na serveru nastavené – nic se nenačetlo." };
+  const failures = Object.entries(r.results ?? {}).filter(([code, n]) => code !== "ok" && n > 0);
+  const parts: string[] = [];
+  parts.push(r.synced > 0 ? `Aktualizováno: ${r.synced}` : "Nic se neaktualizovalo");
+  if (failures.length) parts.push(`selhalo: ${failures.map(([code, n]) => `${n}× ${BATCH_ERRORS[code] ?? code}`).join(", ")}`);
+  if (r.remaining && r.remaining > 0) parts.push(`zbývá ${r.remaining} (další se načtou při příští obnově)`);
+  return { tone: r.synced > 0 && !failures.length ? "success" : "warning", text: `${parts.join(" · ")}.` };
+}

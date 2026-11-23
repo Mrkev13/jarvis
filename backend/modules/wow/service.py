@@ -226,14 +226,37 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
     try:
         data = client.character(ch.realm_slug, ch.name_key)
         prof = client.professions(ch.realm_slug, ch.name_key)
-        apply_profile(ch, data, prof)
+        new_level = _int(data.get("level"), 1, MAX_LEVEL)
+        if new_level is None:
+            raise battlenet.BattleNetError("invalid_response")
     except battlenet.BattleNetError as err:
         ch.sync_status = "not_found" if err.code == "not_found" else "error"
         return err.code
+    # Souběh (hodinový krok × ruční obnova × dvě karty): level se přepíše PODMÍNĚNÝM updatem proti hodnotě, kterou
+    # tahle synchronizace načetla. Jen vítěz (rowcount 1) vidí přechod a emituje level_up – druhý request po commitu
+    # vítěze najde jiný level a událost nezopakuje (Codex review #91).
+    level_filter = WowCharacter.level.is_(None) if previous is None else WowCharacter.level == previous
+    won = db.query(WowCharacter).filter(WowCharacter.id == ch.id, level_filter).update(
+        {WowCharacter.level: new_level}, synchronize_session=False) == 1
+    if not won:
+        db.refresh(ch)  # vítězův stav; čas pokusu se nastaví znovu
+        ch.last_attempt_at = now
+        previous = ch.level
+    before = _snapshot(ch)
+    apply_profile(ch, data, prof)
     ch.sync_status = "ok"
     ch.last_synced_at = now
     db.flush()
-    if previous is not None and ch.level > previous:
+    leveled_up = won and previous is not None and ch.level > previous
+    # Audit (AGENTS.md): každá změna snapshotu – level-up jde jako doménová událost, ostatní pole (item level,
+    # profese, spec, pokles levelu…) jako řádek Aktivity s deltou. Stejná data = žádný zápis do Aktivity.
+    delta = {k: {"old": before[k], "new": v} for k, v in _snapshot(ch).items() if v != before[k]}
+    if leveled_up:
+        delta.pop("level", None)
+    if delta and previous is not None:
+        log_activity(db, AREA, "sync", _sync_summary(ch, delta), entity_type="wow_character", entity_id=ch.id,
+                     delta=delta, user_context=user_context, dedupe_key=f"wow:sync:{uuid.uuid4().hex}")
+    if leveled_up:
         target = f" (cíl {ch.target_level})" if ch.target_level else ""
         append_domain_event(
             db, event_type="wow.character.level_up", aggregate_type="character", aggregate_id=ch.id, now=now,
@@ -245,6 +268,28 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
                                         user_context=user_context),
         )
     return "ok"
+
+
+_SNAPSHOT_FIELDS = ("level", "name", "realm_name", "class_name", "race_name", "faction", "active_spec", "item_level",
+                    "professions_json")
+_FIELD_LABELS = {"level": "level", "item_level": "item level", "active_spec": "spec", "professions_json": "profese",
+                 "class_name": "třída", "race_name": "rasa", "faction": "frakce", "name": "jméno", "realm_name": "realm"}
+
+
+def _snapshot(ch: WowCharacter) -> dict:
+    return {f: getattr(ch, f) for f in _SNAPSHOT_FIELDS}
+
+
+def _sync_summary(ch: WowCharacter, delta: dict) -> str:
+    parts = []
+    for field in _SNAPSHOT_FIELDS:
+        if field not in delta:
+            continue
+        if field in ("level", "item_level"):
+            parts.append(f"{_FIELD_LABELS[field]} {delta[field]['old'] or '–'} → {delta[field]['new'] or '–'}")
+        else:
+            parts.append(_FIELD_LABELS[field])
+    return f"WoW {ch.name}: údaje z Blizzard API ({', '.join(parts)})"[:480]
 
 
 def _refresh_goals(db: Session, user_context: str) -> None:
@@ -270,14 +315,16 @@ def sync_due(db: Session, *, now: datetime | None = None, force: bool = False, u
            if force or c.last_attempt_at is None or c.last_attempt_at <= now - SYNC_EVERY]
     due.sort(key=lambda c: c.last_attempt_at or datetime.min)
     results: dict[str, int] = {}
-    for ch in due[:SYNC_BATCH]:
+    batch = due[:SYNC_BATCH]
+    for ch in batch:
         code = sync_character(db, ch, client, now=now, user_context=user_context)
         results[code] = results.get(code, 0) + 1
         if code in ("unauthorized", "rate_limited"):
             break  # další pokusy by dopadly stejně
     if results.get("ok"):
         _refresh_goals(db, user_context)
-    return {"synced": results.get("ok", 0), "results": results}
+    attempted = sum(results.values())
+    return {"synced": results.get("ok", 0), "results": results, "due": len(due), "remaining": len(due) - attempted}
 
 
 # ---------- zápisy ----------

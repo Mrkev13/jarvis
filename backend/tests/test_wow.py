@@ -218,6 +218,53 @@ class SyncTestCase(WowTestBase):
                                   db.query(GoalProgressHistory).order_by(GoalProgressHistory.id.desc()).limit(1)])
         self.assertEqual(last, [(45.0, 75)])
 
+    def test_concurrent_syncs_emit_one_level_up(self):
+        """Codex review #91: hodinový krok a ruční obnova načtou stejný snapshot (42) – level_up jen jednou."""
+        self.add()
+        self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 43}
+        a, b = self.Session(), self.Session()
+        try:
+            ca, cb = a.get(WowCharacter, 1), b.get(WowCharacter, 1)
+            self.assertEqual((ca.level, cb.level), (42, 42))
+            client = battlenet.client()
+            self.assertEqual(service.sync_character(a, ca, client), "ok")
+            a.commit()
+            self.assertEqual(service.sync_character(b, cb, client), "ok")
+            b.commit()
+        finally:
+            a.close()
+            b.close()
+        events = self.q(lambda db: db.query(DomainEvent).filter_by(event_type="wow.character.level_up").count())
+        self.assertEqual(events, 1)
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="level_up").count()), 1)
+
+    def test_snapshot_changes_without_level_up_are_audited(self):
+        """Codex review #91: item level / profese / pokles levelu = řádek Aktivity s deltou; beze změny nic."""
+        self.add()
+        self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "equipped_item_level": 90}
+        self.q(lambda db: service.sync_one(db, 1))
+        rows = self.q(lambda db: [(a.action_type, a.summary, json.loads(a.delta_json))
+                                  for a in db.query(ActivityLog).filter_by(action_type="sync").all()])
+        self.assertEqual(rows, [("sync", "WoW Thrallík: údaje z Blizzard API (item level 51 → 90)",
+                                 {"item_level": {"old": 51, "new": 90}})])
+        self.q(lambda db: service.sync_one(db, 1))  # stejná data
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="sync").count()), 1)
+        self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 40, "equipped_item_level": 90}
+        self.q(lambda db: service.sync_one(db, 1))
+        last = self.q(lambda db: json.loads(db.query(ActivityLog).filter_by(action_type="sync")
+                                            .order_by(ActivityLog.id.desc()).first().delta_json))
+        self.assertEqual(last, {"level": {"old": 42, "new": 40}})
+        self.assertEqual(self.q(lambda db: db.query(DomainEvent).count()), 0, "pokles levelu není level_up")
+
+    def test_level_up_with_other_changes_logs_both(self):
+        self.add()
+        self.api.profiles[("pyrewood-village", "thrallík")] = {**PROFILE, "level": 44, "equipped_item_level": 60}
+        self.q(lambda db: service.sync_one(db, 1))
+        acts = self.q(lambda db: {a.action_type: json.loads(a.delta_json) for a in db.query(ActivityLog)
+                                  .filter(ActivityLog.action_type.in_(["sync", "level_up"])).all()})
+        self.assertEqual(acts, {"level_up": {"level": {"old": 42, "new": 44}},
+                                "sync": {"item_level": {"old": 51, "new": 60}}})
+
     def test_goal_sources(self):
         self.add()
         self.api.profiles[("pyrewood-village", "garrosh")] = {**PROFILE, "name": "Garrosh", "level": 60}
@@ -236,6 +283,7 @@ class SyncTestCase(WowTestBase):
         self.clock[0] = NOW + timedelta(hours=7)
         out = self.q(integrations.hourly_sync)
         self.assertEqual(out["synced"], service.SYNC_BATCH)
+        self.assertEqual((out["due"], out["remaining"]), (12, 2), "kolik zbylo na další běh")
         with patch.object(battlenet, "client", lambda: None):
             self.assertEqual(self.q(integrations.hourly_sync), {"synced": 0, "skipped": "not_configured"})
 
