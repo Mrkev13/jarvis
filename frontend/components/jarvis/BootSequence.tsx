@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { BOOT_MS, BOOT_SESSION_KEY, bootGreeting, pragueHour, shouldBoot } from "@/lib/boot";
-import { readHudPrefs, voiceGreeting } from "@/lib/hud";
+import { BOOT_REPLAY_EVENT, readHudPrefs, voiceGreeting } from "@/lib/hud";
 import { playHudSound, whenActivated } from "@/lib/hudSound";
 import { speakText } from "@/lib/speech";
 
@@ -42,6 +42,25 @@ export function BootSequence() {
       cleanups.push(() => window.clearTimeout(t));
     }
     return () => cleanups.forEach((fn) => fn());
+  }, []);
+
+  // Codex review #102: „Přehrát start systému" z Nastavení – přehraje se na místě (klientská navigace na ?boot=1 by
+  // efekt výše znovu nespustila, BootSequence zůstává namountovaný). Klik = interakce, zvuk smí hrát hned.
+  useEffect(() => {
+    let timer: number | undefined;
+    const replay = () => {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      window.clearTimeout(timer);
+      setGreeting(null);
+      requestAnimationFrame(() => setGreeting(bootGreeting(pragueHour())));
+      if (readHudPrefs().sounds) playHudSound("boot");
+      timer = window.setTimeout(() => setGreeting(null), BOOT_MS + 50);
+    };
+    window.addEventListener(BOOT_REPLAY_EVENT, replay);
+    return () => {
+      window.removeEventListener(BOOT_REPLAY_EVENT, replay);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   if (!greeting) return null;
