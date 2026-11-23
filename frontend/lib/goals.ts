@@ -31,6 +31,8 @@ export const GOAL_SOURCES = [
   { value: "mff_built_t4_count", label: "MFF – postavené T4", unit: "ks", placeholder: "15" },
   { value: "mff_high_priority_built_count", label: "MFF – postavené s vysokou prioritou", unit: "ks", placeholder: "5" },
   { value: "wot_ace_mastery_count", label: "WoT – počet M-ek (Mistr)", unit: "ks", placeholder: "50" },
+  { value: "wow_characters_at_target", label: "WoW – postavy na cílovém levelu", unit: "ks", placeholder: "3" },
+  { value: "wow_max_level", label: "WoW – nejvyšší level postavy", unit: "lvl", placeholder: "60" },
 ] as const;
 
 export function goalSourceMeta(source: string | null | undefined) {

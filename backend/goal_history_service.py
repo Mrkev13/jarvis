@@ -126,6 +126,11 @@ def compute_automatic_goal_current_value_with_ok(db: Session, source: str, today
             )
         ), True
 
+    if source.startswith("wow_"):
+        # MRK-127: ze snapshotu postav (Blizzard API) – žádné volání API ani LLM
+        from modules.wow.service import goal_value
+        return goal_value(db, source)
+
     if source == WOT_ACE_MASTERY_SOURCE:
         # MRK-82: every "Mistr" (ace) record counts, repeated ones on the same tank too (Standa, 2026-10-25)
         total = (

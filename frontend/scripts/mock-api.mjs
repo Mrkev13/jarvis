@@ -181,6 +181,38 @@ let failNextAttendance = false;
 // MRK-14: stavová Škola (splnění / uzavření / znovuotevření); /__mock/school/reset vrátí fixtures.
 const schoolState = {};
 const remindersState = { stateful: false, removed: new Set() };
+
+// MRK-127: World of Warcraft – stavový mock tvaru skutečného `GET /wow` (modules/wow/service.overview).
+// /__mock/wow/reset vrátí výchozí stav; ?configured=0 = server bez klíčů Blizzard API.
+const WOW_CHARS = () => [
+  { id: 1, name: "Thrallík", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 42, target_level: 60,
+    levels_to_go: 18, at_target: false, class_name: "Shaman", race_name: "Orc", faction: "Horde", active_spec: "Enhancement",
+    item_level: null, professions: [{ name: "Mining", skill: 150, max: 225, secondary: false }, { name: "Herbalism", skill: 140, max: 225, secondary: false }],
+    last_login_at: "2026-10-11T10:00:00Z", sync_status: "ok", sync_label: "aktuální", last_synced_at: new Date(Date.now() - 3 * 3600e3).toISOString() },
+  { id: 2, name: "Jaina", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 60, target_level: 60,
+    levels_to_go: 0, at_target: true, class_name: "Mage", race_name: "Human", faction: "Alliance", active_spec: null,
+    item_level: null, professions: [], last_login_at: null, sync_status: "ok", sync_label: "aktuální",
+    last_synced_at: new Date(Date.now() - 26 * 3600e3).toISOString() },
+  { id: 3, name: "Rexxar", realm_slug: "golemagg", realm_name: "golemagg", level: null, target_level: null, levels_to_go: null,
+    at_target: false, class_name: null, race_name: null, faction: null, active_spec: null, item_level: null, professions: [],
+    last_login_at: null, sync_status: "not_found", sync_label: "postava nenalezena", last_synced_at: null },
+];
+const wowState = { configured: true, characters: WOW_CHARS(), seq: 10 };
+function wowOverview() {
+  const chars = [...wowState.characters].sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || a.name.localeCompare(b.name));
+  const withTarget = chars.filter((c) => c.target_level != null);
+  return {
+    config: wowState.configured ? { configured: true, region: "eu", namespace: "profile-classic1x-eu" } : { configured: false, region: null, namespace: null },
+    summary: { characters: chars.length, max_level: Math.max(0, ...chars.map((c) => c.level ?? 0)), with_target: withTarget.length,
+      at_target: withTarget.filter((c) => c.level != null && c.level >= c.target_level).length },
+    characters: chars,
+  };
+}
+function wowTarget(c, target) {
+  c.target_level = target;
+  c.levels_to_go = target != null && c.level != null ? Math.max(0, target - c.level) : null;
+  c.at_target = target != null && c.level != null && c.level >= target;
+}
 function resetSchool() {
   Object.assign(schoolState, { assignments: fixture("school-assignments"), exams: fixture("school-exams"),
     subjects: fixture("school-subjects") });  // MRK-75: id 4 = archivovaný předmět
@@ -459,6 +491,49 @@ createServer(async (req, res) => {
   }
   // MRK-126: volitelně stavové připomínky – Hotovo (jednorázová) / Zrušit je odebere z GET /reminders?status=active.
   // Zapíná /__mock/reminders/stateful (POST), /__mock/reminders/reset vrátí fixtures a vypne to (ostatní kontroly beze změny).
+  if (url.pathname === "/__mock/wow/reset") {
+    Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", characters: WOW_CHARS(), seq: 10 });
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);
+  if (url.pathname === "/wow/characters" && req.method === "POST") {
+    const name = String(body?.name ?? "").trim();
+    if (!/^\p{L}{2,12}$/u.test(name)) return respond(400, { detail: "Jméno postavy: 2–12 písmen, bez mezer a číslic." });
+    const slug = String(body?.realm ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+    if (wowState.characters.some((c) => c.realm_slug === slug && c.name.toLowerCase() === name.toLowerCase())) {
+      return respond(409, { detail: "Tuhle postavu už sleduješ." }, 200);
+    }
+    const c = { id: ++wowState.seq, name: name[0].toUpperCase() + name.slice(1).toLowerCase(), realm_slug: slug,
+      realm_name: String(body.realm).trim(), level: wowState.configured ? 12 : null, class_name: wowState.configured ? "Hunter" : null,
+      race_name: wowState.configured ? "Night Elf" : null, faction: null, active_spec: null, item_level: null, professions: [],
+      last_login_at: null, sync_status: wowState.configured ? "ok" : "pending", sync_label: wowState.configured ? "aktuální" : "čeká na načtení",
+      last_synced_at: wowState.configured ? new Date().toISOString() : null };
+    wowTarget(c, body?.target_level ?? null);
+    wowState.characters.push(c);
+    return respond(200, { result: wowState.configured ? "ok" : "not_configured",
+      message: wowState.configured ? null : "WoW API není na serveru nastavené.", character: c }, 400);
+  }
+  const wowChar = /^\/wow\/characters\/(\d+)(\/refresh)?$/.exec(url.pathname);
+  if (wowChar) {
+    const c = wowState.characters.find((x) => x.id === Number(wowChar[1]));
+    if (!c) return respond(404, { detail: "Postava neexistuje." });
+    if (wowChar[2] && req.method === "POST") {
+      c.last_synced_at = new Date().toISOString();
+      return respond(200, { result: c.sync_status === "not_found" ? "not_found" : "ok", message: c.sync_status === "not_found" ? "Postava nenalezena – zkontroluj jméno a realm." : null, character: c }, 400);
+    }
+    if (req.method === "PATCH") { wowTarget(c, body?.target_level ?? null); return respond(200, c, 200); }
+    if (req.method === "DELETE") {
+      wowState.characters = wowState.characters.filter((x) => x !== c);
+      return respond(200, { ok: true }, 300);
+    }
+  }
+  if (url.pathname === "/wow/refresh" && req.method === "POST") {
+    // tvar service.sync_due: nenalezená postava = selhání, ostatní ok
+    if (!wowState.configured) return respond(200, { synced: 0, skipped: "not_configured" }, 200);
+    const results = {};
+    for (const c of wowState.characters) results[c.sync_status === "not_found" ? "not_found" : "ok"] = (results[c.sync_status === "not_found" ? "not_found" : "ok"] ?? 0) + 1;
+    return respond(200, { synced: results.ok ?? 0, results, due: wowState.characters.length, remaining: 0 }, 400);
+  }
   if (url.pathname === "/__mock/reminders/stateful") {
     remindersState.stateful = true;
     return respond(200, { ok: true });

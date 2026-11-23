@@ -64,6 +64,7 @@ declaration. Pilot types:
 | `fitness.rehab_exercise.created` / `.updated` / `.archived` / `.restored` | `modules/fitness/service` | `id`, `active` |
 | `fitness.workout.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
 | `fitness.rehab_session.created` / `.updated` | `modules/fitness/service` | `id`, `date`, `count` |
+| `wow.character.level_up` | `modules/wow/service.sync_character` (MRK-127; only when the snapshot from the Blizzard API shows a higher level than the stored one) | `character_id`, `level`, `previous_level`, `target_level` |
 | `finance.import.completed` | `modules/finance/importing/core.commit_import` (MRK-62; same transaction as the ledger rows) | `import_id`, `account_id`, `counts`, `date_from`, `date_to` – never row values |
 | `system.module.enabled` / `.disabled` | `PUT /modules/{id}` | `module_id`, `enabled`, `previous` |
 

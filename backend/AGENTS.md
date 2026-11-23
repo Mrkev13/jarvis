@@ -828,6 +828,17 @@ print(_hash_pin("123456"))
 - Testy: `test_weekly_review.py` (falešné hodiny/LLM, reálná cesta SDK proti lokálnímu fake HTTP),
   migrace v `test_alembic_migration.py`, frontend `lib/weeklyReview.test.mjs`.
 
+## 23b. World of Warcraft (MRK-127, `modules/wow/`, migrace 0031)
+
+- Sledované postavy (`wow_characters`) se snapshotem z Blizzard Battle.net profile API (`modules/wow/battlenet.py`,
+  jen čtení, client credentials, token jen v paměti, HTTPS na pevné hosty, bez přesměrování, timeout, chyby jen kódem).
+- `service.sync_character` je jediná cesta zápisu snapshotu; vyšší level = `wow.character.level_up` + přepočet cílů
+  `wow_characters_at_target` / `wow_max_level` (goal_history_service, deterministicky). Výpadek API = poslední stav.
+- Hodinový krok nejvýš 1× za 6 h na postavu, max 10 postav; bez klíčů nic. REST `/wow`, stránka `/wow` (Další).
+- Env: `BATTLENET_CLIENT_ID`, `BATTLENET_CLIENT_SECRET`, `WOW_REGION`, `WOW_NAMESPACE`, `WOW_LOCALE`; namespace podle
+  verze hry ověří `scripts/check_battlenet.py` (jen stavy). Podrobně `docs/wow.md`. Testy `tests/test_wow.py`
+  (falešný transport, nikdy síť).
+
 ## 24. Architektonická pravidla (Roadmap 3.5)
 
 - Trvalé principy: `docs/architecture-principles.md`; audit a dluh: `docs/architecture-audit.md`;
