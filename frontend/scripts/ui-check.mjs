@@ -3756,9 +3756,11 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
   const hangar = page.locator("[data-wot-hangar]");
   check(`wot hangár ${label}: zobrazený`, await eventually(async () => (await hangar.count()) === 1, 5000));
-  check(`wot hangár ${label}: zaměřený Kranvagn`, (await hangar.locator("h2").innerText()).toLowerCase().includes("kranvagn"));
+  // první aktivní grind v mock datech = Object 279 (e), v manifestu SSSR, tier X
+  check(`wot hangár ${label}: zaměřený první aktivní grind`, (await hangar.locator("h2").innerText()).toLowerCase().includes("object 279"));
   check(`wot hangár ${label}: národ a tier z manifestu`, await eventually(async () =>
-    (await hangar.locator("[data-wot-nation]").innerText().catch(() => "")) === "Švédsko" && (await hangar.locator("[data-wot-tier]").innerText().catch(() => "")) === "tier X", 4000));
+    (await hangar.locator("[data-wot-nation]").innerText().catch(() => "")) === "SSSR" && (await hangar.locator("[data-wot-tier]").innerText().catch(() => "")) === "tier X", 4000));
+  check(`wot hangár ${label}: pláty podle průběhu (29 % = 6 z 20)`, (await hangar.locator(".wot-plate-lit").count()) === 6);
   check(`wot hangár ${label}: 20 pancéřových plátů`, (await hangar.locator(".wot-plate").count()) === 20);
   check(`wot hangár ${label}: tier u řádku grindu`, await eventually(async () => (await page.locator("[data-search-target] .wot-tier-badge").count()) >= 1, 3000));
   const theme = await page.locator("main").evaluate((el) => getComputedStyle(el).getPropertyValue("--arc-rgb").trim());
