@@ -4,16 +4,22 @@
  */
 import type { DomainEvent } from "./domainEvents.ts";
 
-export type HudPrefs = { sounds: boolean; voice: boolean };
+/** MRK-136: `voiceLang` = jazyk pozdravu (cs / britská en), `voiceURI` = vybraný hlas prohlížeče (null = nejlepší dostupný). */
+export type HudPrefs = { sounds: boolean; voice: boolean; voiceLang: "cs" | "en"; voiceURI: string | null };
 export const HUD_PREFS_KEY = "sh:hud:prefs";
 export const HUD_PREFS_EVENT = "sh:hud:prefs";
-export const DEFAULT_HUD_PREFS: HudPrefs = { sounds: false, voice: false };
+export const DEFAULT_HUD_PREFS: HudPrefs = { sounds: false, voice: false, voiceLang: "cs", voiceURI: null };
 
 export function parseHudPrefs(raw: string | null): HudPrefs {
   try {
     const v = raw ? JSON.parse(raw) : null;
     if (v && typeof v === "object") {
-      return { sounds: v.sounds === true, voice: v.voice === true };
+      return {
+        sounds: v.sounds === true,
+        voice: v.voice === true,
+        voiceLang: v.voiceLang === "en" ? "en" : "cs",
+        voiceURI: typeof v.voiceURI === "string" && v.voiceURI.length > 0 && v.voiceURI.length < 300 ? v.voiceURI : null,
+      };
     }
   } catch {
     /* poškozená hodnota = výchozí */

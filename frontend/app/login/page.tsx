@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { AccentLine, Button, Card, ErrorState, fieldClass, HudFrame, HudLabel, StatusPulse } from "@/components/ui";
 import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { API_URL, readErrorDetail } from "@/lib/api";
+import { pragueHour } from "@/lib/boot";
+import { readHudPrefs } from "@/lib/hud";
+import { VOICE_SPOKEN_KEY, greetThenGo, sayGreeting } from "@/lib/hudVoice";
 import { loginErrorMessage } from "@/lib/loginError";
 import { safeNextPath } from "@/lib/safeNext";
 import { cx } from "@/lib/ui";
@@ -87,6 +90,20 @@ function LoginInner() {
         // ne-JSON (proxy / HTML chyba) – níže obecná hláška
       }
       if (r.ok && body.ok) {
+        // MRK-136: odeslání PINu je interakce – Jarvis smí promluvit hned tady (na dashboardu by čekal na klik).
+        // Přesměrování počká, až dořekne (nejvýš 4,5 s), jinak by ho nové načtení stránky utnulo.
+        // Codex review #106: čeká se na skutečný konec klipu (české trvají ~5,5 s); pojistka jen pro zaseknutí.
+        const prefs = readHudPrefs();
+        if (prefs.voice) {
+          const finished = await greetThenGo(() => sayGreeting(prefs, pragueHour()), () => undefined);
+          if (finished) {
+            try {
+              window.sessionStorage.setItem(VOICE_SPOKEN_KEY, "1"); // jen celý pozdrav – useknutý zopakuje dashboard
+            } catch {
+              /* soukromé okno – dashboard pak pozdraví po prvním kliknutí */
+            }
+          }
+        }
         goTo(next);
         return;
       }
