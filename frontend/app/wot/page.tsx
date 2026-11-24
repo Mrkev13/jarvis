@@ -1,7 +1,7 @@
 "use client";
 
-import { HudCore } from "@/components/jarvis/HudCore";
-import { wotCore } from "@/lib/hudModules";
+import { HangarHero } from "@/components/wot/HangarHero";
+import { medalRank } from "@/lib/wotHangar";
 import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useEffect, useRef, useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
@@ -36,7 +36,6 @@ import { pulseJarvis } from "@/lib/jarvisSignals";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
-  grindProgress,
   grindSummary,
   celebrationDuration,
   emptyGrindDraft,
@@ -265,7 +264,7 @@ export default function WotPage() {
   const { activeCount, remaining: remainingTotal } = grindSummary(grinds, celebrating?.id);
 
   return (
-    <ContentContainer>
+    <ContentContainer className="theme-wot">
       <PageHeader
         eyebrow={<HudLabel>Modul · World of Tanks</HudLabel>}
         title="World of Tanks"
@@ -280,18 +279,10 @@ export default function WotPage() {
 
       {error ? <ErrorState message={error} /> : null}
 
-      {/* MRK-134: tank v zaměřovači – první aktivní grind, průběh jako segmenty */}
-      {!loading && !loadFailed ? (() => {
-        const target = activeGrinds(grinds)[0];
-        return (
-          <HudCore
-            module="wot"
-            label="Jarvis · zaměřovač"
-            {...wotCore(target ? { tank: target.tank, progress: grindProgress(target), remaining: Math.max(0, Number(target.xp_remaining) || 0) } : null)}
-            stats={[{ label: "Aktivní grindy", value: activeCount }, { label: "Mka", value: mastery.total, tone: "text-warning" }]}
-          />
-        );
-      })() : null}
+      {/* MRK-138: hangár – zaměřený tank (první aktivní grind) místo obecného HUD jádra (MRK-134) */}
+      {!loading && !loadFailed ? (
+        <HangarHero grind={activeGrinds(grinds)[0] ?? null} activeCount={activeCount} aces={mastery.total} />
+      ) : null}
 
       {loading ? (
         <LoadingState lines={4} label="Načítám data World of Tanks…" />
@@ -320,14 +311,18 @@ export default function WotPage() {
                   <MetricCard label="Tanků s Mkem" value={formatNumber(mastery.tanks)} />
                 </StatGrid>
                 {mastery.byTank.length > 0 ? (
-                  <ul className="mt-4 flex flex-wrap gap-2" aria-label="Mka podle tanků">
-                    {mastery.byTank.slice(0, 12).map((t) => (
+                  // MRK-138: síň slávy – každý tank s Mkem jako medaile (bronz / stříbro / zlato podle počtu)
+                  <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-label="Mka podle tanků">
+                    {mastery.byTank.slice(0, 12).map((t, i) => (
                       <li
                         key={t.tank}
-                        className="inline-flex items-center gap-2 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 py-1 pl-1 pr-2.5 text-sm text-ink"
+                        data-medal={medalRank(t.count)}
+                        className="wot-medal flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 py-1.5 pl-1.5 pr-2.5 text-sm text-ink"
+                        style={{ ["--i" as string]: Math.min(i, 11) } as React.CSSProperties}
                       >
+                        <MedalIcon rank={medalRank(t.count)} />
                         <GameImage kind="tank" name={t.tank} size="xs" />
-                        <span className="max-w-[12rem] truncate">{t.tank}</span>
+                        <span className="min-w-0 flex-1 truncate">{t.tank}</span>
                         {t.count > 1 ? <span className="font-semibold tabular-nums text-ink-muted">×{t.count}</span> : null}
                       </li>
                     ))}
@@ -646,5 +641,17 @@ export default function WotPage() {
       />
       <AskJarvis surface="wot" />
     </ContentContainer>
+  );
+}
+
+
+/** MRK-138: medaile síně slávy – vlastní SVG (hvězda ve věnci), ne grafika Wargamingu. */
+function MedalIcon({ rank }: { rank: "bronze" | "silver" | "gold" }) {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" className={`wot-medal-icon wot-medal-${rank} shrink-0`}>
+      <path d="M8 1h8l-2 6h-4z" className="wot-medal-ribbon" />
+      <circle cx="12" cy="14.5" r="8" className="wot-medal-disc" />
+      <path d="M12 9.5l1.5 3.1 3.4.5-2.5 2.4.6 3.4-3-1.6-3 1.6.6-3.4-2.5-2.4 3.4-.5z" className="wot-medal-star" />
+    </svg>
   );
 }
