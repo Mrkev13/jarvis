@@ -3751,6 +3751,27 @@ for (const [path, module] of [["/habits", "habits"], ["/work", "work"], ["/finan
   await ctx.close();
 }
 
+// 35) MRK-138 – WoT hangár: zaměřený tank s národem a tierem z manifestu, pancéřové pláty, medaile, jantarový HUD
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+  const hangar = page.locator("[data-wot-hangar]");
+  check(`wot hangár ${label}: zobrazený`, await eventually(async () => (await hangar.count()) === 1, 5000));
+  // první aktivní grind v mock datech = Object 279 (e), v manifestu SSSR, tier X
+  check(`wot hangár ${label}: zaměřený první aktivní grind`, (await hangar.locator("h2").innerText()).toLowerCase().includes("object 279"));
+  check(`wot hangár ${label}: národ a tier z manifestu`, await eventually(async () =>
+    // textContent = text v DOM; innerText vrací už po CSS `uppercase` („TIER X“)
+    (await hangar.locator("[data-wot-nation]").textContent().catch(() => ""))?.trim() === "SSSR" && (await hangar.locator("[data-wot-tier]").textContent().catch(() => ""))?.trim() === "tier X", 4000));
+  check(`wot hangár ${label}: pláty podle průběhu (29 % = 6 z 20)`, (await hangar.locator(".wot-plate-lit").count()) === 6);
+  check(`wot hangár ${label}: 20 pancéřových plátů`, (await hangar.locator(".wot-plate").count()) === 20);
+  check(`wot hangár ${label}: tier u řádku grindu`, await eventually(async () => (await page.locator("[data-search-target] .wot-tier-badge").count()) >= 1, 3000));
+  const theme = await page.locator("main").evaluate((el) => getComputedStyle(el).getPropertyValue("--arc-rgb").trim());
+  check(`wot hangár ${label}: jantarový HUD`, theme === "240 180 76", theme);
+  check(`wot hangár ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}wot-hangar-${label}.png`, fullPage: label === "desktop" });
+  check(`wot hangár ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);
