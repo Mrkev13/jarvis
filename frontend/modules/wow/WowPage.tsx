@@ -28,6 +28,9 @@ import {
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import { staggerStyle } from "@/lib/motion";
+import { cx } from "@/lib/ui";
+import { Collections } from "./Collections";
+import { Fleet, LevelRing } from "./HeroBits";
 import {
   batchMessage,
   levelLabel,
@@ -37,6 +40,9 @@ import {
   targetProgress,
   validateCharacterForm,
   isForeverNamespace,
+  classRgb,
+  factionKey,
+  safeRenderUrl,
   type WowBatchResult,
   type WowCharacter,
   type WowOverview,
@@ -127,9 +133,11 @@ export default function WowPage() {
         key={c.id}
         rowKey={`wow-${c.id}`}
         searchTarget={`wowchar-${c.id}`}
-        style={staggerStyle(idx)}
-        className="motion-card"
+        // MRK-139: hrdinská karta – barva třídy, frakce a celý render postavy na pozadí (app/hud.css .wow-hero)
+        style={{ ...staggerStyle(idx), ...heroStyle(c) }}
+        className={cx("motion-card wow-hero", safeRenderUrl(c.render_url) && "wow-hero-render")}
         busy={busy}
+        leading={<LevelRing c={c} />}
         badges={
           <>
             <StatusBadge tone={syncTone(c.sync_status)} dot={c.sync_status === "ok"}>{c.sync_label}</StatusBadge>
@@ -236,6 +244,7 @@ export default function WowPage() {
 
             {/* MRK-134: „flotila" altů – kolik postav je na cílovém levelu */}
             <HudCore module="wow" label="Jarvis · flotila altů" {...wowCore(data.summary)} />
+            <Fleet characters={data.characters} />
 
             <StatGrid cols={3}>
               <MetricCard label="Postav" value={data.summary.characters} />
@@ -250,6 +259,9 @@ export default function WowPage() {
                 <EmptyState compact>Zatím žádná postava. Přidej první vpravo – stačí {forever ? "jméno a příjmení" : "jméno a realm"}.</EmptyState>
               )}
             </PageSection>
+
+            {/* MRK-128: sbírka účtu a seznam „chci získat" */}
+            {data.collections ? <Collections data={data.collections} configured={configured} onChanged={() => wow.reload()} /> : null}
           </div>
 
           <Card as="section" aria-labelledby="wow-add">
@@ -290,4 +302,16 @@ export default function WowPage() {
       />
     </ContentContainer>
   );
+}
+
+
+/** MRK-139: CSS proměnné hrdinské karty – barva třídy, tónování frakce, render postavy (jen oficiální URL). */
+function heroStyle(c: WowCharacter): React.CSSProperties {
+  const render = safeRenderUrl(c.render_url);
+  const faction = factionKey(c.faction);
+  return {
+    ["--class-rgb" as string]: classRgb(c.class_name) ?? "155 227 255",
+    ["--faction-rgb" as string]: faction === "horde" ? "180 40 40" : faction === "alliance" ? "40 90 190" : "60 70 90",
+    ...(render ? { ["--render-url" as string]: `url("${render}")` } : {}),
+  } as React.CSSProperties;
 }

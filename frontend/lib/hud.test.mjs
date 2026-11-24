@@ -23,6 +23,9 @@ test("mission only for fresh completions", () => {
   assert.equal(missionFor(ev("school.exam.closed", { outcome: "passed" }), NOW).detail, "Zkouška uzavřená");
   assert.deepEqual(missionFor(ev("wow.character.level_up", { level: 60, target_level: 60 }), NOW), { title: "Cíl dosažen", detail: "Postava je na levelu 60" });
   assert.equal(missionFor(ev("wow.character.level_up", { level: 24, target_level: 60 }), NOW).title, "Level up");
+  // MRK-128: položka ze seznamu „chci získat" je ve sbírce
+  assert.deepEqual(missionFor(ev("wow.collection.acquired", { wish_id: 1, kind: "mount" }), NOW), { title: "Mise splněna", detail: "Nový mount ve sbírce" });
+  assert.equal(missionFor(ev("wow.collection.acquired", { wish_id: 2, kind: "achievement" }), NOW).detail, "Achievement získaný");
   assert.equal(missionFor(ev("school.assignment.completed", {}, 5 * 60_000), NOW), null, "replay starých událostí neslaví");
   assert.equal(missionFor(ev("habits.entry.done"), NOW), null);
   assert.deepEqual(missionFor(ev("goals.goal.completed", { goal_id: 3, previous_progress: 80 }), NOW), { title: "Mise splněna", detail: "Cíl splněný" });

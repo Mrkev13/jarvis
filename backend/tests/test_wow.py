@@ -58,6 +58,8 @@ class FakeApi:
     def __init__(self):
         self.profiles = {("pyrewood-village", "thrallík"): dict(PROFILE)}
         self.professions = {("pyrewood-village", "thrallík"): PROFESSIONS_RETAIL}
+        self.media = {}  # MRK-139: character-media (výchozí 404 = bez obrázků)
+        self.collections = {}  # MRK-128: {(realm, name, "mounts"|"pets"|"achievements"): data | HTTP kód}
         self.token_status = 200
         self.namespace = "profile-classic1x-eu"
         self.calls = []
@@ -77,7 +79,11 @@ class FakeApi:
         if self.namespace.startswith("profile-forever-"):  # MRK-130: bez realmu, /character/{jmeno-prijmeni}
             parts = ["forever"] + parts
         key = (parts[0], unquote(parts[1]))
-        table = self.professions if len(parts) > 2 else self.profiles
+        if len(parts) > 2 and parts[2] in ("collections", "achievements"):
+            value = self.collections.get(key + (parts[-1],), 404)
+            return Resp(value) if isinstance(value, int) else Resp(200, value)
+        table = (self.media if len(parts) > 2 and parts[2] == "character-media"
+                 else self.professions if len(parts) > 2 else self.profiles)
         value = table.get(key, 404)
         return Resp(value) if isinstance(value, int) else Resp(200, value)
 
@@ -320,7 +326,10 @@ class SyncTestCase(WowTestBase):
         self.add(name="Rexxar", target=None)  # nenalezen
         values = self.q(lambda db: {s: ghs.compute_automatic_goal_current_value_with_ok(db, s)
                                     for s in service.GOAL_SOURCES})
-        self.assertEqual(values, {service.GOAL_AT_TARGET: (1.0, True), service.GOAL_MAX_LEVEL: (60.0, True)})
+        self.assertEqual(values, {service.GOAL_AT_TARGET: (1.0, True), service.GOAL_MAX_LEVEL: (60.0, True),
+                                  # MRK-128: sbírka bez snapshotu = hodnota neznámá (ne nula)
+                                  "wow_mounts": (0.0, False), "wow_pets": (0.0, False),
+                                  "wow_achievement_points": (0.0, False)})
 
     def test_hourly_sync_is_bounded_and_idle_without_keys(self):
         for i, n in enumerate("Aaa Bbb Ccc Ddd Eee Fff Ggg Hhh Iii Jjj Kkk Lll".split()):
@@ -385,7 +394,8 @@ class ForeverTestCase(WowTestBase):
         self.assertEqual(c["professions"], [{"name": "Herbalism", "skill": 150, "max": 225, "secondary": False}])
         urls = [u for _m, u, _kw in self.api.calls if u != battlenet.TOKEN_URL]
         self.assertEqual(urls, ["https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave",
-                                "https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave/professions"])
+                                "https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave/professions",
+                                "https://eu.api.blizzard.com/profile/wow/character/zareth-malgrave/character-media"])
         with self.assertRaises(service.WowError) as err:
             self.q(lambda db: service.add_character(db, "Zareth-Malgrave", "", None))
         self.assertEqual(err.exception.status, 409)
@@ -429,6 +439,63 @@ class ForeverTestCase(WowTestBase):
         self.assertNotIn("profile-classic1x-eu", text, "Forever postava nezkouší realmové namespace")
         for secret in (SECRET, "tok-123", "Zareth", "zareth", "Malgrave", "malgrave"):
             self.assertNotIn(secret, text)
+
+
+class MediaTestCase(WowTestBase):
+    """MRK-139: hrdinské karty – avatar a celý render z character-media, jen oficiální hosty Blizzardu."""
+
+    MEDIA = {"assets": [
+        {"key": "avatar", "value": "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/2-avatar.jpg"},
+        {"key": "inset", "value": "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/2-inset.jpg"},
+        {"key": "main-raw", "value": "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/2-main-raw.png"},
+    ]}
+
+    def add(self):
+        return self.q(lambda db: service.add_character(db, "Thrallík", "Pyrewood Village", 60))
+
+    def test_media_urls_are_stored(self):
+        self.api.media[("pyrewood-village", "thrallík")] = self.MEDIA
+        c = self.add()["character"]
+        self.assertEqual(c["avatar_url"], self.MEDIA["assets"][0]["value"])
+        self.assertEqual(c["render_url"], self.MEDIA["assets"][2]["value"], "main-raw má přednost (průhledné pozadí)")
+        self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(action_type="sync").count()), 0,
+                         "obrázky nejsou změna snapshotu pro Aktivitu")
+
+    def test_missing_media_keeps_the_sync_and_old_urls(self):
+        self.api.media[("pyrewood-village", "thrallík")] = self.MEDIA
+        self.add()
+        self.api.media[("pyrewood-village", "thrallík")] = 503
+        out = self.q(lambda db: service.sync_one(db, 1))
+        self.assertEqual(out["result"], "ok", "výpadek obrázků nesmí shodit synchronizaci")
+        self.assertTrue(out["character"]["render_url"].endswith("main-raw.png"), "zůstanou poslední známé")
+
+    def test_media_rate_limit_or_forbidden_never_drops_the_profile(self):
+        # Codex review #110: 429 / 403 jen u obrázků nesmí zahodit nový level ani level_up
+        for status in (429, 403):
+            with self.subTest(status=status):
+                self.tearDown()
+                self.setUp()
+                self.add()
+                self.api.profiles[("pyrewood-village", "thrallík")] = dict(PROFILE, level=43)
+                self.api.media[("pyrewood-village", "thrallík")] = status
+                out = self.q(lambda db: service.sync_one(db, 1))
+                self.assertEqual(out["result"], "ok")
+                self.assertEqual(out["character"]["level"], 43)
+                self.assertEqual(out["character"]["sync_status"], "ok")
+                self.assertEqual(self.q(lambda db: db.query(DomainEvent).filter_by(
+                    event_type="wow.character.level_up").count()), 1)
+
+    def test_only_official_render_hosts(self):
+        bad = {"assets": [
+            {"key": "avatar", "value": "http://render.worldofwarcraft.com/eu/a.jpg"},
+            {"key": "main-raw", "value": "https://evil.example.com/x.png"},
+            {"key": "main", "value": "https://render.worldofwarcraft.com.evil.io/x.jpg"},
+            {"key": "inset", "value": "https://render.worldofwarcraft.com/eu/x.jpg?track=1"},
+        ]}
+        self.assertEqual(service.parse_media(bad), (None, None))
+        self.assertEqual(service.parse_media(None), (None, None))
+        self.assertEqual(service.parse_media({"assets": [{"key": "main", "value": "https://render-eu.worldofwarcraft.com/a/b-main.jpg"}]}),
+                         (None, "https://render-eu.worldofwarcraft.com/a/b-main.jpg"))
 
 
 class CheckScriptTestCase(WowTestBase):

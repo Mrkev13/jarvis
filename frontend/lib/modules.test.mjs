@@ -24,7 +24,7 @@ const FIXTURES = [
   { id: "beta", label: "Beta", defaultEnabled: false, implemented: true, capabilities: ALL, entityTypes: ["beta_item"], routes: ["/beta"], quickAddKinds: ["beta_meal"] },
   { id: "gamma", label: "Gama", defaultEnabled: false, implemented: false, capabilities: [], entityTypes: [], routes: [], quickAddKinds: [] },
 ];
-const EXISTING = ["school", "work", "finance", "goals", "wot", "mff", "habits", "calendar", "fitness"]; // habits = MRK-21 pilot
+const EXISTING = ["school", "work", "finance", "goals", "wot", "mff", "habits", "calendar", "fitness", "wow"]; // habits = MRK-21 pilot, wow = MRK-127
 const FUTURE = ["food", "projects", "knowledge", "car", "travel", "entertainment"];
 const DEFAULTS = createModuleAccess(manifestFlags());
 const off = (...ids) => createModuleAccess({ ...manifestFlags(), ...Object.fromEntries(ids.map((id) => [id, false])) });
@@ -122,8 +122,9 @@ test("search: availability is a filter, ranking unchanged", () => {
 test("dashboard: disabled module widgets are absent, fetch skipped, storage preserved", () => {
   assert.deepEqual(availableWidgets(DEFAULTS), WIDGETS, "výchozí stav beze změny");
   assert.deepEqual(availableWidgets(DEFAULTS), WIDGETS);
-  const wotMffOff = availableWidgets(off("wot", "mff")).map((d) => d.id);
-  assert.ok(!wotMffOff.includes("games"));
+  const gamesOff = availableWidgets(off("wot", "mff", "wow")).map((d) => d.id);
+  assert.ok(!gamesOff.includes("games"));
+  assert.ok(availableWidgets(off("wot", "mff")).some((d) => d.id === "games"), "MRK-128: Hry zůstanou s WoW");
   assert.ok(availableWidgets(off("wot")).some((d) => d.id === "games"), "Hry zůstanou s MFF");
   assert.ok(!availableWidgets(off("finance")).some((d) => d.id === "finance"));
   assert.ok(availableWidgets(off("finance")).some((d) => d.id === "key_metrics"), "Klíčová čísla zůstanou s Prací");

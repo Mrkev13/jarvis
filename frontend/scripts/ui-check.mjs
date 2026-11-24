@@ -2953,14 +2953,25 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
     check(`companion @${label}: nepřekrývá navigaci`, !overlap(await cBox(page), sidebar));
     await page.screenshot({ path: `${OUT}companion-top-${label}.png` });
 
-    // během scrollu průhledný, po dosednutí znovu na volném místě
+    // během scrollu průhledný, po dosednutí znovu na volném místě.
+    // MRK-137: průhlednost trvá jen ~220 ms po posledním scrollu (COMPANION_TIMING.scrollSettleMs), takže pevný
+    // vzorek po 60 ms na pomalém runneru občas minul. Změny atributu proto zaznamenává MutationObserver
+    // od chvíle před scrollem a kolečko jde nad obsah (myš je jinak v [0,0] nad posuvným sidebarem).
+    await companion(page).evaluate((el) => {
+      const seen = [el.getAttribute("data-companion-visible")];
+      new MutationObserver(() => seen.push(el.getAttribute("data-companion-visible"))).observe(el, { attributes: true, attributeFilter: ["data-companion-visible"] });
+      window.__companionVisibleLog = seen;
+    });
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    await page.mouse.move(Math.round((sidebar ? sidebar.x + sidebar.width : 0) + (width - (sidebar ? sidebar.x + sidebar.width : 0)) / 2), Math.round(height / 2));
     await page.mouse.wheel(0, 500);
-    await settle(page, 60);
-    const mid = await cShown(page);
-    check(`companion @${label}: během scrollu průhledný`, mid === "false", String(mid));
-    await settle(page, 500);
+    const scrolled = await eventually(async () => (await page.evaluate(() => window.scrollY)) > scrollBefore, 1500);
+    const hidMidScroll = await eventually(() => page.evaluate(() => window.__companionVisibleLog.includes("false")), 1500);
+    const log = await page.evaluate(() => window.__companionVisibleLog.join("→"));
+    check(`companion @${label}: během scrollu průhledný`, scrolled && hidMidScroll, `scrollY ${scrollBefore}→${await page.evaluate(() => window.scrollY)}, visible ${log}`);
+    const shownAgain = await eventually(async () => (await cShown(page)) === "true", 1500);
     const coveredMid = await coveredContent(page);
-    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, (await cShown(page)) === "true" && coveredMid.length === 0, coveredMid.join(", "));
+    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, shownAgain && coveredMid.length === 0, coveredMid.join(", "));
     await page.screenshot({ path: `${OUT}companion-scrolled-${label}.png` });
 
     await toBottom(page);
@@ -3770,6 +3781,106 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await page.screenshot({ path: `${OUT}wot-hangar-${label}.png`, fullPage: label === "desktop" });
   check(`wot hangár ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
+}
+
+// 36) MRK-139 – WoW hrdinské karty: celý render na pozadí, barva třídy, prstenec levelu s avatarem, flotila
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const renders = [];
+    const { ctx, page, errors } = await open("/wow", {
+      width, height: width < 500 ? 844 : 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => {
+        renders.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) });
+      }),
+    });
+    const list = page.getByRole("list", { name: "WoW postavy" });
+    await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const thrall = list.locator('[data-search-target="wowchar-1"]');
+    check(`wow karty ${label}: hrdinská karta s renderem`, await eventually(async () => /wow-hero-render/.test(await thrall.getAttribute("class")), 3000));
+    const bg = await thrall.evaluate((el) => getComputedStyle(el).backgroundImage);
+    check(`wow karty ${label}: render jen z oficiálního hostu`, bg.includes("render.worldofwarcraft.com") && bg.includes("main-raw.png"), bg.slice(0, 160));
+    const cls = await thrall.evaluate((el) => getComputedStyle(el).getPropertyValue("--class-rgb").trim());
+    check(`wow karty ${label}: barva třídy (Shaman)`, cls === "0 112 221", cls);
+    check(`wow karty ${label}: prstenec levelu s avatarem`, (await thrall.locator(".wow-ring img").count()) === 1 && (await thrall.locator(".wow-ring-level").innerText()) === "42");
+    check(`wow karty ${label}: postava bez obrázku = iniciála`, (await list.locator('[data-search-target="wowchar-2"] .wow-ring-face').innerText()).trim() === "J");
+    check(`wow karty ${label}: flotila altů`, (await page.locator("[data-wow-fleet] a").count()) === 3);
+    check(`wow karty ${label}: menu ⋯ se neořízne`, (await thrall.evaluate((el) => getComputedStyle(el).overflow)) === "visible");
+    check(`wow karty ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wow-heroes-${label}.png`, fullPage: label === "desktop" });
+    check(`wow karty ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+
+// 37) MRK-128 – WoW sbírka: počty s trendem za týden a sparkline, seznam „chci získat“ (přidání, už vlastněné, odebrání),
+// karta WoW na Řídicím centru
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wow", {
+      width, height: width < 500 ? 844 : 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) })),
+    });
+    const col = page.locator("[data-wow-collections]");
+    check(`wow sbírka ${label}: zobrazená`, await eventually(async () => (await col.count()) === 1, 5000));
+    const mounts = col.locator('[data-wow-count="mounts"]');
+    check(`wow sbírka ${label}: počet mountů`, (await mounts.innerText()).includes("44"));
+    check(`wow sbírka ${label}: trend za týden`, (await mounts.innerText()).includes("+3 za týden"));
+    check(`wow sbírka ${label}: sparkline vývoje`, (await col.locator(".wow-spark polyline").count()) === 4);
+    const wishes = page.getByRole("list", { name: "Chci získat" });
+    check(`wow sbírka ${label}: chybějící nahoře, získané dole`, (await wishes.locator("li").first().innerText()).includes("Invincible's Reins") && (await wishes.locator("li").last().innerText()).includes("Získáno"));
+    check(`wow sbírka ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await col.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}wow-collections-${label}.png`, fullPage: label === "desktop" });
+    check(`wow sbírka ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    // přidání (validace, nové, už vlastněné), odebrání
+    const { ctx, page, errors } = await open("/wow", { width: 1366, height: 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) })) });
+    const card = page.locator("[data-wow-wishes]");
+    await card.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const nameInput = card.getByLabel("Název");
+    await nameInput.fill("x");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: krátký název = chyba u pole", await eventually(async () => (await card.innerText()).includes("2–120 znaků"), 2000));
+    await card.getByLabel("Druh").selectOption("pet");
+    await nameInput.fill("Mechanical  Squirrel");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    const wishes = page.getByRole("list", { name: "Chci získat" });
+    check("wow sbírka: nová položka v seznamu", await eventually(async () => (await wishes.innerText()).includes("Mechanical Squirrel"), 4000));
+    check("wow sbírka: formulář se vyprázdní", (await nameInput.inputValue()) === "");
+    await card.getByLabel("Druh").selectOption("mount");
+    await nameInput.fill("Swift Brown Steed");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: už vlastněné = rovnou odškrtnuté", await eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("už ve sbírce máš"), 4000));
+    await nameInput.fill("swift brown steed");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: duplicita = chyba", await eventually(async () => (await page.locator("[data-wow-collections]").innerText()).includes("už v seznamu máš"), 4000));
+    await wishes.getByRole("button", { name: "Odebrat: Mechanical Squirrel" }).click();
+    check("wow sbírka: odebraná položka zmizí", await eventually(async () => !(await wishes.innerText()).includes("Mechanical Squirrel"), 4000));
+    check("wow sbírka: Obnovit sbírku", await (async () => {
+      await page.getByRole("button", { name: "Obnovit sbírku" }).click();
+      return eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("Sbírka aktualizovaná"), 4000);
+    })());
+    check("wow sbírka akce: bez chyb JS", errors.filter((e) => !/409|Conflict/.test(e)).length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
+    const wowBox = page.locator("[data-dashboard-wow]");
+    check("dashboard: karta WoW ve Hrách", await eventually(async () => (await wowBox.count()) === 1, 5000));
+    check("dashboard: WoW mounti s trendem", /Mounti\s*44\s*\+3/.test(await wowBox.innerText()), await wowBox.innerText().catch(() => ""));
+    check("dashboard: odkaz WoW →", (await page.getByRole("link", { name: "WoW →" }).count()) === 1);
+    check("dashboard WoW: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
 }
 
 await browser.close();

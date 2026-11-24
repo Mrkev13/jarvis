@@ -67,6 +67,11 @@ const MISSIONS: Record<string, (e: DomainEvent) => Mission | null> = {
     if (level === null) return null;
     return { title: target !== null && level >= target ? "Cíl dosažen" : "Level up", detail: `Postava je na levelu ${level}` };
   },
+  // MRK-128: položka ze seznamu „chci získat" se objevila ve sbírce
+  "wow.collection.acquired": (e) => ({
+    title: "Mise splněna",
+    detail: e.payload.kind === "achievement" ? "Achievement získaný" : e.payload.kind === "pet" ? "Nový mazlíček ve sbírce" : "Nový mount ve sbírce",
+  }),
 };
 export const MISSION_FRESH_MS = 2 * 60 * 1000;
 

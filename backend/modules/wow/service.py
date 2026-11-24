@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from activity_service import log_activity
 from domain_events import ActivityProjection, append_domain_event
-from modules.wow import battlenet
+from modules.wow import battlenet, collections
 from modules.wow.models import WowCharacter
 from time_utils import utc_now
 
@@ -30,7 +30,7 @@ NAME_KEY_MAX = 24                     # délka sloupců name / name_key (migrace
 
 GOAL_AT_TARGET = "wow_characters_at_target"
 GOAL_MAX_LEVEL = "wow_max_level"
-GOAL_SOURCES = (GOAL_AT_TARGET, GOAL_MAX_LEVEL)
+GOAL_SOURCES = (GOAL_AT_TARGET, GOAL_MAX_LEVEL, *collections.GOAL_SOURCES)  # MRK-128: + sbírky
 
 SYNC_LABELS = {
     "pending": "čeká na načtení",
@@ -138,6 +138,7 @@ def character_dict(ch: WowCharacter) -> dict:
         "at_target": ch.target_level is not None and ch.level is not None and ch.level >= ch.target_level,
         "class_name": ch.class_name, "race_name": ch.race_name, "faction": ch.faction, "active_spec": ch.active_spec,
         "item_level": ch.item_level, "professions": professions(ch), "last_login_at": _iso(ch.last_login_at),
+        "avatar_url": ch.avatar_url, "render_url": ch.render_url,
         "sync_status": ch.sync_status, "sync_label": SYNC_LABELS.get(ch.sync_status, ch.sync_status),
         "last_synced_at": _iso(ch.last_synced_at),
     }
@@ -162,7 +163,8 @@ def summary(db: Session) -> dict:
 
 def overview(db: Session) -> dict:
     return {"config": battlenet.config_status(), "summary": summary(db),
-            "characters": [character_dict(c) for c in all_characters(db)]}
+            "characters": [character_dict(c) for c in all_characters(db)],
+            "collections": collections.overview(db)}  # MRK-128
 
 
 def goal_value(db: Session, source: str) -> tuple[float, bool]:
@@ -172,6 +174,8 @@ def goal_value(db: Session, source: str) -> tuple[float, bool]:
         return float(s["at_target"]), True
     if source == GOAL_MAX_LEVEL:
         return float(s["max_level"]), True
+    if source in collections.GOAL_SOURCES:  # MRK-128: poslední snapshot sbírky
+        return collections.goal_value(db, source)
     return 0.0, False
 
 
@@ -214,7 +218,25 @@ def parse_professions(data: dict | None) -> list[dict]:
     return out[:6]
 
 
-def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
+# MRK-139: obrázky postavy jen z oficiálních render hostů Blizzardu (https, bez query / fragmentu)
+MEDIA_URL_RE = re.compile(r"^https://render(?:-(?:eu|us|kr|tw))?\.worldofwarcraft\.com/[A-Za-z0-9_\-./%]+\.(?:jpg|jpeg|png|webp)$")
+
+
+def _media_url(value) -> str | None:
+    return value if isinstance(value, str) and len(value) <= 500 and MEDIA_URL_RE.match(value) else None
+
+
+def parse_media(data: dict | None) -> tuple[str | None, str | None]:
+    """character-media → (avatar, celý render). Render: `main-raw` (průhledné pozadí), jinak `main`, jinak `inset`."""
+    if not isinstance(data, dict):
+        return None, None
+    assets = {a.get("key"): _media_url(a.get("value")) for a in (data.get("assets") or []) if isinstance(a, dict)}
+    avatar = assets.get("avatar")
+    render = assets.get("main-raw") or assets.get("main") or assets.get("inset")
+    return avatar, render
+
+
+def apply_profile(ch: WowCharacter, data: dict, prof: dict | None, media: dict | None = None) -> None:
     level = _int(data.get("level"), 1, MAX_LEVEL)
     if level is None:
         raise battlenet.BattleNetError("invalid_response")
@@ -238,6 +260,11 @@ def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
                         if isinstance(ts, (int, float)) and ts > 0 else None)
     if prof is not None:
         ch.professions_json = json.dumps(parse_professions(prof), ensure_ascii=False)
+    avatar, render = parse_media(media)
+    if avatar:
+        ch.avatar_url = avatar
+    if render:
+        ch.render_url = render
 
 
 def _apply_forever_identity(ch: WowCharacter, data: dict) -> None:
@@ -263,6 +290,7 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
     try:
         data = client.character(ch.realm_slug, ch.name_key)
         prof = client.professions(ch.realm_slug, ch.name_key)
+        media = client.media(ch.realm_slug, ch.name_key)  # MRK-139: doplněk, chyba = None
         new_level = _int(data.get("level"), 1, MAX_LEVEL)
         if new_level is None:
             raise battlenet.BattleNetError("invalid_response")
@@ -282,7 +310,7 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
         ch.last_attempt_at = now
         return "ok"
     before = _snapshot(ch)
-    apply_profile(ch, data, prof)
+    apply_profile(ch, data, prof, media)
     ch.sync_status = "ok"
     ch.last_synced_at = now
     db.flush()
@@ -360,10 +388,13 @@ def sync_due(db: Session, *, now: datetime | None = None, force: bool = False, u
         results[code] = results.get(code, 0) + 1
         if code in ("unauthorized", "rate_limited"):
             break  # další pokusy by dopadly stejně
-    if results.get("ok"):
+    # MRK-128: sbírka účtu (nejvýš jednou za 6 h, ručně „Obnovit vše“ hned) – po postavách, ať je zdroj aktuální
+    collection = collections.sync_collections(db, client, now=now, force=force, user_context=user_context)
+    if results.get("ok") or collection == "ok":
         _refresh_goals(db, user_context)
     attempted = sum(results.values())
-    return {"synced": results.get("ok", 0), "results": results, "due": len(due), "remaining": len(due) - attempted}
+    return {"synced": results.get("ok", 0), "results": results, "due": len(due), "remaining": len(due) - attempted,
+            "collections": collection}
 
 
 # ---------- zápisy ----------

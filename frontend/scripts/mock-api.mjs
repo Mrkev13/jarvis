@@ -188,7 +188,10 @@ const WOW_CHARS = () => [
   { id: 1, name: "Thrallík", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 42, target_level: 60,
     levels_to_go: 18, at_target: false, class_name: "Shaman", race_name: "Orc", faction: "Horde", active_spec: "Enhancement",
     item_level: null, professions: [{ name: "Mining", skill: 150, max: 225, secondary: false }, { name: "Herbalism", skill: 140, max: 225, secondary: false }],
-    last_login_at: "2026-10-11T10:00:00Z", sync_status: "ok", sync_label: "aktuální", last_synced_at: new Date(Date.now() - 3 * 3600e3).toISOString() },
+    last_login_at: "2026-10-11T10:00:00Z", sync_status: "ok", sync_label: "aktuální", last_synced_at: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    // MRK-139: obrázky z character-media (UI kontrola je podvrhne neutrálním PNG, nic se nestahuje)
+    avatar_url: "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/1-avatar.jpg",
+    render_url: "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/1-main-raw.png" },
   { id: 2, name: "Jaina", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 60, target_level: 60,
     levels_to_go: 0, at_target: true, class_name: "Mage", race_name: "Human", faction: "Alliance", active_spec: null,
     item_level: null, professions: [], last_login_at: null, sync_status: "ok", sync_label: "aktuální",
@@ -197,7 +200,31 @@ const WOW_CHARS = () => [
     at_target: false, class_name: null, race_name: null, faction: null, active_spec: null, item_level: null, professions: [],
     last_login_at: null, sync_status: "not_found", sync_label: "postava nenalezena", last_synced_at: null },
 ];
-const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10 };
+// MRK-128: sbírka – historie 8 dní (týdenní trend +3 mounti), seznam „chci získat" (1 chybí, 1 získaný)
+const WOW_DAY = (back) => new Date(Date.now() - back * 864e5).toISOString().slice(0, 10);
+const WOW_COLLECTIONS = () => ({
+  history: [
+    { day: WOW_DAY(8), mounts: 41, pets: 30, achievements: 210, achievement_points: 2140, updated_at: null },
+    { day: WOW_DAY(5), mounts: 42, pets: 30, achievements: 214, achievement_points: 2180, updated_at: null },
+    { day: WOW_DAY(2), mounts: 43, pets: 31, achievements: 216, achievement_points: 2200, updated_at: null },
+    { day: WOW_DAY(0), mounts: 44, pets: 31, achievements: 219, achievement_points: 2235, updated_at: new Date(Date.now() - 2 * 3600e3).toISOString() },
+  ],
+  wishes: [
+    { id: 1, kind: "mount", kind_label: "mount", name: "Invincible's Reins", acquired: false, acquired_at: null, created_at: "2026-11-01T10:00:00Z" },
+    { id: 2, kind: "achievement", kind_label: "achievement", name: "Loremaster", acquired: true, acquired_at: new Date(Date.now() - 26 * 3600e3).toISOString(), created_at: "2026-10-01T10:00:00Z" },
+  ],
+  seq: 10,
+});
+const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
+function wowCollections() {
+  const h = wowState.collections.history;
+  const last = h.at(-1) ?? null;
+  const base = h[0] && h[0] !== last ? h[0] : null;
+  const keys = ["mounts", "pets", "achievements", "achievement_points"];
+  const week = Object.fromEntries(keys.map((k) => [k, base && last ? last[k] - base[k] : null]));
+  const wishes = [...wowState.collections.wishes].sort((a, b) => Number(a.acquired) - Number(b.acquired) || a.id - b.id);
+  return { latest: last, week, history: h, wishes, open_wishes: wishes.filter((w) => !w.acquired).length };
+}
 function wowOverview() {
   const chars = [...wowState.characters].sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || a.name.localeCompare(b.name));
   const withTarget = chars.filter((c) => c.target_level != null);
@@ -206,6 +233,7 @@ function wowOverview() {
     summary: { characters: chars.length, max_level: Math.max(0, ...chars.map((c) => c.level ?? 0)), with_target: withTarget.length,
       at_target: withTarget.filter((c) => c.level != null && c.level >= c.target_level).length },
     characters: chars,
+    collections: wowCollections(),
   };
 }
 function wowTarget(c, target) {
@@ -492,7 +520,7 @@ createServer(async (req, res) => {
   // MRK-126: volitelně stavové připomínky – Hotovo (jednorázová) / Zrušit je odebere z GET /reminders?status=active.
   // Zapíná /__mock/reminders/stateful (POST), /__mock/reminders/reset vrátí fixtures a vypne to (ostatní kontroly beze změny).
   if (url.pathname === "/__mock/wow/reset") {
-    Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", forever: url.searchParams.get("forever") === "1", characters: WOW_CHARS(), seq: 10 });
+    Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", forever: url.searchParams.get("forever") === "1", characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() });
     return respond(200, { ok: true });
   }
   if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);
@@ -532,6 +560,29 @@ createServer(async (req, res) => {
       wowState.characters = wowState.characters.filter((x) => x !== c);
       return respond(200, { ok: true }, 300);
     }
+  }
+  // MRK-128: sbírka – tvar modules/wow/collections + router
+  if (url.pathname === "/wow/collections/refresh" && req.method === "POST") {
+    return respond(200, { result: wowState.configured ? "ok" : "not_configured", collections: wowCollections() }, 300);
+  }
+  if (url.pathname === "/wow/wishes" && req.method === "POST") {
+    const kind = String(body?.kind ?? "");
+    const name = String(body?.name ?? "").trim().replace(/\s+/g, " ");
+    if (!["mount", "pet", "achievement"].includes(kind)) return respond(400, { detail: "Druh: mount, mazlíček nebo achievement." });
+    if (name.length < 2 || name.length > 120) return respond(400, { detail: "Název: 2–120 znaků (anglicky, jak ho píše hra)." });
+    if (wowState.collections.wishes.some((w) => w.kind === kind && w.name.toLowerCase() === name.toLowerCase())) return respond(409, { detail: "Tuhle položku už v seznamu máš." });
+    // „Swift Brown Steed" je v mock sbírce → rovnou odškrtnuté (already_owned), ostatní čekají na API
+    const owned = name.toLowerCase() === "swift brown steed";
+    const w = { id: ++wowState.collections.seq, kind, kind_label: { mount: "mount", pet: "mazlíček", achievement: "achievement" }[kind], name,
+      acquired: owned, acquired_at: owned ? new Date().toISOString() : null, created_at: new Date().toISOString() };
+    wowState.collections.wishes.push(w);
+    return respond(200, { ...w, already_owned: owned }, 250);
+  }
+  const wowWish = /^\/wow\/wishes\/(\d+)$/.exec(url.pathname);
+  if (wowWish && req.method === "DELETE") {
+    const before = wowState.collections.wishes.length;
+    wowState.collections.wishes = wowState.collections.wishes.filter((w) => w.id !== Number(wowWish[1]));
+    return before === wowState.collections.wishes.length ? respond(404, { detail: "Položka neexistuje." }) : respond(200, { ok: true }, 200);
   }
   if (url.pathname === "/wow/refresh" && req.method === "POST") {
     // tvar service.sync_due: nenalezená postava = selhání, ostatní ok

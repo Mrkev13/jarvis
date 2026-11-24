@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { levelLabel, professionLabel, syncedAgo, syncTone, targetProgress, validateCharacterForm } from "./lib.ts";
+import { levelLabel, professionLabel, sparkPoints, syncedAgo, syncTone, targetProgress, validateCharacterForm, validateWish, weekTrend } from "./lib.ts";
 
 test("progress to the target level", () => {
   assert.equal(targetProgress({ level: 30, target_level: 60 }), 50);
@@ -67,4 +67,43 @@ test("batch refresh message", async () => {
   assert.deepEqual(batchMessage({ synced: 10, results: { ok: 10 }, due: 12, remaining: 2 }),
     { tone: "success", text: "Aktualizováno: 10 · zbývá 2 (další se načtou při příští obnově)." });
   assert.equal(batchMessage({ synced: 0, skipped: "not_configured" }).tone, "warning");
+});
+
+// MRK-139: hrdinské karty – barvy tříd, frakce, jen oficiální obrázky Blizzardu.
+test("class colours, faction and safe render urls", async () => {
+  const { classRgb, factionKey, safeRenderUrl } = await import("./lib.ts");
+  assert.equal(classRgb("Warlock"), "135 136 238");
+  assert.equal(classRgb(" death knight "), "196 30 58");
+  assert.equal(classRgb("Bard"), null);
+  assert.equal(factionKey("Horde"), "horde");
+  assert.equal(factionKey("ALLIANCE"), "alliance");
+  assert.equal(factionKey(null), null);
+  assert.equal(safeRenderUrl("https://render.worldofwarcraft.com/eu/character/x/1/2-main-raw.png"), "https://render.worldofwarcraft.com/eu/character/x/1/2-main-raw.png");
+  for (const bad of ["http://render.worldofwarcraft.com/a.png", "https://evil.io/a.png", "https://render.worldofwarcraft.com/a.png?x=1", "javascript:alert(1)", null]) {
+    assert.equal(safeRenderUrl(bad), null, String(bad));
+  }
+});
+
+// MRK-128: sbírka
+test("week trend label and tone", () => {
+  assert.deepEqual(weekTrend(3), { text: "+3 za týden", tone: "success" });
+  assert.deepEqual(weekTrend(-2), { text: "−2 za týden", tone: "warning" });
+  assert.deepEqual(weekTrend(0), { text: "za týden beze změny", tone: "neutral" });
+  assert.equal(weekTrend(null), null);
+  assert.equal(weekTrend(undefined), null);
+});
+
+test("sparkline points skip days without a value and need two points", () => {
+  const h = (mounts) => ({ day: "2026-11-01", updated_at: null, mounts, pets: null, achievements: null, achievement_points: null });
+  assert.equal(sparkPoints([h(5)], "mounts"), null);
+  assert.equal(sparkPoints([h(5), h(null)], "mounts"), null);
+  assert.equal(sparkPoints([h(10), h(null), h(20)], "mounts", 100, 32), "0,30 100,2");
+  assert.equal(sparkPoints([h(7), h(7)], "mounts", 100, 32), "0,30 100,30", "rovná čára bez dělení nulou");
+});
+
+test("wish form validation", () => {
+  assert.equal(validateWish("mount", "Invincible"), null);
+  assert.match(validateWish("toy", "Hearthstone"), /druh/);
+  assert.match(validateWish("pet", " x "), /2–120/);
+  assert.match(validateWish("achievement", "a".repeat(121)), /2–120/);
 });

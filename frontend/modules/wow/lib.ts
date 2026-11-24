@@ -22,13 +22,74 @@ export type WowCharacter = {
   sync_status: "pending" | "ok" | "not_found" | "error";
   sync_label: string;
   last_synced_at: string | null;
+  /** MRK-139: obrázky z Blizzard character-media (jen oficiální render hosty, ověřuje backend) */
+  avatar_url?: string | null;
+  render_url?: string | null;
 };
 
 export type WowOverview = {
   config: { configured: boolean; region: string | null; namespace: string | null };
   summary: { characters: number; max_level: number; with_target: number; at_target: number };
   characters: WowCharacter[];
+  /** MRK-128: sbírka účtu (starší backend ji nemusí poslat) */
+  collections?: WowCollections;
 };
+
+/** MRK-128: sbírka – počty z denního snapshotu Blizzard API (None = endpoint data nedal). */
+export type WowCounts = { mounts: number | null; pets: number | null; achievements: number | null; achievement_points: number | null };
+export type WowCollectionSnapshot = WowCounts & { day: string; updated_at: string | null };
+export type WowWishKind = "mount" | "pet" | "achievement";
+export type WowWish = {
+  id: number;
+  kind: WowWishKind;
+  kind_label: string;
+  name: string;
+  acquired: boolean;
+  acquired_at: string | null;
+  created_at: string | null;
+};
+export type WowCollections = {
+  latest: WowCollectionSnapshot | null;
+  week: WowCounts;
+  history: WowCollectionSnapshot[];
+  wishes: WowWish[];
+  open_wishes: number;
+};
+
+export const WISH_KINDS: { value: WowWishKind; label: string }[] = [
+  { value: "mount", label: "Mount" },
+  { value: "pet", label: "Mazlíček" },
+  { value: "achievement", label: "Achievement" },
+];
+
+/** „+3 za týden" / „−1 za týden" / „za týden beze změny"; bez srovnání null. */
+export function weekTrend(delta: number | null | undefined): { text: string; tone: Tone } | null {
+  if (delta == null) return null;
+  if (delta === 0) return { text: "za týden beze změny", tone: "neutral" };
+  return delta > 0 ? { text: `+${delta} za týden`, tone: "success" } : { text: `−${Math.abs(delta)} za týden`, tone: "warning" };
+}
+
+/** Body SVG polyline pro vývoj jedné veličiny (dny bez hodnoty se přeskočí); < 2 body = null. */
+export function sparkPoints(history: WowCollectionSnapshot[], key: keyof WowCounts, width = 120, height = 32): string | null {
+  const vals = history.map((h) => h[key]).filter((v): v is number => typeof v === "number");
+  if (vals.length < 2) return null;
+  const min = Math.min(...vals);
+  const span = Math.max(...vals) - min || 1;
+  const step = width / (vals.length - 1);
+  return vals.map((v, i) => `${round1(i * step)},${round1(height - ((v - min) / span) * (height - 4) - 2)}`).join(" ");
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/** Kontrola položky „chci získat" (backend kontroluje znovu). */
+export function validateWish(kind: string, name: string): string | null {
+  if (!WISH_KINDS.some((k) => k.value === kind)) return "Vyber druh: mount, mazlíček nebo achievement.";
+  const n = name.trim().replace(/\s+/g, " ");
+  if (n.length < 2 || n.length > 120) return "Název: 2–120 znaků, anglicky jak ho píše hra.";
+  return null;
+}
 
 export type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "accent";
 
@@ -125,4 +186,38 @@ export function batchMessage(r: WowBatchResult): { tone: "success" | "warning"; 
   if (failures.length) parts.push(`selhalo: ${failures.map(([code, n]) => `${n}× ${BATCH_ERRORS[code] ?? code}`).join(", ")}`);
   if (r.remaining && r.remaining > 0) parts.push(`zbývá ${r.remaining} (další se načtou při příští obnově)`);
   return { tone: r.synced > 0 && !failures.length ? "success" : "warning", text: `${parts.join(" · ")}.` };
+}
+
+/** MRK-139: oficiální barvy tříd WoW (RGB trojice pro rgb(var(--class-rgb) / α)); neznámá třída = null. */
+const CLASS_RGB: Record<string, string> = {
+  "death knight": "196 30 58",
+  "demon hunter": "163 48 201",
+  druid: "255 124 10",
+  evoker: "51 147 127",
+  hunter: "170 211 114",
+  mage: "63 199 235",
+  monk: "0 255 152",
+  paladin: "244 140 186",
+  priest: "235 235 235",
+  rogue: "255 244 104",
+  shaman: "0 112 221",
+  warlock: "135 136 238",
+  warrior: "198 155 109",
+};
+
+export function classRgb(className: string | null | undefined): string | null {
+  return className ? CLASS_RGB[className.trim().toLowerCase()] ?? null : null;
+}
+
+/** Frakce → „horde" / „alliance" / null (tónování pozadí karty). */
+export function factionKey(faction: string | null | undefined): "horde" | "alliance" | null {
+  const f = (faction ?? "").trim().toLowerCase();
+  return f === "horde" ? "horde" : f === "alliance" ? "alliance" : null;
+}
+
+/** Obrázek jen z oficiálního render hostu Blizzardu (stejné pravidlo jako backend) – jinak null, nic cizího. */
+export function safeRenderUrl(url: string | null | undefined): string | null {
+  return typeof url === "string" && /^https:\/\/render(?:-(?:eu|us|kr|tw))?\.worldofwarcraft\.com\/[A-Za-z0-9_\-./%]+\.(?:jpg|jpeg|png|webp)$/.test(url)
+    ? url
+    : null;
 }

@@ -32,6 +32,10 @@ LOCALE_RE = re.compile(r"^[a-z]{2}_[A-Z]{2}$")
 TOKEN_URL = "https://oauth.battle.net/token"
 TIMEOUT = 10
 MAX_BYTES = 512 * 1024
+# MRK-128: seznam achievementů retail účtu má jednotky MB (tisíce položek s kritérii)
+COLLECTION_MAX_BYTES = 8 * 1024 * 1024
+# MRK-128: sbírky – cesta pod postavou → název pro chyby a testy
+COLLECTIONS = {"mounts": "/collections/mounts", "pets": "/collections/pets", "achievements": "/achievements"}
 
 
 class BattleNetError(Exception):
@@ -92,9 +96,9 @@ def reset_token_cache() -> None:
         _token.update(value=None, expires=0.0, key=None)
 
 
-def _read_json(resp) -> dict:
+def _read_json(resp, max_bytes: int = MAX_BYTES) -> dict:
     body = resp.content if hasattr(resp, "content") else b""
-    if body is None or len(body) > MAX_BYTES:
+    if body is None or len(body) > max_bytes:
         raise BattleNetError("invalid_response")
     try:
         data = resp.json()
@@ -145,7 +149,7 @@ class Client:
         self.transport = transport or requests.request
         self.now = now
 
-    def _get(self, path: str) -> dict:
+    def _get(self, path: str, max_bytes: int = MAX_BYTES) -> dict:
         token = _access_token(self.cfg, self.transport, self.now)
         url = f"{self.cfg.api_host}{path}"
         params = {"namespace": self.cfg.namespace, "locale": self.cfg.locale}
@@ -160,7 +164,7 @@ class Client:
             reset_token_cache()  # token mohl vypršet dřív – příště nový
         if resp.status_code != 200:
             raise _status_error(resp.status_code)
-        return _read_json(resp)
+        return _read_json(resp, max_bytes)
 
     @staticmethod
     def _char_path(realm_slug: str, name_key: str) -> str:
@@ -179,6 +183,23 @@ class Client:
             if err.code == "not_found":
                 return None
             raise
+
+
+    def media(self, realm_slug: str, name_key: str) -> dict | None:
+        """MRK-139: obrázky postavy (avatar, render). Doplněk – JAKÁKOLI chyba (i 429 / 403) = None, synchronizace
+        profilu jede dál a nic se nezahodí (Codex review #110)."""
+        try:
+            return self._get(self._char_path(realm_slug, name_key) + "/character-media")
+        except BattleNetError:
+            return None
+
+    def collection(self, realm_slug: str, name_key: str, what: str) -> dict | None:
+        """MRK-128: sbírka účtu přes postavu (`mounts` | `pets` | `achievements`). Doplněk – chyba = None, takže
+        výpadek jednoho endpointu nechá u toho čísla poslední známý stav a ostatní se uloží."""
+        try:
+            return self._get(self._char_path(realm_slug, name_key) + COLLECTIONS[what], COLLECTION_MAX_BYTES)
+        except BattleNetError:
+            return None
 
 
 def client() -> Client | None:
