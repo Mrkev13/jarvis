@@ -11,10 +11,11 @@
  */
 
 export type GameAssetKind = "tank" | "character" | "resource";
-export type GameImageSize = "xs" | "sm" | "md" | "lg";
+export type GameImageSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 /** Výška obrázku v px (tank má šířku 1,6× – poměr ikon z Tankopedie 160 × 100). */
-export const GAME_IMAGE_SIZES: Record<GameImageSize, number> = { xs: 24, sm: 40, md: 56, lg: 88 };
+// MRK-138: xl = zaměřený tank v hangáru (192 × 120)
+export const GAME_IMAGE_SIZES: Record<GameImageSize, number> = { xs: 24, sm: 40, md: 56, lg: 88, xl: 120 };
 export const TANK_ASPECT = 1.6;
 
 export function imageBox(kind: GameAssetKind, size: GameImageSize): { width: number; height: number } {
