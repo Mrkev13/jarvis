@@ -3,9 +3,14 @@ Bez sítě: falešný transport z test_wow (FakeApi.collections)."""
 import json
 import os
 import sys
+import tempfile
 import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -208,6 +213,61 @@ class WishTestCase(CollectionsBase):
         self.assertEqual(self.q(lambda db: db.query(ActivityLog).filter_by(entity_type="wow_wish", action_type="delete").count()), 1)
         with self.assertRaises(collections.CollectionError):
             self.q(lambda db: collections.delete_wish(db, w["id"]))
+
+
+class RaceTestCase(CollectionsBase):
+    """Codex review #113: hodinový krok × ruční obnova pro den BEZ snapshotu – oba načtou snap=None, druhý insert
+    narazí na unikátní `day`. Souborová SQLite (oddělená spojení), aby se sessions opravdu prokládaly."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.engine.dispose()
+        self.engine = create_engine(f"sqlite+pysqlite:///{self._tmp.name}/race.db", poolclass=NullPool)
+        from database import Base
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        self.q(lambda db: service.add_character(db, "Thrallík", "Pyrewood Village", 60))
+
+    def tearDown(self):
+        super().tearDown()
+        self._tmp.cleanup()
+
+    def test_two_syncs_for_a_new_day_never_crash(self):
+        inner_done = []
+        real = battlenet.Client.collection
+
+        def interleaved(cli, realm, name, what):
+            if what == "mounts" and not inner_done:
+                inner_done.append(True)
+                # druhá obnova proběhne celá (a commitne) mezi načtením snap=None a insertem první
+                self.set_api(m=mounts("Swift Brown Steed", "Black Stallion", "Raven Lord"))
+                self.assertEqual(self.sync(force=True), "ok")
+                self.set_api(m=mounts("Swift Brown Steed", "Black Stallion", "Raven Lord", "Invincible"))
+            return real(cli, realm, name, what)
+
+        with patch.object(battlenet.Client, "collection", interleaved):
+            self.assertEqual(self.sync(force=True), "ok", "prohraný insert nesmí shodit obnovu (REST by vrátil 500)")
+        rows = self.q(lambda db: [(r.day, r.mounts) for r in db.query(WowCollectionSnapshot).all()])
+        self.assertEqual(rows, [(date(2026, 11, 23), 4)], "jeden řádek na den, novější hodnoty z prvního běhu")
+        audits = self.q(lambda db: [json.loads(a.delta_json) for a in
+                                    db.query(ActivityLog).filter_by(entity_type="wow_collection").order_by(ActivityLog.id)])
+        self.assertEqual(len(audits), 2)
+        self.assertEqual(audits[1], {"mounts": {"old": 3, "new": 4}}, "audit prohraného běhu = jen jeho změna")
+
+
+class ClaimTestCase(CollectionsBase):
+    def test_conflict_rolls_back_only_the_savepoint(self):
+        """Konflikt na `day` vrátí jen savepoint – dřívější zápisy vnější transakce (postavy v sync_due) zůstanou."""
+        self.sync()
+
+        def go(db):
+            collections.add_wish(db, "pet", "Lil' K.T.")  # neuložený zápis vnější transakce
+            snap, created = collections._claim_today(db, date(2026, 11, 23), self.clock[0], {k: None for k in collections.COUNTS})
+            return created, snap.mounts
+
+        self.assertEqual(self.q(go), (False, 2), "vrátí vítězný řádek")
+        self.assertEqual(self.q(lambda db: db.query(WowWish).count()), 1, "vnější zápis přežil")
 
 
 class IntegrationTestCase(CollectionsBase):

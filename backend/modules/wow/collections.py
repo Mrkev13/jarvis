@@ -13,6 +13,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from activity_service import log_activity
@@ -207,11 +208,11 @@ def sync_collections(db: Session, client: battlenet.Client | None, *, now: datet
     previous = latest(db)
     before = {k: getattr(previous, k) for k in COUNTS} if previous else {k: None for k in COUNTS}
     if snap is None:
-        snap = WowCollectionSnapshot(day=today, updated_at=now)
-        # chybějící endpoint dnes = poslední známá hodnota (graf nemá díry kvůli výpadku)
-        for k in COUNTS:
-            setattr(snap, k, before[k])
-        db.add(snap)
+        snap, created = _claim_today(db, today, now, before)
+        if not created:
+            # Souběh vyhrál jiný sync (hodinový krok × ruční obnova): stav PŘED námi = jeho snapshot, ať audit
+            # zapíše jen to, co měníme my (Codex review #113)
+            before = {k: getattr(snap, k) for k in COUNTS}
     for k, v in values.items():
         if v is not None:
             setattr(snap, k, v)
@@ -224,6 +225,22 @@ def sync_collections(db: Session, client: battlenet.Client | None, *, now: datet
                      delta=delta, user_context=user_context, dedupe_key=f"wow:collection:{uuid.uuid4().hex}")
     _tick_wishes(db, {"mount": mount_names, "pet": pet_names, "achievement": ach_names}, now, user_context)
     return "ok"
+
+
+def _claim_today(db: Session, today: date, now: datetime, seed: dict) -> tuple[WowCollectionSnapshot, bool]:
+    """Dnešní řádek snapshotu → (řádek, vložil ho tento sync). Jinak vrátí ten, který mezitím vložil souběžný sync.
+
+    Insert běží v SAVEPOINTu: konflikt na unikátním `day` vrátí jen savepoint, vnější transakce (synchronizace
+    postav v `sync_due`, audit) zůstane netknutá. Nový řádek startuje z posledních známých hodnot – chybějící
+    endpoint dnes = včerejší číslo (graf nemá díry kvůli výpadku)."""
+    try:
+        with db.begin_nested():
+            snap = WowCollectionSnapshot(day=today, updated_at=now, **seed)
+            db.add(snap)
+            db.flush()
+        return snap, True
+    except IntegrityError:
+        return db.query(WowCollectionSnapshot).filter(WowCollectionSnapshot.day == today).one(), False
 
 
 def _summary(delta: dict) -> str:
