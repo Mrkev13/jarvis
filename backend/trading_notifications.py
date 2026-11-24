@@ -10,6 +10,8 @@ Výsledkem jsou kandidáti pro `notifications_service.generate_notifications`:
 
 Oblast je `finance`, takže je `finance_ai_policy.is_finance_notification` odfiltruje z AI (MRK-60).
 Bez `TRADING_API_URL` modul nic nedělá. Výpadek konektoru = „zdroj nedostupný“, nikdy výjimka ven.
+Neplatná odpověď (jiný tvar, nečitelné datum…) je taky výpadek: vrátí `trading_health`, nikdy prázdný seznam –
+prázdný výsledek by `_resolve_if_no_longer_relevant` vyhodnotil jako zotavení a upozornění by zmizelo.
 """
 from __future__ import annotations
 
@@ -36,6 +38,8 @@ ALERT_TTL_DAYS = 14
 MAX_LISTED_FILLS = 6
 
 TRADING_NOTIFICATION_TYPES = frozenset({"trading_report", "trading_alert", "trading_health"})
+HEALTH_KEY = "trading_health"
+INVALID_RESPONSE = "Trading API vrátilo neplatnou odpověď – stav paper tradingu nejde ověřit."
 
 Fetch = Callable[[str], object]
 
@@ -58,6 +62,13 @@ def _http_get(path: str) -> object:
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
         raise TradingApiError(
             f"Trading API neodpovídá ({e.__class__.__name__}). Zkontroluj kontejnery standa-trading.") from None
+
+
+def _api_date(value) -> date:
+    """Datum z API jen jako text YYYY-MM-DD (fromisoformat by bral i „20261123“ a podobné tvary)."""
+    if not isinstance(value, str) or len(value) != 10:
+        raise ValueError("invalid date")
+    return date.fromisoformat(value)
 
 
 def is_configured() -> bool:
@@ -104,20 +115,20 @@ def report_message(rep: dict) -> str:
     return "\n".join(lines)
 
 
+def health_candidate(candidate_cls, message: str):
+    """Upozornění na nedostupný / neověřitelný trading. Používá ho i notifications_service při nečekané chybě."""
+    return candidate_cls(dedupe_key=HEALTH_KEY, area=AREA, title="Paper trading: problém", message=message,
+                         severity="warning", notification_type="trading_health", source_type=SOURCE_TYPE,
+                         source_id=None, action_url=ACTION_URL, expires_at=None)
+
+
 def trading_candidates(candidate_cls, today: date, fetch: Fetch | None = None) -> list:
     """Kandidáti notifikací. `candidate_cls` = NotificationCandidate (předává se zvenku kvůli kruhovému importu),
-    `fetch` jen pro testy (jinak HTTP)."""
+    `fetch` jen pro testy (jinak HTTP). Při nastaveném API nikdy nevrátí „nic“ kvůli chybě – vždy health."""
     if fetch is None:
         if not is_configured():
             return []
         fetch = _http_get
-
-    def cand(**kw):
-        return candidate_cls(area=AREA, source_type=SOURCE_TYPE, source_id=None, action_url=ACTION_URL, **kw)
-
-    def health(message: str):
-        return cand(dedupe_key="trading_health", title="Paper trading: problém", message=message,
-                    severity="warning", notification_type="trading_health", expires_at=None)
 
     try:
         h = fetch("/health")
@@ -125,7 +136,23 @@ def trading_candidates(candidate_cls, today: date, fetch: Fetch | None = None) -
         summary = fetch("/summary")
     except TradingApiError as e:
         log.warning("trading notifications: %s", e)
-        return [health(str(e))]
+        return [health_candidate(candidate_cls, str(e))]
+
+    try:
+        if not isinstance(h, dict) or not isinstance(rep, dict) or not isinstance(summary, list):
+            raise TypeError("unexpected response shape")
+        return _candidates_from(candidate_cls, today, h, rep, summary)
+    except (TypeError, ValueError, KeyError, AttributeError) as e:
+        log.warning("trading notifications: invalid API response (%s)", e.__class__.__name__)
+        return [health_candidate(candidate_cls, INVALID_RESPONSE)]
+
+
+def _candidates_from(candidate_cls, today: date, h: dict, rep: dict, summary: list) -> list:
+    def cand(**kw):
+        return candidate_cls(area=AREA, source_type=SOURCE_TYPE, source_id=None, action_url=ACTION_URL, **kw)
+
+    def health(message: str):
+        return health_candidate(candidate_cls, message)
 
     out = []
 
@@ -134,7 +161,7 @@ def trading_candidates(candidate_cls, today: date, fetch: Fetch | None = None) -
         job = next((r.get("job") for r in h.get("last_runs", []) if r.get("status") == "error"), "?")
         out.append(health(f"Poslední běh '{job}' v standa-trading skončil chybou (docker compose logs worker)."))
     data_until = h.get("data_until")
-    if data_until and (today - date.fromisoformat(str(data_until))).days > STALE_DATA_DAYS:
+    if data_until is not None and (today - _api_date(data_until)).days > STALE_DATA_DAYS:
         out.append(health(f"Data jsou stará – poslední svíčka {data_until}. Sběr dat asi neběží."))
     # Dva problémy najednou → jedna notifikace (stejný dedupe_key), zprávy spojené.
     health_items = [c for c in out if c.notification_type == "trading_health"]
@@ -143,8 +170,8 @@ def trading_candidates(candidate_cls, today: date, fetch: Fetch | None = None) -
 
     # ── Denní report ──
     rep_date = rep.get("date")
-    if rep_date and (today - date.fromisoformat(str(rep_date))).days <= REPORT_MAX_AGE_DAYS:
-        d = date.fromisoformat(str(rep_date))
+    d = _api_date(rep_date) if rep_date is not None else None
+    if d is not None and (today - d).days <= REPORT_MAX_AGE_DAYS:
         out.append(cand(
             dedupe_key=f"trading_report:{d.isoformat()}", title=f"Paper trading {d.day}. {d.month}.",
             message=report_message(rep), severity="info", notification_type="trading_report",
@@ -152,7 +179,7 @@ def trading_candidates(candidate_cls, today: date, fetch: Fetch | None = None) -
         ))
 
     # ── Strategie vypnutá pojistkou ──
-    for a in summary or []:
+    for a in summary:
         reason = a.get("disabled_reason") or ""
         if not a.get("active") and "drawdown" in reason:
             out.append(cand(

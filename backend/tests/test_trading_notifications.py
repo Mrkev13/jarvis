@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 import trading_notifications as tn
 from database import Base
 from finance_ai_policy import is_finance_notification
-from models import Notification
+from models import Assignment, Notification, Subject
 from notifications_service import NotificationCandidate, generate_notifications, list_notifications
 
 TODAY = date(2026, 11, 24)
@@ -117,6 +117,24 @@ class TradingCandidatesTestCase(unittest.TestCase):
         self.assertEqual(alerts[0].severity, "important")
         self.assertEqual(alerts[0].expires_at, datetime(2026, 11, 24) + timedelta(days=14))
 
+    def test_invalid_responses_give_health_warning_not_silence(self):
+        # Regrese (review PR #111): neplatný tvar odpovědi = neověřený stav → health, nikdy prázdný seznam.
+        bad = {
+            "nečitelné datum": api(health={"ok": False, "last_runs": [{"job": "collect", "status": "error"}],
+                                            "data_until": "nesmysl"}),
+            "health není objekt": api(health=["ok"]),
+            "report bez data jako text": api(report={"date": 20261123}),
+            "summary není seznam": api(summary={"name": "x"}),
+            "účet bez jména": api(summary=[{"active": False, "disabled_reason": "drawdown"}]),
+            "účet bez výnosu": api(report={"date": "2026-11-23", "accounts": [{"name": "x", "total": 1}]}),
+            "last_runs je text": api(health={"ok": False, "last_runs": "error", "data_until": "2026-11-23"}),
+        }
+        for label, fetch in bad.items():
+            with self.subTest(label):
+                [c] = candidates(fetch)
+                self.assertEqual(c.dedupe_key, "trading_health")
+                self.assertEqual(c.message, tn.INVALID_RESPONSE)
+
     def test_all_trading_notifications_are_hidden_from_ai(self):
         summary = [account("x", 1, -31, active=False, reason="drawdown")]
         for c in candidates(api(summary=summary)) + candidates(failing):
@@ -181,11 +199,37 @@ class TradingInGenerateNotificationsTestCase(unittest.TestCase):
         self.assertNotIn("trading_health", self.open_keys())
         self.assertIn("trading_report:2026-11-23", self.open_keys())
 
-    def test_unexpected_connector_error_does_not_break_other_notifications(self):
-        def boom(path):
-            raise RuntimeError("unexpected")
-        stats = self.run_with(boom)
-        self.assertEqual(stats["created"], 0)
+    def test_outage_then_invalid_response_keeps_health_until_real_recovery(self):
+        # Regrese (review PR #111): výpadek → neplatná odpověď nesmí upozornění vyřešit, až zdravá odpověď.
+        self.run_with(failing)
+        self.assertIn("trading_health", self.open_keys())
+
+        invalid = api(health={"ok": False, "last_runs": [{"job": "collect", "status": "error"}],
+                              "data_until": "nesmysl"})
+        stats = self.run_with(invalid)
+        self.assertEqual(stats["resolved_irrelevant"], 0)
+        self.assertIn("trading_health", self.open_keys())
+
+        self.run_with(api())
+        self.assertNotIn("trading_health", self.open_keys())
+
+    def test_unexpected_error_keeps_health_and_other_notifications(self):
+        subj = Subject(name="Test", code="", semester="", credits=0, active=True)
+        self.db.add(subj)
+        self.db.flush()
+        self.db.add(Assignment(title="Úkol", description="", due_date=TODAY + timedelta(days=2),
+                               priority="medium", status="todo", subject_id=subj.id))
+        self.db.commit()
+        self.run_with(failing)
+
+        with mock.patch.object(tn, "trading_candidates", side_effect=RuntimeError("unexpected")), \
+                mock.patch("notifications_service.trading_candidates", side_effect=RuntimeError("unexpected")):
+            stats = generate_notifications(self.db, today=TODAY)
+        self.db.commit()
+        self.assertEqual(stats["resolved_irrelevant"], 0)
+        keys = self.open_keys()
+        self.assertIn("trading_health", keys)
+        self.assertTrue(any(k.startswith("assignment_deadline_3d:") for k in keys))
 
     def test_report_stays_after_next_run_without_new_data(self):
         # Report nemá být „vyřešen“ jen proto, že další den API vrací starší datum – vyprší sám.
