@@ -5,6 +5,8 @@ import { DesktopSidebar, MobileHeader } from "@/components/Sidebar";
 import { JarvisCompanion } from "@/components/jarvis/JarvisCompanion";
 import { BootSequence } from "@/components/jarvis/BootSequence";
 import { HudReticle } from "@/components/jarvis/HudReticle";
+import { MissionComplete } from "@/components/jarvis/MissionComplete";
+import { DaypartTint } from "@/components/jarvis/DaypartTint";
 import { ModuleRouteGuard } from "@/components/modules/ModuleRouteGuard";
 import { ModuleRuntimeLoader } from "@/components/modules/ModuleRuntimeLoader";
 import { DomainEventsBridge } from "@/components/events/DomainEventsBridge";
@@ -50,6 +52,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <DomainEventsBridge />
           <JarvisCompanion />
           <BootSequence />
+          <MissionComplete />
+          <DaypartTint />
         </div>
       </QuickAddProvider>
     </SearchProvider>

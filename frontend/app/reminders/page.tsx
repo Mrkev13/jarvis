@@ -1,5 +1,6 @@
 "use client";
 
+import { RemindersCore } from "@/components/jarvis/RemindersCore";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRowExit } from "@/components/motion/useRowExit";
@@ -237,6 +238,9 @@ export default function RemindersPage() {
         title="Připomínky"
         subtitle="Časy jsou v pražském čase. Zazněná připomínka se objeví i ve zvonku notifikací."
       />
+
+      {/* MRK-134: HUD odpočet do další připomínky (jen v pohledu Nadcházející) */}
+      {view === "upcoming" && reminders.data ? <RemindersCore items={reminders.data} /> : null}
 
       {actionError ? <ErrorState message={actionError} /> : null}
 

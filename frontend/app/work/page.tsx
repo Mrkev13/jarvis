@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { pragueMonthDay, workCore } from "@/lib/hudModules";
 import { useMemo, useState } from "react";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import {
@@ -148,6 +150,12 @@ export default function WorkPage() {
           </Button>
         }
       />
+
+      {/* MRK-134: HUD jádro – prstenec = kolik měsíce uběhlo, věta s hodinami a výdělkem */}
+      {summary ? (() => {
+        const { day, daysInMonth } = pragueMonthDay();
+        return <HudCore module="work" label={`Jarvis · práce · den ${day} z ${daysInMonth}`} {...workCore(summary.this_month_hours, summary.this_month_earnings, day, daysInMonth)} />;
+      })() : null}
 
       {actionError ? <ErrorState message={actionError} /> : null}
 

@@ -18,8 +18,8 @@
   z-index: -1;
   pointer-events: none;
   background-image:
-    radial-gradient(ellipse 70% 55% at 82% -12%, rgb(var(--arc-rgb) / 0.11), transparent 62%),
-    radial-gradient(ellipse 55% 40% at 0% 0%, rgb(167 139 250 / 0.05), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 82% -12%, rgb(var(--hud-glow-a) / var(--hud-glow-a-alpha)), transparent 62%),
+    radial-gradient(ellipse 55% 40% at 0% 0%, rgb(var(--hud-glow-b) / var(--hud-glow-b-alpha)), transparent 60%),
     radial-gradient(circle at center, rgb(var(--arc-strong-rgb) / 0.07) 1px, transparent 1.5px),
     linear-gradient(rgb(var(--arc-rgb) / var(--hud-line-opacity)) 1px, transparent 1px),
     linear-gradient(90deg, rgb(var(--arc-rgb) / var(--hud-line-opacity)) 1px, transparent 1px);
@@ -370,6 +370,8 @@
 }
 .jarvis-core[data-jarvis-core="alert"] { --core-rgb: 251 191 36; }
 .jarvis-core[data-jarvis-core="done"]  { --core-rgb: 52 211 153; }
+.jarvis-core[data-hud-mood="alert"] { --core-rgb: 251 191 36; }
+.jarvis-core[data-hud-mood="done"]  { --core-rgb: 52 211 153; }
 .day-reactor {
   width: 2.75rem;
   height: 2.75rem;
@@ -472,4 +474,156 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ai-wave-bar { animation: none !important; transform: scaleY(0.6); }
+}
+
+/* =====================================================================================================
+ * MRK-133 – Jarvis HUD vlna 3
+ * ===================================================================================================== */
+
+/* ---------- Barva HUD podle denní doby (DaypartTint → html[data-daypart]) – jen záře a mřížka pozadí ---------- */
+:root {
+  --hud-glow-a: var(--arc-rgb);
+  --hud-glow-a-alpha: 0.11;
+  --hud-glow-b: 167 139 250;
+  --hud-glow-b-alpha: 0.05;
+  --hud-reticle-opacity: 0.75;
+}
+html[data-daypart="morning"] {
+  /* ráno: teplá záře jako východ slunce nad HUD */
+  --hud-glow-a: 255 176 84;
+  --hud-glow-a-alpha: 0.1;
+  --hud-glow-b: var(--arc-rgb);
+  --hud-glow-b-alpha: 0.06;
+}
+html[data-daypart="evening"] {
+  --hud-glow-a: 124 140 255;
+  --hud-glow-a-alpha: 0.1;
+  --hud-glow-b-alpha: 0.09;
+}
+html[data-daypart="night"] {
+  /* noc: tlumené pozadí, šetří oči */
+  --hud-glow-a-alpha: 0.06;
+  --hud-glow-b-alpha: 0.03;
+  --hud-line-opacity: 0.022;
+  --hud-reticle-opacity: 0.4;
+}
+.hud-reticle { opacity: var(--hud-reticle-opacity); }
+
+/* ---------- „Mise splněna" (components/jarvis/MissionComplete.tsx) ---------- */
+.mission-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 46%, rgb(52 211 153 / 0.16), rgb(5 9 17 / 0.55) 55%, transparent 80%);
+  animation:
+    boot-line-in 260ms var(--motion-ease-enter) backwards,
+    boot-overlay-out 420ms var(--motion-ease-exit) 1500ms forwards;
+}
+.mission-stage { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.mission-reactor {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 6rem;
+  height: 6rem;
+  animation: boot-reactor-in 480ms var(--motion-ease-emphasized) backwards;
+}
+.mission-wave { border-color: rgb(52 211 153 / 0.8); box-shadow: 0 0 24px rgb(52 211 153 / 0.4); animation-delay: 120ms; }
+.mission-wave.boot-wave-2 { animation-delay: 320ms; }
+.mission-title {
+  margin-top: 1.25rem;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(167 243 208);
+  text-shadow: 0 0 24px rgb(52 211 153 / 0.6);
+  animation: boot-line-in 360ms var(--motion-ease-enter) 200ms backwards;
+}
+.mission-detail {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-ink-2);
+  animation: boot-line-in 360ms var(--motion-ease-enter) 360ms backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mission-overlay { display: none; }
+}
+
+/* =====================================================================================================
+ * MRK-134 – Jarvis HUD vlna 4: moduly
+ * ===================================================================================================== */
+
+/* ---------- Kalendář: ryska „teď" jako skener (modules/calendar/DayTimelineList.tsx) ---------- */
+.now-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 1.25rem;
+  list-style: none;
+}
+.now-line::before {
+  content: "";
+  flex: 1;
+  height: 1px;
+  margin-left: 6.5rem;
+  background: linear-gradient(90deg, rgb(var(--arc-strong-rgb)), rgb(var(--arc-rgb) / 0.4) 60%, transparent);
+  box-shadow: 0 0 10px rgb(var(--arc-rgb) / 0.7);
+  transform-origin: left center;
+  animation: title-rule-in 700ms var(--motion-ease-emphasized) backwards;
+}
+.now-line-time {
+  position: absolute;
+  left: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: rgb(var(--arc-strong-rgb));
+  padding: 0 0.375rem;
+  border: 1px solid rgb(var(--arc-rgb) / 0.5);
+  border-radius: 9999px;
+  background: rgb(var(--arc-rgb) / 0.1);
+}
+
+/* ---------- Kalendář týden: dnešní den rozsvícený ---------- */
+.week-today {
+  border-color: rgb(var(--arc-rgb) / 0.55);
+  box-shadow: var(--shadow-glow);
+  background-image: linear-gradient(180deg, rgb(var(--arc-rgb) / 0.08), transparent 6rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-line::before { animation: none !important; }
+}
+
+/* ---------- AI: čerstvá odpověď se vypíše shora dolů (components/ai/MessageItem.tsx) ---------- */
+.ai-reveal {
+  -webkit-mask-image: linear-gradient(180deg, #000 45%, transparent 55%);
+  mask-image: linear-gradient(180deg, #000 45%, transparent 55%);
+  -webkit-mask-size: 100% 220%;
+  mask-size: 100% 220%;
+  mask-position: 0 0;
+  animation: ai-reveal 1100ms var(--motion-ease-standard) backwards;
+}
+@keyframes ai-reveal {
+  from { -webkit-mask-position: 0 100%; mask-position: 0 100%; }
+  to   { -webkit-mask-position: 0 0;    mask-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-reveal { animation: none !important; -webkit-mask-image: none; mask-image: none; }
+}
+
+/* ---------- Plánovač: fronta misí (components/PlannerCards.tsx) ---------- */
+.plan-step {
+  animation: palette-result-in 320ms var(--motion-ease-enter) calc(var(--i, 0) * 60ms + 80ms) backwards;
+}
+.plan-step-top {
+  border-color: rgb(var(--arc-rgb) / 0.45);
+  box-shadow: inset 2px 0 0 rgb(var(--arc-strong-rgb) / 0.9), 0 0 22px -12px rgb(var(--arc-rgb) / 0.8);
+  background-image: linear-gradient(90deg, rgb(var(--arc-rgb) / 0.08), transparent 55%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-step { animation: none !important; }
 }

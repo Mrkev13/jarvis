@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import PushSettings from "@/components/PushSettings";
 import { ModuleSettings } from "@/components/modules/ModuleSettings";
+import { HudSettings } from "@/components/jarvis/HudSettings";
 import { Card, CardHeader, ContentContainer, HudLabel, PageHeader } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
 
@@ -54,6 +55,7 @@ export default function SettingsPage() {
             </ol>
           </Card>
         </div>
+        <HudSettings />
         <ModuleSettings />
       </div>
     </ContentContainer>
