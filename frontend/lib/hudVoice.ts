@@ -41,7 +41,7 @@ export function voiceOptions(voices: VoiceLike[], lang: "cs" | "en"): VoiceLike[
 
 /** Vybraný hlas (pokud ho prohlížeč pořád má a sedí k jazyku), jinak nejlepší dostupný. */
 export function pickVoice<T extends VoiceLike>(voices: T[], prefs: Pick<HudPrefs, "voiceLang" | "voiceURI">): T | null {
-  const chosen = prefs.voiceURI ? voices.find((v) => v.voiceURI === prefs.voiceURI && voiceScore(v, prefs.voiceLang) >= 0) : undefined;
+  const chosen = prefs.voiceURI && prefs.voiceURI !== "piper" ? voices.find((v) => v.voiceURI === prefs.voiceURI && voiceScore(v, prefs.voiceLang) >= 0) : undefined;
   if (chosen) return chosen;
   return (voiceOptions(voices, prefs.voiceLang)[0] as T | undefined) ?? null;
 }
@@ -91,4 +91,42 @@ export async function speakAsJarvis(text: string, prefs: Pick<HudPrefs, "voiceLa
       resolve();
     }
   });
+}
+
+/** MRK-136: „studiový hlas" – předgenerované pozdravy Piperem (public/jarvis/voice). Výchozí volba hlasu. */
+export const PIPER_VOICE = "piper";
+
+/** Klip pozdravu pro jazyk a pražskou hodinu – hranice dne stejné jako `greetingText`. */
+export function greetingClip(lang: "cs" | "en", hour: number): string {
+  let part: string;
+  if (lang === "en") part = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 18 ? "afternoon" : hour >= 18 && hour < 23 ? "evening" : "night";
+  else part = hour >= 5 && hour < 10 ? "morning" : hour >= 10 && hour < 18 ? "day" : hour >= 18 && hour < 23 ? "evening" : "night";
+  return `/jarvis/voice/${lang}-${part}.mp3`;
+}
+
+export function usesStudioVoice(prefs: Pick<HudPrefs, "voiceURI">): boolean {
+  return prefs.voiceURI === null || prefs.voiceURI === PIPER_VOICE;
+}
+
+function playClip(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(url);
+    audio.volume = 0.9;
+    audio.onended = () => resolve();
+    audio.onerror = () => reject(new Error("clip"));
+    audio.play().catch(reject);
+  });
+}
+
+/** Pozdrav: studiový hlas (klip), při chybě nebo volbě jiného hlasu hlas prohlížeče. Skončí po dořečení. */
+export async function sayGreeting(prefs: Pick<HudPrefs, "voiceLang" | "voiceURI">, hour: number): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (usesStudioVoice(prefs)) {
+    try {
+      return await playClip(greetingClip(prefs.voiceLang, hour));
+    } catch {
+      /* zablokované přehrání / chybějící soubor → hlas prohlížeče */
+    }
+  }
+  return speakAsJarvis(greetingText(prefs.voiceLang, hour), prefs);
 }

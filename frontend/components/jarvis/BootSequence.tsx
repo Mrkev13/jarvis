@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { BOOT_MS, BOOT_SESSION_KEY, bootGreeting, pragueHour, shouldBoot } from "@/lib/boot";
 import { BOOT_REPLAY_EVENT, readHudPrefs } from "@/lib/hud";
-import { VOICE_SPOKEN_KEY, greetingText, speakAsJarvis } from "@/lib/hudVoice";
+import { VOICE_SPOKEN_KEY, sayGreeting } from "@/lib/hudVoice";
 import { playHudSound, whenActivated } from "@/lib/hudSound";
 
 /**
@@ -40,7 +40,7 @@ export function BootSequence() {
         spoken = false;
       }
       if (!spoken || force) {
-        cleanups.push(whenActivated(() => void speakAsJarvis(greetingText(prefs.voiceLang, pragueHour()), prefs)));
+        cleanups.push(whenActivated(() => void sayGreeting(prefs, pragueHour())));
       }
     }
     const run = shouldBoot({ seen, reducedMotion, automated, force });

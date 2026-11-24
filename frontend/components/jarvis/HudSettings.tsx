@@ -6,7 +6,7 @@ import { fieldClass } from "@/components/ui/forms";
 import { BOOT_REPLAY_EVENT, HUD_PREFS_EVENT, readHudPrefs, writeHudPrefs, type HudPrefs } from "@/lib/hud";
 import { pragueHour } from "@/lib/boot";
 import { playHudSound } from "@/lib/hudSound";
-import { greetingText, pickVoice, speakAsJarvis, voiceOptions, type VoiceLike } from "@/lib/hudVoice";
+import { PIPER_VOICE, pickVoice, sayGreeting, usesStudioVoice, voiceOptions, type VoiceLike } from "@/lib/hudVoice";
 import { isSpeechSynthesisSupported } from "@/lib/speech";
 import { cx } from "@/lib/ui";
 
@@ -35,7 +35,8 @@ export function HudSettings() {
 
   const lang = prefs?.voiceLang ?? "cs";
   const options = voiceOptions(voices, lang);
-  const current = prefs ? pickVoice(voices, prefs) : null;
+  const studio = prefs ? usesStudioVoice(prefs) : true;
+  const current = prefs && !studio ? pickVoice(voices, prefs) : null;
 
   const update = (patch: Partial<HudPrefs>) => {
     const next = { ...(prefs ?? readHudPrefs()), ...patch };
@@ -86,22 +87,23 @@ export function HudSettings() {
           <select
             aria-label="Hlas Jarvise"
             className={cx(fieldClass, "mt-1")}
-            value={current?.voiceURI ?? ""}
-            disabled={!prefs || options.length === 0}
-            onChange={(e) => update({ voiceURI: e.target.value || null })}
+            value={studio ? PIPER_VOICE : current?.voiceURI ?? PIPER_VOICE}
+            disabled={!prefs}
+            onChange={(e) => update({ voiceURI: e.target.value === PIPER_VOICE ? null : e.target.value })}
           >
-            {options.length === 0 ? <option value="">Prohlížeč nemá {lang === "en" ? "anglický" : "český"} hlas</option> : null}
+            {/* MRK-136: studiový hlas (Piper, předgenerované pozdravy) je výchozí a zní nejlépe */}
+            <option value={PIPER_VOICE}>Jarvis – studiový hlas (doporučený)</option>
             {options.map((v, i) => (
               <option key={v.voiceURI} value={v.voiceURI}>
-                {v.name}{i === 0 ? " (doporučený)" : ""}
+                {v.name}{i === 0 ? " – nejlepší v prohlížeči" : ""}
               </option>
             ))}
           </select>
         </label>
       </div>
       <p className="mt-2 px-3 text-xs text-ink-muted">
-        Prohlížeč smí mluvit až po interakci: po zadání PINu pozdraví hned, jinak po prvním kliknutí. Nejlépe znějí hlasy
-        s „Natural“, „Online“ nebo „Google“ v názvu (např. Google UK English Male v Chromu).
+        Prohlížeč smí mluvit až po interakci: po zadání PINu pozdraví hned, jinak po prvním kliknutí. Studiový hlas je
+        předem nahraný neuronovým hlasem Piper (britský mužský / český); hlasy prohlížeče jsou záloha.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" onClick={() => playHudSound("mission", true)}>
@@ -110,7 +112,7 @@ export function HudSettings() {
         <Button
           size="sm"
           variant="secondary"
-          onClick={() => void speakAsJarvis(greetingText(lang, pragueHour()), prefs ?? readHudPrefs())}
+          onClick={() => void sayGreeting(prefs ?? readHudPrefs(), pragueHour())}
         >
           Zkusit hlas
         </Button>

@@ -7,7 +7,7 @@ import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { API_URL, readErrorDetail } from "@/lib/api";
 import { pragueHour } from "@/lib/boot";
 import { readHudPrefs } from "@/lib/hud";
-import { VOICE_SPOKEN_KEY, greetingText, speakAsJarvis } from "@/lib/hudVoice";
+import { VOICE_SPOKEN_KEY, sayGreeting } from "@/lib/hudVoice";
 import { loginErrorMessage } from "@/lib/loginError";
 import { safeNextPath } from "@/lib/safeNext";
 import { cx } from "@/lib/ui";
@@ -100,7 +100,7 @@ function LoginInner() {
             /* soukromé okno – dashboard pak pozdraví po prvním kliknutí */
           }
           await Promise.race([
-            speakAsJarvis(greetingText(prefs.voiceLang, pragueHour()), prefs),
+            sayGreeting(prefs, pragueHour()),
             new Promise((resolve) => window.setTimeout(resolve, 4500)),
           ]);
         }

@@ -3684,6 +3684,9 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await card.getByLabel("Jazyk pozdravu").selectOption("en");
   check("hud hlas: britská angličtina uložená", await eventually(async () => JSON.parse(await page.evaluate(() => localStorage.getItem("sh:hud:prefs"))).voiceLang === "en", 2000));
   check("hud hlas: výběr hlasu je v kartě", (await card.getByLabel("Hlas Jarvise").count()) === 1);
+  check("hud hlas: výchozí je studiový hlas (Piper)", (await card.getByLabel("Hlas Jarvise").inputValue()) === "piper");
+  const clip = await page.evaluate(async () => { const r = await fetch("/jarvis/voice/en-afternoon.mp3"); return [r.status, r.headers.get("content-type")]; });
+  check("hud hlas: studiový klip se servíruje", clip[0] === 200 && /audio/.test(String(clip[1])), JSON.stringify(clip));
   await card.getByLabel("Jazyk pozdravu").selectOption("cs");
   // Codex review #102: skutečný klik přehraje start na místě (žádná navigace) a ten sám zmizí
   await card.getByRole("button", { name: "Přehrát start systému" }).click();

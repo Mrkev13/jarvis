@@ -41,3 +41,19 @@ test("prefs keep voice language and choice, reject junk", () => {
     { sounds: false, voice: true, voiceLang: "en", voiceURI: "g-uk-m" });
   assert.deepEqual(parseHudPrefs('{"voiceLang":"de","voiceURI":5}'), { sounds: false, voice: false, voiceLang: "cs", voiceURI: null });
 });
+
+test("studio voice clips follow the greeting day parts", async () => {
+  const { greetingClip, usesStudioVoice } = await import("./hudVoice.ts");
+  const { existsSync } = await import("node:fs");
+  assert.equal(greetingClip("en", 14), "/jarvis/voice/en-afternoon.mp3");
+  assert.equal(greetingClip("en", 9), "/jarvis/voice/en-morning.mp3");
+  assert.equal(greetingClip("cs", 11), "/jarvis/voice/cs-day.mp3", "česky „Dobré odpoledne“ už od 10 h");
+  assert.equal(greetingClip("cs", 2), "/jarvis/voice/cs-night.mp3");
+  for (const lang of ["cs", "en"]) for (let h = 0; h < 24; h++) {
+    const file = new URL(`../public${greetingClip(lang, h)}`, import.meta.url);
+    assert.ok(existsSync(file), `chybí klip ${greetingClip(lang, h)}`);
+  }
+  assert.equal(usesStudioVoice({ voiceURI: null }), true);
+  assert.equal(usesStudioVoice({ voiceURI: "piper" }), true);
+  assert.equal(usesStudioVoice({ voiceURI: "g-uk-m" }), false);
+});
