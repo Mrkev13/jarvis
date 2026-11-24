@@ -33,6 +33,9 @@ export const GOAL_SOURCES = [
   { value: "wot_ace_mastery_count", label: "WoT – počet M-ek (Mistr)", unit: "ks", placeholder: "50" },
   { value: "wow_characters_at_target", label: "WoW – postavy na cílovém levelu", unit: "ks", placeholder: "3" },
   { value: "wow_max_level", label: "WoW – nejvyšší level postavy", unit: "lvl", placeholder: "60" },
+  { value: "wow_mounts", label: "WoW – počet mountů", unit: "ks", placeholder: "100" },
+  { value: "wow_pets", label: "WoW – počet mazlíčků", unit: "ks", placeholder: "50" },
+  { value: "wow_achievement_points", label: "WoW – achievement body", unit: "b", placeholder: "5000" },
 ] as const;
 
 export function goalSourceMeta(source: string | null | undefined) {

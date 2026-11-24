@@ -59,6 +59,7 @@ class FakeApi:
         self.profiles = {("pyrewood-village", "thrallík"): dict(PROFILE)}
         self.professions = {("pyrewood-village", "thrallík"): PROFESSIONS_RETAIL}
         self.media = {}  # MRK-139: character-media (výchozí 404 = bez obrázků)
+        self.collections = {}  # MRK-128: {(realm, name, "mounts"|"pets"|"achievements"): data | HTTP kód}
         self.token_status = 200
         self.namespace = "profile-classic1x-eu"
         self.calls = []
@@ -78,6 +79,9 @@ class FakeApi:
         if self.namespace.startswith("profile-forever-"):  # MRK-130: bez realmu, /character/{jmeno-prijmeni}
             parts = ["forever"] + parts
         key = (parts[0], unquote(parts[1]))
+        if len(parts) > 2 and parts[2] in ("collections", "achievements"):
+            value = self.collections.get(key + (parts[-1],), 404)
+            return Resp(value) if isinstance(value, int) else Resp(200, value)
         table = (self.media if len(parts) > 2 and parts[2] == "character-media"
                  else self.professions if len(parts) > 2 else self.profiles)
         value = table.get(key, 404)
@@ -322,7 +326,10 @@ class SyncTestCase(WowTestBase):
         self.add(name="Rexxar", target=None)  # nenalezen
         values = self.q(lambda db: {s: ghs.compute_automatic_goal_current_value_with_ok(db, s)
                                     for s in service.GOAL_SOURCES})
-        self.assertEqual(values, {service.GOAL_AT_TARGET: (1.0, True), service.GOAL_MAX_LEVEL: (60.0, True)})
+        self.assertEqual(values, {service.GOAL_AT_TARGET: (1.0, True), service.GOAL_MAX_LEVEL: (60.0, True),
+                                  # MRK-128: sbírka bez snapshotu = hodnota neznámá (ne nula)
+                                  "wow_mounts": (0.0, False), "wow_pets": (0.0, False),
+                                  "wow_achievement_points": (0.0, False)})
 
     def test_hourly_sync_is_bounded_and_idle_without_keys(self):
         for i, n in enumerate("Aaa Bbb Ccc Ddd Eee Fff Ggg Hhh Iii Jjj Kkk Lll".split()):

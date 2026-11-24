@@ -31,7 +31,65 @@ export type WowOverview = {
   config: { configured: boolean; region: string | null; namespace: string | null };
   summary: { characters: number; max_level: number; with_target: number; at_target: number };
   characters: WowCharacter[];
+  /** MRK-128: sbírka účtu (starší backend ji nemusí poslat) */
+  collections?: WowCollections;
 };
+
+/** MRK-128: sbírka – počty z denního snapshotu Blizzard API (None = endpoint data nedal). */
+export type WowCounts = { mounts: number | null; pets: number | null; achievements: number | null; achievement_points: number | null };
+export type WowCollectionSnapshot = WowCounts & { day: string; updated_at: string | null };
+export type WowWishKind = "mount" | "pet" | "achievement";
+export type WowWish = {
+  id: number;
+  kind: WowWishKind;
+  kind_label: string;
+  name: string;
+  acquired: boolean;
+  acquired_at: string | null;
+  created_at: string | null;
+};
+export type WowCollections = {
+  latest: WowCollectionSnapshot | null;
+  week: WowCounts;
+  history: WowCollectionSnapshot[];
+  wishes: WowWish[];
+  open_wishes: number;
+};
+
+export const WISH_KINDS: { value: WowWishKind; label: string }[] = [
+  { value: "mount", label: "Mount" },
+  { value: "pet", label: "Mazlíček" },
+  { value: "achievement", label: "Achievement" },
+];
+
+/** „+3 za týden" / „−1 za týden" / „za týden beze změny"; bez srovnání null. */
+export function weekTrend(delta: number | null | undefined): { text: string; tone: Tone } | null {
+  if (delta == null) return null;
+  if (delta === 0) return { text: "za týden beze změny", tone: "neutral" };
+  return delta > 0 ? { text: `+${delta} za týden`, tone: "success" } : { text: `−${Math.abs(delta)} za týden`, tone: "warning" };
+}
+
+/** Body SVG polyline pro vývoj jedné veličiny (dny bez hodnoty se přeskočí); < 2 body = null. */
+export function sparkPoints(history: WowCollectionSnapshot[], key: keyof WowCounts, width = 120, height = 32): string | null {
+  const vals = history.map((h) => h[key]).filter((v): v is number => typeof v === "number");
+  if (vals.length < 2) return null;
+  const min = Math.min(...vals);
+  const span = Math.max(...vals) - min || 1;
+  const step = width / (vals.length - 1);
+  return vals.map((v, i) => `${round1(i * step)},${round1(height - ((v - min) / span) * (height - 4) - 2)}`).join(" ");
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/** Kontrola položky „chci získat" (backend kontroluje znovu). */
+export function validateWish(kind: string, name: string): string | null {
+  if (!WISH_KINDS.some((k) => k.value === kind)) return "Vyber druh: mount, mazlíček nebo achievement.";
+  const n = name.trim().replace(/\s+/g, " ");
+  if (n.length < 2 || n.length > 120) return "Název: 2–120 znaků, anglicky jak ho píše hra.";
+  return null;
+}
 
 export type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "accent";
 

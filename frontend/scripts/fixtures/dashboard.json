@@ -233,5 +233,26 @@
   "t4_count": 3,
   "priority_count": 2,
   "average_build_completeness": 35
+ },
+ "wow": {
+  "summary": {
+   "characters": 3,
+   "max_level": 60,
+   "with_target": 2,
+   "at_target": 1
+  },
+  "collection": {
+   "mounts": 44,
+   "pets": 31,
+   "achievements": 219,
+   "achievement_points": 2235
+  },
+  "week": {
+   "mounts": 3,
+   "pets": 1,
+   "achievements": 9,
+   "achievement_points": 95
+  },
+  "open_wishes": 1
  }
 }

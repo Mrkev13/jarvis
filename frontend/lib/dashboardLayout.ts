@@ -78,7 +78,7 @@ export const CORE_WIDGETS: WidgetDef[] = [
   { id: "burning", title: "Co hoří", area: null, defaultVisible: true, defaultOrder: 10, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, usesToday: true },
   { id: "day", title: "Můj den", area: null, defaultVisible: true, defaultOrder: 20, defaultSize: "medium", allowedSizes: ["medium", "large", "full"], usesDashboardData: false, usesToday: true },
   { id: "goals", title: "Cíle", area: "goals", defaultVisible: true, defaultOrder: 30, defaultSize: "medium", allowedSizes: ["small", "medium", "large"], usesDashboardData: true, modules: ["goals"] },
-  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff"] },
+  { id: "games", title: "Hry", area: null, defaultVisible: true, defaultOrder: 40, defaultSize: "full", allowedSizes: ["medium", "large", "full"], usesDashboardData: true, modules: ["wot", "mff", "wow"] },
   { id: "daily_briefing", title: "Denní přehled", area: "briefing", defaultVisible: true, defaultOrder: 50, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },
   { id: "weekly_review", title: "Týdenní přehled", area: "review", defaultVisible: true, defaultOrder: 60, defaultSize: "small", allowedSizes: ["small", "medium"], usesDashboardData: false },
   { id: "changes", title: "Od včera", area: null, defaultVisible: true, defaultOrder: 70, defaultSize: "large", allowedSizes: ["medium", "large", "full"], usesDashboardData: false },

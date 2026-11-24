@@ -3815,6 +3815,74 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   }
 }
 
+// 37) MRK-128 – WoW sbírka: počty s trendem za týden a sparkline, seznam „chci získat“ (přidání, už vlastněné, odebrání),
+// karta WoW na Řídicím centru
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wow", {
+      width, height: width < 500 ? 844 : 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) })),
+    });
+    const col = page.locator("[data-wow-collections]");
+    check(`wow sbírka ${label}: zobrazená`, await eventually(async () => (await col.count()) === 1, 5000));
+    const mounts = col.locator('[data-wow-count="mounts"]');
+    check(`wow sbírka ${label}: počet mountů`, (await mounts.innerText()).includes("44"));
+    check(`wow sbírka ${label}: trend za týden`, (await mounts.innerText()).includes("+3 za týden"));
+    check(`wow sbírka ${label}: sparkline vývoje`, (await col.locator(".wow-spark polyline").count()) === 4);
+    const wishes = page.getByRole("list", { name: "Chci získat" });
+    check(`wow sbírka ${label}: chybějící nahoře, získané dole`, (await wishes.locator("li").first().innerText()).includes("Invincible's Reins") && (await wishes.locator("li").last().innerText()).includes("Získáno"));
+    check(`wow sbírka ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await col.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}wow-collections-${label}.png`, fullPage: label === "desktop" });
+    check(`wow sbírka ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    // přidání (validace, nové, už vlastněné), odebrání
+    const { ctx, page, errors } = await open("/wow", { width: 1366, height: 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) })) });
+    const card = page.locator("[data-wow-wishes]");
+    await card.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const nameInput = card.getByLabel("Název");
+    await nameInput.fill("x");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: krátký název = chyba u pole", await eventually(async () => (await card.innerText()).includes("2–120 znaků"), 2000));
+    await card.getByLabel("Druh").selectOption("pet");
+    await nameInput.fill("Mechanical  Squirrel");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    const wishes = page.getByRole("list", { name: "Chci získat" });
+    check("wow sbírka: nová položka v seznamu", await eventually(async () => (await wishes.innerText()).includes("Mechanical Squirrel"), 4000));
+    check("wow sbírka: formulář se vyprázdní", (await nameInput.inputValue()) === "");
+    await card.getByLabel("Druh").selectOption("mount");
+    await nameInput.fill("Swift Brown Steed");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: už vlastněné = rovnou odškrtnuté", await eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("už ve sbírce máš"), 4000));
+    await nameInput.fill("swift brown steed");
+    await card.getByRole("button", { name: "Přidat" }).click();
+    check("wow sbírka: duplicita = chyba", await eventually(async () => (await page.locator("[data-wow-collections]").innerText()).includes("už v seznamu máš"), 4000));
+    await wishes.getByRole("button", { name: "Odebrat: Mechanical Squirrel" }).click();
+    check("wow sbírka: odebraná položka zmizí", await eventually(async () => !(await wishes.innerText()).includes("Mechanical Squirrel"), 4000));
+    check("wow sbírka: Obnovit sbírku", await (async () => {
+      await page.getByRole("button", { name: "Obnovit sbírku" }).click();
+      return eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("Sbírka aktualizovaná"), 4000);
+    })());
+    check("wow sbírka akce: bez chyb JS", errors.filter((e) => !/409|Conflict/.test(e)).length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/", { width: 1366, height: 900 });
+    const wowBox = page.locator("[data-dashboard-wow]");
+    check("dashboard: karta WoW ve Hrách", await eventually(async () => (await wowBox.count()) === 1, 5000));
+    check("dashboard: WoW mounti s trendem", /Mounti\s*44\s*\+3/.test(await wowBox.innerText()), await wowBox.innerText().catch(() => ""));
+    check("dashboard: odkaz WoW →", (await page.getByRole("link", { name: "WoW →" }).count()) === 1);
+    check("dashboard WoW: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

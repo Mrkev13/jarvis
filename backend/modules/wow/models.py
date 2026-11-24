@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Integer, String, Text, UniqueConstraint
 
 from database import Base
 
@@ -42,3 +42,42 @@ class WowCharacter(Base):
     last_synced_at = Column(DateTime, nullable=True)   # poslední ÚSPĚŠNÁ synchronizace
     last_attempt_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+# ---------- MRK-128: sbírky (migrace 0033) ----------
+
+WISH_KINDS = ("mount", "pet", "achievement")
+
+
+class WowCollectionSnapshot(Base):
+    """Denní snapshot sbírky účtu (mounti a pets jsou v API účtové, bere se první postava se stavem `ok`).
+
+    Jeden řádek na den (Europe/Prague); další synchronizace téhož dne ho přepíše. None = endpoint data nedal.
+    """
+    __tablename__ = "wow_collection_snapshots"
+    __table_args__ = (UniqueConstraint("day", name="uq_wow_collection_snapshots_day"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    day = Column(Date, nullable=False)
+    mounts = Column(Integer, nullable=True)
+    pets = Column(Integer, nullable=True)
+    achievements = Column(Integer, nullable=True)        # počet dokončených
+    achievement_points = Column(Integer, nullable=True)
+    source_character_id = Column(Integer, nullable=True)  # bez FK – postava jde přestat sledovat, historie zůstává
+    updated_at = Column(DateTime, nullable=False)         # naive UTC
+
+
+class WowWish(Base):
+    """Seznam „chci získat“. Položka se odškrtne sama, když ji API ukáže v sbírce (shoda názvu bez velikosti písmen)."""
+    __tablename__ = "wow_wishes"
+    __table_args__ = (
+        UniqueConstraint("kind", "name_key", name="uq_wow_wishes_kind_name"),
+        CheckConstraint("kind IN ('mount', 'pet', 'achievement')", name="ck_wow_wishes_kind"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    kind = Column(String(20), nullable=False)
+    name = Column(String(120), nullable=False)
+    name_key = Column(String(120), nullable=False)
+    acquired_at = Column(DateTime, nullable=True)          # naive UTC; None = ještě chybí
+    created_at = Column(DateTime, nullable=False)

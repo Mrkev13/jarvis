@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import database
-from modules.wow import service
+from modules.wow import battlenet, collections, service
 
 router = APIRouter(prefix="/wow", tags=["wow"])
 
@@ -21,13 +21,18 @@ class CharacterUpdate(BaseModel):
     target_level: int | None = None
 
 
+class WishCreate(BaseModel):
+    kind: str
+    name: str
+
+
 def _run(fn):
     db = database.SessionLocal()
     try:
         result = fn(db)
         db.commit()
         return result
-    except service.WowError as err:
+    except (service.WowError, collections.CollectionError) as err:
         db.rollback()
         raise HTTPException(status_code=err.status, detail=err.message)
     finally:
@@ -65,3 +70,29 @@ def wow_refresh_one(character_id: int):
 @router.post("/refresh")
 def wow_refresh_all():
     return _run(lambda db: service.sync_due(db, force=True, user_context="manual"))
+
+
+# ---------- MRK-128: sbírky ----------
+
+
+@router.post("/collections/refresh")
+def wow_collections_refresh():
+    def go(db):
+        result = collections.sync_collections(db, battlenet.client(), force=True, user_context="manual")
+        if result == "ok":
+            service._refresh_goals(db, "manual")
+        return {"result": result, "collections": collections.overview(db)}
+    return _run(go)
+
+
+@router.post("/wishes")
+def wow_wish_add(body: WishCreate):
+    return _run(lambda db: collections.add_wish(db, body.kind, body.name, battlenet.client()))
+
+
+@router.delete("/wishes/{wish_id}")
+def wow_wish_delete(wish_id: int):
+    def go(db):
+        collections.delete_wish(db, wish_id)
+        return {"ok": True}
+    return _run(go)
