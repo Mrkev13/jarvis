@@ -182,13 +182,12 @@ class Client:
 
 
     def media(self, realm_slug: str, name_key: str) -> dict | None:
-        """MRK-139: obrázky postavy (avatar, render). Doplněk – jakákoli chyba = None, synchronizace jede dál."""
+        """MRK-139: obrázky postavy (avatar, render). Doplněk – JAKÁKOLI chyba (i 429 / 403) = None, synchronizace
+        profilu jede dál a nic se nezahodí (Codex review #110)."""
         try:
             return self._get(self._char_path(realm_slug, name_key) + "/character-media")
-        except BattleNetError as err:
-            if err.code in ("not_found", "invalid_response", "unavailable"):
-                return None
-            raise
+        except BattleNetError:
+            return None
 
 
 def client() -> Client | None:

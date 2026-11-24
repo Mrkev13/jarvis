@@ -462,6 +462,22 @@ class MediaTestCase(WowTestBase):
         self.assertEqual(out["result"], "ok", "výpadek obrázků nesmí shodit synchronizaci")
         self.assertTrue(out["character"]["render_url"].endswith("main-raw.png"), "zůstanou poslední známé")
 
+    def test_media_rate_limit_or_forbidden_never_drops_the_profile(self):
+        # Codex review #110: 429 / 403 jen u obrázků nesmí zahodit nový level ani level_up
+        for status in (429, 403):
+            with self.subTest(status=status):
+                self.tearDown()
+                self.setUp()
+                self.add()
+                self.api.profiles[("pyrewood-village", "thrallík")] = dict(PROFILE, level=43)
+                self.api.media[("pyrewood-village", "thrallík")] = status
+                out = self.q(lambda db: service.sync_one(db, 1))
+                self.assertEqual(out["result"], "ok")
+                self.assertEqual(out["character"]["level"], 43)
+                self.assertEqual(out["character"]["sync_status"], "ok")
+                self.assertEqual(self.q(lambda db: db.query(DomainEvent).filter_by(
+                    event_type="wow.character.level_up").count()), 1)
+
     def test_only_official_render_hosts(self):
         bad = {"assets": [
             {"key": "avatar", "value": "http://render.worldofwarcraft.com/eu/a.jpg"},
