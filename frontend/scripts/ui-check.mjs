@@ -3668,6 +3668,46 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 33) MRK-133 – Jarvis HUD vlna 3: nastavení zvuků a hlasu, denní doba, „Mise splněna"
+{
+  const { ctx, page, errors } = await open("/settings", { width: 1366, height: 900 });
+  const card = page.locator("[data-settings-hud]");
+  await card.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const sounds = card.getByRole("switch", { name: /Zvuky systému/ });
+  const voice = card.getByRole("switch", { name: /Hlasový pozdrav/ });
+  check("hud nastavení: zvuky a hlas výchozí vypnuté", (await sounds.getAttribute("aria-checked")) === "false" && (await voice.getAttribute("aria-checked")) === "false");
+  await sounds.click();
+  check("hud nastavení: zvuky zapnuté", await eventually(async () => (await sounds.getAttribute("aria-checked")) === "true", 2000));
+  const stored = await page.evaluate(() => localStorage.getItem("sh:hud:prefs"));
+  check("hud nastavení: uloženo v prohlížeči", stored === '{"sounds":true,"voice":false}', String(stored));
+  // Codex review #102: skutečný klik přehraje start na místě (žádná navigace) a ten sám zmizí
+  await card.getByRole("button", { name: "Přehrát start systému" }).click();
+  const replay = page.locator("[data-boot-sequence]");
+  check("hud nastavení: Přehrát start systému – start se ukáže", await eventually(async () => (await replay.count()) === 1, 2000));
+  check("hud nastavení: start zůstane na Nastavení", new URL(page.url()).pathname === "/settings", page.url());
+  check("hud nastavení: přehraný start sám zmizí", await eventually(async () => (await replay.count()) === 0, 4000));
+  await card.screenshot({ path: `${OUT}hud3-settings.png` });
+  const daypart = await page.evaluate(() => document.documentElement.dataset.daypart);
+  check("hud: denní doba na <html>", ["morning", "day", "evening", "night"].includes(daypart), String(daypart));
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("sh:hud:mission", { detail: { title: "Mise splněna", detail: "Úkol hotový" } })));
+  const overlay = page.locator("[data-mission-complete]");
+  check("mise: oslava se ukáže", await eventually(async () => (await overlay.count()) === 1 && (await overlay.innerText()).includes("Mise splněna"), 2000));
+  check("mise: neblokuje klikání", (await overlay.evaluate((el) => getComputedStyle(el).pointerEvents)) === "none");
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: `${OUT}hud3-mission.png` });
+  check("mise: sama zmizí", await eventually(async () => (await overlay.count()) === 0, 3500));
+  await page.evaluate(() => localStorage.removeItem("sh:hud:prefs"));
+  check("hud nastavení: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/settings", { width: 1366, height: 900, reducedMotion: "reduce" });
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("sh:hud:mission", { detail: { title: "Mise splněna", detail: "x" } })));
+  await page.waitForTimeout(300);
+  check("mise reduced motion: bez oslavy", (await page.locator("[data-mission-complete]").count()) === 0);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

@@ -4,6 +4,7 @@ import { refreshModules } from "@/hooks/useModules";
 import { useDomainEvents } from "@/hooks/useDomainEvents";
 import { isModuleSettingsEvent, jarvisSignalFor } from "@/lib/domainEvents";
 import { pulseJarvis } from "@/lib/jarvisSignals";
+import { announceMission, missionFor } from "@/lib/hud";
 
 /**
  * MRK-19: první runtime konzumenti doménových událostí (nic nevykresluje):
@@ -18,6 +19,9 @@ export function DomainEventsBridge() {
       if (isModuleSettingsEvent(e)) void refreshModules();
       const signal = jarvisSignalFor(e);
       if (signal) pulseJarvis(signal);
+      // MRK-133: čerstvé dokončení / level-up = „Mise splněna" přes celou obrazovku
+      const mission = missionFor(e);
+      if (mission) announceMission(mission);
     },
     onReset: () => void refreshModules(),
   });
