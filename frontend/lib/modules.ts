@@ -52,7 +52,7 @@ export const MODULES: ModuleDef[] = [
   { id: "fitness", label: "Fitness & Rehab", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["fitness_exercise", "fitness_workout", "fitness_rehab_exercise", "fitness_rehab_session"], routes: ["/fitness"], quickAddKinds: [] },
   { id: "habits", label: "Návyky", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "dashboard", "ai_context"], entityTypes: ["habit"], routes: ["/habits"], quickAddKinds: [] },
   { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
-  { id: "wow", label: "World of Warcraft", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "ai_context"], entityTypes: ["wow_character"], routes: ["/wow"], quickAddKinds: [] },
+  { id: "wow", label: "World of Warcraft", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["wow_character", "wow_wish", "wow_collection"], routes: ["/wow"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),

@@ -819,3 +819,16 @@ html[data-daypart="night"] {
   color: rgb(255 224 150);
 }
 
+
+/* =====================================================================================================
+ * MRK-128 – WoW sbírka: sparkline vývoje pod počty, (odškrtnuté položky přeškrtává EntityRow muted)
+ * ===================================================================================================== */
+.wow-count { padding-bottom: 2.25rem; }
+.wow-spark polyline {
+  stroke: rgb(var(--arc-rgb) / 0.75);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 3px rgb(var(--arc-rgb) / 0.55));
+}

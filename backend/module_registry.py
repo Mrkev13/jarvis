@@ -152,8 +152,9 @@ MODULES: tuple[ModuleDef, ...] = (
                                      "calendar.event.source_missing", "calendar.event.restored"})),
     # MRK-127: World of Warcraft – postavy a alti ze snapshotu Blizzard API (docs/wow.md).
     ModuleDef("wow", "World of Warcraft", default_enabled=True, implemented=True,
-              capabilities=frozenset({"nav", "search", "ai_context"}),
-              entity_types=frozenset({"wow_character"}), context_areas=frozenset({"wow"}), api_prefixes=("/wow",),
+              capabilities=frozenset({"nav", "search", "dashboard", "ai_context"}),  # MRK-128: + karta na dashboardu
+              entity_types=frozenset({"wow_character", "wow_wish", "wow_collection"}), context_areas=frozenset({"wow"}),
+              api_prefixes=("/wow",),
               integrations=wow_integrations.INTEGRATIONS, event_types=frozenset(wow_integrations.EVENTS)),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),

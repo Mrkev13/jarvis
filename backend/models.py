@@ -812,7 +812,7 @@ from modules.calendar.models import CalendarSource, CalendarEvent  # noqa: E402
 
 from modules.school.models import SchoolAttendance, StudyCourse, StudyMaterial  # noqa: E402
 from modules.fitness.models import Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry  # noqa: E402
-from modules.wow.models import WowCharacter  # noqa: E402  (MRK-127)
+from modules.wow.models import WowCharacter, WowCollectionSnapshot, WowWish  # noqa: E402  (MRK-127, MRK-128)
 from modules.finance.models import (  # noqa: E402
     FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision,
 )
@@ -821,7 +821,8 @@ from modules.finance.legacy_compat import install_legacy_compat  # noqa: E402
 install_legacy_compat(FinanceTransaction)
 
 MODULE_MODELS = (Habit, HabitEntry, CalendarSource, CalendarEvent, StudyCourse, StudyMaterial, SchoolAttendance, Exercise, WorkoutSession, WorkoutSet, RehabExercise, RehabSession, RehabEntry,
-                 FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision, WowCharacter)
+                 FinanceAccount, FinanceCategory, FinanceImport, FinanceImportIssue, FinanceRule, FinanceTransactionRevision, WowCharacter,
+                 WowCollectionSnapshot, WowWish)
 
 
 class DomainEvent(Base):

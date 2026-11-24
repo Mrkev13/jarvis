@@ -29,6 +29,7 @@ import { useApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import { staggerStyle } from "@/lib/motion";
 import { cx } from "@/lib/ui";
+import { Collections } from "./Collections";
 import { Fleet, LevelRing } from "./HeroBits";
 import {
   batchMessage,
@@ -258,6 +259,9 @@ export default function WowPage() {
                 <EmptyState compact>Zatím žádná postava. Přidej první vpravo – stačí {forever ? "jméno a příjmení" : "jméno a realm"}.</EmptyState>
               )}
             </PageSection>
+
+            {/* MRK-128: sbírka účtu a seznam „chci získat" */}
+            {data.collections ? <Collections data={data.collections} configured={configured} onChanged={() => wow.reload()} /> : null}
           </div>
 
           <Card as="section" aria-labelledby="wow-add">

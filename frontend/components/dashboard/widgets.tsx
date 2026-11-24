@@ -135,6 +135,13 @@ export type DashboardPayload = {
     priority_count: number;
     average_build_completeness: number;
   } | null;
+  /** MRK-128: WoW – postavy a sbírka účtu (starší backend sekci nemusí poslat) */
+  wow?: {
+    summary: { characters: number; max_level: number; with_target: number; at_target: number };
+    collection: { mounts: number | null; pets: number | null; achievements: number | null; achievement_points: number | null } | null;
+    week: { mounts: number | null; achievement_points: number | null };
+    open_wishes: number;
+  } | null;
 };
 
 const fmt0 = (v: number) => formatNumber(v, 0);
@@ -522,6 +529,8 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
   const shows = useShows();
   const wot = data?.wot;
   const mff = data?.mff;
+  const wow = data?.wow;
+  const gameCount = ["wot", "mff", "wow"].filter((m) => shows(m)).length;
   return (
     <Card index={index} aria-labelledby="games-title">
       <CardHeader
@@ -531,13 +540,14 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
           <>
             {shows("wot") ? <TextLink href="/wot">WoT →</TextLink> : null}
             {shows("mff") ? <TextLink href="/mff">MFF →</TextLink> : null}
+            {shows("wow") ? <TextLink href="/wow">WoW →</TextLink> : null}
           </>
         }
       />
       {loading ? (
         <LoadingState lines={2} />
       ) : (
-        <div className={cx("grid gap-3 text-sm", shows("wot") && shows("mff") ? "md:grid-cols-2" : null)}>
+        <div className={cx("grid gap-3 text-sm", gameCount === 2 ? "md:grid-cols-2" : gameCount === 3 ? "md:grid-cols-3" : null)}>
           {shows("wot") ? (
             <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3">
               <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -589,9 +599,47 @@ function GamesWidget({ data, loading, index }: WidgetProps) {
               )}
             </div>
           ) : null}
+          {shows("wow") ? (
+            <div className="rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 p-3" data-dashboard-wow="">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="font-medium text-ink">World of Warcraft</span>
+                {wow ? <span className="text-xs text-ink-muted">{wow.summary.characters} postav</span> : null}
+              </div>
+              {wow?.collection ? (
+                <>
+                  <WowStat label="Mounti" value={wow.collection.mounts} delta={wow.week.mounts} />
+                  <WowStat label="Achievement body" value={wow.collection.achievement_points} delta={wow.week.achievement_points} />
+                  <div className="flex justify-between gap-2">
+                    <span className="text-ink-muted">Chci získat</span>
+                    <span className="tabular-nums text-ink">{wow.open_wishes}</span>
+                  </div>
+                </>
+              ) : wow && wow.summary.characters ? (
+                <div className="flex justify-between gap-2">
+                  <span className="text-ink-muted">Nejvyšší level</span>
+                  <span className="tabular-nums text-ink">{wow.summary.max_level}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-ink-muted">Žádné postavy.</p>
+              )}
+            </div>
+          ) : null}
         </div>
       )}
     </Card>
+  );
+}
+
+/** MRK-128: řádek WoW sbírky – počet a změna za týden. */
+function WowStat({ label, value, delta }: { label: string; value: number | null; delta: number | null }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-ink-muted">{label}</span>
+      <span className="tabular-nums text-ink">
+        {value == null ? "–" : fmt0(value)}
+        {delta ? <span className={cx("ml-1.5 text-xs", delta > 0 ? "text-success" : "text-warning")}>{delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`}</span> : null}
+      </span>
+    </div>
   );
 }
 

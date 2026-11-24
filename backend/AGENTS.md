@@ -839,6 +839,10 @@ print(_hash_pin("123456"))
   verze hry ověří `scripts/check_battlenet.py` (jen stavy). WoW Forever (MRK-130): `profile-forever-<region>`, postava
   „Jméno Příjmení“ bez realmu (`realm_slug="forever"`, cesta `/character/{jmeno-prijmeni}`). Podrobně `docs/wow.md`. Testy `tests/test_wow.py`
   (falešný transport, nikdy síť).
+- Sbírka (MRK-128, `modules/wow/collections.py`, migrace 0033): denní snapshot počtů (`wow_collection_snapshots`)
+  a seznam přání (`wow_wishes`); `sync_collections` je jediná cesta zápisu, volá ho `service.sync_due` po postavách.
+  Získané přání = `wow.collection.acquired`; cíle `wow_mounts` / `wow_pets` / `wow_achievement_points`. Testy
+  `tests/test_wow_collections.py`.
 
 ## 24. Architektonická pravidla (Roadmap 3.5)
 
