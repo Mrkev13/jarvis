@@ -2953,14 +2953,25 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
     check(`companion @${label}: nepřekrývá navigaci`, !overlap(await cBox(page), sidebar));
     await page.screenshot({ path: `${OUT}companion-top-${label}.png` });
 
-    // během scrollu průhledný, po dosednutí znovu na volném místě
+    // během scrollu průhledný, po dosednutí znovu na volném místě.
+    // MRK-137: průhlednost trvá jen ~220 ms po posledním scrollu (COMPANION_TIMING.scrollSettleMs), takže pevný
+    // vzorek po 60 ms na pomalém runneru občas minul. Změny atributu proto zaznamenává MutationObserver
+    // od chvíle před scrollem a kolečko jde nad obsah (myš je jinak v [0,0] nad posuvným sidebarem).
+    await companion(page).evaluate((el) => {
+      const seen = [el.getAttribute("data-companion-visible")];
+      new MutationObserver(() => seen.push(el.getAttribute("data-companion-visible"))).observe(el, { attributes: true, attributeFilter: ["data-companion-visible"] });
+      window.__companionVisibleLog = seen;
+    });
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    await page.mouse.move(Math.round((sidebar ? sidebar.x + sidebar.width : 0) + (width - (sidebar ? sidebar.x + sidebar.width : 0)) / 2), Math.round(height / 2));
     await page.mouse.wheel(0, 500);
-    await settle(page, 60);
-    const mid = await cShown(page);
-    check(`companion @${label}: během scrollu průhledný`, mid === "false", String(mid));
-    await settle(page, 500);
+    const scrolled = await eventually(async () => (await page.evaluate(() => window.scrollY)) > scrollBefore, 1500);
+    const hidMidScroll = await eventually(() => page.evaluate(() => window.__companionVisibleLog.includes("false")), 1500);
+    const log = await page.evaluate(() => window.__companionVisibleLog.join("→"));
+    check(`companion @${label}: během scrollu průhledný`, scrolled && hidMidScroll, `scrollY ${scrollBefore}→${await page.evaluate(() => window.scrollY)}, visible ${log}`);
+    const shownAgain = await eventually(async () => (await cShown(page)) === "true", 1500);
     const coveredMid = await coveredContent(page);
-    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, (await cShown(page)) === "true" && coveredMid.length === 0, coveredMid.join(", "));
+    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, shownAgain && coveredMid.length === 0, coveredMid.join(", "));
     await page.screenshot({ path: `${OUT}companion-scrolled-${label}.png` });
 
     await toBottom(page);
