@@ -15,6 +15,7 @@ from datetime import date, datetime, time, timezone
 from sqlalchemy.orm import Session
 
 import media_storage
+import wot_mastery_service
 from activity_service import log_activity
 from env_config import env_int
 from models import WotMilestone, WotReplay
@@ -222,6 +223,11 @@ def upload_replay(db: Session, data: bytes, filename: str | None, *, tank_name: 
         log_activity(db, "wot", "create", f"Replay nahrán: {_label(r)}", entity_type="WotReplay", entity_id=r.id,
                      delta={"event": EVENTS["uploaded"], "parser_status": r.parser_status}, user_context="manual",
                      dedupe_key=f"{EVENTS['uploaded']}:{r.id}")
+        # MRK-106: replay M-ka k čekajícímu milníku z Wargaming API se spáruje sám a doplní statistiky bitvy
+        pending = wot_mastery_service.pending_match(db, r)
+        if pending is not None:
+            wot_mastery_service.fill_from_replay(db, pending, r)
+            db.refresh(r)
     except Exception:
         media_storage.delete_file(REPLAY_FOLDER, stored)  # žádný osiřelý soubor
         raise
@@ -247,6 +253,12 @@ def create_milestone_from_replay(db: Session, replay_id: int) -> tuple[WotReplay
     r = get_replay(db, replay_id)
     if r.linked_milestone_id is not None:
         raise WotError("Replay už je propojený s Mkem.", status=409, code="already_linked")
+    # MRK-106: čekající M z Wargaming API pro stejný tank má přednost před novým milníkem (žádná duplicita)
+    pending = wot_mastery_service.pending_match(db, r)
+    if pending is not None:
+        wot_mastery_service.fill_from_replay(db, pending, r)
+        db.refresh(r)
+        return r, pending
     tank = r.tank_name or (r.tank_tag.split(":", 1)[-1] if r.tank_tag else None)
     if not tank:
         raise WotError("Replay nemá tank – doplň ho v údajích replaye.", status=422, code="missing_tank")

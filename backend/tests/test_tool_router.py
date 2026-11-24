@@ -83,7 +83,7 @@ class RouteSelectionTestCase(unittest.TestCase):
                 self.assertLessEqual(len(route_tools([REPRESENTATIVE[key]]).names), limit)
 
     def test_area_tools(self):
-        self.assertEqual(_names(route_tools(["kolik mám kreditů ve WoT?"])), {"get_wot_resources", "get_wot_grinds"})
+        self.assertEqual(_names(route_tools(["kolik mám kreditů ve WoT?"])), {"get_wot_resources", "get_wot_grinds", "get_wot_mastery"})
         self.assertEqual(_names(route_tools(["kolik mám postav v MFF na T4"])), {"get_mff_summary", "get_mff_characters"})
         self.assertEqual(_names(route_tools(["co se naposledy změnilo"])), {"get_recent_activity"})
         school = _names(route_tools(["jaké mám zkoušky z matiky?"]))
@@ -228,7 +228,7 @@ class RouteSelectionTestCase(unittest.TestCase):
         route = route_tools(["zapiš mi 4 hodiny na Servind", "a ještě 2 hodiny"])
         self.assertIn("add_work_session", route.names)
         self.assertEqual(_names(route_tools(["kolik mám kreditů ve WoT?", "a gold?"])) & READ_NAMES,
-                         {"get_wot_resources", "get_wot_grinds"})
+                         {"get_wot_resources", "get_wot_grinds", "get_wot_mastery"})
 
     def test_only_one_previous_turn_and_only_for_short_follow_ups(self):
         # Write záměr dvě zprávy zpátky se nepřenáší.

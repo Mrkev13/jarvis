@@ -141,6 +141,12 @@ def _read_study_material(db, material_id: int, query: str | None = None):
     return read_material(db, material_id, query=query)
 
 
+def _wot_mastery(db, tier: int | None = None, nation: str | None = None, mastery: str | None = None,
+                 limit: int | None = None):
+    from wot_mastery_service import query  # lazy: keeps the registry import light
+    return query(db, tier=tier, nation=nation, mastery=mastery, limit=limit or 50)
+
+
 # MRK-60: notifikace a historie cílů, které nesou Finance data, AI nedostane (finance_ai_policy.py).
 def _ai_notifications(unread_only: bool = False, severity: str | None = None, area: str | None = None,
                       include_resolved: bool = False):
@@ -161,6 +167,18 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
           func=get_wot_resources, areas=[AREA_WOT], covered=True),
     _read("get_wot_grinds", "WoT tank grinds: XP remaining, priority, status.",
           func=get_wot_grinds, areas=[AREA_WOT]),
+    # MRK-106: highest mastery badge per tank from the Wargaming API snapshot (computed, no LLM math)
+    _read(
+        "get_wot_mastery",
+        "WoT mastery badge per tank (M/I/II/III) from Wargaming API; filter e.g. tier 8 without_ace.",
+        {
+            "tier": _INT,
+            "nation": {"type": "string", "description": "e.g. ussr, germany, SSSR"},
+            "mastery": {"type": "string", "enum": ["ace", "first", "second", "third", "none", "without_ace"]},
+            "limit": _LIMIT,
+        },
+        func=_wot_mastery, areas=[AREA_WOT], takes_db=True,
+    ),
     _read("get_school_subjects", "School subjects with IDs (source of subject_id).",
           func=get_school_subjects, areas=[AREA_SCHOOL], explicit_only=True),
     _read(
