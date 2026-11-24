@@ -3847,7 +3847,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await card.getByLabel("Druh").selectOption("mount");
     await nameInput.fill("Swift Brown Steed");
     await card.getByRole("button", { name: "Přidat" }).click();
-    check("wow sbírka: už vlastněné = rovnou odškrtnuté", await eventually(async () => (await page.getByRole("status").innerText().catch(() => "")).includes("už ve sbírce máš"), 4000));
+    check("wow sbírka: už vlastněné = rovnou odškrtnuté", await eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("už ve sbírce máš"), 4000));
     await nameInput.fill("swift brown steed");
     await card.getByRole("button", { name: "Přidat" }).click();
     check("wow sbírka: duplicita = chyba", await eventually(async () => (await page.locator("[data-wow-collections]").innerText()).includes("už v seznamu máš"), 4000));
@@ -3855,7 +3855,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("wow sbírka: odebraná položka zmizí", await eventually(async () => !(await wishes.innerText()).includes("Mechanical Squirrel"), 4000));
     check("wow sbírka: Obnovit sbírku", await (async () => {
       await page.getByRole("button", { name: "Obnovit sbírku" }).click();
-      return eventually(async () => (await page.getByRole("status").innerText().catch(() => "")).includes("Sbírka aktualizovaná"), 4000);
+      return eventually(async () => (await page.locator("[data-wow-collections] [role=status]").innerText().catch(() => "")).includes("Sbírka aktualizovaná"), 4000);
     })());
     check("wow sbírka akce: bez chyb JS", errors.filter((e) => !/409|Conflict/.test(e)).length === 0, errors.join("; "));
     await ctx.close();

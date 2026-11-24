@@ -198,8 +198,8 @@ function WishRow({ w, idx, busy, onDelete }: { w: WowWish; idx: number; busy: bo
       title={w.name}
       meta={w.acquired && w.acquired_at ? `Získáno ${syncedAgo(w.acquired_at)}` : "Čeká na API"}
       actions={
-        <Button size="sm" variant="ghost" busy={busy} onClick={onDelete}>
-          Odebrat<span className="sr-only">: {w.name}</span>
+        <Button size="sm" variant="ghost" busy={busy} onClick={onDelete} aria-label={`Odebrat: ${w.name}`}>
+          Odebrat
         </Button>
       }
     />
