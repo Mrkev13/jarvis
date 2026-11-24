@@ -7,6 +7,8 @@ import { formatNumber } from "@/lib/format";
 import { staggerStyle } from "@/lib/motion";
 import { cx, priorityTone } from "@/lib/ui";
 import { grindProgress, grindStatusMeta, type WotGrind } from "@/lib/wot";
+import { useTankInfo } from "@/hooks/useTankInfo";
+import { nationStyle, romanTier } from "@/lib/wotHangar";
 
 /**
  * Aktivní grind: tank (Game Enrichment A), průběh, zbývající XP a výslovné „Splněno".
@@ -32,13 +34,26 @@ export function GrindRow({
   const priority = priorityTone(g.priority);
   const status = grindStatusMeta(celebrating ? "completed" : g.status);
   const progress = celebrating ? 100 : grindProgress(g);
+  // MRK-138: národ (tónování za tankem) a tier z manifestu Tankopedie
+  const info = useTankInfo(g.tank);
+  const nation = nationStyle(info?.nation);
+  const tier = romanTier(info?.tier);
   return (
     <EntityRow
       searchTarget={g.id != null ? `grind-${g.id}` : undefined}
       style={staggerStyle(index)}
       className={cx("motion-card", celebrating && "border-accent/60")}
       tone={celebrating ? "accent" : "neutral"}
-      leading={<GameImage kind="tank" name={g.tank} size="sm" />}
+      leading={
+        <span
+          className="wot-tank-slot relative inline-flex shrink-0"
+          style={nation ? ({ ["--nation-rgb" as string]: nation.rgb } as React.CSSProperties) : undefined}
+          data-nation={info?.nation ?? undefined}
+        >
+          <GameImage kind="tank" name={g.tank} size="sm" />
+          {tier ? <span className="wot-tier-badge" aria-label={`Tier ${tier}`}>{tier}</span> : null}
+        </span>
+      }
       badges={
         <>
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>

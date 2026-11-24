@@ -126,7 +126,7 @@ test("fallback monograms, alt text and sizes", () => {
   assert.equal(assetAlt("tank", "Kranvagn"), "Tank Kranvagn");
   assert.equal(assetAlt("character", "Thor"), "Portrét: Thor");
   assert.equal(assetAlt("resource", "credits"), "", "ikona u popisku je dekorativní");
-  assert.deepEqual(Object.values(GAME_IMAGE_SIZES), [24, 40, 56, 88]);
+  assert.deepEqual(Object.values(GAME_IMAGE_SIZES), [24, 40, 56, 88, 120]);
   assert.deepEqual(imageBox("tank", "sm"), { width: 64, height: 40 });
   assert.deepEqual(imageBox("character", "md"), { width: 56, height: 56 });
 });
