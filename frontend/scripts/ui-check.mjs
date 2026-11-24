@@ -2953,14 +2953,25 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
     check(`companion @${label}: nepřekrývá navigaci`, !overlap(await cBox(page), sidebar));
     await page.screenshot({ path: `${OUT}companion-top-${label}.png` });
 
-    // během scrollu průhledný, po dosednutí znovu na volném místě
+    // během scrollu průhledný, po dosednutí znovu na volném místě.
+    // MRK-137: průhlednost trvá jen ~220 ms po posledním scrollu (COMPANION_TIMING.scrollSettleMs), takže pevný
+    // vzorek po 60 ms na pomalém runneru občas minul. Změny atributu proto zaznamenává MutationObserver
+    // od chvíle před scrollem a kolečko jde nad obsah (myš je jinak v [0,0] nad posuvným sidebarem).
+    await companion(page).evaluate((el) => {
+      const seen = [el.getAttribute("data-companion-visible")];
+      new MutationObserver(() => seen.push(el.getAttribute("data-companion-visible"))).observe(el, { attributes: true, attributeFilter: ["data-companion-visible"] });
+      window.__companionVisibleLog = seen;
+    });
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    await page.mouse.move(Math.round((sidebar ? sidebar.x + sidebar.width : 0) + (width - (sidebar ? sidebar.x + sidebar.width : 0)) / 2), Math.round(height / 2));
     await page.mouse.wheel(0, 500);
-    await settle(page, 60);
-    const mid = await cShown(page);
-    check(`companion @${label}: během scrollu průhledný`, mid === "false", String(mid));
-    await settle(page, 500);
+    const scrolled = await eventually(async () => (await page.evaluate(() => window.scrollY)) > scrollBefore, 1500);
+    const hidMidScroll = await eventually(() => page.evaluate(() => window.__companionVisibleLog.includes("false")), 1500);
+    const log = await page.evaluate(() => window.__companionVisibleLog.join("→"));
+    check(`companion @${label}: během scrollu průhledný`, scrolled && hidMidScroll, `scrollY ${scrollBefore}→${await page.evaluate(() => window.scrollY)}, visible ${log}`);
+    const shownAgain = await eventually(async () => (await cShown(page)) === "true", 1500);
     const coveredMid = await coveredContent(page);
-    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, (await cShown(page)) === "true" && coveredMid.length === 0, coveredMid.join(", "));
+    check(`companion @${label}: po scrollu zase vidět a nic nezakrývá`, shownAgain && coveredMid.length === 0, coveredMid.join(", "));
     await page.screenshot({ path: `${OUT}companion-scrolled-${label}.png` });
 
     await toBottom(page);
@@ -3748,6 +3759,27 @@ for (const [path, module] of [["/habits", "habits"], ["/work", "work"], ["/finan
   check("plánovač: fronta misí", await eventually(async () => (await page.locator(".plan-step").count()) >= 1, 4000));
   check("plánovač: nejvyšší priorita zaměřená", (await page.locator(".plan-step-top").count()) >= 1);
   await page.screenshot({ path: `${OUT}hud4-planner.png` });
+  await ctx.close();
+}
+
+// 35) MRK-138 – WoT hangár: zaměřený tank s národem a tierem z manifestu, pancéřové pláty, medaile, jantarový HUD
+for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+  const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+  const hangar = page.locator("[data-wot-hangar]");
+  check(`wot hangár ${label}: zobrazený`, await eventually(async () => (await hangar.count()) === 1, 5000));
+  // první aktivní grind v mock datech = Object 279 (e), v manifestu SSSR, tier X
+  check(`wot hangár ${label}: zaměřený první aktivní grind`, (await hangar.locator("h2").innerText()).toLowerCase().includes("object 279"));
+  check(`wot hangár ${label}: národ a tier z manifestu`, await eventually(async () =>
+    // textContent = text v DOM; innerText vrací už po CSS `uppercase` („TIER X“)
+    (await hangar.locator("[data-wot-nation]").textContent().catch(() => ""))?.trim() === "SSSR" && (await hangar.locator("[data-wot-tier]").textContent().catch(() => ""))?.trim() === "tier X", 4000));
+  check(`wot hangár ${label}: pláty podle průběhu (29 % = 6 z 20)`, (await hangar.locator(".wot-plate-lit").count()) === 6);
+  check(`wot hangár ${label}: 20 pancéřových plátů`, (await hangar.locator(".wot-plate").count()) === 20);
+  check(`wot hangár ${label}: tier u řádku grindu`, await eventually(async () => (await page.locator("[data-search-target] .wot-tier-badge").count()) >= 1, 3000));
+  const theme = await page.locator("main").evaluate((el) => getComputedStyle(el).getPropertyValue("--arc-rgb").trim());
+  check(`wot hangár ${label}: jantarový HUD`, theme === "240 180 76", theme);
+  check(`wot hangár ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  await page.screenshot({ path: `${OUT}wot-hangar-${label}.png`, fullPage: label === "desktop" });
+  check(`wot hangár ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
   await ctx.close();
 }
 
