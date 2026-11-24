@@ -4,9 +4,9 @@ import { daypartFor, missionFor, parseHudPrefs, voiceGreeting } from "./hud.ts";
 
 // MRK-133: Jarvis HUD vlna 3 – předvolby, denní doba, „Mise splněna", hlasový pozdrav.
 test("prefs default to off and survive garbage", () => {
-  assert.deepEqual(parseHudPrefs(null), { sounds: false, voice: false });
-  assert.deepEqual(parseHudPrefs("{nope"), { sounds: false, voice: false });
-  assert.deepEqual(parseHudPrefs('{"sounds":true,"voice":"yes"}'), { sounds: true, voice: false });
+  assert.deepEqual(parseHudPrefs(null), { sounds: false, voice: false, voiceLang: "cs", voiceURI: null });
+  assert.deepEqual(parseHudPrefs("{nope"), { sounds: false, voice: false, voiceLang: "cs", voiceURI: null });
+  assert.deepEqual(parseHudPrefs('{"sounds":true,"voice":"yes"}'), { sounds: true, voice: false, voiceLang: "cs", voiceURI: null });
 });
 
 test("daypart by Prague hour", () => {
