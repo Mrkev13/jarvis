@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { mffCore } from "@/lib/hudModules";
 import { useMemo, useState } from "react";
 import {
   AreaBadge,
@@ -149,6 +151,9 @@ export default function MffPage() {
       {loadError ? (
         <ErrorState message={loadError} onRetry={() => void loadData()} retrying={busyLoading} />
       ) : null}
+
+      {/* MRK-134: HUD jádro – plně postavené T4 jako segmenty reaktoru */}
+      {s ? <HudCore module="mff" label="Jarvis · T4 tým" {...mffCore(s.t4_count ?? 0, s.fully_built_t4_count ?? 0)} /> : null}
 
       <PageSection labelledBy="mff-summary" title="Přehled">
         {summary.loading ? (

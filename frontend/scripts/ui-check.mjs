@@ -3708,6 +3708,41 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 34) MRK-134 – Jarvis HUD v modulech: jádra (reaktor + věta), AI výpis, fronta misí v Plánovači
+for (const [path, module] of [["/habits", "habits"], ["/work", "work"], ["/finance", "finance"], ["/mff", "mff"], ["/wot", "wot"], ["/wow", "wow"], ["/reminders", "reminders"]]) {
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    if (label === "mobil" && !["habits", "wot", "reminders"].includes(module)) continue;
+    // mock API nemá /habits (modul má vlastní browser-check) – tady stačí tvar GET /habits pro jádro
+    const habitsSetup = module !== "habits" ? undefined : (p) => p.route("http://127.0.0.1:8000/habits", (route) =>
+      route.request().method() !== "GET" ? route.fallback() : route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ date: "2026-11-23", active: [], archived: [],
+          summary: { total: 3, done: 1, skipped: 0, open: 2, week_done: 9, week_expected: 21 } }) }));
+    const { ctx, page, errors } = await open(path, { width, height: width < 500 ? 844 : 900, setup: habitsSetup });
+    const core = page.locator(`[data-hud-core="${module}"]`);
+    check(`hud ${module} ${label}: jádro modulu`, await eventually(async () => (await core.count()) === 1, 5000));
+    const line = (await core.locator("[data-hud-line]").innerText().catch(() => "")).trim();
+    check(`hud ${module} ${label}: věta stavu`, line.length > 5, line);
+    if (module === "habits") check(`hud habits ${label}: věta podle dat`, line === "Dnes zbývá 2 návyky. Týden: 9/21.", line);
+    check(`hud ${module} ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    if (label === "desktop" || module === "habits") await page.screenshot({ path: `${OUT}hud4-${module}-${label}.png` });
+    check(`hud ${module} ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+{
+  const { ctx, page } = await open("/ai", { width: 1366, height: 900 });
+  await aiSend(page, "Ahoj");
+  check("ai: čerstvá odpověď se vypíše (terminál)", await eventually(async () => (await page.locator("[data-ai-answer].ai-reveal").count()) >= 1, 4000));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open("/planner", { width: 1366, height: 900 });
+  check("plánovač: fronta misí", await eventually(async () => (await page.locator(".plan-step").count()) >= 1, 4000));
+  check("plánovač: nejvyšší priorita zaměřená", (await page.locator(".plan-step-top").count()) >= 1);
+  await page.screenshot({ path: `${OUT}hud4-planner.png` });
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

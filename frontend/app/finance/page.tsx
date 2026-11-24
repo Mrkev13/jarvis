@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { financeCore } from "@/lib/hudModules";
 import { useState } from "react";
 import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import {
@@ -239,6 +241,9 @@ export default function FinancePage() {
       ) : (
         <>
           {refreshFailed ? <ErrorState message={`Obnovení selhalo. ${LOAD_ERROR}`} onRetry={() => void loadData()} /> : null}
+
+          {/* MRK-134: „energie systému" – kolik z příjmů zůstává (jen vizuál této stránky, nikdy do AI – MRK-60) */}
+          {s ? <HudCore module="finance" label="Jarvis · energie financí" {...financeCore(s.income, s.expenses)} /> : null}
 
           <section aria-label="Souhrn" aria-busy={summary.refreshing || undefined}>
             <StatGrid cols={3}>

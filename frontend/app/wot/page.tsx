@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { wotCore } from "@/lib/hudModules";
 import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useEffect, useRef, useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
@@ -34,6 +36,7 @@ import { pulseJarvis } from "@/lib/jarvisSignals";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
+  grindProgress,
   grindSummary,
   celebrationDuration,
   emptyGrindDraft,
@@ -276,6 +279,19 @@ export default function WotPage() {
       />
 
       {error ? <ErrorState message={error} /> : null}
+
+      {/* MRK-134: tank v zaměřovači – první aktivní grind, průběh jako segmenty */}
+      {!loading && !loadFailed ? (() => {
+        const target = activeGrinds(grinds)[0];
+        return (
+          <HudCore
+            module="wot"
+            label="Jarvis · zaměřovač"
+            {...wotCore(target ? { tank: target.tank, progress: grindProgress(target), remaining: Math.max(0, Number(target.xp_remaining) || 0) } : null)}
+            stats={[{ label: "Aktivní grindy", value: activeCount }, { label: "Mka", value: mastery.total, tone: "text-warning" }]}
+          />
+        );
+      })() : null}
 
       {loading ? (
         <LoadingState lines={4} label="Načítám data World of Tanks…" />

@@ -1,5 +1,7 @@
 "use client";
 
+import { HudCore } from "@/components/jarvis/HudCore";
+import { habitsCore } from "@/lib/hudModules";
 import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useState } from "react";
 import {
@@ -188,6 +190,12 @@ export default function HabitsPage() {
         title="Návyky"
         subtitle="Dnešní stav a posledních 7 dní. Den bez záznamu se po půlnoci počítá jako vynechaný."
       />
+
+      {/* MRK-134: HUD jádro – dnešní návyky jako segmenty reaktoru */}
+      {data ? (
+        <HudCore module="habits" label="Jarvis · návyky dnes" {...habitsCore(data.summary)}
+          stats={[{ label: "Hotovo", value: data.summary.done, tone: "text-success" }, { label: "Zbývá", value: data.summary.open, tone: "text-accent-strong" }]} />
+      ) : null}
 
       {actionError ? <ErrorState message={actionError} /> : null}
 
