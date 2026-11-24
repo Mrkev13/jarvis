@@ -39,6 +39,18 @@ test("reminders countdown", () => {
   assert.deepEqual([0, 5, 60, 125, 60 * 72].map(untilLabel), ["teď", "za 5 min", "za 1 h", "za 2 h 5 min", "za 3 dny"]);
 });
 
+// Codex review #104: odložená opakovaná připomínka – efektivní termín = dřívější z due_at a snoozed_until (backend)
+test("snoozed recurring reminder counts down from snoozed_until and wins the order", async () => {
+  const { effectiveDueMs } = await import("./hudModules.ts");
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  const daily = { title: "Rehab", status: "scheduled", state: "scheduled", due_at: "2026-11-25T12:00:00Z", snoozed_until: "2026-11-24T12:10:00Z" };
+  const other = { title: "Fyzio", status: "scheduled", state: "scheduled", due_at: "2026-11-24T13:00:00Z", snoozed_until: null };
+  assert.equal(remindersCore([daily], now).line, "Další za 10 min: Rehab.");
+  assert.equal(remindersCore([other, daily], now).line, "Další za 10 min: Rehab.", "odložený výskyt předběhne ostatní");
+  assert.equal(effectiveDueMs({ due_at: "2026-11-24T12:00:00Z", snoozed_until: "2026-11-24T15:00:00Z" }), Date.parse("2026-11-24T12:00:00Z"), "pozdější snooze neplatí");
+  assert.equal(effectiveDueMs({ due_at: "2026-11-24T12:00:00Z" }), Date.parse("2026-11-24T12:00:00Z"));
+});
+
 test("calendar now line", async () => {
   const { nowLineIndex, pragueNow } = await import("./hudModules.ts");
   assert.equal(nowLineIndex([10, 20, 30], 15), 1);

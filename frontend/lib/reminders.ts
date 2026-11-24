@@ -20,6 +20,8 @@ export interface Reminder {
   due_label: string;
   next_label: string;
   snoozed_label?: string | null;
+  /** UTC ISO; u opakované připomínky odložený výskyt (due_at se nemění) – viz effectiveDueMs */
+  snoozed_until?: string | null;
   recurrence: "none" | "daily" | "weekly" | string;
   weekdays?: string | null;
   local_time?: string | null;

@@ -81,12 +81,22 @@ export function untilLabel(minutes: number): string {
   return m ? `za ${h} h ${m} min` : `za ${h} h`;
 }
 
+/**
+ * Efektivní termín jako backend (`reminder_service.effective_due`): odložený výskyt opakované připomínky žije jen
+ * v `snoozed_until` (due_at zůstává další pravidelný) – platí dřívější z obou. Codex review #104.
+ */
+export function effectiveDueMs(r: { due_at: string; snoozed_until?: string | null }): number {
+  const due = Date.parse(r.due_at);
+  const snoozed = r.snoozed_until ? Date.parse(r.snoozed_until) : NaN;
+  return Number.isFinite(snoozed) && (!Number.isFinite(due) || snoozed < due) ? snoozed : due;
+}
+
 /** Připomínky: odpočet do nejbližší naplánované; prstenec = 12 h (rozsvícené = kolik z nich už uplynulo). */
-export function remindersCore(items: { title: string; status: string; state: string; due_at: string }[], now: number): CoreModel {
+export function remindersCore(items: { title: string; status: string; state: string; due_at: string; snoozed_until?: string | null }[], now: number): CoreModel {
   const due = items.filter((r) => r.state === "due").length;
   const upcoming = items
     .filter((r) => r.state !== "due" && (r.status === "scheduled" || r.status === "snoozed"))
-    .map((r) => ({ r, at: Date.parse(r.due_at) }))
+    .map((r) => ({ r, at: effectiveDueMs(r) }))
     .filter((x) => Number.isFinite(x.at) && x.at >= now)
     .sort((a, b) => a.at - b.at);
   const firing = due > 0 ? `${due} ${things(due)} čeká na vyřízení. ` : "";
