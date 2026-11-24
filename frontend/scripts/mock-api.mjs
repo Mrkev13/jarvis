@@ -188,7 +188,10 @@ const WOW_CHARS = () => [
   { id: 1, name: "Thrallík", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 42, target_level: 60,
     levels_to_go: 18, at_target: false, class_name: "Shaman", race_name: "Orc", faction: "Horde", active_spec: "Enhancement",
     item_level: null, professions: [{ name: "Mining", skill: 150, max: 225, secondary: false }, { name: "Herbalism", skill: 140, max: 225, secondary: false }],
-    last_login_at: "2026-10-11T10:00:00Z", sync_status: "ok", sync_label: "aktuální", last_synced_at: new Date(Date.now() - 3 * 3600e3).toISOString() },
+    last_login_at: "2026-10-11T10:00:00Z", sync_status: "ok", sync_label: "aktuální", last_synced_at: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    // MRK-139: obrázky z character-media (UI kontrola je podvrhne neutrálním PNG, nic se nestahuje)
+    avatar_url: "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/1-avatar.jpg",
+    render_url: "https://render.worldofwarcraft.com/eu/character/pyrewood-village/1/1-main-raw.png" },
   { id: 2, name: "Jaina", realm_slug: "pyrewood-village", realm_name: "Pyrewood Village", level: 60, target_level: 60,
     levels_to_go: 0, at_target: true, class_name: "Mage", race_name: "Human", faction: "Alliance", active_spec: null,
     item_level: null, professions: [], last_login_at: null, sync_status: "ok", sync_label: "aktuální",

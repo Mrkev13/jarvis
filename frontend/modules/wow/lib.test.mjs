@@ -68,3 +68,18 @@ test("batch refresh message", async () => {
     { tone: "success", text: "Aktualizováno: 10 · zbývá 2 (další se načtou při příští obnově)." });
   assert.equal(batchMessage({ synced: 0, skipped: "not_configured" }).tone, "warning");
 });
+
+// MRK-139: hrdinské karty – barvy tříd, frakce, jen oficiální obrázky Blizzardu.
+test("class colours, faction and safe render urls", async () => {
+  const { classRgb, factionKey, safeRenderUrl } = await import("./lib.ts");
+  assert.equal(classRgb("Warlock"), "135 136 238");
+  assert.equal(classRgb(" death knight "), "196 30 58");
+  assert.equal(classRgb("Bard"), null);
+  assert.equal(factionKey("Horde"), "horde");
+  assert.equal(factionKey("ALLIANCE"), "alliance");
+  assert.equal(factionKey(null), null);
+  assert.equal(safeRenderUrl("https://render.worldofwarcraft.com/eu/character/x/1/2-main-raw.png"), "https://render.worldofwarcraft.com/eu/character/x/1/2-main-raw.png");
+  for (const bad of ["http://render.worldofwarcraft.com/a.png", "https://evil.io/a.png", "https://render.worldofwarcraft.com/a.png?x=1", "javascript:alert(1)", null]) {
+    assert.equal(safeRenderUrl(bad), null, String(bad));
+  }
+});

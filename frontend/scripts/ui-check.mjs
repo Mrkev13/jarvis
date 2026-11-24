@@ -3783,6 +3783,38 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// 36) MRK-139 – WoW hrdinské karty: celý render na pozadí, barva třídy, prstenec levelu s avatarem, flotila
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wow/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const renders = [];
+    const { ctx, page, errors } = await open("/wow", {
+      width, height: width < 500 ? 844 : 900,
+      setup: (p) => p.route("https://render.worldofwarcraft.com/**", (route) => {
+        renders.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ status: 200, contentType: "image/png", body: stubPng(120, 160, [90, 70, 120]) });
+      }),
+    });
+    const list = page.getByRole("list", { name: "WoW postavy" });
+    await list.waitFor({ timeout: 5000 }).catch(() => undefined);
+    const thrall = list.locator('[data-search-target="wowchar-1"]');
+    check(`wow karty ${label}: hrdinská karta s renderem`, await eventually(async () => /wow-hero-render/.test(await thrall.getAttribute("class")), 3000));
+    const bg = await thrall.evaluate((el) => getComputedStyle(el).backgroundImage);
+    check(`wow karty ${label}: render jen z oficiálního hostu`, bg.includes("render.worldofwarcraft.com") && bg.includes("main-raw.png"), bg.slice(0, 160));
+    const cls = await thrall.evaluate((el) => getComputedStyle(el).getPropertyValue("--class-rgb").trim());
+    check(`wow karty ${label}: barva třídy (Shaman)`, cls === "0 112 221", cls);
+    check(`wow karty ${label}: prstenec levelu s avatarem`, (await thrall.locator(".wow-ring img").count()) === 1 && (await thrall.locator(".wow-ring-level").innerText()) === "42");
+    check(`wow karty ${label}: postava bez obrázku = iniciála`, (await list.locator('[data-search-target="wowchar-2"] .wow-ring-face').innerText()).trim() === "J");
+    check(`wow karty ${label}: flotila altů`, (await page.locator("[data-wow-fleet] a").count()) === 3);
+    check(`wow karty ${label}: menu ⋯ se neořízne`, (await thrall.evaluate((el) => getComputedStyle(el).overflow)) === "visible");
+    check(`wow karty ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wow-heroes-${label}.png`, fullPage: label === "desktop" });
+    check(`wow karty ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);
