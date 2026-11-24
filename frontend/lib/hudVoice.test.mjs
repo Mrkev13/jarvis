@@ -57,3 +57,30 @@ test("studio voice clips follow the greeting day parts", async () => {
   assert.equal(usesStudioVoice({ voiceURI: "piper" }), true);
   assert.equal(usesStudioVoice({ voiceURI: "g-uk-m" }), false);
 });
+
+// Codex review #106: přihlášení nesmí useknout pozdrav – čeká na konec, pojistka pokryje nejdelší klip i načtení.
+test("login waits for the whole greeting; the safety cap covers the longest clip", async () => {
+  const { greetThenGo, LOGIN_GREETING_MAX_MS } = await import("./hudVoice.ts");
+  const { readdirSync, statSync } = await import("node:fs");
+  const dir = new URL("../public/jarvis/voice/", import.meta.url);
+  // MP3 64 kb/s CBR → délka ≈ bajty * 8 / 64000
+  const longestMs = Math.max(...readdirSync(dir).filter((f) => f.endsWith(".mp3"))
+    .map((f) => (statSync(new URL(f, dir)).size * 8) / 64000 * 1000));
+  assert.ok(longestMs > 5000, "české klipy jsou delší než původních 4,5 s");
+  assert.ok(LOGIN_GREETING_MAX_MS >= longestMs + 2500, `pojistka ${LOGIN_GREETING_MAX_MS} ms vs. klip ${Math.round(longestMs)} ms`);
+
+  // simulované hodiny: pozdrav trvá 5,6 s – přesměrování až po něm, ne v 4,5 s
+  const events = [];
+  let clock = 0;
+  const timers = [];
+  const wait = (ms) => new Promise((r) => timers.push({ at: clock + ms, r }));
+  const say = () => new Promise((r) => timers.push({ at: clock + 5600, r: () => { events.push(`dořečeno@${clock}`); r(); } }));
+  const run = greetThenGo(say, () => events.push(`odchod@${clock}`), LOGIN_GREETING_MAX_MS, wait);
+  for (const t of [...timers].sort((a, b) => a.at - b.at)) { clock = t.at; t.r(); await new Promise((r) => setImmediate(r)); }
+  assert.equal(await run, true);
+  assert.deepEqual(events.slice(0, 2), ["dořečeno@5600", "odchod@5600"]);
+
+  // zaseknuté přehrávání: pojistka odejde a vrátí false (pozdrav se neoznačí jako odehraný)
+  const stuck = await greetThenGo(() => new Promise(() => {}), () => {}, 10, (ms) => new Promise((r) => setTimeout(r, ms)));
+  assert.equal(stuck, false);
+});

@@ -130,3 +130,20 @@ export async function sayGreeting(prefs: Pick<HudPrefs, "voiceLang" | "voiceURI"
   }
   return speakAsJarvis(greetingText(prefs.voiceLang, hour), prefs);
 }
+
+/**
+ * Codex review #106: nejdelší čekání na pozdrav po PINu, než se přesměruje. Jen pojistka (zaseknuté přehrávání) –
+ * normálně se čeká na skutečný konec klipu. Musí pokrýt nejdelší klip (≈ 5,6 s) i jeho načtení (test hlídá).
+ */
+export const LOGIN_GREETING_MAX_MS = 9000;
+
+/**
+ * Po přihlášení: pozdrav dohraje a teprve pak `go()`. Vrací, zda pozdrav doběhl celý (false = zasáhla pojistka) –
+ * jen celý pozdrav se smí označit jako odehraný, jinak dashboard pozdraví znovu.
+ */
+export async function greetThenGo(say: () => Promise<void>, go: () => void, maxMs = LOGIN_GREETING_MAX_MS,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))): Promise<boolean> {
+  const finished = await Promise.race([say().then(() => true, () => true), wait(maxMs).then(() => false)]);
+  go();
+  return finished;
+}
