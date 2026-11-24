@@ -12,6 +12,7 @@ from models import Assignment, Exam, Goal, Notification
 from text_utils import days_left_cz, format_date_cz, format_hours_cz
 from time_utils import today_local
 from statuses import ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES
+from trading_notifications import trading_candidates
 
 
 
@@ -129,6 +130,7 @@ def _resolve_if_no_longer_relevant(
             "goal_stagnation",
             "work_behind",
             "finance_goal_stagnation",
+            "trading_health",
         ):
             r.resolved = True
             changed += 1
@@ -426,6 +428,12 @@ def generate_notifications(db: Session, today: date | None = None, now: datetime
         cand = _finance_goal_stagnation_candidate(db, it, d)
         if cand:
             candidates.append(cand)
+
+    # MRK-140: paper trading (externí read-only API). Výpadek konektoru nesmí shodit ostatní notifikace.
+    try:
+        candidates.extend(trading_candidates(NotificationCandidate, d))
+    except Exception:  # noqa: BLE001
+        pass
 
     relevant_keys = {c.dedupe_key for c in candidates}
 
