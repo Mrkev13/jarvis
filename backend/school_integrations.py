@@ -446,9 +446,10 @@ INTEGRATIONS = ModuleIntegrations(
     ),
     dashboard=(DashboardSection("upcoming", dashboard_upcoming, empty=[]),),
     context=(
-        ContextSection("school", ("skol", "ukol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "deadline", "termin", "test",
-                                  "dochaz", "absenc"),
-                       order=10, build=context_school, covered_tools=("get_school_assignments", "get_school_exams")),
+        # MRK-83: „test", „termín", „úkol" i mimo školu (smoke test, termín u doktora, úkol v práci) → slabá slova
+        ContextSection("school", ("skol", "zkous", "pisemk", "zapoct", "predmet", "semestr", "dochaz", "absenc"),
+                       order=10, build=context_school, covered_tools=("get_school_assignments", "get_school_exams"),
+                       weak_keywords=(" test", "termin", "ukol", "deadline")),
         *materials.CONTEXT,
     ),
     quick_add_rules=(

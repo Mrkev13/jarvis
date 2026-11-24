@@ -29,6 +29,9 @@ DEFAULT_MAX_HISTORY_TOKENS = 2500
 DEFAULT_SDK_MAX_RETRIES = 0
 DEFAULT_LLM_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_MAX_WAIT_SECONDS = 20
+# MRK-83 (audit Z17): strop výstupu jednoho kola chatu (včetně reasoning tokenů) – předvídatelná spotřeba denního
+# limitu Groqu. Denní / týdenní přehled mají vlastní menší limity (briefing_service, weekly_review_service).
+DEFAULT_CHAT_MAX_TOKENS = 3000
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,7 @@ class LLMSettings:
     max_history_tokens: int = DEFAULT_MAX_HISTORY_TOKENS
     llm_max_attempts: int = DEFAULT_LLM_MAX_ATTEMPTS
     retry_max_wait_seconds: int = DEFAULT_RETRY_MAX_WAIT_SECONDS
+    chat_max_tokens: int = DEFAULT_CHAT_MAX_TOKENS
     usage_logging: bool = True
     # A5: deterministický výběr menší sady toolů podle dotazu; False = vždy všechny tooly (dřívější chování).
     tool_routing: bool = True
@@ -100,6 +104,7 @@ def load_llm_settings(env: dict | None = None) -> LLMSettings:
         sdk_max_retries=_int_env(env, "GROQ_SDK_MAX_RETRIES", DEFAULT_SDK_MAX_RETRIES, min_value=0),
         llm_max_attempts=_int_env(env, "AI_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS),
         retry_max_wait_seconds=_int_env(env, "AI_LLM_RETRY_MAX_WAIT_SECONDS", DEFAULT_RETRY_MAX_WAIT_SECONDS),
+        chat_max_tokens=_int_env(env, "AI_CHAT_MAX_TOKENS", DEFAULT_CHAT_MAX_TOKENS, min_value=256),
         usage_logging=_bool_env(env, "AI_USAGE_LOG", True),
         tool_routing=_bool_env(env, "AI_TOOL_ROUTING", True),
     )
