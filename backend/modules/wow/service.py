@@ -138,6 +138,7 @@ def character_dict(ch: WowCharacter) -> dict:
         "at_target": ch.target_level is not None and ch.level is not None and ch.level >= ch.target_level,
         "class_name": ch.class_name, "race_name": ch.race_name, "faction": ch.faction, "active_spec": ch.active_spec,
         "item_level": ch.item_level, "professions": professions(ch), "last_login_at": _iso(ch.last_login_at),
+        "avatar_url": ch.avatar_url, "render_url": ch.render_url,
         "sync_status": ch.sync_status, "sync_label": SYNC_LABELS.get(ch.sync_status, ch.sync_status),
         "last_synced_at": _iso(ch.last_synced_at),
     }
@@ -214,7 +215,25 @@ def parse_professions(data: dict | None) -> list[dict]:
     return out[:6]
 
 
-def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
+# MRK-139: obrázky postavy jen z oficiálních render hostů Blizzardu (https, bez query / fragmentu)
+MEDIA_URL_RE = re.compile(r"^https://render(?:-(?:eu|us|kr|tw))?\.worldofwarcraft\.com/[A-Za-z0-9_\-./%]+\.(?:jpg|jpeg|png|webp)$")
+
+
+def _media_url(value) -> str | None:
+    return value if isinstance(value, str) and len(value) <= 500 and MEDIA_URL_RE.match(value) else None
+
+
+def parse_media(data: dict | None) -> tuple[str | None, str | None]:
+    """character-media → (avatar, celý render). Render: `main-raw` (průhledné pozadí), jinak `main`, jinak `inset`."""
+    if not isinstance(data, dict):
+        return None, None
+    assets = {a.get("key"): _media_url(a.get("value")) for a in (data.get("assets") or []) if isinstance(a, dict)}
+    avatar = assets.get("avatar")
+    render = assets.get("main-raw") or assets.get("main") or assets.get("inset")
+    return avatar, render
+
+
+def apply_profile(ch: WowCharacter, data: dict, prof: dict | None, media: dict | None = None) -> None:
     level = _int(data.get("level"), 1, MAX_LEVEL)
     if level is None:
         raise battlenet.BattleNetError("invalid_response")
@@ -238,6 +257,11 @@ def apply_profile(ch: WowCharacter, data: dict, prof: dict | None) -> None:
                         if isinstance(ts, (int, float)) and ts > 0 else None)
     if prof is not None:
         ch.professions_json = json.dumps(parse_professions(prof), ensure_ascii=False)
+    avatar, render = parse_media(media)
+    if avatar:
+        ch.avatar_url = avatar
+    if render:
+        ch.render_url = render
 
 
 def _apply_forever_identity(ch: WowCharacter, data: dict) -> None:
@@ -263,6 +287,7 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
     try:
         data = client.character(ch.realm_slug, ch.name_key)
         prof = client.professions(ch.realm_slug, ch.name_key)
+        media = client.media(ch.realm_slug, ch.name_key)  # MRK-139: doplněk, chyba = None
         new_level = _int(data.get("level"), 1, MAX_LEVEL)
         if new_level is None:
             raise battlenet.BattleNetError("invalid_response")
@@ -282,7 +307,7 @@ def sync_character(db: Session, ch: WowCharacter, client: battlenet.Client | Non
         ch.last_attempt_at = now
         return "ok"
     before = _snapshot(ch)
-    apply_profile(ch, data, prof)
+    apply_profile(ch, data, prof, media)
     ch.sync_status = "ok"
     ch.last_synced_at = now
     db.flush()

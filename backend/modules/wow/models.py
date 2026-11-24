@@ -34,6 +34,9 @@ class WowCharacter(Base):
     active_spec = Column(String(40), nullable=True)
     item_level = Column(Integer, nullable=True)        # jen když ho namespace nabízí
     professions_json = Column(Text, nullable=True)     # [{"name": "Mining", "skill": 150, "max": 300}]
+    # MRK-139 (migrace 0032): obrázky z Blizzard character-media – jen URL z oficiálních hostů render.worldofwarcraft.com
+    avatar_url = Column(String(500), nullable=True)
+    render_url = Column(String(500), nullable=True)
     last_login_at = Column(DateTime, nullable=True)    # naive UTC
     sync_status = Column(String(20), nullable=False, default="pending")
     last_synced_at = Column(DateTime, nullable=True)   # poslední ÚSPĚŠNÁ synchronizace

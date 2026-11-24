@@ -627,3 +627,76 @@ html[data-daypart="night"] {
 @media (prefers-reduced-motion: reduce) {
   .plan-step { animation: none !important; }
 }
+
+/* =====================================================================================================
+ * MRK-139 – WoW hrdinské karty: barva třídy, tónování frakce, celý render postavy na pozadí, prstenec levelu
+ * ===================================================================================================== */
+.wow-hero {
+  /* žádný overflow: hidden – menu „⋯" se otevírá uvnitř karty a nesmí se oříznout */
+  position: relative;
+  border-color: rgb(var(--class-rgb) / 0.35);
+  background-image:
+    linear-gradient(100deg, rgb(var(--faction-rgb) / 0.18), transparent 45%),
+    linear-gradient(180deg, rgb(var(--class-rgb) / 0.06), transparent 70%);
+}
+.wow-hero::before {
+  /* lem v barvě třídy vlevo */
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(var(--class-rgb)), rgb(var(--class-rgb) / 0.2));
+  box-shadow: 0 0 14px rgb(var(--class-rgb) / 0.6);
+}
+.wow-hero-render {
+  min-height: 15rem;
+  /* celý render postavy vpravo jako vrstva pozadí; zleva ho překryje přechod do barvy karty */
+  background-image:
+    linear-gradient(90deg, rgb(12 19 30) 32%, rgb(12 19 30 / 0.6) 55%, rgb(12 19 30 / 0) 78%),
+    var(--render-url),
+    linear-gradient(100deg, rgb(var(--faction-rgb) / 0.22), rgb(var(--class-rgb) / 0.12));
+  background-repeat: no-repeat;
+  background-size: auto, auto 135%, auto;
+  background-position: 0 0, right -1.5rem top 18%, 0 0;
+}
+@media (max-width: 639px) {
+  .wow-hero-render {
+    min-height: 12rem;
+    background-image:
+      linear-gradient(90deg, rgb(12 19 30 / 0.92) 40%, rgb(12 19 30 / 0.7)),
+      var(--render-url),
+      linear-gradient(100deg, rgb(var(--faction-rgb) / 0.22), rgb(var(--class-rgb) / 0.12));
+    background-position: 0 0, right -3rem top 15%, 0 0;
+  }
+}
+
+/* prstenec levelu s avatarem */
+.wow-ring-track { stroke: rgb(255 255 255 / 0.1); }
+.wow-ring-fill {
+  stroke: rgb(var(--class-rgb, 155 227 255));
+  filter: drop-shadow(0 0 4px rgb(var(--class-rgb, 155 227 255) / 0.7));
+}
+.wow-ring-done { stroke: rgb(255 214 120); filter: drop-shadow(0 0 6px rgb(255 214 120 / 0.8)); }
+.wow-ring-face {
+  background: radial-gradient(circle at 50% 35%, rgb(var(--class-rgb, 155 227 255) / 0.35), #0b1220 70%);
+  border: 1px solid rgb(var(--class-rgb, 155 227 255) / 0.4);
+}
+.wow-ring-level {
+  position: absolute;
+  bottom: -0.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 1.6rem;
+  padding: 0 0.3rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(255 214 120 / 0.7);
+  background: #141a24;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
+  color: rgb(255 224 150);
+}
+

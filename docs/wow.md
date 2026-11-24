@@ -20,6 +20,14 @@ ve skupině „Další“). Data jsou **snapshot** – Hub API jen čte, ve hře
   `wow_max_level` (nejvyšší level).
 - Vyhledávání: postavy (`/wow?wowchar=<id>`); AI kontext: krátký seznam „jméno třída lvl X/cíl“ (žádné API volání).
 
+## Hrdinské karty (MRK-139)
+
+- Synchronizace načte i `character-media` (avatar + celý render, migrace `0032_wow_character_media`). Ukládají se
+  jen URL z oficiálních hostů `render(-eu|-us|-kr|-tw).worldofwarcraft.com` (https, bez query); výpadek obrázků
+  synchronizaci neshodí a nechá poslední známé. Obrázky nejsou změna snapshotu pro Aktivitu.
+- Karta: render vpravo jako vrstva pozadí, barva třídy (oficiální barvy), tónování frakce, prstenec levelu
+  s avatarem; nahoře „flotila“ avatarů. Prohlížeč načítá obrázky přímo z CDN Blizzardu bez referreru.
+
 ## Konfigurace (jen server, `.env.production`)
 
 | Proměnná | Význam |

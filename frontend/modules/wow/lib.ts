@@ -22,6 +22,9 @@ export type WowCharacter = {
   sync_status: "pending" | "ok" | "not_found" | "error";
   sync_label: string;
   last_synced_at: string | null;
+  /** MRK-139: obrázky z Blizzard character-media (jen oficiální render hosty, ověřuje backend) */
+  avatar_url?: string | null;
+  render_url?: string | null;
 };
 
 export type WowOverview = {
@@ -125,4 +128,38 @@ export function batchMessage(r: WowBatchResult): { tone: "success" | "warning"; 
   if (failures.length) parts.push(`selhalo: ${failures.map(([code, n]) => `${n}× ${BATCH_ERRORS[code] ?? code}`).join(", ")}`);
   if (r.remaining && r.remaining > 0) parts.push(`zbývá ${r.remaining} (další se načtou při příští obnově)`);
   return { tone: r.synced > 0 && !failures.length ? "success" : "warning", text: `${parts.join(" · ")}.` };
+}
+
+/** MRK-139: oficiální barvy tříd WoW (RGB trojice pro rgb(var(--class-rgb) / α)); neznámá třída = null. */
+const CLASS_RGB: Record<string, string> = {
+  "death knight": "196 30 58",
+  "demon hunter": "163 48 201",
+  druid: "255 124 10",
+  evoker: "51 147 127",
+  hunter: "170 211 114",
+  mage: "63 199 235",
+  monk: "0 255 152",
+  paladin: "244 140 186",
+  priest: "235 235 235",
+  rogue: "255 244 104",
+  shaman: "0 112 221",
+  warlock: "135 136 238",
+  warrior: "198 155 109",
+};
+
+export function classRgb(className: string | null | undefined): string | null {
+  return className ? CLASS_RGB[className.trim().toLowerCase()] ?? null : null;
+}
+
+/** Frakce → „horde" / „alliance" / null (tónování pozadí karty). */
+export function factionKey(faction: string | null | undefined): "horde" | "alliance" | null {
+  const f = (faction ?? "").trim().toLowerCase();
+  return f === "horde" ? "horde" : f === "alliance" ? "alliance" : null;
+}
+
+/** Obrázek jen z oficiálního render hostu Blizzardu (stejné pravidlo jako backend) – jinak null, nic cizího. */
+export function safeRenderUrl(url: string | null | undefined): string | null {
+  return typeof url === "string" && /^https:\/\/render(?:-(?:eu|us|kr|tw))?\.worldofwarcraft\.com\/[A-Za-z0-9_\-./%]+\.(?:jpg|jpeg|png|webp)$/.test(url)
+    ? url
+    : null;
 }
