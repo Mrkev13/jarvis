@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Button, Card, CardHeader } from "@/components/ui";
-import { BOOT_REPLAY_EVENT, HUD_PREFS_EVENT, readHudPrefs, voiceGreeting, writeHudPrefs, type HudPrefs } from "@/lib/hud";
-import { bootGreeting, pragueHour } from "@/lib/boot";
+import { fieldClass } from "@/components/ui/forms";
+import { BOOT_REPLAY_EVENT, HUD_PREFS_EVENT, readHudPrefs, writeHudPrefs, type HudPrefs } from "@/lib/hud";
+import { pragueHour } from "@/lib/boot";
 import { playHudSound } from "@/lib/hudSound";
-import { isSpeechSynthesisSupported, speakText } from "@/lib/speech";
+import { greetingText, pickVoice, speakAsJarvis, voiceOptions, type VoiceLike } from "@/lib/hudVoice";
+import { isSpeechSynthesisSupported } from "@/lib/speech";
 import { cx } from "@/lib/ui";
 
 /**
@@ -14,13 +16,26 @@ import { cx } from "@/lib/ui";
  */
 export function HudSettings() {
   const [prefs, setPrefs] = useState<HudPrefs | null>(null);
+  // MRK-136: hlasy prohlížeče (načítají se asynchronně – voiceschanged)
+  const [voices, setVoices] = useState<VoiceLike[]>([]);
 
   useEffect(() => {
     const sync = () => setPrefs(readHudPrefs());
     queueMicrotask(sync);
     window.addEventListener(HUD_PREFS_EVENT, sync);
-    return () => window.removeEventListener(HUD_PREFS_EVENT, sync);
+    const synth = isSpeechSynthesisSupported() ? window.speechSynthesis : null;
+    const loadVoices = () => setVoices((synth?.getVoices?.() ?? []).map((v) => ({ name: v.name, lang: v.lang, voiceURI: v.voiceURI, localService: v.localService })));
+    queueMicrotask(loadVoices);
+    synth?.addEventListener?.("voiceschanged", loadVoices);
+    return () => {
+      window.removeEventListener(HUD_PREFS_EVENT, sync);
+      synth?.removeEventListener?.("voiceschanged", loadVoices);
+    };
   }, []);
+
+  const lang = prefs?.voiceLang ?? "cs";
+  const options = voiceOptions(voices, lang);
+  const current = prefs ? pickVoice(voices, prefs) : null;
 
   const update = (patch: Partial<HudPrefs>) => {
     const next = { ...(prefs ?? readHudPrefs()), ...patch };
@@ -51,6 +66,43 @@ export function HudSettings() {
           onChange={(v) => update({ voice: v })}
         />
       </div>
+      {/* MRK-136: jazyk a hlas pozdravu – nejlepší (přirozené / online) hlasy nahoře */}
+      <div className="mt-3 grid gap-3 px-3 sm:grid-cols-2">
+        <label className="block text-sm text-ink-2">
+          Jazyk pozdravu
+          <select
+            aria-label="Jazyk pozdravu"
+            className={cx(fieldClass, "mt-1")}
+            value={lang}
+            disabled={!prefs}
+            onChange={(e) => update({ voiceLang: e.target.value === "en" ? "en" : "cs", voiceURI: null })}
+          >
+            <option value="cs">Čeština</option>
+            <option value="en">English (britský – jako ve filmu)</option>
+          </select>
+        </label>
+        <label className="block text-sm text-ink-2">
+          Hlas
+          <select
+            aria-label="Hlas Jarvise"
+            className={cx(fieldClass, "mt-1")}
+            value={current?.voiceURI ?? ""}
+            disabled={!prefs || options.length === 0}
+            onChange={(e) => update({ voiceURI: e.target.value || null })}
+          >
+            {options.length === 0 ? <option value="">Prohlížeč nemá {lang === "en" ? "anglický" : "český"} hlas</option> : null}
+            {options.map((v, i) => (
+              <option key={v.voiceURI} value={v.voiceURI}>
+                {v.name}{i === 0 ? " (doporučený)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="mt-2 px-3 text-xs text-ink-muted">
+        Prohlížeč smí mluvit až po interakci: po zadání PINu pozdraví hned, jinak po prvním kliknutí. Nejlépe znějí hlasy
+        s „Natural“, „Online“ nebo „Google“ v názvu (např. Google UK English Male v Chromu).
+      </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" onClick={() => playHudSound("mission", true)}>
           Zkusit zvuk
@@ -58,7 +110,7 @@ export function HudSettings() {
         <Button
           size="sm"
           variant="secondary"
-          onClick={() => void speakText(voiceGreeting(bootGreeting(pragueHour())), "cs-CZ")}
+          onClick={() => void speakAsJarvis(greetingText(lang, pragueHour()), prefs ?? readHudPrefs())}
         >
           Zkusit hlas
         </Button>

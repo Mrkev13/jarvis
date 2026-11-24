@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { AccentLine, Button, Card, ErrorState, fieldClass, HudFrame, HudLabel, StatusPulse } from "@/components/ui";
 import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { API_URL, readErrorDetail } from "@/lib/api";
+import { pragueHour } from "@/lib/boot";
+import { readHudPrefs } from "@/lib/hud";
+import { VOICE_SPOKEN_KEY, greetingText, speakAsJarvis } from "@/lib/hudVoice";
 import { loginErrorMessage } from "@/lib/loginError";
 import { safeNextPath } from "@/lib/safeNext";
 import { cx } from "@/lib/ui";
@@ -87,6 +90,20 @@ function LoginInner() {
         // ne-JSON (proxy / HTML chyba) – níže obecná hláška
       }
       if (r.ok && body.ok) {
+        // MRK-136: odeslání PINu je interakce – Jarvis smí promluvit hned tady (na dashboardu by čekal na klik).
+        // Přesměrování počká, až dořekne (nejvýš 4,5 s), jinak by ho nové načtení stránky utnulo.
+        const prefs = readHudPrefs();
+        if (prefs.voice) {
+          try {
+            window.sessionStorage.setItem(VOICE_SPOKEN_KEY, "1");
+          } catch {
+            /* soukromé okno – dashboard pak pozdraví po prvním kliknutí */
+          }
+          await Promise.race([
+            speakAsJarvis(greetingText(prefs.voiceLang, pragueHour()), prefs),
+            new Promise((resolve) => window.setTimeout(resolve, 4500)),
+          ]);
+        }
         goTo(next);
         return;
       }

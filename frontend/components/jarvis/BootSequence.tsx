@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { ArcReactor } from "@/components/jarvis/ArcReactor";
 import { BOOT_MS, BOOT_SESSION_KEY, bootGreeting, pragueHour, shouldBoot } from "@/lib/boot";
-import { BOOT_REPLAY_EVENT, readHudPrefs, voiceGreeting } from "@/lib/hud";
+import { BOOT_REPLAY_EVENT, readHudPrefs } from "@/lib/hud";
+import { VOICE_SPOKEN_KEY, greetingText, speakAsJarvis } from "@/lib/hudVoice";
 import { playHudSound, whenActivated } from "@/lib/hudSound";
-import { speakText } from "@/lib/speech";
 
 /**
  * MRK-131: „start systému" – jednou za relaci se rozzáří arc reaktor, pošle dvě vlny a Jarvis pozdraví.
@@ -32,7 +32,16 @@ export function BootSequence() {
     // prohlížeč smí mluvit až po interakci, jinak se pozdrav odloží na první klik
     const prefs = readHudPrefs();
     if (prefs.voice && (force || (!seen && !automated))) {
-      cleanups.push(whenActivated(() => void speakText(voiceGreeting(greeting), "cs-CZ")));
+      // MRK-136: po přihlášení PINem už Jarvis promluvil na přihlašovací obrazovce – podruhé ne
+      let spoken = false;
+      try {
+        spoken = window.sessionStorage.getItem(VOICE_SPOKEN_KEY) === "1";
+      } catch {
+        spoken = false;
+      }
+      if (!spoken || force) {
+        cleanups.push(whenActivated(() => void speakAsJarvis(greetingText(prefs.voiceLang, pragueHour()), prefs)));
+      }
     }
     const run = shouldBoot({ seen, reducedMotion, automated, force });
     if (run) {
