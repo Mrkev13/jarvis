@@ -158,6 +158,8 @@ def sync(db: Session, client: wot_wargaming.Client | None, *, now: datetime | No
         return {"result": err.code}
     baseline = not existing  # první synchronizace: stará M bez data, žádné milníky
     changed, new_aces = 0, []
+    # kdy tank naposledy viděla synchronizace (před tímto během) – M zapsané od té doby je tahle bitva (Codex #116)
+    seen_before = {tid: r.updated_at for tid, r in existing.items()}
     for s in stats:
         row = existing.get(s["tank_id"])
         meta = info.get(s["tank_id"])
@@ -189,7 +191,7 @@ def sync(db: Session, client: wot_wargaming.Client | None, *, now: datetime | No
                 new_aces.append(row)
     db.flush()
     for row in new_aces:
-        _record_ace(db, row, now, user_context)
+        _record_ace(db, row, now, user_context, seen_before.get(row.tank_id))
     if changed:
         log_activity(db, AREA, "sync", f"WoT odznaky z Wargaming API: {changed} tanků změněno"
                      + (f", nová M: {len(new_aces)}" if new_aces else ""),
@@ -218,9 +220,41 @@ def _insert(db: Session, s: dict, meta: dict | None, now: datetime) -> WotVehicl
         return None
 
 
-def _record_ace(db: Session, row: WotVehicleMastery, now: datetime, user_context: str) -> None:
-    """Nové M tanku → milník „čeká na replay“ (+ cíl M-ka celkem) a doménová událost pro „Mise splněna“."""
+def _already_recorded(db: Session, row: WotVehicleMastery, since: datetime | None) -> WotMilestone | None:
+    """M tohoto tanku zapsané od minulé synchronizace (z replaye nebo ručně) = tatáž bitva, kterou API teď hlásí.
+
+    API přešlo na Ace poprvé, takže dřív než minulá synchronizace (kdy ještě hlásila méně) M neexistovalo – starší
+    záznam je jiná bitva. Bez data minulé synchronizace (nový tank) stačí jakýkoli den kolem detekce.
+    """
+    names = {norm_name(row.name), norm_name(row.short_name)} - {""}
+    if not names:
+        return None
+    since_day = to_local(since - PAIR_AFTER_DETECTION).date() if since else None
+    taken = {mid for (mid,) in db.query(WotVehicleMastery.ace_milestone_id).filter(
+        WotVehicleMastery.ace_milestone_id.isnot(None))}
+    rows = (db.query(WotMilestone).filter(WotMilestone.milestone_type == "mastery", WotMilestone.mastery == "ace")
+            .order_by(WotMilestone.id.desc()).all())
+    for m in rows:
+        if m.id in taken or norm_name(m.tank) not in names:
+            continue
+        when = m.played_on or (to_local(m.created_at).date() if m.created_at else None)
+        if since_day is None or (when is not None and when >= since_day):
+            return m
+    return None
+
+
+def _record_ace(db: Session, row: WotVehicleMastery, now: datetime, user_context: str,
+                seen_before: datetime | None = None) -> None:
+    """Nové M tanku → milník „čeká na replay“ (+ cíl M-ka celkem) a doménová událost pro „Mise splněna“.
+    Když už stejné M zapsal replay / ručně (pořadí replay → API), API řádek se jen připojí (Codex review #116)."""
     import wot_service  # líně: wot_service → goal_history_service → … (bez cyklu při importu modulu)
+
+    existing = _already_recorded(db, row, seen_before)
+    if existing is not None:
+        row.ace_detected_at = now
+        row.ace_milestone_id = existing.id
+        db.flush()
+        return
 
     m = wot_service.create_milestone(db, {
         "tank": row.name or f"Tank {row.tank_id}", "mastery": "ace", "played_on": today_local(now).isoformat(),

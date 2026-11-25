@@ -242,6 +242,52 @@ class PairingTestCase(MasteryBase):
         self.assertEqual(self.q(lambda db: db.get(WotMilestone, mid).damage), 5205)
 
 
+class ReplayFirstTestCase(MasteryBase):
+    """Codex review #116: pořadí replay → „Vytvořit Mko z replaye“ → teprve pak API detekce (6h interval)."""
+
+    upload = PairingTestCase.upload
+
+    def test_api_detection_reuses_the_ace_already_recorded_from_a_replay(self):
+        self.clock[0] = NOW - timedelta(hours=7)
+        self.sync()                       # výchozí stav: Progetto má I (3)
+        self.clock[0] = NOW
+        rid, _ = self.upload()            # bitva 2026-09-14 18:15 UTC, M
+        def make(db):
+            r, m = wrs.create_milestone_from_replay(db, rid)
+            db.commit()
+            return m.id
+        mid = self.q(make)
+        self.clock[0] = NOW + timedelta(hours=1)
+        self.api.marks[1] = 4
+        out = self.sync()
+        self.assertEqual(out["new_aces"], 1)
+        self.assertEqual(self.q(lambda db: db.query(WotMilestone).count()), 1, "žádný druhý milník za stejnou bitvu")
+        row = self.q(lambda db: db.query(WotVehicleMastery).filter_by(tank_id=1).one())
+        self.assertEqual(row.ace_milestone_id, mid, "API řádek se připojí k existujícímu M")
+        self.assertEqual(self.aces_events(), 0, "nic nového se nezískalo – M už je zapsané")
+        ov = self.q(svc.overview)
+        self.assertEqual(ov["summary"]["pending_replays"], 0)
+        self.assertEqual(self.q(lambda db: ghs.compute_automatic_goal_current_value_with_ok(db, ghs.WOT_ACE_MASTERY_SOURCE)),
+                         (1.0, True), "cíl M-ka celkem jen jednou")
+
+    def test_older_manual_ace_does_not_swallow_a_new_one(self):
+        # ruční M z doby PŘED minulou synchronizací (kdy API ještě M nehlásilo) není tahle bitva
+        self.clock[0] = NOW - timedelta(days=3)
+        self.sync()
+        def old(db):
+            import wot_service
+            wot_service.create_milestone(db, {"tank": "Progetto M35 mod. 46", "mastery": "ace", "played_on": "2026-09-10"})
+            db.commit()
+        self.q(old)
+        self.clock[0] = NOW
+        self.sync()                       # mezitím další sync (odznak beze změny)
+        self.clock[0] = NOW + timedelta(hours=7)
+        self.api.marks[1] = 4
+        self.sync()
+        self.assertEqual(self.q(lambda db: db.query(WotMilestone).count()), 2)
+        self.assertEqual(self.aces_events(), 1)
+
+
 class QueryAndApiTestCase(MasteryBase):
     def test_ai_query_is_computed(self):
         self.sync()
