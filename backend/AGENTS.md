@@ -844,6 +844,13 @@ print(_hash_pin("123456"))
   Získané přání = `wow.collection.acquired`; cíle `wow_mounts` / `wow_pets` / `wow_achievement_points`. Testy
   `tests/test_wow_collections.py`.
 
+## 23d. Trading (MRK-141, `modules/trading/`, bez migrace)
+
+- Read-only stránka `/trading` nad API stacku standa-trading přes konektor MRK-140 (`trading_notifications.fetch_json`):
+  strategie vs SPY, pojistka, obchody, signály, zdraví. Jen whitelist polí, chyby jen čitelnou zprávou (bez URL a klíče).
+- Bez `ai_context` / kontextu / toolů – finance do AI nejde (MRK-60, test `test_module_has_no_ai_surface`).
+  Podrobně `docs/trading.md`, testy `tests/test_trading_module.py`.
+
 ## 24. Architektonická pravidla (Roadmap 3.5)
 
 - Trvalé principy: `docs/architecture-principles.md`; audit a dluh: `docs/architecture-audit.md`;

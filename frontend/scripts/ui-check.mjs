@@ -3883,6 +3883,37 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await fetch(`${MOCK}/wow/reset`, { method: "POST" });
 }
 
+// 39) MRK-141 – Trading: strategie seřazené podle výnosu (SPY poslední), pojistka, obchody, signály, zdraví stacku;
+// výpadek API a nenastavené API = čitelný stav
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/trading/state?mode=ok`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/trading", { width, height: width < 500 ? 844 : 900 });
+    const cards = page.getByRole("list", { name: "Strategie" }).locator("li");
+    check(`trading ${label}: strategie`, await eventually(async () => (await cards.count()) === 4, 5000));
+    check(`trading ${label}: nejlepší nahoře`, (await cards.first().getAttribute("data-trading-strategy")) === "sma_cross" && (await cards.first().innerText()).includes("Nejlepší vs SPY"));
+    check(`trading ${label}: benchmark poslední`, (await cards.last().innerText()).includes("SPY (benchmark)"));
+    check(`trading ${label}: kapitál a výnos`, /10\s012\s+USD/.test(await cards.first().innerText()) && (await cards.first().innerText()).includes("+0,12"));
+    check(`trading ${label}: vypnutá pojistkou`, (await page.locator('[data-trading-strategy="rsi_revert"]').innerText()).includes("Pojistka: drawdown"));
+    check(`trading ${label}: obchody a signály`, (await page.getByRole("list", { name: "Obchody" }).locator("li").count()) === 2 && (await page.getByRole("list", { name: "Signály" }).innerText()).includes("prodat XOM"));
+    check(`trading ${label}: HUD jádro`, (await page.locator('[data-hud-core="trading"]').innerText()).includes("2 z 3 strategií poráží SPY"));
+    check(`trading ${label}: zdraví stacku`, (await page.locator("[data-trading-health]").innerText()).includes("Stack běží"));
+    check(`trading ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}trading-${label}.png`, fullPage: label === "desktop" });
+    check(`trading ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  for (const [mode, selector, text] of [["down", "[data-trading-down]", "neodpovídá"], ["setup", "[data-trading-setup]", "TRADING_API_URL"]]) {
+    await fetch(`${MOCK}/trading/state?mode=${mode}`, { method: "POST" });
+    const { ctx, page, errors } = await open("/trading", { width: 1366, height: 900 });
+    check(`trading ${mode}: čitelný stav`, await eventually(async () => (await page.locator(selector).innerText().catch(() => "")).includes(text), 4000));
+    check(`trading ${mode}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/trading/state?mode=ok`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

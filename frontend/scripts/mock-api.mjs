@@ -215,6 +215,25 @@ const WOW_COLLECTIONS = () => ({
   ],
   seq: 10,
 });
+let tradingMode = "ok";
+function tradingOverview() {
+  if (tradingMode === "setup") return { configured: false, status: "not_configured" };
+  if (tradingMode === "down") return { configured: true, status: "unavailable", message: "Trading API neodpovídá (URLError). Zkontroluj kontejnery standa-trading." };
+  const st = (name, total, ret, vs, extra = {}) => ({ name, label: name === "buy_hold_spy" ? "SPY (benchmark)" : name, benchmark: name === "buy_hold_spy",
+    total, return_pct: ret, vs_spy: vs, active: true, disabled_reason: null, ...extra });
+  return {
+    configured: true, status: "ok", report_date: "2026-11-24", best: "sma_cross",
+    health: { ok: true, data_until: "2026-11-24", stale: false, runs: [
+      { job: "collect", status: "ok", at: "2026-11-24T22:05:00Z" }, { job: "trade", status: "ok", at: "2026-11-24T22:10:00Z" }] },
+    strategies: [
+      st("sma_cross", 10011.96, 0.12, 0.44), st("ema_trailing", 9972.11, -0.28, 0.04),
+      st("rsi_revert", 8820.4, -11.8, -11.48, { active: false, disabled_reason: "drawdown 12 % > 10 %" }),
+      st("buy_hold_spy", 9967.77, -0.32, null),
+    ],
+    fills: [{ strategy: "sma_cross", side: "buy", symbol: "AAPL", qty: 2 }, { strategy: "buy_hold_spy", side: "buy", symbol: "SPY", qty: 13 }],
+    signals: [{ strategy: "ema_trailing", action: "sell", symbol: "XOM" }],
+  };
+}
 const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
 function wowCollections() {
   const h = wowState.collections.history;
@@ -523,6 +542,12 @@ createServer(async (req, res) => {
     Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", forever: url.searchParams.get("forever") === "1", characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() });
     return respond(200, { ok: true });
   }
+  // MRK-141: Trading – tvar modules/trading/service.overview; /__mock/trading/state?mode=ok|down|setup přepne stav
+  if (url.pathname === "/__mock/trading/state") {
+    tradingMode = url.searchParams.get("mode") || "ok";
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/trading" && req.method === "GET") return respond(200, tradingOverview(), 150);
   if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);
   if (url.pathname === "/wow/characters" && req.method === "POST") {
     const raw = String(body?.name ?? "").trim();
