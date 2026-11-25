@@ -64,8 +64,10 @@ export default function TradingPage() {
       ) : data.status !== "ok" ? (
         <Card data-trading-down="">
           <CardHeader title="Paper trading teď nejde ověřit" description={data.message} />
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" onClick={() => void res.reload()}>Zkusit znovu</Button>
+            {/* report za zvolený den nemusí existovat – cesta zpět na nejnovější */}
+            {reportDay ? <Button size="sm" variant="ghost" onClick={() => setReportDay("")}>Nejnovější report</Button> : null}
           </div>
         </Card>
       ) : (

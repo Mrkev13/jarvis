@@ -592,6 +592,8 @@ createServer(async (req, res) => {
   }
   if (url.pathname === "/trading" && req.method === "GET") {
     const day = url.searchParams.get("date");
+    // den bez reportu (víkend) → jako skutečné API: chyba konektoru
+    if (day === "2026-11-22") return respond(200, { configured: true, status: "unavailable", message: "Trading API vrátilo chybu 404." }, 150);
     return respond(200, day && tradingMode === "ok" ? { ...tradingOverview(), report_date: day } : tradingOverview(), 150);
   }
   if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);

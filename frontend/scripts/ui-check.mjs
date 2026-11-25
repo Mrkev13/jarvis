@@ -3974,6 +3974,10 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("trading: report za vybraný den", await eventually(async () => (await page.locator("[data-trading-health]").innerText()).includes("Report z 20. 11."), 4000));
     await page.getByRole("button", { name: "Nejnovější" }).click();
     check("trading: zpět na nejnovější report", await eventually(async () => (await page.locator("[data-trading-health]").innerText()).includes("Report z 24. 11."), 4000));
+    await page.getByLabel("Report za den").fill("2026-11-22");
+    check("trading: den bez reportu = čitelný stav", await eventually(async () => (await page.locator("[data-trading-down]").count()) === 1, 4000));
+    await page.getByRole("button", { name: "Nejnovější report" }).click();
+    check("trading: z chyby zpět na nejnovější", await eventually(async () => (await page.locator("[data-trading-health]").innerText().catch(() => "")).includes("Report z 24. 11."), 4000));
     check("trading den: bez chyb JS", errors.length === 0, errors.join("; "));
     await ctx.close();
   }
