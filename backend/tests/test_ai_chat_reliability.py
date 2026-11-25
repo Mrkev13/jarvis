@@ -160,6 +160,23 @@ class ScenariosTestCase(ChatReliabilityBase):
         tool_msg = next(m for m in self.fake.requests[1]["messages"] if m["role"] == "tool")
         self.assertEqual(json.loads(tool_msg["content"]), {"error": "tool_not_routed"})
 
+    def test_07c_model_cannot_borrow_the_server_memories_call_id(self):
+        # Codex review #117: ID tool callu posílá i model – „auto_get_memories“ nesmí obejít route
+        with patch.object(tools, "get_school_subjects", side_effect=AssertionError("nesmí se provést")):
+            self.chat("kolik mám kreditů ve WoT?",
+                      tool_completion(("get_school_subjects", {}, ai.AUTO_MEMORIES_CALL_ID)), ok("Nevím."))
+        tool_msg = next(m for m in self.fake.requests[1]["messages"] if m["role"] == "tool")
+        self.assertEqual(json.loads(tool_msg["content"]), {"error": "tool_not_routed"})
+
+    def test_07d_server_injected_memories_still_run_for_the_planner(self):
+        synthetic = ai._with_planner_memories([type("C", (), {
+            "id": "g", "function": type("F", (), {"name": "get_goals", "arguments": "{}"})()})()], set())[-1]
+        route = ai.ToolRoute(names=("get_goals",), reason="test")
+        self.assertIsNone(ai._read_tool_blocked("get_memories", synthetic, route), "serverem vložené get_memories projde")
+        forged = type("C", (), {"id": ai.AUTO_MEMORIES_CALL_ID, "function": None})()
+        self.assertEqual(ai._read_tool_blocked("get_memories", forged, route), "tool_not_routed",
+                         "stejné ID od modelu nestačí")
+
     def test_07b_read_tool_of_disabled_module_is_refused(self):
         import module_registry
 

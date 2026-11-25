@@ -366,7 +366,7 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     route (A5): write tool, který routing v tomto requestu nevystavil (žádný write záměr), se NEPROVEDE
     ani nepřipraví – model dostane chybu. MRK-83: read tool mimo route nebo modulu bez `ai_context` (vypnutý modul)
     se taky neprovede – nespoléháme na to, že provider odmítne nenabídnutý tool. Výjimka: serverem doplněné
-    get_memories pro planner (AUTO_MEMORIES_CALL_ID).
+    get_memories pro planner (`server_injected`, ID samotné nestačí – posílá ho i model).
     """
     tool_messages = []
     pending_actions = []
@@ -434,7 +434,7 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
             continue
 
         function = READ_TOOL_FUNCTIONS.get(fn_name)
-        blocked = _read_tool_blocked(fn_name, tc.id, route) if function is not None else None
+        blocked = _read_tool_blocked(fn_name, tc, route) if function is not None else None
 
         if blocked is not None:
             print(f"  [TOOL BLOCKED] read tool {fn_name}: {blocked}")
@@ -463,13 +463,16 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     return tool_messages, pending_actions
 
 
-def _read_tool_blocked(fn_name: str, call_id: str, route: ToolRoute | None) -> str | None:
+def _read_tool_blocked(fn_name: str, tc, route: ToolRoute | None) -> str | None:
     """MRK-83 (audit Z12): důvod odmítnutí read toolu, nebo None. Modul se kontroluje vždy (i bez route)."""
     from module_registry import current_access  # líně: registr importuje poskytovatele modulů
     spec = TOOLS_BY_NAME.get(fn_name)
     if spec is not None and spec.areas and not any(current_access().allows_context_area(a) for a in spec.areas):
         return "module_unavailable"
-    if route is not None and not route.allows(fn_name) and call_id != AUTO_MEMORIES_CALL_ID:
+    # Codex review #117: výjimka jen pro get_memories, které vložil server (_with_planner_memories) – příznak na
+    # objektu volání; ID z odpovědi modelu (i „auto_get_memories“) není důkaz původu.
+    server_memories = fn_name == "get_memories" and getattr(tc, "server_injected", False) is True
+    if route is not None and not route.allows(fn_name) and not server_memories:
         return "tool_not_routed"
     return None
 
@@ -652,7 +655,8 @@ def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
     if "get_goals" not in names or "get_memories" in names or "get_memories" in called_tools:
         return round_calls
     synthetic = types.SimpleNamespace(
-        id=AUTO_MEMORIES_CALL_ID, function=types.SimpleNamespace(name="get_memories", arguments="{}"),
+        id=AUTO_MEMORIES_CALL_ID, server_injected=True,
+        function=types.SimpleNamespace(name="get_memories", arguments="{}"),
     )
     return [*round_calls, synthetic]
 
