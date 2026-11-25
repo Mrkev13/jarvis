@@ -8,8 +8,10 @@ Finance do AI nejde (MRK-60): modul nemá AI kontext ani tooly; data jsou jen pr
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Callable
+from urllib.parse import quote
 
 import trading_notifications as tn
 from time_utils import today_local
@@ -17,6 +19,11 @@ from time_utils import today_local
 MAX_FILLS = 50
 MAX_SIGNALS = 50
 MAX_RUNS = 10
+EQUITY_DAYS = 90
+MAX_EQUITY_POINTS = 400
+MAX_POSITIONS = 100
+MAX_ORDERS = 30
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 Fetch = Callable[[str], object]
 
 
@@ -89,15 +96,83 @@ def _health(h: dict, today: date) -> dict:
             "stale": bool(until and (today - until).days > tn.STALE_DATA_DAYS), "runs": runs}
 
 
-def overview(*, fetch: Fetch | None = None, today: date | None = None) -> dict:
-    """Celý přehled pro stránku. `fetch` jen pro testy (jinak HTTP konektor)."""
+def _day(value) -> str | None:
+    """YYYY-MM-DD jen když je to opravdu datum; jinak None (nic se nehádá)."""
+    try:
+        return tn._api_date(value).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _equity(rows) -> list[dict]:
+    """`/equity/{strategie}` → denní body kapitálu a drawdownu, seřazené podle data."""
+    if not isinstance(rows, list):
+        raise TypeError("equity")
+    out = []
+    for r in rows[-MAX_EQUITY_POINTS:]:
+        d = _day(r.get("date")) if isinstance(r, dict) else None
+        total = _num(r.get("total")) if isinstance(r, dict) else None
+        if d and total is not None:
+            out.append({"date": d, "total": total, "drawdown_pct": _num(r.get("drawdown_pct"))})
+    return sorted(out, key=lambda p: p["date"])
+
+
+def _positions(rows) -> list[dict]:
+    if not isinstance(rows, list):
+        raise TypeError("positions")
+    out = []
+    for p in rows[:MAX_POSITIONS]:
+        if not isinstance(p, dict) or not _text(p.get("symbol"), 20):
+            continue
+        out.append({"strategy": _text(p.get("strategy")), "symbol": _text(p["symbol"], 20), "qty": _num(p.get("qty")),
+                    "avg_price": _num(p.get("avg_price")), "last_close": _num(p.get("last_close")),
+                    "opened_date": _day(p.get("opened_date")), "last_date": _day(p.get("last_date")),
+                    "pnl_pct": _num(p.get("pnl_pct")), "pnl_usd": _num(p.get("pnl_usd"))})
+    return out
+
+
+def _orders(rows) -> list[dict]:
+    if not isinstance(rows, list):
+        raise TypeError("orders")
+    out = []
+    for o in rows[:MAX_ORDERS]:
+        if not isinstance(o, dict) or o.get("side") not in ("buy", "sell") or not _text(o.get("symbol"), 20):
+            continue
+        out.append({"id": o.get("id") if isinstance(o.get("id"), int) else None, "strategy": _text(o.get("strategy")),
+                    "side": o["side"], "symbol": _text(o["symbol"], 20), "qty": _num(o.get("qty")),
+                    "created_date": _day(o.get("created_date")), "fill_date": _day(o.get("fill_date")),
+                    "fill_price": _num(o.get("fill_price")), "fee": _num(o.get("fee"))})
+    return out
+
+
+def _optional(fetch: Fetch, path: str, parse):
+    """Doplňková data (graf, pozice, pokyny): výpadek / jiný tvar jen vynechá sekci, přehled zůstane."""
+    try:
+        return parse(fetch(path))
+    except (tn.TradingApiError, TypeError, ValueError, KeyError, AttributeError):
+        return None
+
+
+def parse_report_date(raw: str | None) -> str | None:
+    """`?date=` stránky → YYYY-MM-DD, nebo ValueError (REST vrátí 400)."""
+    if raw in (None, ""):
+        return None
+    if not isinstance(raw, str) or not DATE_RE.match(raw):
+        raise ValueError("date")
+    return date.fromisoformat(raw).isoformat()
+
+
+def overview(*, fetch: Fetch | None = None, today: date | None = None, report_date: str | None = None) -> dict:
+    """Celý přehled pro stránku. `fetch` jen pro testy (jinak HTTP konektor). `report_date` = report za daný den
+    (`/report?date=`); jinak poslední."""
     if fetch is None:
         if not tn.is_configured():
             return {"configured": False, "status": "not_configured"}
         fetch = tn.fetch_json
     today = today or today_local()
     try:
-        h, rep, summary = fetch("/health"), fetch("/report"), fetch("/summary")
+        h, summary = fetch("/health"), fetch("/summary")
+        rep = fetch(f"/report?date={report_date}" if report_date else "/report")
     except tn.TradingApiError as e:
         return {"configured": True, "status": "unavailable", "message": str(e)}
     try:
@@ -107,10 +182,18 @@ def overview(*, fetch: Fetch | None = None, today: date | None = None) -> dict:
         report_date = tn._api_date(rep_date).isoformat() if rep_date is not None else None
         strategies = _strategies(rep, summary)
         best = next((s for s in strategies if not s["benchmark"] and s["vs_spy"] is not None), None)
-        return {
+        out = {
             "configured": True, "status": "ok", "health": _health(h, today), "report_date": report_date,
             "strategies": strategies, "fills": _fills(rep), "signals": _signals(rep),
             "best": best["name"] if best else None,
         }
     except (TypeError, ValueError, KeyError, AttributeError):
         return {"configured": True, "status": "invalid", "message": tn.INVALID_RESPONSE}
+    # MRK-141: doplňky z dalších endpointů – každý zvlášť, výpadek jen skryje svou sekci
+    equity = {s["name"]: _optional(fetch, f"/equity/{quote(s['name'], safe='')}?days={EQUITY_DAYS}", _equity)
+              for s in strategies}
+    out["equity"] = {k: v for k, v in equity.items() if v}
+    out["positions"] = _optional(fetch, "/positions", _positions)
+    out["orders_pending"] = _optional(fetch, "/orders?status=pending", _orders)
+    out["orders_filled"] = _optional(fetch, "/orders?status=filled", _orders)
+    return out

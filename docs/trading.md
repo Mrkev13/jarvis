@@ -15,7 +15,18 @@ známá pole (whitelist):
 - **obchody** posledního obchodního dne (`fills`, jen `buy` / `sell`) a **signály** na další den.
 - **zdraví**: `ok`, data do, „stará data“ (víc než 5 dní, stejné pravidlo jako notifikace), poslední běhy úloh.
 
-Žádná tabulka, žádná migrace. Každé otevření stránky čte API znovu (3 požadavky, timeout 5 s).
+Doplňky z dalších endpointů API (Standa, 2026-11-25). Každý zvlášť: výpadek nebo jiný tvar skryje jen svou sekci,
+přehled zůstane:
+
+| Endpoint | Na stránce |
+| --- | --- |
+| `/equity/{strategie}?days=90` → `[{date, total, drawdown_pct}]` | **Vývoj kapitálu**: graf všech strategií proti SPY (jedna osa USD, SPY šedý čárkovaný, barva podle jména strategie), legenda s max drawdownem, hodnoty dne při najetí, tabulka hodnot |
+| `/positions` → `[{strategy, symbol, qty, avg_price, last_close, pnl_pct, pnl_usd, …}]` | **Otevřené pozice** + souhrn P&L po strategiích |
+| `/orders?status=pending` / `filled` → `[{id, strategy, side, symbol, qty, created_date, fill_date, fill_price, fee, …}]` | **Čekající pokyny** a **Historie obchodů** (posledních 30) |
+| `/report?date=YYYY-MM-DD` | výběr dne reportu (`GET /trading?date=`, neplatné datum = 400) |
+
+Žádná tabulka, žádná migrace. Každé otevření stránky čte API znovu (3 povinné požadavky + kapitál pro každou
+strategii, pozice a 2× pokyny; timeout 5 s každý).
 
 ## Stavy
 
@@ -40,5 +51,5 @@ Hlídá to test `test_module_has_no_ai_surface`. Notifikace z tradingu AI filtru
 
 ## Navazuje
 
-- Graf vývoje kapitálu: potřebuje v standa-trading endpoint s časovou řadou (např. denní equity).
 - Karta na Řídicím centru: až bude jasné, co z tradingu chceš vidět denně.
+- Zrušené pokyny (`/orders?status=cancelled` s `cancel_reason`), pokud budou zajímavé.
