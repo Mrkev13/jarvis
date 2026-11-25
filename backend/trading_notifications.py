@@ -64,6 +64,10 @@ def _http_get(path: str) -> object:
             f"Trading API neodpovídá ({e.__class__.__name__}). Zkontroluj kontejnery standa-trading.") from None
 
 
+# MRK-141: stránka /trading (modules/trading/service.py) čte stejný konektor – jeden klient, jedna konfigurace.
+fetch_json = _http_get
+
+
 def _api_date(value) -> date:
     """Datum z API jen jako text YYYY-MM-DD (fromisoformat by bral i „20261123“ a podobné tvary)."""
     if not isinstance(value, str) or len(value) != 10:
