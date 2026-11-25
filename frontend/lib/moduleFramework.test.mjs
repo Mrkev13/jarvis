@@ -23,7 +23,7 @@ test("manifest: only implemented modules, nav for every module with the nav capa
 
 test("derived registries equal the previous hand-written lists (zero-surprise)", () => {
   assert.deepEqual(NAV_PAGES.map((p) => p.href), [
-    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/habits", "/calendar", "/fitness", "/wot", "/wow", "/mff",
+    "/", "/today", "/review", "/planner", "/reminders", "/goals", "/school", "/work", "/finance", "/habits", "/calendar", "/fitness", "/wot", "/wow", "/trading", "/mff",
     "/changes", "/activity", "/memory", "/ai", "/settings",
   ]);
   for (const p of NAV_PAGES.filter((x) => x.module)) assert.equal(p.area, p.module);

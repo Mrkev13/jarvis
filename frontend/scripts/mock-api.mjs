@@ -215,6 +215,44 @@ const WOW_COLLECTIONS = () => ({
   ],
   seq: 10,
 });
+let tradingMode = "ok";
+function tradingOverview() {
+  if (tradingMode === "setup") return { configured: false, status: "not_configured" };
+  if (tradingMode === "down") return { configured: true, status: "unavailable", message: "Trading API neodpovídá (URLError). Zkontroluj kontejnery standa-trading." };
+  const st = (name, total, ret, vs, extra = {}) => ({ name, label: name === "buy_hold_spy" ? "SPY (benchmark)" : name, benchmark: name === "buy_hold_spy",
+    total, return_pct: ret, vs_spy: vs, active: true, disabled_reason: null, ...extra });
+  return {
+    configured: true, status: "ok", report_date: "2026-11-24", best: "sma_cross",
+    health: { ok: true, data_until: "2026-11-24", stale: false, runs: [
+      { job: "collect", status: "ok", at: "2026-11-24T22:05:00Z" }, { job: "trade", status: "ok", at: "2026-11-24T22:10:00Z" }] },
+    strategies: [
+      st("sma_cross", 10011.96, 0.12, 0.44), st("ema_trailing", 9972.11, -0.28, 0.04),
+      st("rsi_revert", 8820.4, -11.8, -11.48, { active: false, disabled_reason: "drawdown 12 % > 10 %" }),
+      st("buy_hold_spy", 9967.77, -0.32, null),
+    ],
+    fills: [{ strategy: "sma_cross", side: "buy", symbol: "AAPL", qty: 2 }, { strategy: "buy_hold_spy", side: "buy", symbol: "SPY", qty: 13 }],
+    signals: [{ strategy: "ema_trailing", action: "sell", symbol: "XOM" }],
+    // tvary ze skutečného API standa-trading (/equity, /positions, /orders)
+    // 90 dní (2026-08-27 … 2026-11-24) jako skutečné /equity?days=90: den i → 10 000 + i × krok (propad dní 60–62)
+    equity: { sma_cross: tradingCurve(10), ema_trailing: tradingCurve(5), buy_hold_spy: tradingCurve(2) },
+    positions: [
+      { strategy: "sma_cross", symbol: "AAPL", qty: 2, avg_price: 347.9539, opened_date: "2026-11-23", last_close: 354.07, last_date: "2026-11-24", pnl_pct: 1.76, pnl_usd: 12.23 },
+      { strategy: "sma_cross", symbol: "AMZN", qty: 3, avg_price: 260.3901, opened_date: "2026-11-23", last_close: 252.29, last_date: "2026-11-24", pnl_pct: -3.11, pnl_usd: -24.3 },
+      { strategy: "ema_trailing", symbol: "UNH", qty: 3, avg_price: 322.4612, opened_date: "2026-11-23", last_close: 341.88, last_date: "2026-11-24", pnl_pct: 6.02, pnl_usd: 58.26 },
+    ],
+    orders_pending: [{ id: 19, strategy: "ema_trailing", side: "buy", symbol: "COST", qty: 1, created_date: "2026-11-24", fill_date: null, fill_price: null, fee: null }],
+    orders_filled: [{ id: 16, strategy: "ema_trailing", side: "sell", symbol: "XOM", qty: 6, created_date: "2026-11-23", fill_date: "2026-11-24", fill_price: 157.3413, fee: 1 }],
+  };
+}
+function tradingCurve(step) {
+  const start = Date.UTC(2026, 7, 27);
+  let peak = 0;
+  return Array.from({ length: 90 }, (_, i) => {
+    const total = 10000 + i * step - (i >= 60 && i <= 62 ? 80 : 0);
+    peak = Math.max(peak, total);
+    return { date: new Date(start + i * 864e5).toISOString().slice(0, 10), total, drawdown_pct: Math.round(((total - peak) / peak) * 10000) / 100 };
+  });
+}
 const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
 function wowCollections() {
   const h = wowState.collections.history;
@@ -547,6 +585,17 @@ createServer(async (req, res) => {
   if (url.pathname === "/__mock/wow/reset") {
     Object.assign(wowState, { configured: url.searchParams.get("configured") !== "0", forever: url.searchParams.get("forever") === "1", characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() });
     return respond(200, { ok: true });
+  }
+  // MRK-141: Trading – tvar modules/trading/service.overview; /__mock/trading/state?mode=ok|down|setup přepne stav
+  if (url.pathname === "/__mock/trading/state") {
+    tradingMode = url.searchParams.get("mode") || "ok";
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/trading" && req.method === "GET") {
+    const day = url.searchParams.get("date");
+    // den bez reportu (víkend) → jako skutečné API: chyba konektoru
+    if (day === "2026-11-22") return respond(200, { configured: true, status: "unavailable", message: "Trading API vrátilo chybu 404." }, 150);
+    return respond(200, day && tradingMode === "ok" ? { ...tradingOverview(), report_date: day } : tradingOverview(), 150);
   }
   if (url.pathname === "/wow" && req.method === "GET") return respond(200, wowOverview(), 150);
   if (url.pathname === "/wow/characters" && req.method === "POST") {

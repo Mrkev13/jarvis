@@ -51,6 +51,7 @@ from modules.habits import integrations as habits_integrations
 from modules.calendar import integrations as calendar_integrations
 from modules.fitness import integrations as fitness_integrations
 from modules.wow import integrations as wow_integrations
+from modules.trading import integrations as trading_integrations
 from core_integrations import CORE_INTEGRATIONS
 from env_config import parse_flag
 from module_contracts import CONTRIBUTION_CAPABILITY, NO_INTEGRATIONS, ModuleIntegrations
@@ -157,6 +158,10 @@ MODULES: tuple[ModuleDef, ...] = (
               entity_types=frozenset({"wow_character", "wow_wish", "wow_collection"}), context_areas=frozenset({"wow"}),
               api_prefixes=("/wow",),
               integrations=wow_integrations.INTEGRATIONS, event_types=frozenset(wow_integrations.EVENTS)),
+    # MRK-141: Trading – read-only stránka paper tradingu (stack standa-trading). Bez ai_context: finance do AI nejde.
+    ModuleDef("trading", "Trading", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav"}), api_prefixes=("/trading",),
+              integrations=trading_integrations.INTEGRATIONS),
     _planned("projects", "Projekty"),
     _planned("knowledge", "Znalosti"),
     _planned("car", "Auto"),

@@ -3935,6 +3935,69 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await fetch(`${MOCK}/wot/reset`, { method: "POST" });
 }
 
+// 39) MRK-141 – Trading: strategie seřazené podle výnosu (SPY poslední), pojistka, obchody, signály, zdraví stacku;
+// výpadek API a nenastavené API = čitelný stav
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/trading/state?mode=ok`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/trading", { width, height: width < 500 ? 844 : 900 });
+    const cards = page.getByRole("list", { name: "Strategie" }).locator("li");
+    check(`trading ${label}: strategie`, await eventually(async () => (await cards.count()) === 4, 5000));
+    check(`trading ${label}: nejlepší nahoře`, (await cards.first().getAttribute("data-trading-strategy")) === "sma_cross" && (await cards.first().innerText()).includes("Nejlepší vs SPY"));
+    check(`trading ${label}: benchmark poslední`, (await cards.last().innerText()).includes("SPY (benchmark)"));
+    check(`trading ${label}: kapitál a výnos`, /10\s012\s+USD/.test(await cards.first().innerText()) && (await cards.first().innerText()).includes("+0,12"));
+    check(`trading ${label}: vypnutá pojistkou`, (await page.locator('[data-trading-strategy="rsi_revert"]').innerText()).includes("Pojistka: drawdown"));
+    check(`trading ${label}: obchody a signály`, (await page.getByRole("list", { name: "Obchody" }).locator("li").count()) === 2 && (await page.getByRole("list", { name: "Signály" }).innerText()).includes("prodat XOM"));
+    check(`trading ${label}: HUD jádro`, (await page.locator('[data-hud-core="trading"]').innerText()).includes("2 z 3 strategií poráží SPY"));
+    check(`trading ${label}: zdraví stacku`, (await page.locator("[data-trading-health]").innerText()).includes("Stack běží"));
+    // MRK-141: graf kapitálu, pozice, pokyny
+    const eq = page.locator("[data-trading-equity]");
+    check(`trading ${label}: graf kapitálu se 3 křivkami`, (await eq.locator("path[data-series]").count()) === 3);
+    check(`trading ${label}: SPY čárkovaně`, (await eq.locator('path[data-series="buy_hold_spy"]').getAttribute("stroke-dasharray")) !== null);
+    check(`trading ${label}: legenda s max drawdownem`, (await eq.locator('[data-legend="sma_cross"]').innerText()).includes("max DD"));
+    const box = await eq.locator("svg rect").boundingBox();
+    // úplně u pravého okraje = poslední den (na mobilu je den z 90 jen ~3,7 px široký)
+    if (box) await page.mouse.move(box.x + box.width - 0.5, box.y + box.height / 2);
+    check(`trading ${label}: tooltip hodnot dne`, await eventually(async () => (await eq.locator("[data-equity-tooltip]").innerText().catch(() => "")).includes("24. 11."), 2000));
+    // Codex review #119: ukazatel přesně nad 23. dnem 90denní řady → tooltip musí ukázat TEN den a jeho hodnotu
+    if (box) await page.mouse.move(box.x + (box.width * 22) / 89, box.y + box.height / 2);
+    const tip = async () => (await eq.locator("[data-equity-tooltip]").innerText().catch(() => "")).replace(/\s+/g, " ");
+    check(`trading ${label}: tooltip = den pod ukazatelem (18. 9., 10 220 USD)`, await eventually(async () => (await tip()).startsWith("18. 9.") && (await tip()).includes("10 220"), 2000), await tip());
+    if (box) await page.mouse.move(box.x + (box.width * 45) / 89, box.y + box.height / 2);
+    check(`trading ${label}: tooltip uprostřed (den 45 = 11. 10.)`, await eventually(async () => (await tip()).startsWith("11. 10."), 2000), await tip());
+    check(`trading ${label}: pozice`, (await page.getByRole("table", { name: "Pozice" }).locator("tbody tr").count()) === 3);
+    check(`trading ${label}: P&L po strategiích`, (await page.locator("[data-trading-positions] dl").innerText()).includes("−12,07"));
+    check(`trading ${label}: čekající pokyny a historie`, (await page.getByRole("list", { name: "Čekající pokyny" }).innerText()).includes("COST") && (await page.getByRole("list", { name: "Historie obchodů" }).innerText()).includes("157,34"));
+    check(`trading ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}trading-${label}.png`, fullPage: label === "desktop" });
+    check(`trading ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/trading", { width: 1366, height: 900 });
+    await page.locator("[data-trading-health]").waitFor({ timeout: 5000 }).catch(() => undefined);
+    await page.getByLabel("Report za den").fill("2026-11-20");
+    check("trading: report za vybraný den", await eventually(async () => (await page.locator("[data-trading-health]").innerText()).includes("Report z 20. 11."), 4000));
+    await page.getByRole("button", { name: "Nejnovější" }).click();
+    check("trading: zpět na nejnovější report", await eventually(async () => (await page.locator("[data-trading-health]").innerText()).includes("Report z 24. 11."), 4000));
+    await page.getByLabel("Report za den").fill("2026-11-22");
+    check("trading: den bez reportu = čitelný stav", await eventually(async () => (await page.locator("[data-trading-down]").count()) === 1, 4000));
+    await page.getByRole("button", { name: "Nejnovější report" }).click();
+    check("trading: z chyby zpět na nejnovější", await eventually(async () => (await page.locator("[data-trading-health]").innerText().catch(() => "")).includes("Report z 24. 11."), 4000));
+    check("trading den: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  for (const [mode, selector, text] of [["down", "[data-trading-down]", "neodpovídá"], ["setup", "[data-trading-setup]", "TRADING_API_URL"]]) {
+    await fetch(`${MOCK}/trading/state?mode=${mode}`, { method: "POST" });
+    const { ctx, page, errors } = await open("/trading", { width: 1366, height: 900 });
+    check(`trading ${mode}: čitelný stav`, await eventually(async () => (await page.locator(selector).innerText().catch(() => "")).includes(text), 4000));
+    check(`trading ${mode}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/trading/state?mode=ok`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);
