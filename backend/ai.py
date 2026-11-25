@@ -366,7 +366,7 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     route (A5): write tool, který routing v tomto requestu nevystavil (žádný write záměr), se NEPROVEDE
     ani nepřipraví – model dostane chybu. MRK-83: read tool mimo route nebo modulu bez `ai_context` (vypnutý modul)
     se taky neprovede – nespoléháme na to, že provider odmítne nenabídnutý tool. Výjimka: serverem doplněné
-    get_memories pro planner (`server_injected`, ID samotné nestačí – posílá ho i model).
+    get_memories pro planner (objekt typu `_ServerToolCall`; ID ani pole z odpovědi providera nestačí).
     """
     tool_messages = []
     pending_actions = []
@@ -469,9 +469,9 @@ def _read_tool_blocked(fn_name: str, tc, route: ToolRoute | None) -> str | None:
     spec = TOOLS_BY_NAME.get(fn_name)
     if spec is not None and spec.areas and not any(current_access().allows_context_area(a) for a in spec.areas):
         return "module_unavailable"
-    # Codex review #117: výjimka jen pro get_memories, které vložil server (_with_planner_memories) – příznak na
-    # objektu volání; ID z odpovědi modelu (i „auto_get_memories“) není důkaz původu.
-    server_memories = fn_name == "get_memories" and getattr(tc, "server_injected", False) is True
+    # Codex review #117: výjimka jen pro get_memories, které vložil server (_with_planner_memories). Důkazem původu je
+    # TYP objektu (_ServerToolCall), ne jeho pole – SDK zachová i neznámá pole z JSON providera (ID, příznaky…).
+    server_memories = fn_name == "get_memories" and type(tc) is _ServerToolCall
     if route is not None and not route.allows(fn_name) and not server_memories:
         return "tool_not_routed"
     return None
@@ -615,6 +615,10 @@ def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str, tools: list[dict]
 AUTO_MEMORIES_CALL_ID = "auto_get_memories"
 
 
+class _ServerToolCall(types.SimpleNamespace):
+    """Tool call, který vložil server (ne provider). Typ nejde vyrobit z JSON odpovědi – jen tímto kódem."""
+
+
 def _is_tool_validation_error(exc: Exception) -> bool:
     """Groq 400 „tool call validation failed" (např. volání toolu, který request neobsahoval)."""
     import openai as _openai
@@ -654,9 +658,8 @@ def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
     names = {tc.function.name for tc in round_calls}
     if "get_goals" not in names or "get_memories" in names or "get_memories" in called_tools:
         return round_calls
-    synthetic = types.SimpleNamespace(
-        id=AUTO_MEMORIES_CALL_ID, server_injected=True,
-        function=types.SimpleNamespace(name="get_memories", arguments="{}"),
+    synthetic = _ServerToolCall(
+        id=AUTO_MEMORIES_CALL_ID, function=types.SimpleNamespace(name="get_memories", arguments="{}"),
     )
     return [*round_calls, synthetic]
 
