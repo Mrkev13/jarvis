@@ -127,7 +127,8 @@ MODULES: tuple[ModuleDef, ...] = (
               # wot_replay = Replay Library (Game Enrichment C) ve vyhledávání; /wot pokrývá i /wot/replays,
               # /wot/milestones a /wot/screenshots (milníky ani splnění se nevyhledávají – nemají vlastní typ výsledku).
               entity_types=frozenset({"wot_grind", "wot_resource", "wot_replay"}), context_areas=frozenset({"wot"}),
-              api_prefixes=("/wot",), integrations=wot_integrations.INTEGRATIONS),
+              api_prefixes=("/wot",), integrations=wot_integrations.INTEGRATIONS,
+              event_types=frozenset(wot_integrations.EVENTS)),  # MRK-106: nové M z Wargaming API
     ModuleDef("mff", "Marvel Future Fight", default_enabled=True, implemented=True,
               capabilities=ALL_CAPABILITIES - {"quick_add", "today"},
               entity_types=frozenset({"mff_character"}), context_areas=frozenset({"mff"}),

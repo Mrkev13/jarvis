@@ -279,6 +279,9 @@ class WotMilestone(Base):
     base_xp = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
     favorite = Column(Boolean, nullable=False, default=False)
+    # MRK-106 (migrace 0034): odkud milník je – None = ručně / z replaye, "api" = první M tanku zjištěné z Wargaming API
+    # (čeká na replay se statistikami bitvy, dokud k němu žádný replay není propojený)
+    source = Column(String(20), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -339,6 +342,27 @@ class WotReplay(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     milestone = relationship("WotMilestone", back_populates="replays")
+
+
+class WotVehicleMastery(Base):
+    """MRK-106: nejvyšší odznak mistrovství u každého odehraného tanku – snapshot z Wargaming API (`tanks/stats`
+    `mark_of_mastery` 0–4, názvy z `encyclopedia/vehicles`). API dává jen NEJVYŠŠÍ odznak, ne počet M-ek; opakovaná M
+    zůstávají v ručních milnících. Přechod na 4 (Ace) po první synchronizaci = nový milník `source="api"`."""
+    __tablename__ = "wot_vehicle_mastery"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tank_id = Column(Integer, nullable=False, unique=True)
+    name = Column(String(100), nullable=True)
+    short_name = Column(String(60), nullable=True)
+    tag = Column(String(100), nullable=True)            # „R157_Object_279R" – páruje se s tagem z replaye
+    tier = Column(Integer, nullable=True)
+    nation = Column(String(20), nullable=True)
+    vehicle_type = Column(String(20), nullable=True)
+    mark_of_mastery = Column(Integer, nullable=False, default=0)
+    battles = Column(Integer, nullable=True)
+    ace_detected_at = Column(DateTime, nullable=True)   # naive UTC; kdy synchronizace poprvé uviděla M
+    ace_milestone_id = Column(Integer, ForeignKey("wot_milestones.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, nullable=False)
 
 
 class Subject(Base):

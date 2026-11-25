@@ -3883,6 +3883,50 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await fetch(`${MOCK}/wow/reset`, { method: "POST" });
 }
 
+// 38) MRK-106 – M-ka všech tanků z Wargaming API: souhrn, filtry (tier, národ, jen bez M, hledání), řazení,
+// obnova najde nové M → milník „Čeká na replay“
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/wot/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+    const card = page.locator("[data-wot-mastery]");
+    const rows = card.getByRole("list", { name: "Odznaky tanků" }).locator("li");
+    check(`wot M-ka ${label}: tabulka zobrazená`, await eventually(async () => (await rows.count()) === 6, 5000));
+    check(`wot M-ka ${label}: souhrn odznaků`, (await card.locator('[data-mastery-count="M"] dd').innerText()) === "2");
+    check(`wot M-ka ${label}: nejvyšší tier nahoře`, (await rows.first().innerText()).includes("Object 279 (e)"));
+    check(`wot M-ka ${label}: opakovaná M z milníků (M ×3)`, (await rows.first().innerText()).includes("M ×3"));
+    await card.getByLabel("Tier").selectOption("8");
+    check(`wot M-ka ${label}: filtr tier VIII`, await eventually(async () => (await rows.count()) === 3, 2000));
+    await card.getByLabel("Jen bez M (co dohrát)").check();
+    check(`wot M-ka ${label}: jen bez M`, await eventually(async () => (await rows.count()) === 2, 2000));
+    await card.getByLabel("Národ").selectOption("ussr");
+    check(`wot M-ka ${label}: národ SSSR`, await eventually(async () => (await rows.count()) === 1 && (await rows.first().innerText()).includes("IS-3"), 2000));
+    check(`wot M-ka ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await card.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}wot-mastery-${label}.png` });
+    check(`wot M-ka ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/wot", { width: 1366, height: 900, setup: (p) => withGameAssets(p) });
+    const card = page.locator("[data-wot-mastery]");
+    await card.waitFor({ timeout: 5000 }).catch(() => undefined);
+    await card.getByPlaceholder("např. Tiger").fill("lowe");
+    check("wot M-ka: hledání bez diakritiky", await eventually(async () => (await card.getByRole("list", { name: "Odznaky tanků" }).locator("li").count()) === 1, 2000));
+    await card.getByRole("button", { name: "Obnovit" }).click();
+    check("wot M-ka: obnova ohlásí nové M", await eventually(async () => (await card.getByRole("status").innerText().catch(() => "")).includes("Nová M: 1"), 4000));
+    const pending = page.locator('[data-testid="pending-replay"]');
+    check("wot M-ka: nové M v milnících čeká na replay", await eventually(async () => (await pending.count()) === 1, 4000));
+    check("wot M-ka: odkaz na nahrání replaye", (await page.locator('[data-testid="milestone-upload-replay"] a').getAttribute("href")) === "/wot/replays");
+    await page.locator('[data-testid="pending-replay"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}wot-mastery-pending.png` });
+    check("wot M-ka akce: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/wot/reset`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

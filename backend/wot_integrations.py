@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, short
 from models import WotGrind, WotMilestone, WotReplay, WotResource
-from module_contracts import ChangeSource, activity_changes, ContextRequest, ContextSection, DashboardSection, ModuleIntegrations, SearchSource
+import wot_mastery_service
+import wot_wargaming
+from module_contracts import (
+    ChangeSource, activity_changes, event_changes, ContextRequest, ContextSection, DashboardSection, ModuleIntegrations,
+    ScheduledStep, SearchSource,
+)
+from wot_mastery_router import router as mastery_router
 from text_utils import format_date_cz, format_num_cz, join_parts
 from time_utils import to_local
 
@@ -72,7 +78,7 @@ def context_wot(req: ContextRequest) -> list[str]:
     grinds.sort(key=lambda g: PRIORITY_RANK.get((g.priority or "").lower(), 3))
     grind_items = [f"{short(g.tank, 25)} {fmt_num(float(g.xp_remaining or 0))} XP ({g.priority})" for g in grinds[:MAX_ITEMS]]
     return [f"WoT zdroje: {resources or 'žádné'}", f"WoT aktivní grindy: {list_or_none(grind_items, len(grinds))}",
-            *_mastery_lines(db)]
+            *_mastery_lines(db), *context_mastery(req)]
 
 
 MASTERY_TOP = 5  # „který tank má nejvíc" – pár míst navíc kvůli shodám
@@ -106,6 +112,26 @@ def _mastery_lines(db) -> list[str]:
     return lines
 
 
+def context_mastery(req: ContextRequest) -> list[str]:
+    """MRK-106: souhrn tabulky odznaků z Wargaming API (detail po tancích dává tool get_wot_mastery)."""
+    s = wot_mastery_service.summary(req.db)
+    if not s["tanks"]:
+        return []
+    by = s["by_mark"]
+    line = (f"WoT odznaky z Wargaming API (nejvyšší na tank): {s['tanks']} tanků, M {by['M']}, I {by['I']}, "
+            f"II {by['II']}, III {by['III']}, bez odznaku {by['–']}")
+    if s["pending_replays"]:
+        line += f"; M čekající na replay: {s['pending_replays']}"
+    return [line]
+
+
+def hourly_mastery(db):
+    return wot_mastery_service.sync(db, wot_wargaming.client())
+
+
+EVENTS = (wot_mastery_service.ACE_EVENT,)
+
+
 def tank_names(db):
     """Zmínka grindovaného tanku („kolik chybí na Kranvagn") = oblast WoT."""
     return [t for (t,) in db.query(WotGrind.tank).all() if t]
@@ -113,6 +139,7 @@ def tank_names(db):
 
 INTEGRATIONS = ModuleIntegrations(
     changes=(ChangeSource("wot", areas=frozenset({"wot"}),
+                          from_event=event_changes({"milestone": "/wot"}, {wot_mastery_service.ACE_EVENT: "WoT: nové M"}),
                           from_activity=activity_changes({"wot_grind": "/wot?grind={id}",
                                                           "wot_replay": "/wot/replays?replay={id}"}, "/wot")),),
     search=(SearchSource("wot", 90, search_wot),),
@@ -123,4 +150,6 @@ INTEGRATIONS = ModuleIntegrations(
                                " mko", " mka", "mistr", "oceneni", "mastery", "odznak"), order=70,
                        build=context_wot, covered_tools=("get_wot_resources", "get_wot_grinds"), name_hints=tank_names),
     ),
+    hourly=(ScheduledStep("wot mastery sync", hourly_mastery),),  # MRK-106: nejvýš 1× za 6 h, bez klíčů nic
+    routers=(mastery_router,),
 )

@@ -557,7 +557,7 @@ print(_hash_pin("123456"))
   Pending akce, potvrzení i auth jsou beze změny.
 - **Kill switch**: `AI_TOOL_ROUTING=false` → každý request posílá přesně `ai.TOOLS` (všech 28) jako před A5.
 - **Měření** (odhad schémat, bez kontextu → s CURRENT STATE): všechny tooly 28 / ~2 730; škola 7 → 4 tooly
-  (~600 → ~400), finance 4 → 3 (~300 → ~255), WoT 2 (~100), pozdrav 0, obecný dotaz 18 READ (~1 310),
+  (~600 → ~400), finance 4 → 3 (~300 → ~255), WoT 2 (~100; od MRK-106 3 s `get_wot_mastery`), pozdrav 0, obecný dotaz 18 READ (~1 310),
   zápis výdaje 5 → 4 (~430 → ~380), zápis s neznámou oblastí 12 (~1 560). Skript `backend/scripts/measure_tool_routing.py`.
 
 ---
@@ -843,6 +843,18 @@ print(_hash_pin("123456"))
   a seznam přání (`wow_wishes`); `sync_collections` je jediná cesta zápisu, volá ho `service.sync_due` po postavách.
   Získané přání = `wow.collection.acquired`; cíle `wow_mounts` / `wow_pets` / `wow_achievement_points`. Testy
   `tests/test_wow_collections.py`.
+
+## 23c. WoT – M-ka všech tanků (MRK-106, `wot_wargaming.py`, `wot_mastery_service.py`, migrace 0034)
+
+- Snapshot nejvyššího odznaku na tank z Wargaming API (`tanks/stats` `mark_of_mastery`, jen veřejná data,
+  `application_id` + účet podle `WOT_NICKNAME`). API nezná počet M na tanku – opakovaná M zůstávají ruční.
+- První sync = výchozí stav (žádné milníky); další přechod na Ace = milník `source="api"` („čeká na replay“)
+  + `wot.mastery.ace_detected`. Replay s M na stejný tank (bitva ≤ den po detekci) se spáruje sám
+  (`wot_replay_service.upload_replay` / `create_milestone_from_replay`).
+- Hodinový krok max 1× za 6 h; REST `/wot/mastery` (+ `/refresh`) přes `ModuleIntegrations.routers`;
+  AI read tool `get_wot_mastery` (spočítaný výsledek). Cíl `wot_ace_mastery_count` beze změny (M-ka celkem).
+- Env `WG_APPLICATION_ID`, `WG_REGION`, `WOT_NICKNAME`. Podrobně `docs/wot-mastery.md`, testy
+  `tests/test_wot_mastery_api.py` (falešný transport).
 
 ## 24. Architektonická pravidla (Roadmap 3.5)
 

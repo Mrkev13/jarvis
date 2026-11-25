@@ -218,6 +218,9 @@ export type WotMilestone = {
   screenshots: MilestoneScreenshot[];
   /** Game Enrichment C: propojené replaye (id v knihovně replayů). */
   replay_ids?: number[];
+  /** MRK-106: "api" = první M tanku zjištěné z Wargaming API; pending_replay = zatím bez replaye se statistikami. */
+  source?: string | null;
+  pending_replay?: boolean;
 };
 
 export type MilestoneDraft = {
