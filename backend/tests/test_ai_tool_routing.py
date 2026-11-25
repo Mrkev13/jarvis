@@ -173,7 +173,7 @@ class AskAiRoutingTestCase(unittest.TestCase):
             {"role": "user", "content": "kolik mám kreditů ve WoT?"},
         ]
         self._ask(messages, [_message(content="Máš 1 000 000 kreditů.")])
-        self.assertEqual(self._tool_names(self.calls[0]), {"get_wot_resources", "get_wot_grinds"})
+        self.assertEqual(self._tool_names(self.calls[0]), {"get_wot_resources", "get_wot_grinds", "get_wot_mastery"})
 
     def test_tool_validation_error_widens_once_and_retries(self):
         with self.assertLogs("standa_hub.llm", "INFO") as logs:
@@ -182,7 +182,7 @@ class AskAiRoutingTestCase(unittest.TestCase):
                 _message(content="Hotovo."),
             ])
         self.assertEqual(result["answer"], "Hotovo.")
-        self.assertEqual(self._tool_names(self.calls[0]), {"get_wot_resources", "get_wot_grinds"})
+        self.assertEqual(self._tool_names(self.calls[0]), {"get_wot_resources", "get_wot_grinds", "get_wot_mastery"})
         self.assertEqual(self._tool_names(self.calls[1]), READ_NAMES, "fallback: všechny READ, žádné WRITE")
         summary = next(line for line in logs.output if "request calls=" in line)
         self.assertIn("tool_route=fallback route_widened=True", summary)

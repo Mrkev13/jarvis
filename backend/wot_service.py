@@ -251,6 +251,9 @@ def serialize_milestone(m: WotMilestone) -> dict:
         "screenshots": [serialize_screenshot(s) for s in sorted(m.screenshots, key=lambda s: (s.position, s.id))],
         # Game Enrichment C: propojené replaye (jen id – detail je v knihovně replayů)
         "replay_ids": sorted(r.id for r in m.replays),
+        # MRK-106: první M tanku zjištěné z Wargaming API čeká na replay se statistikami bitvy
+        "source": m.source,
+        "pending_replay": m.source == "api" and not m.replays,
     }
 
 
