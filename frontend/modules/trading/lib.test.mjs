@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BENCHMARK_COLOR, SERIES_COLORS, chartModel, fillLabel, linePath, maxDrawdown, pct, pnlByStrategy, price, returnTone, seriesColors, shortDate, signalLabel, tradingCore, usd, usdSigned } from "./lib.ts";
+import { BENCHMARK_COLOR, SERIES_COLORS, chartModel, fillLabel, hoverIndex, linePath, maxDrawdown, pct, pnlByStrategy, price, returnTone, seriesColors, shortDate, signalLabel, tradingCore, usd, usdSigned } from "./lib.ts";
 
 const s = (name, ret, vs, extra = {}) => ({ name, label: name, benchmark: false, total: 10000, return_pct: ret, vs_spy: vs, active: true, disabled_reason: null, ...extra });
 const ok = (strategies, health = { ok: true, data_until: "2026-11-24", stale: false, runs: [] }) => ({
@@ -75,4 +75,13 @@ test("drawdown, position P&L and money", () => {
   assert.equal(usdSigned(12.23), "+12,23 USD");
   assert.equal(usdSigned(-24.3), "−24,30 USD");
   assert.equal(price(347.9539), "347,95");
+});
+
+test("hover index maps the pointer inside the plot area straight to the day (Codex #119)", () => {
+  assert.equal(hoverIndex(22 / 89, 90), 22, "bod 23. dne v 90denní řadě");
+  assert.equal(hoverIndex(0, 90), 0);
+  assert.equal(hoverIndex(1, 90), 89);
+  assert.equal(hoverIndex(-0.2, 5), 0);
+  assert.equal(hoverIndex(1.4, 5), 4);
+  assert.equal(hoverIndex(Number.NaN, 5), 0);
 });

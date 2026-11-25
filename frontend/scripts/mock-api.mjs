@@ -233,11 +233,8 @@ function tradingOverview() {
     fills: [{ strategy: "sma_cross", side: "buy", symbol: "AAPL", qty: 2 }, { strategy: "buy_hold_spy", side: "buy", symbol: "SPY", qty: 13 }],
     signals: [{ strategy: "ema_trailing", action: "sell", symbol: "XOM" }],
     // tvary ze skutečného API standa-trading (/equity, /positions, /orders)
-    equity: {
-      sma_cross: tradingCurve([10000, 10011.96, 10056.41, 10031.2, 10102.5]),
-      ema_trailing: tradingCurve([10000, 9972.11, 9990.4, 10012.3, 10020.8]),
-      buy_hold_spy: tradingCurve([10000, 9967.77, 9988.1, 9975.4, 10001.2]),
-    },
+    // 90 dní (2026-08-27 … 2026-11-24) jako skutečné /equity?days=90: den i → 10 000 + i × krok (propad dní 60–62)
+    equity: { sma_cross: tradingCurve(10), ema_trailing: tradingCurve(5), buy_hold_spy: tradingCurve(2) },
     positions: [
       { strategy: "sma_cross", symbol: "AAPL", qty: 2, avg_price: 347.9539, opened_date: "2026-11-23", last_close: 354.07, last_date: "2026-11-24", pnl_pct: 1.76, pnl_usd: 12.23 },
       { strategy: "sma_cross", symbol: "AMZN", qty: 3, avg_price: 260.3901, opened_date: "2026-11-23", last_close: 252.29, last_date: "2026-11-24", pnl_pct: -3.11, pnl_usd: -24.3 },
@@ -247,10 +244,14 @@ function tradingOverview() {
     orders_filled: [{ id: 16, strategy: "ema_trailing", side: "sell", symbol: "XOM", qty: 6, created_date: "2026-11-23", fill_date: "2026-11-24", fill_price: 157.3413, fee: 1 }],
   };
 }
-function tradingCurve(totals) {
-  const days = ["2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"];
+function tradingCurve(step) {
+  const start = Date.UTC(2026, 7, 27);
   let peak = 0;
-  return totals.map((total, i) => { peak = Math.max(peak, total); return { date: days[i], total, drawdown_pct: Math.round(((total - peak) / peak) * 10000) / 100 }; });
+  return Array.from({ length: 90 }, (_, i) => {
+    const total = 10000 + i * step - (i >= 60 && i <= 62 ? 80 : 0);
+    peak = Math.max(peak, total);
+    return { date: new Date(start + i * 864e5).toISOString().slice(0, 10), total, drawdown_pct: Math.round(((total - peak) / peak) * 10000) / 100 };
+  });
 }
 const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
 function wowCollections() {

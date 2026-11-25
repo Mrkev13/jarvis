@@ -165,6 +165,12 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Index dne pod ukazatelem: `ratio` = poloha v kreslicí ploše 0–1 (už bez okrajů os), `n` = počet dní. */
+export function hoverIndex(ratio: number, n: number): number {
+  if (n < 1 || !Number.isFinite(ratio)) return 0;
+  return Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1))));
+}
+
 /** SVG path z bodů. */
 export function linePath(points: { x: number; y: number }[]): string {
   return points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");

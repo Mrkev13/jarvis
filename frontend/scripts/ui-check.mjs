@@ -3959,6 +3959,12 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     const box = await eq.locator("svg rect").boundingBox();
     if (box) await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2);
     check(`trading ${label}: tooltip hodnot dne`, await eventually(async () => (await eq.locator("[data-equity-tooltip]").innerText().catch(() => "")).includes("24. 11."), 2000));
+    // Codex review #119: ukazatel přesně nad 23. dnem 90denní řady → tooltip musí ukázat TEN den a jeho hodnotu
+    if (box) await page.mouse.move(box.x + (box.width * 22) / 89, box.y + box.height / 2);
+    const tip = async () => (await eq.locator("[data-equity-tooltip]").innerText().catch(() => "")).replace(/\s+/g, " ");
+    check(`trading ${label}: tooltip = den pod ukazatelem (18. 9., 10 220 USD)`, await eventually(async () => (await tip()).startsWith("18. 9.") && (await tip()).includes("10 220"), 2000), await tip());
+    if (box) await page.mouse.move(box.x + (box.width * 45) / 89, box.y + box.height / 2);
+    check(`trading ${label}: tooltip uprostřed (den 45 = 11. 10.)`, await eventually(async () => (await tip()).startsWith("11. 10."), 2000), await tip());
     check(`trading ${label}: pozice`, (await page.getByRole("table", { name: "Pozice" }).locator("tbody tr").count()) === 3);
     check(`trading ${label}: P&L po strategiích`, (await page.locator("[data-trading-positions] dl").innerText()).includes("−12,07"));
     check(`trading ${label}: čekající pokyny a historie`, (await page.getByRole("list", { name: "Čekající pokyny" }).innerText()).includes("COST") && (await page.getByRole("list", { name: "Historie obchodů" }).innerText()).includes("157,34"));

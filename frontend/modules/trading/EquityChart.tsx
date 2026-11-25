@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { BENCHMARK_COLOR, chartModel, linePath, maxDrawdown, pct, seriesColors, shortDate, usd, type EquityPoint, type TradingStrategy } from "./lib";
+import { BENCHMARK_COLOR, chartModel, hoverIndex, linePath, maxDrawdown, pct, seriesColors, shortDate, usd, type EquityPoint, type TradingStrategy } from "./lib";
 
 const W = 640;
 const H = 240;
@@ -27,10 +27,10 @@ export function EquityChart({ equity, strategies }: { equity: Record<string, Equ
   const yOf = (v: number) => 10 + (1 - (v - model.yMin) / (model.yMax - model.yMin)) * (H - 10 - 24);
 
   function onMove(e: React.PointerEvent<SVGRectElement>) {
+    // Codex review #119: obdélník už JE kreslicí plocha (x = levý okraj osy) – poměr v něm přímo dává den, okraje se
+    // znovu neodečítají
     const box = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - box.left) / box.width) * W;
-    const i = Math.round(((x - 56) / (W - 56 - 12)) * (model!.dates.length - 1));
-    setHover(Math.max(0, Math.min(model!.dates.length - 1, i)));
+    setHover(hoverIndex((e.clientX - box.left) / box.width, model!.dates.length));
   }
 
   return (
