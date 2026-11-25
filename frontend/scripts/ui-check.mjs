@@ -3957,7 +3957,8 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check(`trading ${label}: SPY čárkovaně`, (await eq.locator('path[data-series="buy_hold_spy"]').getAttribute("stroke-dasharray")) !== null);
     check(`trading ${label}: legenda s max drawdownem`, (await eq.locator('[data-legend="sma_cross"]').innerText()).includes("max DD"));
     const box = await eq.locator("svg rect").boundingBox();
-    if (box) await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2);
+    // úplně u pravého okraje = poslední den (na mobilu je den z 90 jen ~3,7 px široký)
+    if (box) await page.mouse.move(box.x + box.width - 0.5, box.y + box.height / 2);
     check(`trading ${label}: tooltip hodnot dne`, await eventually(async () => (await eq.locator("[data-equity-tooltip]").innerText().catch(() => "")).includes("24. 11."), 2000));
     // Codex review #119: ukazatel přesně nad 23. dnem 90denní řady → tooltip musí ukázat TEN den a jeho hodnotu
     if (box) await page.mouse.move(box.x + (box.width * 22) / 89, box.y + box.height / 2);
