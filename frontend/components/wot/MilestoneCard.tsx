@@ -37,6 +37,8 @@ export function MilestoneCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             {mastery ? <StatusBadge tone="accent">{mastery}</StatusBadge> : null}
+            {/* MRK-106: M zjištěné z Wargaming API – statistiky bitvy doplní replay */}
+            {m.pending_replay ? <span data-testid="pending-replay"><StatusBadge tone="info">Čeká na replay</StatusBadge></span> : null}
             {m.favorite ? (
               <span data-testid="favorite-marker">
                 <StatusBadge tone="warning" icon="star">
@@ -68,6 +70,12 @@ export function MilestoneCard({
       {m.notes ? <p className="whitespace-pre-line break-words text-sm text-ink-2">{m.notes}</p> : null}
 
       <MilestoneGallery shots={m.screenshots} tank={m.tank} />
+
+      {m.pending_replay ? (
+        <p className="text-sm" data-testid="milestone-upload-replay">
+          <TextLink href="/wot/replays">Nahrát replay bitvy – statistiky se doplní samy</TextLink>
+        </p>
+      ) : null}
 
       {m.replay_ids?.length ? (
         <p className="text-sm" data-testid="milestone-replay-link">

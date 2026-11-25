@@ -535,6 +535,10 @@ def _history_for_ai(conversation_id: int | None, fallback_messages) -> list[dict
         db.close()
 
 
+# MRK-83 (Z16): chyba po návrhu změny – návrh zůstává k potvrzení
+PENDING_AFTER_ERROR = "\n\nNávrh změny z tohoto dotazu je připravený níže – můžeš ho potvrdit nebo zrušit."
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     conversation_id = request.conversation_id
@@ -694,6 +698,7 @@ def chat(request: ChatRequest):
             if isinstance(exc, DailyLimitError)
             else "Za 10 sekund by to mělo zase fungovat."
         )
+        pending = getattr(exc, "pending_actions", [])
         return JSONResponse(
             status_code=status,
             content={
@@ -701,13 +706,15 @@ def chat(request: ChatRequest):
                 "answer": (
                     f"⚠️ {msg}\n\n"
                     "Uložila jsem kontext, můžeš klidně pokládat otázky pokračovat. "
-                    f"{retry_hint}"
+                    f"{retry_hint}" + (PENDING_AFTER_ERROR if pending else "")
                 ),
-                "pending_actions": [],
+                # MRK-83 (Z16): návrhy z dřívějších kol tohoto dotazu zůstávají k potvrzení
+                "pending_actions": pending,
             },
         )
     except Exception as exc:
         from fastapi.responses import JSONResponse
+        pending = getattr(exc, "pending_actions", [])
         return JSONResponse(
             status_code=500,
             content={
@@ -715,8 +722,9 @@ def chat(request: ChatRequest):
                 "answer": (
                     "⚠️ Stala se neočekávaná chyba při volání AI. "
                     "Zkus to prosím za chvíli znovu – pokud potíže přetrvají, restartuj backend."
+                    + (PENDING_AFTER_ERROR if pending else "")
                 ),
-                "pending_actions": [],
+                "pending_actions": pending,
             },
         )
 

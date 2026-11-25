@@ -301,7 +301,32 @@ function resetWot() {
     seq: 100,
     // Game Enrichment C: knihovna replayů (fixtures ze skutečného wot_replay_service)
     replays: fixture("wot-replays").items,
+    // MRK-106: odznaky všech tanků (tvar wot_mastery_service.overview); refresh „najde“ nové M na IS-3
+    mastery: WOT_MASTERY(),
   });
+}
+function WOT_MASTERY() {
+  const t = (tank_id, name, tier, nation, nation_label, type_label, mark, battles, ace_count = mark === 4 ? 1 : 0) => ({
+    tank_id, name, short_name: name, tag: null, tier, nation, nation_label, type: null, type_label, mark,
+    mark_label: ["–", "III", "II", "I", "M"][mark], battles, ace_count, ace_detected_at: null, ace_milestone_id: null, pending_replay: false,
+  });
+  return [
+    t(1, "Object 279 (e)", 10, "ussr", "SSSR", "TT", 4, 310, 3),
+    t(2, "Kranvagn", 10, "sweden", "Švédsko", "TT", 3, 140),
+    t(3, "IS-3", 8, "ussr", "SSSR", "TT", 2, 220),
+    t(4, "Progetto M35 mod. 46", 8, "italy", "Itálie", "ST", 4, 180),
+    t(5, "Löwe", 8, "germany", "Německo", "TT", 0, 12),
+    t(6, "T-34", 5, "ussr", "SSSR", "ST", 1, 60),
+  ];
+}
+function wotMasteryOverview() {
+  const rows = [...wotState.mastery].sort((a, b) => (b.tier ?? 0) - (a.tier ?? 0) || b.mark - a.mark || a.name.localeCompare(b.name));
+  const by_mark = { M: 0, I: 0, II: 0, III: 0, "–": 0 };
+  for (const r of rows) by_mark[r.mark_label] += 1;
+  return { config: { configured: true, region: "eu" },
+    summary: { tanks: rows.length, with_ace: by_mark.M, by_mark, last_synced_at: new Date(Date.now() - 2 * 3600e3).toISOString(),
+      pending_replays: rows.filter((r) => r.pending_replay).length },
+    tanks: rows };
 }
 // ui-check nahrává scripts/fixtures/replay-upload.wotreplay (syntetický) → odpověď skutečného serveru pro tentýž soubor
 const REPLAY_UPLOAD = fixture("wot-replay-upload");
@@ -786,6 +811,22 @@ createServer(async (req, res) => {
     return respond(200, { ok: true, grind: g, completion }, 350);
   }
   if (url.pathname === "/wot/grinds/completed" && req.method === "GET") return respond(200, wotState.completed);
+  if (url.pathname === "/wot/mastery" && req.method === "GET") return respond(200, wotMasteryOverview(), 150);
+  if (url.pathname === "/wot/mastery/refresh" && req.method === "POST") {
+    // první obnova „najde“ M na IS-3 → milník čekající na replay (jako wot_mastery_service._record_ace)
+    const is3 = wotState.mastery.find((r) => r.tank_id === 3);
+    let newAces = 0;
+    if (is3.mark !== 4) {
+      const m = { id: ++wotState.seq, milestone_type: "mastery", mastery: "ace", tank: "IS-3", map_name: null, played_on: wotNow().slice(0, 10),
+        damage: null, assist: null, kills: null, base_xp: null, notes: "Zjištěno z Wargaming API – nahraj replay bitvy a statistiky se doplní samy.",
+        favorite: false, source: "api", pending_replay: true, created_at: wotNow(), updated_at: wotNow(), screenshots: [] };
+      wotState.milestones.unshift(m);
+      Object.assign(is3, { mark: 4, mark_label: "M", ace_count: 1, ace_milestone_id: m.id, pending_replay: true, ace_detected_at: wotNow() });
+      newAces = 1;
+    }
+    return respond(200, { result: "ok", tanks: wotState.mastery.length, changed: newAces, new_aces: newAces, baseline: false, message: null,
+      mastery: wotMasteryOverview() }, 300);
+  }
   if (url.pathname === "/wot/milestones" && req.method === "GET") {
     return respond(200, wotState.milestones.map((m) => ({ ...m, replay_ids: wotState.replays.filter((r) => r.linked_milestone_id === m.id).map((r) => r.id) })));
   }

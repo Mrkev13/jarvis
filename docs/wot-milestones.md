@@ -4,7 +4,10 @@ Builds on Game Enrichment A (`docs/game-assets.md`): every tank shown here – a
 milestone card, the milestone form preview – goes through `GameImage kind="tank"`, so a tank name that resolves in
 the Tankopedia manifest gets its picture automatically. No extra mapping is needed.
 
-Page order on `/wot`: **Zdroje → Grindy tanků (active) → Splněné grindy → Mka & nejlepší bitvy**.
+Page order on `/wot`: **Zdroje → Grindy tanků (active) → Splněné grindy → M-ka všech tanků → Mka & nejlepší bitvy**.
+
+MRK-106: the first M of a tank is detected from the Wargaming API and saved as a milestone (`source="api"`, badge
+„Čeká na replay“) that a later replay fills in – see `docs/wot-mastery.md`.
 
 ## Grind lifecycle
 

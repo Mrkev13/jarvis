@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { GameImage } from "@/components/games/GameImage";
 import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
 import { GrindRow } from "@/components/wot/GrindRow";
+import { MasteryTable } from "@/components/wot/MasteryTable";
 import { MilestoneCard } from "@/components/wot/MilestoneCard";
 import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
@@ -552,6 +553,9 @@ export default function WotPage() {
           ) : (
             <CompletedGrinds items={completions} highlightId={completedNotice?.id || null} />
           )}
+
+          {/* ===== M-KA VŠECH TANKŮ (MRK-106, Wargaming API) ===== */}
+          <MasteryTable onSynced={() => void milestonesRes.reload()} />
 
           {/* ===== MILNÍKY ===== */}
           <PageSection

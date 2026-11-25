@@ -3,7 +3,7 @@
 Zjištěno při živém ověření Roadmap 3.0 A5 (2026-10-03, reálný Groq + PostgreSQL). Nic z toho neblokuje
 merge A5 ani release v0.2.0; zápis i čtení zůstávají bezpečné.
 
-## 1. „test" dává falešnou shodu s oblastí škola (`classify_areas`)
+## 1. ✅ VYŘEŠENO (MRK-83) – „test" dává falešnou shodu s oblastí škola (`classify_areas`)
 
 - **Kde:** `backend/context_service.py` → `_AREA_WORDS[AREA_SCHOOL]` obsahuje podřetězec `"test"`.
   `classify_areas` je sdílené pro CURRENT STATE prefetch (A3) i routing toolů (A5, `tool_router.py`).
@@ -14,6 +14,9 @@ merge A5 ani release v0.2.0; zápis i čtení zůstávají bezpečné.
 - **Návrh:** v pravidlech pro write záměr upřednostnit oblast podle objektu slovesa / částky v Kč
   („výdaj", „příjem" → jen finance) nebo školní „test" počítat jen jako samostatné slovo v otázce
   na školu. Přidat regresní test do `test_tool_router.py` a ověřit, že A3 testy kontextu zůstanou zelené.
+- **Stav:** „test", „termín", „úkol" a „deadline" jsou u Školy `ContextSection.weak_keywords` – označí ji jen
+  když dotaz nemá žádnou jinou výslovnou oblast („výdaj za smoke test" → jen finance, „kdy mám test?" → škola).
+  Regresní testy v `tests/test_ai_chat_reliability.py`.
 
 ## 2. ✅ VYŘEŠENO (Roadmap 3.5) – AI read nástroje vrací časy v UTC místo Europe/Prague
 
