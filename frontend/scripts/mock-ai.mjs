@@ -63,6 +63,16 @@ const SCENARIOS = [
       pending_actions: [],
     }),
   },
+  // MRK-83 (Z16): výpadek AI ve 2. kole po návrhu v 1. kole – chybová odpověď nese už uložený návrh
+  {
+    match: /výpadek po návrhu/i,
+    status: 503,
+    body: () => ({
+      error: "AI je dočasně nedostupné.",
+      answer: "⚠️ AI je dočasně nedostupné.\n\nNávrh změny z tohoto dotazu je připravený níže – můžeš ho potvrdit nebo zrušit.",
+      pending_actions: [pending("add_work_session", { date_value: "2026-10-11", hours: 2, project: "Klient XYZ", hourly_rate: 375, description: "Po výpadku" })],
+    }),
+  },
   { match: /chyba/i, status: 500, body: () => ({ error: "Interní chyba: mock", answer: "⚠️ Stala se neočekávaná chyba při volání AI.", pending_actions: [] }) },
   {
     match: /plán|plan/i,

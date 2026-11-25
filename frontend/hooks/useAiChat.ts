@@ -147,7 +147,7 @@ export function useAiChat({
           return true;
         }
         if (!response.ok) {
-          let body: { error?: unknown; answer?: unknown } | null = null;
+          let body: { error?: unknown; answer?: unknown; pending_actions?: unknown } | null = null;
           try {
             body = await response.clone().json();
           } catch {
@@ -156,6 +156,9 @@ export function useAiChat({
           const f = chatHttpFailure(response.status, body);
           setFailure({ ...f, prompt });
           appendLocal(f.message);
+          // MRK-83 (Z16): návrh změny z dřívějšího kola zůstává v DB k potvrzení – nesmí zmizet s chybou
+          const leftover = normalizePendingActions(body?.pending_actions);
+          if (leftover.length) setPendingActions(leftover);
           return true;
         }
         const data = (await response.json()) as { answer?: string; pending_actions?: unknown; planner_result?: unknown };

@@ -436,6 +436,8 @@ print(_hash_pin("123456"))
 - SDK retry je vypnuté (`GROQ_SDK_MAX_RETRIES=0`); retry dělá jen `ai._llm_create_with_retry`
   (`AI_LLM_MAX_ATTEMPTS`, default 3). Po 429 čeká dle `retry-after` / „try again in …" (max
   `AI_LLM_RETRY_MAX_WAIT_SECONDS`). Dřív SDK tiše retryovalo 2× uvnitř každého aplikačního pokusu.
+- MRK-83: každé kolo chatu má strop výstupu `max_tokens` = `AI_CHAT_MAX_TOKENS` (default 3000, vč. reasoning).
+  Prázdná odpověď uříznutá limitem (`finish_reason=length`) → čitelná hláška `ai.TRUNCATED_ANSWER`.
 - Logger `standa_hub.llm` (vlastní handler, `AI_USAGE_LOG=false` vypne) loguje **jen čísla**:
   - každé volání: `prompt_tokens`, `completion_tokens`, `total_tokens`, `latency_ms`, `tool_calls`,
     `rl_remaining_tokens` (hlavička `x-ratelimit-remaining-tokens`), 429 / API chyby,

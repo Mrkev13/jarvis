@@ -97,6 +97,8 @@ class ContextSection:
 
     `order` = pořadí sekce v CURRENT STATE (None = oblast bez sekce, jen routing toolů – např. MFF).
     `name_hints(db)` = názvy záznamů, jejichž zmínka označí oblast (projekty práce, tanky).
+    `weak_keywords` = víceznačná slova („test", „termín", „úkol"): označí oblast, jen když dotaz nemá žádnou jinou
+    výslovnou oblast (MRK-83 – „výdaj za smoke test" je finance, ne škola).
     Implikovaná pravidla („plán" → škola, cíle…) a rozpočet tokenů zůstávají v context_service.
     """
     area: str
@@ -105,6 +107,7 @@ class ContextSection:
     build: Callable[[ContextRequest], list[str]] | None = None
     covered_tools: tuple[str, ...] = ()
     name_hints: Callable[[Any], Iterable[str]] | None = None
+    weak_keywords: tuple[str, ...] = ()
 
 
 # ---------- Rychlé přidání (quick_add_service) ----------

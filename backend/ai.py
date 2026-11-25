@@ -364,7 +364,9 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
     """Provede read tooly a z write toolů udělá pending akce.
 
     route (A5): write tool, který routing v tomto requestu nevystavil (žádný write záměr), se NEPROVEDE
-    ani nepřipraví – model dostane chybu. Read tooly mimo route se provedou (jen čtou data).
+    ani nepřipraví – model dostane chybu. MRK-83: read tool mimo route nebo modulu bez `ai_context` (vypnutý modul)
+    se taky neprovede – nespoléháme na to, že provider odmítne nenabídnutý tool. Výjimka: serverem doplněné
+    get_memories pro planner (objekt typu `_ServerToolCall`; ID ani pole z odpovědi providera nestačí).
     """
     tool_messages = []
     pending_actions = []
@@ -432,8 +434,12 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
             continue
 
         function = READ_TOOL_FUNCTIONS.get(fn_name)
+        blocked = _read_tool_blocked(fn_name, tc, route) if function is not None else None
 
-        if function is None:
+        if blocked is not None:
+            print(f"  [TOOL BLOCKED] read tool {fn_name}: {blocked}")
+            result = {"error": blocked}  # stejný tvar jako gate studijních materiálů (module_unavailable)
+        elif function is None:
             result = {
                 "error": "unknown_tool",
                 "detail": f"Unknown tool: {fn_name}",
@@ -456,6 +462,23 @@ def _run_tool_calls(db, tool_calls, route: ToolRoute | None = None):
 
     return tool_messages, pending_actions
 
+
+def _read_tool_blocked(fn_name: str, tc, route: ToolRoute | None) -> str | None:
+    """MRK-83 (audit Z12): důvod odmítnutí read toolu, nebo None. Modul se kontroluje vždy (i bez route)."""
+    from module_registry import current_access  # líně: registr importuje poskytovatele modulů
+    spec = TOOLS_BY_NAME.get(fn_name)
+    if spec is not None and spec.areas and not any(current_access().allows_context_area(a) for a in spec.areas):
+        return "module_unavailable"
+    # Codex review #117: výjimka jen pro get_memories, které vložil server (_with_planner_memories). Důkazem původu je
+    # TYP objektu (_ServerToolCall), ne jeho pole – SDK zachová i neznámá pole z JSON providera (ID, příznaky…).
+    server_memories = fn_name == "get_memories" and type(tc) is _ServerToolCall
+    if route is not None and not route.allows(fn_name) and not server_memories:
+        return "tool_not_routed"
+    return None
+
+
+# MRK-83: odpověď uříznutá limitem max_tokens bez textu (jen reasoning)
+TRUNCATED_ANSWER = "Odpověď se nevešla do limitu. Zkus otázku zúžit, nebo se zeptej po částech."
 
 # Odpověď, když request připravil pending akci: deterministicky, nezávisle na textu modelu.
 PENDING_CONFIRMATION_ANSWER = "Připravil jsem změnu k potvrzení."
@@ -592,6 +615,10 @@ def _warn_if_fixed_overhead_exceeds_budget(system_prompt: str, tools: list[dict]
 AUTO_MEMORIES_CALL_ID = "auto_get_memories"
 
 
+class _ServerToolCall(types.SimpleNamespace):
+    """Tool call, který vložil server (ne provider). Typ nejde vyrobit z JSON odpovědi – jen tímto kódem."""
+
+
 def _is_tool_validation_error(exc: Exception) -> bool:
     """Groq 400 „tool call validation failed" (např. volání toolu, který request neobsahoval)."""
     import openai as _openai
@@ -631,7 +658,7 @@ def _with_planner_memories(round_calls: list, called_tools: set[str]) -> list:
     names = {tc.function.name for tc in round_calls}
     if "get_goals" not in names or "get_memories" in names or "get_memories" in called_tools:
         return round_calls
-    synthetic = types.SimpleNamespace(
+    synthetic = _ServerToolCall(
         id=AUTO_MEMORIES_CALL_ID, function=types.SimpleNamespace(name="get_memories", arguments="{}"),
     )
     return [*round_calls, synthetic]
@@ -708,6 +735,7 @@ def ask_ai(messages):
     context_sections = 0
     tool_route: ToolRoute | None = None
     route_widened = False
+    all_pending_actions: list[dict] = []
     try:
         _check_pending_expired(db)
 
@@ -742,7 +770,6 @@ def ask_ai(messages):
         # A5: sada toolů se vybere jednou před prvním voláním a platí pro všechna kola requestu.
         tool_route = _route_for_request(user_texts, context)
         _warn_if_fixed_overhead_exceeds_budget(system_prompt, _route_tool_param(tool_route) or [])
-        all_pending_actions = []
         MAX_TOOL_ROUNDS = 10
 
         for _ in range(MAX_TOOL_ROUNDS):
@@ -752,6 +779,7 @@ def ask_ai(messages):
                     tools=_route_tool_param(tool_route),
                     tool_choice="auto",
                     temperature=0.2,
+                    max_tokens=LLM_SETTINGS.chat_max_tokens,
                     call_log=call_log,
                 )
             except RuntimeError as exc:
@@ -767,13 +795,15 @@ def ask_ai(messages):
                         tools=_route_tool_param(tool_route),
                         tool_choice="auto",
                         temperature=0.2,
+                        max_tokens=LLM_SETTINGS.chat_max_tokens,
                         call_log=call_log,
                     )
                 except RuntimeError as exc2:
                     if not _is_tool_validation_error(exc2):
                         raise
                     response = _llm_create_with_retry(
-                        api_messages=api_messages, tools=None, temperature=0.2, call_log=call_log,
+                        api_messages=api_messages, tools=None, temperature=0.2,
+                        max_tokens=LLM_SETTINGS.chat_max_tokens, call_log=call_log,
                     )
 
             choice = response.choices[0]
@@ -781,6 +811,9 @@ def ask_ai(messages):
 
             if not assistant_msg.tool_calls:
                 answer = assistant_msg.content or ""
+                if not answer.strip() and getattr(choice, "finish_reason", None) == "length":
+                    # MRK-83: strop max_tokens vyčerpal reasoning – čitelná zpráva místo prázdné bubliny
+                    answer = TRUNCATED_ANSWER
                 if find_planner_block(answer) is not None:
                     # Připomínat jen tooly, které model v tomto requestu opravdu má k dispozici.
                     missing = [t for t in missing_planner_tools(called_tools) if tool_route.allows(t)]
@@ -831,6 +864,12 @@ def ask_ai(messages):
             ),
             "pending_actions": all_pending_actions,
         }
+    except Exception as exc:
+        # MRK-83 (audit Z16): návrhy z dřívějších kol jsou už uložené (potvrditelné po TTL) – chyba v dalším kole
+        # je nesmí schovat. /chat je vrátí i v chybové odpovědi, frontend je ukáže k potvrzení.
+        if all_pending_actions:
+            exc.pending_actions = list(all_pending_actions)
+        raise
     finally:
         log_request_summary(
             call_log, tool_rounds, _elapsed_ms(request_started),

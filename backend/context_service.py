@@ -55,6 +55,9 @@ _OVERVIEW_WORDS = ("jak jsem na tom", "jak na tom", "prehled", "shrnuti", " stav
 # Statické tabulky ze VŠECH registrovaných oblastí (routing toolů běží i bez DB a stavu modulů; vypnutý modul
 # zablokuje sekci i tooly později – `access.contributions` a tool_router).
 _AREA_WORDS: dict[str, tuple[str, ...]] = {sec.area: sec.keywords for _owner, sec in all_contributions("context")}
+# MRK-83: víceznačná slova – oblast jen když dotaz nemá jinou výslovnou oblast (ContextSection.weak_keywords)
+_WEAK_WORDS: dict[str, tuple[str, ...]] = {
+    sec.area: sec.weak_keywords for _owner, sec in all_contributions("context") if sec.weak_keywords}
 # Read tooly, jejichž informaci daná sekce pokrývá (planner pravidla, metriky).
 _COVERED_TOOLS: dict[str, tuple[str, ...]] = {
     **{sec.area: sec.covered_tools for _owner, sec in all_contributions("context") if sec.covered_tools},
@@ -116,7 +119,8 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     """
     t = f" {_fold(message)} "
     areas: set[str] = set()
-    for area, area_words in (_AREA_WORDS if words is None else words).items():
+    table = _AREA_WORDS if words is None else words
+    for area, area_words in table.items():
         if _has(t, area_words):
             areas.add(area)
     named = {area: list(names) for area, names in (hints or {}).items()}
@@ -125,6 +129,9 @@ def classify_areas(message: str, project_names=(), tank_names=(), *, implied: bo
     for area, names in named.items():
         if _has(t, [_fold(n) for n in names if n and len(n) >= 3]):
             areas.add(area)
+    if not areas:
+        # MRK-83: slabá slova („test", „termín") rozhodnou jen bez jiné výslovné oblasti
+        areas |= {area for area, weak in _WEAK_WORDS.items() if area in table and _has(t, weak)}
     if not implied:
         return frozenset(areas)
     if _has(t, _TIME_PLAN_WORDS):

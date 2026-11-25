@@ -742,6 +742,14 @@ async function aiSend(page, text) {
   check("ai: plán v chatu jako karta Planneru", (await page.getByText("Týdenní plán", { exact: true }).count()) >= 1);
   await page.screenshot({ path: `${OUT}ai-planner.png` });
 
+  // MRK-83 (Z16): chyba v pozdějším kole – už uložený návrh změny zůstane na obrazovce k potvrzení
+  await aiSend(page, "Simuluj výpadek po návrhu");
+  await page.waitForTimeout(1500);
+  const leftover = page.getByRole("list", { name: "Akce čekající na potvrzení" }).locator("li");
+  check("ai: návrh po chybě AI zůstane k potvrzení", (await leftover.count()) === 1 && (await page.getByText("Návrh změny z tohoto dotazu je připravený níže", { exact: false }).count()) >= 1);
+  await leftover.first().getByRole("button", { name: "Zamítnout" }).click().catch(() => undefined);
+  await page.waitForTimeout(600);
+
   // pending akce: náhled → potvrzení → výsledek s Vrátit → vrácení jako nová karta → zamítnutí
   await aiSend(page, "Zapiš práci 6,5 h pro Klient XYZ");
   await page.waitForTimeout(1500);
