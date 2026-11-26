@@ -234,8 +234,8 @@ def create_entry(db: Session, data: dict) -> dict:
 
 
 def update_entry(db: Session, entry_id: int, data: dict) -> dict:
-    """Změna hodiny. Změna dne / času posune všechny výskyty; výjimky staré podoby se zahodí (jejich klíče by už
-    nepatřily žádnému výskytu)."""
+    """Změna hodiny. Změna dne / času posune všechny výskyty; výjimky výskytů, které už do série nepatří (jiný den /
+    čas, zkrácená platnost), se zahodí."""
     row = _get(db, entry_id)
     v = _validated(db, data)
     before = (row.starts_at, row.ends_at, row.rrule, row.title, row.description, row.location)
@@ -243,23 +243,44 @@ def update_entry(db: Session, entry_id: int, data: dict) -> dict:
     after = (row.starts_at, row.ends_at, row.rrule, row.title, row.description, row.location)
     if after == before:
         return entry_dict(db, row, {v["subject"].id: v["subject"].name})
-    if (before[0], before[1]) != (row.starts_at, row.ends_at):
-        for o in _overrides(db, row):
-            db.delete(o)
+    dropped = _drop_orphan_overrides(db, row)
     row.sequence = (row.sequence or 0) + 1
     row.updated_at = now_utc()
     db.flush()
-    _fact(db, row, "updated", "update", f"Rozvrh upraven: {_label(row)}")
+    _fact(db, row, "updated", "update", f"Rozvrh upraven: {_label(row)}",
+          {"exceptions_removed": dropped} if dropped else None)
     return entry_dict(db, row, {v["subject"].id: v["subject"].name})
+
+
+def _drop_orphan_overrides(db: Session, row: CalendarEvent) -> int:
+    """Smaže výjimky, jejichž původní výskyt už do série nepatří (jiný den / čas, zkrácená platnost) – jinak by
+    přesunutá hodina zůstala v Kalendáři a v rozvrhu by nešla spravovat. Výjimky platných výskytů zůstanou."""
+    overrides = _overrides(db, row)
+    if not overrides:
+        return 0
+    until = _until(row) or row.starts_at.astimezone(APP_TZ).date()
+    hi = datetime.combine(until + timedelta(days=1), time.min, tzinfo=APP_TZ).astimezone(timezone.utc)
+    keys = set(_instances(row, row.starts_at, hi, 1000))
+    dropped = [o for o in overrides if o.recurrence_id not in keys]
+    for o in dropped:
+        db.delete(o)
+    return len(dropped)
 
 
 def delete_entry(db: Session, entry_id: int) -> None:
     """Odebrání hodiny = zrušení opakované události (žádné tvrdé mazání; výskyty zmizí z kalendáře)."""
     row = _get(db, entry_id)
+    now = now_utc()
     row.status = "cancelled"
-    row.cancelled_at = row.updated_at = now_utc()
+    row.cancelled_at = row.updated_at = now
+    # přesunuté výskyty jsou samostatné aktivní řádky – bez zrušení by zůstaly v Kalendáři / denní ose / Dnes
+    moved = [o for o in _overrides(db, row) if o.status == "active"]
+    for o in moved:
+        o.status = "cancelled"
+        o.cancelled_at = o.updated_at = now
     db.flush()
-    _fact(db, row, "cancelled", "cancel", f"Rozvrh: odebrána hodina {_label(row)}")
+    _fact(db, row, "cancelled", "cancel", f"Rozvrh: odebrána hodina {_label(row)}",
+          {"moved_occurrences_cancelled": len(moved)} if moved else None)
 
 
 def _instance(row: CalendarEvent, day: date) -> datetime:

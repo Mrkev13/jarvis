@@ -301,8 +301,10 @@ No own model and **no migration** (`backend/modules/calendar/timetable.py`):
   validity are read back from the event, never stored twice.
 - One occurrence: an override row with the same `external_uid` and `recurrence_id` = the instance key (UTC ISO).
   Cancel = `status='cancelled'`; move = active override with new times; „Vrátit“ removes the override. Changing the
-  class's day or time moves every occurrence and drops exceptions of the old shape.
-- Removing a class cancels the series (no hard delete). Every change appends `calendar.event.*` with its Activity
+  class's day or time moves every occurrence; any change (day, time, shortened validity) drops exceptions whose
+  original occurrence no longer belongs to the series, exceptions of remaining occurrences stay.
+- Removing a class cancels the series and its moved occurrences (no hard delete), so nothing orphaned stays in the
+  calendar. Every change appends `calendar.event.*` with its Activity
   projection in the same transaction.
 - REST (module-gated like the rest of `/calendar`): `GET/POST /calendar/timetable`, `PUT/DELETE /calendar/timetable/{id}`,
   `POST /calendar/timetable/{id}/exceptions` (`{date, action: cancel|move, new_date?, start?, end?}`),

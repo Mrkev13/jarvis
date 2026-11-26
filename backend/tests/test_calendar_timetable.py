@@ -197,3 +197,39 @@ def test_window_math_for_first_occurrence():
     # valid_from ve čtvrtek, hodina v pondělí → první výskyt další pondělí
     assert date(2026, 10, 1).weekday() == 3
     assert date(2026, 10, 1) + timedelta(days=(0 - 3) % 7) == date(2026, 10, 5)
+
+
+def move_19_to_21(db, entry):
+    timetable.set_exception(db, entry["id"], {"date": "2026-10-19", "action": "move", "new_date": "2026-10-21",
+                                              "start": "13:00", "end": "14:30"})
+    db.commit()
+    assert "2026-10-21 13:00" in local_starts(window(db, date(2026, 10, 1), date(2026, 12, 7)))
+
+
+def test_delete_series_also_cancels_moved_occurrence(db):
+    """Regrese (review #121): přesun → odebrání série nesmí nechat osiřelý výskyt v Kalendáři."""
+    entry = create(db)
+    move_19_to_21(db, entry)
+    timetable.delete_entry(db, entry["id"])
+    db.commit()
+    assert timetable.list_entries(db)["entries"] == []
+    assert window(db, date(2026, 10, 1), date(2026, 12, 7)) == []
+    last = db.query(ActivityLog).order_by(ActivityLog.id.desc()).first()
+    assert "odebrána" in last.summary
+
+
+def test_shortening_validity_drops_orphaned_exceptions_only(db):
+    """Regrese (review #121): přesun 19. 10. → zkrácení platnosti do 12. 10. → žádný osiřelý výskyt;
+    výjimka výskytu, který v platnosti zůstal, se zachová."""
+    entry = create(db)
+    timetable.set_exception(db, entry["id"], {"date": "2026-10-12", "action": "cancel"})
+    move_19_to_21(db, entry)
+    out = timetable.update_entry(db, entry["id"], {**LECTURE, "subject_id": subject_id(db), "valid_until": "2026-10-12"})
+    db.commit()
+    assert [(e["date"], e["action"]) for e in out["exceptions"]] == [("2026-10-12", "cancel")]
+    assert local_starts(window(db, date(2026, 10, 1), date(2026, 12, 7))) == ["2026-10-05 09:00"]
+    # prodloužení zpět: 19. 10. je zase normální hodina podle rozvrhu (přesun byl zahozen)
+    timetable.update_entry(db, entry["id"], {**LECTURE, "subject_id": subject_id(db)})
+    db.commit()
+    starts = local_starts(window(db, date(2026, 10, 1), date(2026, 10, 27)))
+    assert starts == ["2026-10-05 09:00", "2026-10-19 09:00", "2026-10-26 09:00"]
