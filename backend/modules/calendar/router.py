@@ -1,10 +1,10 @@
 """Calendar inherits application auth and module gating. No URL is accepted from clients."""
 import datetime as dt
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 import database
-from modules.calendar import free_blocks, service
+from modules.calendar import free_blocks, service, timetable
 
 router = APIRouter(prefix='/calendar', tags=['calendar'])
 
@@ -18,6 +18,9 @@ def _run(fn):
     except service.CalendarSyncError as error:
         db.rollback()
         raise HTTPException(status_code=503, detail={'category': error.category}) from None
+    except timetable.TimetableError as error:
+        db.rollback()
+        raise HTTPException(status_code=error.status, detail=error.message) from None
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail={'category': 'calendar_operation_failed'}) from None
@@ -82,3 +85,40 @@ def calendar_sync_source(key: str):
     if key not in service.SOURCES:
         raise HTTPException(status_code=404, detail={'category': 'unknown_source'})
     return _run(lambda db: service.sync_source(db, key))
+
+
+# ---------- MRK-41: ruční rozvrh školy (opakované události zdroje „Rozvrh“) ----------
+
+
+@router.get('/timetable')
+def timetable_list():
+    return _run(timetable.list_entries)
+
+
+@router.post('/timetable')
+def timetable_create(body: dict = Body(...)):
+    return _run(lambda db: timetable.create_entry(db, body))
+
+
+@router.put('/timetable/{entry_id}')
+def timetable_update(entry_id: int, body: dict = Body(...)):
+    return _run(lambda db: timetable.update_entry(db, entry_id, body))
+
+
+@router.delete('/timetable/{entry_id}')
+def timetable_delete(entry_id: int):
+    def go(db):
+        timetable.delete_entry(db, entry_id)
+        return {'ok': True}
+    return _run(go)
+
+
+@router.post('/timetable/{entry_id}/exceptions')
+def timetable_exception(entry_id: int, body: dict = Body(...)):
+    """Zrušení nebo přesun jednoho výskytu: {date, action: cancel|move, new_date?, start?, end?}."""
+    return _run(lambda db: timetable.set_exception(db, entry_id, body))
+
+
+@router.delete('/timetable/{entry_id}/exceptions/{day}')
+def timetable_exception_clear(entry_id: int, day: str):
+    return _run(lambda db: timetable.clear_exception(db, entry_id, day))
