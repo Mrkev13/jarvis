@@ -4020,11 +4020,11 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await tt.locator("[data-timetable-entry]").first().waitFor({ timeout: 5000 }).catch(() => undefined);
     const form = tt.locator("[data-timetable-form]");
     await form.getByLabel("Den").selectOption("3");
-    await form.getByLabel("Od").fill("14:00");
-    await form.getByLabel("Do").fill("13:00");
+    await form.getByLabel("Od", { exact: true }).fill("14:00");
+    await form.getByLabel("Do", { exact: true }).fill("13:00");
     await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
     check("rozvrh: konec před začátkem = chyba", await eventually(async () => (await form.innerText()).includes("Konec musí být po začátku"), 2000));
-    await form.getByLabel("Do").fill("15:30");
+    await form.getByLabel("Do", { exact: true }).fill("15:30");
     await form.getByLabel("Místnost").fill("A1");
     await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
     check("rozvrh: nová hodina ve čtvrtek", await eventually(async () => (await tt.locator('[data-timetable-day="3"]').innerText().catch(() => "")).includes("14:00–15:30"), 4000));
@@ -4039,8 +4039,8 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await exc.getByLabel("Která hodina (datum)").fill("2026-12-09");
     await exc.getByLabel("Co s ní").selectOption("move");
     await exc.getByLabel("Nové datum").fill("2026-12-10");
-    await exc.getByLabel("Od").fill("16:00");
-    await exc.getByLabel("Do").fill("17:30");
+    await exc.getByLabel("Od", { exact: true }).fill("16:00");
+    await exc.getByLabel("Do", { exact: true }).fill("17:30");
     await exc.getByRole("button", { name: "Přesunout hodinu" }).click();
     check("rozvrh: přesun jedné hodiny", await eventually(async () => (await tt.locator('[data-timetable-entry="2"]').innerText()).includes("9. 12. → 10. 12. 16:00"), 4000));
     await tt.getByRole("button", { name: /^Upravit: .* Pondělí 09:00/ }).click();
