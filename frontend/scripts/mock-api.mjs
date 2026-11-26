@@ -253,6 +253,23 @@ function tradingCurve(step) {
     return { date: new Date(start + i * 864e5).toISOString().slice(0, 10), total, drawdown_pct: Math.round(((total - peak) / peak) * 10000) / 100 };
   });
 }
+const TIMETABLE_KINDS = { lecture: "Přednáška", seminar: "Seminář", exercise: "Cvičení", lab: "Laboratoř" };
+const TT_DAYS = ["pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle"];
+function timetableEntry(id, b) {
+  const subject = (fixture("school-subjects") || []).find((s) => s.id === Number(b.subject_id));
+  return { id, subject_id: Number(b.subject_id), subject_name: subject ? subject.name : `Předmět ${b.subject_id}`, title: subject ? subject.name : "",
+    kind: b.kind, kind_label: TIMETABLE_KINDS[b.kind] ?? null, room: b.room ?? null, weekday: Number(b.weekday), weekday_label: TT_DAYS[Number(b.weekday)],
+    start: b.start, end: b.end, valid_from: b.valid_from, valid_until: b.valid_until, exceptions: [] };
+}
+function TIMETABLE() {
+  const subjects = fixture("school-subjects") || [];
+  const first = subjects[0] ? subjects[0].id : 1;
+  return { seq: 10, entries: [
+    timetableEntry(1, { subject_id: first, kind: "lecture", weekday: 0, start: "09:00", end: "10:30", room: "S5", valid_from: "2026-10-01", valid_until: "2027-01-31" }),
+    timetableEntry(2, { subject_id: first, kind: "exercise", weekday: 2, start: "12:20", end: "13:50", room: "K2", valid_from: "2026-10-01", valid_until: "2027-01-31" }),
+  ] };
+}
+let timetableState = TIMETABLE();
 const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
 function wowCollections() {
   const h = wowState.collections.history;
@@ -714,6 +731,36 @@ createServer(async (req, res) => {
     return respond(200, { ok: true });
   }
   // MRK-75: předměty – archivované jen s ?include_archived=true; PATCH úprava / archivace / obnovení
+  // MRK-41: ruční rozvrh (tvar modules/calendar/timetable.entry_dict); /__mock/timetable/reset vrátí výchozí stav
+  if (url.pathname === "/__mock/timetable/reset") { timetableState = TIMETABLE(); return respond(200, { ok: true }); }
+  if (url.pathname === "/calendar/timetable" && req.method === "GET") return respond(200, { entries: timetableState.entries, kinds: TIMETABLE_KINDS }, 120);
+  if (url.pathname === "/calendar/timetable" && req.method === "POST") {
+    if (!body?.subject_id) return respond(400, { detail: "Vyber předmět." });
+    if (String(body.end) <= String(body.start)) return respond(400, { detail: "Konec musí být po začátku." });
+    const e = timetableEntry(++timetableState.seq, body);
+    timetableState.entries.push(e);
+    return respond(200, e, 200);
+  }
+  const ttEntry = /^\/calendar\/timetable\/(\d+)$/.exec(url.pathname);
+  if (ttEntry) {
+    const i = timetableState.entries.findIndex((e) => e.id === Number(ttEntry[1]));
+    if (i < 0) return respond(404, { detail: "Hodina v rozvrhu neexistuje." });
+    if (req.method === "PUT") { timetableState.entries[i] = { ...timetableEntry(timetableState.entries[i].id, body), exceptions: [] }; return respond(200, timetableState.entries[i], 200); }
+    if (req.method === "DELETE") { timetableState.entries.splice(i, 1); return respond(200, { ok: true }, 200); }
+  }
+  const ttExc = /^\/calendar\/timetable\/(\d+)\/exceptions(?:\/(\d{4}-\d{2}-\d{2}))?$/.exec(url.pathname);
+  if (ttExc) {
+    const e = timetableState.entries.find((x) => x.id === Number(ttExc[1]));
+    if (!e) return respond(404, { detail: "Hodina v rozvrhu neexistuje." });
+    if (req.method === "POST") {
+      e.exceptions = e.exceptions.filter((x) => x.date !== body.date);
+      e.exceptions.push(body.action === "move"
+        ? { date: body.date, action: "move", starts_at: `${body.new_date}T${body.start}:00+01:00`, ends_at: `${body.new_date}T${body.end}:00+01:00` }
+        : { date: body.date, action: "cancel", starts_at: null, ends_at: null });
+      return respond(200, e, 200);
+    }
+    if (req.method === "DELETE") { e.exceptions = e.exceptions.filter((x) => x.date !== ttExc[2]); return respond(200, e, 200); }
+  }
   if (url.pathname === "/school/subjects" && req.method === "GET") {
     const all = url.searchParams.get("include_archived") === "true";
     return respond(200, schoolState.subjects.filter((s) => all || s.active), 60);
