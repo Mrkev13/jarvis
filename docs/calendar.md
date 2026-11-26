@@ -250,7 +250,8 @@ TypeScript, pyflakes and production build passed; Alembic head unchanged.
   `CALENDAR_MOODLE_ICS_URL`), `google` → `GOOGLE_ICS_URL`. The key is `CalendarSource.config_key` (≤ 20 chars,
   `kind='ics'`). No migration is needed. Clients only ever name a key, never a URL or an env variable.
 - Google offers a private, read-only ICS address: Google Kalendář → Nastavení kalendáře → „Tajná adresa ve formátu
-  iCal". It is a secret: keep it in the protected env file only. Writing to Google (OAuth) is a separate issue.
+  iCal". It is a secret: keep it in the protected env file only. Writing to Google: one-way projection into a dedicated calendar, see
+  [google-calendar-write.md](google-calendar-write.md) (MRK-88).
 - Sync endpoints:
   - `POST /calendar/sync` syncs every configured source, each in its own savepoint. A failing feed neither blocks
     nor undoes the others. The response holds summed counts plus `sources: {key: counts | {"error": category}}`.
