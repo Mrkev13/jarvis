@@ -53,6 +53,8 @@ import {
 import { cx, priorityTone } from "@/lib/ui";
 import { SubjectList } from "@/modules/school/SubjectList";
 import { ProgressPanel } from "@/modules/school/ProgressPanel";
+import { Timetable } from "@/modules/school/Timetable";
+import { useModuleAccess } from "@/hooks/useModules";
 
 type Subject = SchoolSubject;
 
@@ -122,6 +124,7 @@ function DeadlineBadge({ date, kind, closed }: { date: string | null; kind: "ass
 }
 
 export default function SchoolPage() {
+  const { access } = useModuleAccess();  // MRK-41: sekce Rozvrh jen se zapnutým Kalendářem
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -946,6 +949,17 @@ export default function SchoolPage() {
               </CollapsibleGroup>
             </PageSection>
           )}
+
+          {/* ===== ROZVRH (MRK-41) – data jsou opakované události Kalendáře, bez Kalendáře se sekce neukáže ===== */}
+          {access.allows("calendar", "nav") ? (
+            <PageSection
+              labelledBy="school-timetable"
+              title="Rozvrh"
+              description="Týdenní hodiny zadané jednou za semestr. Objeví se v Kalendáři, na denní ose i v Dnes."
+            >
+              <Timetable subjects={offeredSubjects(subjects).map((s) => ({ id: s.id, name: s.name }))} />
+            </PageSection>
+          ) : null}
 
           {/* ===== ZÁPOČTY A DOCHÁZKA (MRK-86) ===== */}
           <PageSection

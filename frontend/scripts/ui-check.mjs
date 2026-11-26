@@ -3998,6 +3998,64 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await fetch(`${MOCK}/trading/state?mode=ok`, { method: "POST" });
 }
 
+// 40) MRK-41 – Rozvrh na stránce Škola: hodiny po dnech, přidání, výjimka (zrušení / přesun / vrácení), úprava, odebrání
+{
+  const MOCK = "http://127.0.0.1:8000/__mock";
+  await fetch(`${MOCK}/timetable/reset`, { method: "POST" });
+  for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/school", { width, height: width < 500 ? 844 : 900 });
+    const tt = page.locator("[data-school-timetable]");
+    check(`rozvrh ${label}: sekce na stránce Škola`, await eventually(async () => (await tt.locator("[data-timetable-entry]").count()) === 2, 5000));
+    check(`rozvrh ${label}: po dnech (pondělí, středa)`, (await tt.locator("[data-timetable-day]").evaluateAll((els) => els.map((e) => e.getAttribute("data-timetable-day")))).join(",") === "0,2");
+    check(`rozvrh ${label}: hodina s časem, druhem a místností`, /09:00–10:30.*Dějepis[\s\S]*Přednáška · S5/.test(await tt.locator('[data-timetable-entry="1"]').innerText()));
+    check(`rozvrh ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await tt.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}school-timetable-${label}.png` });
+    check(`rozvrh ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/school", { width: 1366, height: 900 });
+    const tt = page.locator("[data-school-timetable]");
+    await tt.locator("[data-timetable-entry]").first().waitFor({ timeout: 5000 }).catch(() => undefined);
+    const form = tt.locator("[data-timetable-form]");
+    await form.getByLabel("Den").selectOption("3");
+    await form.getByLabel("Od").fill("14:00");
+    await form.getByLabel("Do").fill("13:00");
+    await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
+    check("rozvrh: konec před začátkem = chyba", await eventually(async () => (await form.innerText()).includes("Konec musí být po začátku"), 2000));
+    await form.getByLabel("Do").fill("15:30");
+    await form.getByLabel("Místnost").fill("A1");
+    await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
+    check("rozvrh: nová hodina ve čtvrtek", await eventually(async () => (await tt.locator('[data-timetable-day="3"]').innerText().catch(() => "")).includes("14:00–15:30"), 4000));
+    await tt.getByRole("button", { name: /^Zrušit nebo přesunout jednu hodinu: .* Pondělí 09:00/ }).click();
+    const exc = tt.locator("[data-timetable-exception]");
+    await exc.getByLabel("Která hodina (datum)").fill("2026-12-07");
+    await exc.getByRole("button", { name: "Zrušit hodinu" }).click();
+    check("rozvrh: zrušená hodina jako výjimka", await eventually(async () => (await tt.locator('[data-timetable-entry="1"]').innerText()).includes("zrušeno 7. 12."), 4000));
+    await tt.getByRole("button", { name: "Vrátit podle rozvrhu: zrušeno 7. 12." }).click();
+    check("rozvrh: vrácení podle rozvrhu", await eventually(async () => !(await tt.locator('[data-timetable-entry="1"]').innerText()).includes("zrušeno"), 4000));
+    await tt.getByRole("button", { name: /^Zrušit nebo přesunout jednu hodinu: .* Středa 12:20/ }).click();
+    await exc.getByLabel("Která hodina (datum)").fill("2026-12-09");
+    await exc.getByLabel("Co s ní").selectOption("move");
+    await exc.getByLabel("Nové datum").fill("2026-12-10");
+    await exc.getByLabel("Od").fill("16:00");
+    await exc.getByLabel("Do").fill("17:30");
+    await exc.getByRole("button", { name: "Přesunout hodinu" }).click();
+    check("rozvrh: přesun jedné hodiny", await eventually(async () => (await tt.locator('[data-timetable-entry="2"]').innerText()).includes("9. 12. → 10. 12. 16:00"), 4000));
+    await tt.getByRole("button", { name: /^Upravit: .* Pondělí 09:00/ }).click();
+    await form.getByLabel("Místnost").fill("S7");
+    await form.getByRole("button", { name: "Uložit změnu" }).click();
+    check("rozvrh: úprava hodiny", await eventually(async () => (await tt.locator('[data-timetable-entry="1"]').innerText()).includes("S7"), 4000));
+    await tt.getByRole("button", { name: /^Upravit: .* Pondělí 09:00/ }).click();
+    await form.getByRole("button", { name: "Odebrat hodinu" }).click();
+    check("rozvrh: odebrání hodiny", await eventually(async () => (await tt.locator('[data-timetable-entry="1"]').count()) === 0, 4000));
+    check("rozvrh akce: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/timetable/reset`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

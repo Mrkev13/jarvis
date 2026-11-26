@@ -285,6 +285,30 @@ TypeScript, pyflakes and production build passed; Alembic head unchanged.
 - Real-export check (prints only counts and value shapes, never the URL or content):
   `python scripts/check_moodle_ics_categories.py --env-file <protected production env>`.
 
+## Manual school timetable (MRK-41)
+
+Weekly classes entered once per semester on **Škola → Rozvrh** (`frontend/modules/school/Timetable.tsx`), stored as
+ordinary recurring calendar events, so occurrences, DST, free blocks, the day timeline and Today work unchanged.
+No own model and **no migration** (`backend/modules/calendar/timetable.py`):
+
+- Source **„Rozvrh“** (`config_key='timetable'`, `kind='ics'` because of the existing check constraint). It has no
+  feed: `service.SOURCES` / `configured_sources()` never contain it, so ICS sync and reconciliation never touch manual
+  entries or mark them missing.
+- One class = one master event: `RRULE:FREQ=WEEKLY;UNTIL=<end of the last class, UTC>`, first occurrence = the first
+  chosen weekday on/after *Platí od*, local wall-clock time in `Europe/Prague` (DST-safe expansion).
+  `course_ref = "subject:<id>"` links the subject (the Moodle matcher of MRK-76 only looks at the `moodle` source),
+  `description` = kind label (Přednáška / Seminář / Cvičení / Laboratoř), `location` = room. Weekday, times and
+  validity are read back from the event, never stored twice.
+- One occurrence: an override row with the same `external_uid` and `recurrence_id` = the instance key (UTC ISO).
+  Cancel = `status='cancelled'`; move = active override with new times; „Vrátit“ removes the override. Changing the
+  class's day or time moves every occurrence and drops exceptions of the old shape.
+- Removing a class cancels the series (no hard delete). Every change appends `calendar.event.*` with its Activity
+  projection in the same transaction.
+- REST (module-gated like the rest of `/calendar`): `GET/POST /calendar/timetable`, `PUT/DELETE /calendar/timetable/{id}`,
+  `POST /calendar/timetable/{id}/exceptions` (`{date, action: cancel|move, new_date?, start?, end?}`),
+  `DELETE /calendar/timetable/{id}/exceptions/{YYYY-MM-DD}`. Validation errors are 400 with a Czech `detail`.
+- Tests: `backend/tests/test_calendar_timetable.py`, `frontend/modules/school/timetableLib.test.mjs`, ui-check section 40.
+
 ## Framework and UI
 
 Backend and frontend manifests register only implemented capabilities: nav,
