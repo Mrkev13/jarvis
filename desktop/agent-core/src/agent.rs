@@ -325,11 +325,11 @@ impl Agent {
             };
             match hub.heartbeat(&hb) {
                 Ok(()) => self.next_heartbeat = Some(now + HEARTBEAT_EVERY),
-                Err(e) => return self.fail(state, e),
+                Err(e) => return self.fail(state, e, session, expected),
             }
         }
         // 1) nejdřív dohlásit výsledky, které minule neprošly (příkazy se znovu neprovádí)
-        if let Err(outcome) = self.flush(hub, state) {
+        if let Err(outcome) = self.flush(hub, state, session, expected) {
             return outcome;
         }
         // 2) nové příkazy jen tehdy, když z minulé dávky nic nezbylo
@@ -340,10 +340,16 @@ impl Agent {
                     self.inbox
                         .extend(commands.into_iter().map(|cmd| Pending { cmd, received }));
                 }
-                Err(e) => return self.fail(state, e),
+                Err(e) => return self.fail(state, e, session, expected),
             }
         }
         {
+            // stav se zapisuje jen pro aktuální relaci (pod zámkem generace, pořadí zámků session → state)
+            let current = lock(session);
+            if *current != expected {
+                self.inbox.clear();
+                return TickOutcome::Stale;
+            }
             let mut st = lock(state);
             st.connected = true;
             st.last_error = None;
@@ -383,7 +389,7 @@ impl Agent {
                     message: Some(message),
                 },
             ));
-            if let Err(outcome) = self.flush(hub, state) {
+            if let Err(outcome) = self.flush(hub, state, session, expected) {
                 return outcome;
             }
         }
@@ -391,19 +397,38 @@ impl Agent {
     }
 
     /// Odešle čekající výsledky popořadě. 404/409 = Hub příkaz už uzavřel (propadl) → výsledek se zahodí.
-    fn flush(&mut self, hub: &dyn HubApi, state: &Mutex<AgentState>) -> Result<(), TickOutcome> {
+    fn flush(
+        &mut self,
+        hub: &dyn HubApi,
+        state: &Mutex<AgentState>,
+        session: &Mutex<u64>,
+        expected: u64,
+    ) -> Result<(), TickOutcome> {
         while let Some((id, result)) = self.outbox.front() {
             match hub.report(*id, result) {
                 Ok(()) | Err(ApiError::Http(404 | 409, _)) => {
                     self.outbox.pop_front();
                 }
-                Err(e) => return Err(self.fail(state, e)),
+                Err(e) => return Err(self.fail(state, e, session, expected)),
             }
         }
         Ok(())
     }
 
-    fn fail(&mut self, state: &Mutex<AgentState>, err: ApiError) -> TickOutcome {
+    /// Chyba sítě / Hubu. Zapíše se jen pro aktuální relaci – odpověď staré relace (např. 401 starého tokenu po
+    /// novém spárování) stav nové relace nepřepíše a vrátí `Stale` (review #139).
+    fn fail(
+        &mut self,
+        state: &Mutex<AgentState>,
+        err: ApiError,
+        session: &Mutex<u64>,
+        expected: u64,
+    ) -> TickOutcome {
+        let current = lock(session);
+        if *current != expected {
+            self.inbox.clear();
+            return TickOutcome::Stale;
+        }
         let mut state = lock(state);
         state.connected = false;
         state.last_error = Some(err.to_string());
@@ -863,6 +888,73 @@ mod tests {
         );
         assert!(hub.reports.borrow().is_empty());
         assert_eq!(agent.backlog(), (0, 0));
+    }
+
+    /// Hub, jehož poll během čekání „spáruje novou relaci“ a pak vrátí chybu starého tokenu.
+    struct RepairDuringPoll<'a> {
+        session: &'a Mutex<u64>,
+        state: &'a Mutex<AgentState>,
+        fail_in: &'static str,
+        err: ApiError,
+    }
+
+    impl RepairDuringPoll<'_> {
+        fn new_session_then(&self, step: &str) -> Result<(), ApiError> {
+            if step != self.fail_in {
+                return Ok(());
+            }
+            let mut g = self.session.lock().unwrap();
+            *g += 1;
+            let mut st = self.state.lock().unwrap();
+            st.unauthorized = false;
+            st.connected = true;
+            st.last_error = None;
+            Err(self.err.clone())
+        }
+    }
+
+    impl HubApi for RepairDuringPoll<'_> {
+        fn heartbeat(&self, _b: &Heartbeat) -> Result<(), ApiError> {
+            self.new_session_then("heartbeat")
+        }
+        fn poll(&self, _w: u32) -> Result<Vec<Command>, ApiError> {
+            self.new_session_then("poll")?;
+            Ok(vec![launch(1)])
+        }
+        fn report(&self, _id: i64, _r: &CommandResult) -> Result<(), ApiError> {
+            self.new_session_then("report")
+        }
+    }
+
+    #[test]
+    fn old_session_errors_do_not_overwrite_new_pairing() {
+        // review #139: 401/síťová chyba starého tokenu po novém spárování nesmí novou relaci zastavit
+        for step in ["heartbeat", "poll", "report"] {
+            for err in [
+                ApiError::Unauthorized("odvoláno".into()),
+                ApiError::Network("reset".into()),
+            ] {
+                let (session, state, exec) = (
+                    Mutex::new(1u64),
+                    Mutex::new(AgentState::default()),
+                    FakeExec::default(),
+                );
+                let hub = RepairDuringPoll {
+                    session: &session,
+                    state: &state,
+                    fail_in: step,
+                    err: err.clone(),
+                };
+                let mut agent = Agent::new("0.1.0");
+                let out = agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0, &session, 1);
+                assert_eq!(out, TickOutcome::Stale, "{step} {err:?}");
+                let st = state.lock().unwrap();
+                assert!(
+                    !st.unauthorized && st.connected && st.last_error.is_none(),
+                    "{step} {err:?}: stav nové relace zůstal"
+                );
+            }
+        }
     }
 
     #[test]
