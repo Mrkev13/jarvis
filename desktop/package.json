@@ -1,0 +1,13 @@
+{
+  "name": "jarvis-agent",
+  "private": true,
+  "description": "MRK-156: Tauri CLI pro sestavení Jarvise pro PC (npm run build → instalátor NSIS).",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build",
+    "icons": "tauri icon ../frontend/public/icon-512.png -o src-tauri/icons"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0"
+  }
+}

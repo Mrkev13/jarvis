@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis pro PC</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Jarvis pro PC</h1>
+        <p class="muted" id="subtitle">Agent Standa Hubu</p>
+      </div>
+      <span class="pill" id="status">…</span>
+    </header>
+
+    <p class="banner error" id="error" hidden></p>
+    <p class="banner ok" id="notice" hidden></p>
+
+    <section id="power" class="card warn" hidden>
+      <div>
+        <strong id="power-label"></strong>
+        <p class="muted">Zrušit jde i z ikony v oznamovací oblasti nebo z Hubu.</p>
+      </div>
+      <button type="button" id="power-cancel">Zrušit</button>
+    </section>
+
+    <section id="pair-card" class="card" hidden>
+      <h2>Spárovat s Hubem</h2>
+      <p class="muted">V Hubu vytvoř párovací kód (platí 10 minut) a opiš ho sem.</p>
+      <form id="pair-form">
+        <label>Adresa Hubu<input id="hub-url" name="hub" placeholder="https://…:8443" autocomplete="off" required></label>
+        <label>Párovací kód<input id="code" name="code" placeholder="ABCD-EFGH" autocomplete="off" required maxlength="12"></label>
+        <label>Název počítače<input id="name" name="name" placeholder="Herní PC" maxlength="80"></label>
+        <button type="submit" id="pair-submit">Spárovat</button>
+      </form>
+    </section>
+
+    <section id="device-card" class="card" hidden>
+      <h2 id="device-name"></h2>
+      <p class="muted" id="device-hub"></p>
+      <div class="row">
+        <button type="button" id="pause"></button>
+        <button type="button" class="ghost" id="unpair">Odpárovat</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>Aplikace</h2>
+        <button type="button" class="ghost" id="detect">Najít znovu</button>
+      </div>
+      <p class="muted">Hub smí spustit jen aplikace z tohoto seznamu. Cesta zůstává jen v tomhle PC.</p>
+      <ul id="apps" class="list"></ul>
+      <details>
+        <summary>Přidat aplikaci</summary>
+        <form id="app-form">
+          <label>Název<input id="app-name" required maxlength="80" placeholder="Prohlížeč"></label>
+          <label>Cesta k .exe, zástupce nebo odkaz<input id="app-target" required placeholder="C:\Program Files\…\app.exe"></label>
+          <label>Argumenty (volitelné)<input id="app-args" placeholder="--profile hry"></label>
+          <label>Název procesu pro „běží“ (volitelné)<input id="app-process" placeholder="app.exe"></label>
+          <button type="submit">Přidat</button>
+        </form>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Nastavení</h2>
+      <label class="check"><input type="checkbox" id="autostart"> Spouštět s Windows (na pozadí)</label>
+    </section>
+
+    <section class="card">
+      <h2>Poslední příkazy</h2>
+      <ul id="recent" class="list"></ul>
+    </section>
+
+    <footer class="muted" id="version"></footer>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>
