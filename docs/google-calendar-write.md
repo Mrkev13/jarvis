@@ -6,7 +6,7 @@ Tento dokument nic neimplementuje a nemění kód.
 ## 1. Výchozí stav
 
 - Google Kalendář Hub dnes jen čte, a to přes tajnou ICS adresu (`GOOGLE_ICS_URL`, MRK-77). Adresa je jen pro čtení.
-- Hub vlastní data, která v Googlu chybí: ruční rozvrh (MRK-41), školní termíny z Moodlu (MRK-76) a připomínky.
+- Hub vlastní data, která v Googlu chybí: ruční rozvrh (MRK-41) a školní termíny z Moodlu (MRK-76).
 - Standa chce vidět, co má Hub, i v Google Kalendáři v telefonu. Proto „bylo by dobrý i zapisovat“.
 
 ## 2. Rozhodnutí
@@ -16,7 +16,7 @@ Tento dokument nic neimplementuje a nemění kód.
 2. **Rozdělení zdrojů pravdy:**
    - Vlastní události v Googlu (primární a další Standovy kalendáře) mají zdroj pravdy **Google**. Hub je dál
      čte přes ICS a nemění je.
-   - Pro data Hubu (rozvrh, školní termíny, připomínky) je zdrojem pravdy **Hub**. Kalendář „Standa Hub“ v Googlu
+   - Pro data Hubu (rozvrh, školní termíny) je zdrojem pravdy **Hub**. Kalendář „Standa Hub“ v Googlu
      je jen jejich **projekce**: kopie pro zobrazení, ne druhý zdroj.
 3. **Úpravy přímo v Googlu se nepřebírají.** Když Standa v Googlu upraví nebo smaže událost v kalendáři
    „Standa Hub“, další synchronizace ji vrátí podle Hubu. Hub to zapíše do Aktivity („přepsáno podle Hubu“). Upravovat
@@ -35,7 +35,7 @@ Tento dokument nic neimplementuje a nemění kód.
 | --- | --- | --- |
 | Ruční rozvrh (MRK-41, zdroj `timetable`) | Opakovaná událost s `RRULE` až do „Platí do“. Zrušená hodina se zruší jen v daném výskytu (instance `cancelled`), přesunutá hodina se uloží jako upravený výskyt. Název = předmět + druh, místo = místnost. | 1 |
 | Školní termíny z Moodlu (odevzdání, zkoušky) | Jednorázová událost (celodenní nebo s časem podle zdroje). Popis jen název předmětu a odkaz do Hubu, ne obsah zadání. | 2 |
-| Připomínky s časem | Jednorázová událost s upozorněním. Připomínky bez času se nezapisují. | 2 |
+| Připomínky | **Nezapisují se** (rozhodnutí Standy, 2026-11-27). | – |
 | Finance, práce, cíle, zdraví, hry | **Nezapisují se.** Finance mimo Hub nejdou (MRK-60). U ostatních to zatím není potřeba. | – |
 
 Co se zapisuje, určuje allowlist kategorií v kódu (stejně jako `SOURCES` pro čtení). Klient posílá jen klíč
@@ -87,7 +87,7 @@ Zápis vždy prochází potvrzovacím tokem Hubu. Obecný nástroj „zavolej Go
 
 **Fronta a výpadky (outbox)**
 
-- Změny v Hubu (vytvoření, úprava, výjimka, zrušení rozvrhu, termínu nebo připomínky) jdou přes doménové události.
+- Změny v Hubu (vytvoření, úprava, výjimka, zrušení hodiny rozvrhu nebo termínu) jdou přes doménové události.
   Kde zatím chybí, doplní je implementační issue (deklarace v `docs/domain-events.md`). Projekce je čte z `domain_events` od posledního zpracovaného ID. Vlastní fronta ani druhý zápis v transakci tak
   nejsou potřeba a událost se neztratí ani při výpadku Googlu.
 - Synchronizaci spouští scheduler (např. každých 5 minut) a ruční tlačítko „Synchronizovat do Googlu“. Při chybě se
@@ -122,11 +122,11 @@ review). Viz diff v `home-server.md`.
    kalendáře „Standa Hub“, stav v `GET /calendar` a v UI, odpojení. Bez zápisu událostí.
 2. **Google Calendar: projekce rozvrhu (fáze 1).** Migrace `calendar_google_links`, synchronizace z doménových
    událostí, scheduler, denní porovnání, potvrzené zapnutí a vypnutí, Aktivita.
-3. **Google Calendar: školní termíny a připomínky s časem (fáze 2).**
+3. **Google Calendar: školní termíny (fáze 2).**
 4. *(Jen pokud bude potřeba)* Jednorázová událost do primárního kalendáře přes pending action a širší scope.
 
-## 8. Otevřené body pro Standu
+## 8. Rozhodnutí Standy (2026-11-27)
 
-- Název vedlejšího kalendáře (návrh: „Standa Hub“) a jeho barva.
-- Mají se do Googlu posílat i připomínky, nebo stačí rozvrh a školní termíny?
-- Upozornění v Googlu u hodin rozvrhu: žádné (výchozí), nebo např. 10 minut předem?
+- Název kalendáře: na názvu nezáleží, zůstává „Standa Hub“ (barva výchozí).
+- Do Googlu jde **jen rozvrh a školní termíny**. Připomínky ne.
+- Upozornění v Googlu: **žádná** (události se zakládají bez `reminders`, `useDefault: false`).
