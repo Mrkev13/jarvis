@@ -209,29 +209,41 @@ def list_entries(db: Session) -> dict:
 ATTENDANCE_KINDS = ("seminar", "exercise", "lab")  # MRK-148: přednášky se do docházky nepočítají
 
 
+def attendance_lessons(db: Session, lo_dt: datetime, hi_dt: datetime) -> list[tuple[int, str, datetime, datetime]]:
+    """Skutečné hodiny cvičení / seminářů / laborek, které ZAČÍNAJÍ v [lo_dt, hi_dt) (aware) →
+    [(subject_id, druh, začátek, konec)] v UTC. Zrušený výskyt chybí, přesunutý je v novém termínu (MRK-148/149)."""
+    labels = {KINDS[k] for k in ATTENDANCE_KINDS}
+    out: list[tuple[int, str, datetime, datetime]] = []
+    for row in _masters(db):
+        sid = _subject_id(row)
+        if sid is None or row.description not in labels:
+            continue
+        overrides = _overrides(db, row)
+        excepted = {o.recurrence_id for o in overrides}
+        span = row.ends_at - row.starts_at
+        found = _instances(row, lo_dt.astimezone(timezone.utc), hi_dt.astimezone(timezone.utc), 1000)
+        for key, value in found.items():
+            if key not in excepted and isinstance(value, datetime) and lo_dt <= value < hi_dt:
+                begin = value.astimezone(timezone.utc)
+                out.append((sid, row.description, begin, begin + span))
+        for o in overrides:
+            if o.status == "active" and lo_dt <= o.starts_at < hi_dt:
+                out.append((sid, row.description, o.starts_at.astimezone(timezone.utc), o.ends_at.astimezone(timezone.utc)))
+    return sorted(out, key=lambda x: (x[2], x[0]))
+
+
 def attendance_weeks(db: Session, lo: date, hi: date) -> dict[int, set[date]]:
     """MRK-148: {subject_id: pondělí týdnů s výukou} z cvičení / seminářů / laborek rozvrhu v [lo, hi].
 
     Jen předměty, které takovou hodinu v rozvrhu mají (klíč chybí = rozvrh docházku neurčuje). Zrušený výskyt se
     nepočítá, přesunutý se počítá v týdnu, kam se přesunul (pokud spadá do rozsahu)."""
     labels = {KINDS[k] for k in ATTENDANCE_KINDS}
+    out: dict[int, set[date]] = {sid: set() for sid in (_subject_id(r) for r in _masters(db)
+                                                          if r.description in labels) if sid is not None}
     lo_dt = datetime.combine(lo, time.min, tzinfo=APP_TZ)
     hi_dt = datetime.combine(hi + timedelta(days=1), time.min, tzinfo=APP_TZ)
-    out: dict[int, set[date]] = {}
-    for row in _masters(db):
-        sid = _subject_id(row)
-        if sid is None or row.description not in labels:
-            continue
-        weeks = out.setdefault(sid, set())
-        overrides = _overrides(db, row)
-        excepted = {o.recurrence_id for o in overrides}
-        found = _instances(row, lo_dt.astimezone(timezone.utc), hi_dt.astimezone(timezone.utc), 1000)
-        for key, value in found.items():
-            if key not in excepted and isinstance(value, datetime):
-                weeks.add(_monday(value.astimezone(APP_TZ).date()))
-        for o in overrides:
-            if o.status == "active" and lo_dt <= o.starts_at < hi_dt:
-                weeks.add(_monday(o.starts_at.astimezone(APP_TZ).date()))
+    for sid, _kind, begin, _end in attendance_lessons(db, lo_dt, hi_dt):
+        out[sid].add(_monday(begin.astimezone(APP_TZ).date()))
     return out
 
 
