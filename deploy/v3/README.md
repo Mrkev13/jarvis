@@ -187,3 +187,36 @@ systemctl show standa-hub-auto-update.timer -p TimersMonotonic   # OnUnitInactiv
 Delivery after a merge to `mrk-101-ubuntu-production` = up to 10 minutes of waiting + push CI on that SHA + image
 build. It is measured, not guaranteed. Commits that change the Alembic head are still blocked by the updater and
 need the controlled migration procedure.
+
+## Updater status for Hub notifications (MRK-151)
+
+`lib/updater-status-v3.sh` runs as `ExecStopPost=` of `standa-hub-auto-update.service` (drop-in
+`systemd/standa-hub-auto-update.service.d/30-status.conf`), i.e. after **every** updater run, also a failed one. It
+reads only the journal of that run (`$INVOCATION_ID`) and writes `{at, state, reason, target}` (no hostname, URL or
+command output) to `/srv/standa-hub-data/backups/ops/updater-status.json` (root, 0644). The backend already sees that
+directory as `/data/backups/ops` (no compose template change, no drift) and its hourly job turns
+`state=blocked` into one Hub notification + push per target (`backend/deploy_notice.py` on `main`, PR #131):
+
+| Log of the run | `state` / `reason` |
+| --- | --- |
+| `MIGRATION_HEAD_CHANGED` | `blocked` / `MIGRATION_HEAD_CHANGED` („Nasazení čeká na migraci“) |
+| `CI_NOT_FOUND`, `CI_NOT_APPROVED` | `waiting` (ignored by Hub – CI of the new version still running) |
+| `BACKUP_*` check failure | `blocked` / `BACKUP_NOT_FRESH` |
+| other failure | `blocked` / `DEPLOY_FAILED` |
+| success (`NO_UPDATE_NEEDED`, `AUTO_UPDATE_DEPLOYED`) | `ok` (resolves an open notification) |
+
+A run that ends before it knows the target writes nothing; the script always exits 0 (never fails the updater).
+
+Install (once, under the maintenance lock is not needed – nothing in production changes until the next timer run):
+
+```bash
+L=/usr/local/lib/standa-hub; R=origin/mrk-101-ubuntu-production; T=$(mktemp -d)
+git -C /home/standa/projects/jarvis-mrk101 fetch -q origin mrk-101-ubuntu-production
+git -C /home/standa/projects/jarvis-mrk101 show $R:deploy/v3/lib/updater-status-v3.sh > $T/s.sh
+git -C /home/standa/projects/jarvis-mrk101 show $R:deploy/v3/systemd/standa-hub-auto-update.service.d/30-status.conf > $T/30-status.conf
+sudo install -o root -g root -m 755 $T/s.sh $L/updater-status-v3.sh
+sudo install -o root -g root -m 644 $T/30-status.conf /etc/systemd/system/standa-hub-auto-update.service.d/30-status.conf
+rm -rf $T; sudo systemctl daemon-reload
+```
+
+Tests: `backend/tests/test_updater_status_v3.py` (fake `journalctl`).
