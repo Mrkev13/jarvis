@@ -253,10 +253,17 @@ allowed_origins = [
 AUTH_PUBLIC_PATHS = frozenset({"/", "/health", "/auth/login", "/auth/logout", "/auth/session/validate"})
 
 
+# MRK-155: endpointy agenta na PC nehlídá session, ale token zařízení (modules/computer/router.require_device) –
+# a ten naopak nikde jinde neplatí (tady se čte jen session cookie).
+DEVICE_AGENT_PREFIX = "/device/agent/"
+
+
 def require_auth(request: Request) -> dict:
     """Globální FastAPI dependency. Pokud auth_enabled a žádná platná session → 401."""
     if request.url.path in AUTH_PUBLIC_PATHS:
         return {"is_authenticated": False, "public_path": True}
+    if request.url.path.startswith(DEVICE_AGENT_PREFIX):
+        return {"is_authenticated": False, "device_agent": True}
     if not auth_enabled():
         return {"is_authenticated": True, "auth_disabled": True}
     token = request.cookies.get(AUTH_COOKIE_NAME)
