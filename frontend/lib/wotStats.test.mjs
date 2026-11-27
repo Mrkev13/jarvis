@@ -12,6 +12,28 @@ test("nice axis ticks", () => {
   assert.deepEqual(niceTicks(NaN, 1), []);
 });
 
+test("axis ticks always cover the data (review #136)", () => {
+  assert.deepEqual(niceTicks(100, 149, 3), [100, 120, 140, 160]);
+  assert.deepEqual(niceTicks(0, 49, 3), [0, 20, 40, 60]);
+  const ranges = [[5100, 5149], [0, 1], [0, 49], [11875, 13125], [8_450_000, 8_700_000], [3, 997], [-120, 35], [0.2, 0.9]];
+  for (const [lo, hi] of ranges) {
+    const t = niceTicks(lo, hi, 3);
+    assert.ok(t[0] <= lo && t[t.length - 1] >= hi, `${lo}–${hi} → ${t.join(",")}`);
+  }
+});
+
+test("highest point stays inside the plot (review #136)", () => {
+  const plot = { w: 320, h: 140, l: 44, r: 8, t: 10, b: 22 };
+  const pts = [{ at: "2026-11-20T00:00:00Z", value: 5100 }, { at: "2026-11-22T00:00:00Z", value: 5149 }, { at: "2026-11-24T00:00:00Z", value: 5120 }];
+  const ticks = niceTicks(5100, 5149, 3);
+  const { pts: xy, sy } = linePoints(pts, plot, Date.parse("2026-11-20T00:00:00Z"), Date.parse("2026-11-27T00:00:00Z"), ticks);
+  for (const p of xy) assert.ok(p.y >= plot.t && p.y <= plot.h - plot.b, `y=${p.y}`);
+  // sloupce: DailyBars škáluje od 0 do poslední značky – 49 bitev se musí vejít
+  const bars = niceTicks(0, 49, 3);
+  assert.ok(sy(5149) >= plot.t);
+  assert.ok(49 <= bars[bars.length - 1]);
+});
+
 test("step line runs to the end of the axis", () => {
   const plot = { w: 200, h: 100, l: 20, r: 10, t: 10, b: 20 };
   const x0 = Date.parse("2026-11-20T00:00:00Z");

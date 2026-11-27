@@ -41,9 +41,11 @@ export function niceTicks(min: number, max: number, count = 4): number[] {
   const raw = (max - min) / count;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw;
-  const start = Math.floor(min / step) * step;
+  // první i poslední značka obalí data – grafy berou krajní značky jako meze škály (jinak maximum přeteče nad plot)
+  const first = Math.floor(min / step);
+  const last = Math.ceil(max / step);
   const out: number[] = [];
-  for (let v = start; v <= max + step * 0.5; v += step) out.push(Math.round(v / step) * step);
+  for (let i = first; i <= last; i++) out.push(i * step);
   return out;
 }
 
