@@ -10,7 +10,9 @@ Kroky (fail closed, nikdy nic nemerguje):
    nenasadí (porovnává heady v image, ne stav DB) a vyžaduje řízený migrační deployment (MRK-114);
 6. zkušební merge (`git merge-tree`) -> případné konflikty do popisu;
 7. větev release/main-<sha12> připnutá na PŘESNÝ zdrojový commit (nikdy se nepřesouvá) a PR do produkční větve;
-   už otevřený PR pro tu větev se jen aktualizuje.
+   už otevřený PR pro tu větev se jen aktualizuje;
+8. MRK-150: starší otevřené release PR (jejich commit je předkem nového zdroje) se zavřou s odkazem na nový – nový
+   release je obsahuje. Novější release se nikdy nezavře (ruční spuštění pro starší SHA nic nepřepíše). Nic se nemerguje.
 
 Git čte z lokálního klonu (workflow dělá checkout s celou historií), GitHub API přes `gh api` (GH_TOKEN).
 """
@@ -197,7 +199,23 @@ def run(sha_input: str, dry_run: bool) -> int:
         print(f"RELEASE_PR_CREATED: #{number}")
     ensure_labels(labels)
     gh("POST", f"repos/{REPO}/issues/{number}/labels", {"labels": labels})
+    supersede_older(sha, number)
     return 0
+
+
+def supersede_older(sha: str, number: int) -> None:
+    """MRK-150: zavře otevřené release PR, jejichž commit nový release obsahuje (jen release/main-*, ne ruční PR)."""
+    open_prs = gh("GET", f"repos/{REPO}/pulls?state=open&base={PRODUCTION}&per_page=100") or []
+    for pr in open_prs:
+        head = pr.get("head") or {}
+        old_sha = str(head.get("sha") or "")
+        if (pr.get("number") == number or not str(head.get("ref") or "").startswith("release/main-")
+                or not re.fullmatch(r"[0-9a-f]{40}", old_sha) or old_sha == sha or not is_ancestor(old_sha, sha)):
+            continue
+        gh("POST", f"repos/{REPO}/issues/{pr['number']}/comments",
+           {"body": f"Nahrazeno novějším release PR #{number} (main@{sha[:12]}), který tyto změny obsahuje."})
+        gh("PATCH", f"repos/{REPO}/pulls/{pr['number']}", {"state": "closed"})
+        print(f"RELEASE_PR_SUPERSEDED: #{pr['number']}")
 
 
 def main() -> int:
