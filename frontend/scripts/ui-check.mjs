@@ -2884,6 +2884,22 @@ for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"
   await ctx.close();
 }
 await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+// MRK-148 – docházka podle rozvrhu: místo výběru rytmu „podle rozvrhu“, nabízí se jen týdny s cvičením
+for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
+  await fetch("http://127.0.0.1:8000/__mock/school/timetable?subject=2", { method: "POST" });
+  const { ctx, page, errors } = await open("/school", { width, height });
+  const section = page.getByRole("list", { name: "Zápočty a docházka" });
+  await section.waitFor({ timeout: 5000 }).catch(() => undefined);
+  const fyz = section.locator('[data-progress-subject="2"]');
+  check(`docházka z rozvrhu ${label}: „podle rozvrhu“ místo výběru rytmu`,
+    (await fyz.locator('[data-schedule-source="timetable"]').count()) === 1 && (await fyz.getByLabel("Rytmus výuky – Fyzika").count()) === 0);
+  check(`docházka z rozvrhu ${label}: štítek u předmětu`, (await fyz.innerText()).includes("podle rozvrhu"));
+  check(`docházka z rozvrhu ${label}: minulá výuka = před dvěma týdny`, (await fyz.innerText()).includes("Minulá výuka"));
+  await fyz.screenshot({ path: `${OUT}school-progress-${label}-timetable.png` });
+  check(`docházka z rozvrhu ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await fetch("http://127.0.0.1:8000/__mock/school/reset", { method: "POST" });
+}
 // MRK-76 – Moodle testy a uzávěrky u předmětu: Škola → Termíny (štítek Moodle, odkaz do Kalendáře) a hlavní obrazovka.
 for (const [width, height, label] of [[1366, 900, "desktop"], [390, 844, "mobil"]]) {
   const { ctx, page, errors } = await open("/school", { width, height });

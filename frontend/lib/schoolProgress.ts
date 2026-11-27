@@ -35,8 +35,9 @@ export interface SubjectProgress {
     class_weeks: string[];
     class_this_week: boolean;
   };
-  /** MRK-112: rytmus výuky – každý týden (1) nebo ob týden (2) od pondělí `anchor`. */
-  schedule: { every: 1 | 2; anchor: string | null };
+  /** MRK-112: rytmus výuky – každý týden (1) nebo ob týden (2) od pondělí `anchor`.
+   *  MRK-148: `source: "timetable"` = týdny s výukou bere docházka z rozvrhu (cvičení / semináře / laborky). */
+  schedule: { source?: "timetable" | "manual"; every: 1 | 2; anchor: string | null };
 }
 
 export interface ProgressPayload {
