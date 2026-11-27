@@ -194,7 +194,7 @@ class SchoolProgressTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual((r.json()["attendance_every"], r.json()["attendance_anchor"]), (2, WEEK.isoformat()))
         p = self.progress(self.law)
-        self.assertEqual(p["schedule"], {"every": 2, "anchor": WEEK.isoformat()})
+        self.assertEqual(p["schedule"], {"source": "manual", "every": 2, "anchor": WEEK.isoformat()})
         a = p["attendance"]
         self.assertTrue(a["class_this_week"])
         self.assertEqual(a["class_weeks"][:3], ["2026-11-09", "2026-10-26", "2026-10-12"])
@@ -317,6 +317,81 @@ class SchoolProgressTestCase(unittest.TestCase):
         self.assertIn("Docházka (týdny): Právo: byl 1 z 2, absence 1 z max. 2 (zbývá poslední)", text)
         self.assertIn("Varování absencí: Právo: zbývá poslední povolená absence (1 z max. 2)", text)
         self.assertNotIn("Starý předmět", text)
+
+
+
+class AttendanceFromTimetableTestCase(unittest.TestCase):
+    """MRK-148: týdny s výukou z rozvrhu – jen cvičení / semináře / laborky; přednáška se nepočítá.
+    Stejné prostředí jako SchoolProgressTestCase (bez dědění – jinak by se jeho testy pouštěly dvakrát)."""
+
+    setUp = SchoolProgressTestCase.setUp
+    tearDown = SchoolProgressTestCase.tearDown
+    q = SchoolProgressTestCase.q
+    attend = SchoolProgressTestCase.attend
+    progress = SchoolProgressTestCase.progress
+    biweekly = SchoolProgressTestCase.biweekly
+
+    def lesson(self, subject_id, **over):
+        from modules.calendar import timetable
+        body = {"subject_id": subject_id, "kind": "exercise", "weekday": 1, "start": "10:00", "end": "11:30",
+                "valid_from": "2026-10-01", "valid_until": "2027-01-31", **over}
+
+        def run(db):
+            out = timetable.create_entry(db, body)
+            db.commit()
+            return out
+        return self.q(run)
+
+    def exception(self, entry_id, **body):
+        from modules.calendar import timetable
+
+        def run(db):
+            timetable.set_exception(db, entry_id, body)
+            db.commit()
+        self.q(run)
+
+    def test_biweekly_exercise_drives_class_weeks_lecture_does_not(self):
+        self.lesson(self.law, kind="lecture", weekday=0)          # přednáška každý týden – nepočítá se
+        self.lesson(self.law, every=2, week_anchor=WEEK.isoformat())  # cvičení ob týden, výuka tento týden
+        p = self.progress(self.law)
+        self.assertEqual(p["schedule"]["source"], "timetable")
+        a = p["attendance"]
+        self.assertTrue(a["class_this_week"])
+        self.assertEqual(a["class_weeks"], ["2026-11-09", "2026-10-26", "2026-10-12"], "jen týdny cvičení od 1. 10.")
+        r = self.attend(self.law, date(2026, 11, 2), True)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("podle rozvrhu", r.text)
+        self.assertEqual(self.attend(self.law, date(2026, 10, 26), False).status_code, 200)
+        self.assertEqual(self.progress(self.law)["attendance"]["absent"], 1)
+        self.assertIn("Právo (výuka podle rozvrhu)", " ".join(self.q(lambda db: progress.context_lines(db, TODAY))))
+
+    def test_cancelled_and_moved_lessons(self):
+        e = self.lesson(self.law)  # cvičení každé úterý
+        self.attend(self.law, date(2026, 10, 26), False)
+        self.exception(e["id"], date="2026-10-27", action="cancel")  # odpadlo → týden bez výuky, absence se nepočítá
+        self.exception(e["id"], date="2026-11-03", action="move", new_date="2026-11-09", start="10:00", end="11:30")
+        a = self.progress(self.law)["attendance"]
+        self.assertNotIn("2026-10-26", a["class_weeks"])
+        self.assertNotIn("2026-11-02", a["class_weeks"], "hodina přesunutá do dalšího týdne")
+        self.assertIn("2026-11-09", a["class_weeks"])
+        self.assertEqual((a["recorded"], a["absent"]), (0, 0), "absence z týdne, kdy hodina odpadla, se nepočítá")
+
+    def test_subject_without_exercise_keeps_manual_rhythm(self):
+        self.lesson(self.ait, kind="lecture")
+        self.biweekly(self.ait, WEEK)
+        p = self.progress(self.ait)
+        self.assertEqual(p["schedule"], {"source": "manual", "every": 2, "anchor": WEEK.isoformat()})
+        self.assertEqual(p["attendance"]["class_weeks"][:2], ["2026-11-09", "2026-10-26"])
+
+    def test_calendar_disabled_falls_back_to_manual(self):
+        self.lesson(self.law, every=2, week_anchor=WEEK.isoformat())
+        with patch.object(progress, "timetable_weeks", lambda *a, **k: {}):
+            p = self.progress(self.law)
+        self.assertEqual(p["schedule"]["source"], "manual")
+        self.assertEqual(len(p["attendance"]["class_weeks"]), progress.HISTORY_SPAN_WEEKS)
+        access = ModuleAccess({"calendar": False})
+        with patch("module_registry.current_access", lambda: access):
+            self.assertEqual(self.q(lambda db: progress.timetable_weeks(db, WEEK, WEEK)), {})
 
 
 if __name__ == "__main__":

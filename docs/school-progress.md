@@ -17,6 +17,14 @@ Manual, per subject, no timetable (per-lesson attendance needs MRK-41) and no UI
 - Attendance can be written only for an active subject and only up to the current week, any past week included;
   writing the same value is a no-op; `present: null` removes the row. Every write is an Activity entry (same
   transaction).
+- Attendance from the timetable (MRK-148): a subject with at least one exercise / seminar / lab in the manual
+  timetable (MRK-41/142) takes its class weeks from it – every other week and validity from the timetable, a cancelled
+  lesson = no class that week, a moved lesson counts in the week it moved to. Lectures never count. Without such a
+  lesson (or with the Calendar module off) the manual rhythm below applies. `schedule.source` is `timetable` or
+  `manual`; the UI shows „Výuka podle rozvrhu“ instead of the rhythm select. Writing attendance into a week without
+  class is 422 `no_class_week` („podle rozvrhu“).
+  The cross-module link is the core bridge `backend/class_weeks_service.py` (like `goal_history_service` → WoW):
+  the School module imports neither Calendar nor the module registry.
 - Class weeks (MRK-112): a biweekly subject has class in weeks an even number of weeks from its anchor (also before
   it). Only class weeks count and can be written (`422 no_class_week` otherwise; deleting a row is always allowed).
   A row recorded in a non-class week (e.g. before the rhythm was set) stays in the DB but does not count.

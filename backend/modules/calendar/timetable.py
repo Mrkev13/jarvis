@@ -190,6 +190,35 @@ def list_entries(db: Session) -> dict:
     return {"entries": [entry_dict(db, r, subjects) for r in rows], "kinds": KINDS}
 
 
+ATTENDANCE_KINDS = ("seminar", "exercise", "lab")  # MRK-148: přednášky se do docházky nepočítají
+
+
+def attendance_weeks(db: Session, lo: date, hi: date) -> dict[int, set[date]]:
+    """MRK-148: {subject_id: pondělí týdnů s výukou} z cvičení / seminářů / laborek rozvrhu v [lo, hi].
+
+    Jen předměty, které takovou hodinu v rozvrhu mají (klíč chybí = rozvrh docházku neurčuje). Zrušený výskyt se
+    nepočítá, přesunutý se počítá v týdnu, kam se přesunul (pokud spadá do rozsahu)."""
+    labels = {KINDS[k] for k in ATTENDANCE_KINDS}
+    lo_dt = datetime.combine(lo, time.min, tzinfo=APP_TZ)
+    hi_dt = datetime.combine(hi + timedelta(days=1), time.min, tzinfo=APP_TZ)
+    out: dict[int, set[date]] = {}
+    for row in _masters(db):
+        sid = _subject_id(row)
+        if sid is None or row.description not in labels:
+            continue
+        weeks = out.setdefault(sid, set())
+        overrides = _overrides(db, row)
+        excepted = {o.recurrence_id for o in overrides}
+        found = _instances(row, lo_dt.astimezone(timezone.utc), hi_dt.astimezone(timezone.utc), 1000)
+        for key, value in found.items():
+            if key not in excepted and isinstance(value, datetime):
+                weeks.add(_monday(value.astimezone(APP_TZ).date()))
+        for o in overrides:
+            if o.status == "active" and lo_dt <= o.starts_at < hi_dt:
+                weeks.add(_monday(o.starts_at.astimezone(APP_TZ).date()))
+    return out
+
+
 # ---------- zápisy ----------
 
 
