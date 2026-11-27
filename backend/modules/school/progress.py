@@ -324,6 +324,8 @@ def set_attendance(db, subject_id: int, week: date, present: bool | None, *, tod
     word = {True: "byl", False: "nebyl", None: "nezapsáno"}
     # vlastní klíč pro každou skutečnou změnu: výchozí klíč (souhrn) by Byl → Nebyl → Byl zahodil jako duplikát;
     # opakovaný stejný požadavek sem nedojde (výše `old == present` = nic)
+    from modules.school.attendance_prompt import resolve_prompt  # MRK-149 (líně: attendance_prompt importuje progress)
+    resolve_prompt(db, s.id, week)
     log_activity(db, "school", "update", f"Docházka {s.name}, {week_label(week)}: {word[present]}",
                  entity_type="Subject", entity_id=s.id,
                  delta={"attendance": {"week_start": week.isoformat(), "old": old, "new": present}},

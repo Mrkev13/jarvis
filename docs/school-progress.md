@@ -23,6 +23,13 @@ Manual, per subject, no timetable (per-lesson attendance needs MRK-41) and no UI
   lesson (or with the Calendar module off) the manual rhythm below applies. `schedule.source` is `timetable` or
   `manual`; the UI shows „Výuka podle rozvrhu“ instead of the rhythm select. Writing attendance into a week without
   class is 422 `no_class_week` („podle rozvrhu“).
+- Attendance from a notification (MRK-149): the hourly School step (`modules/school/attendance_prompt.py`) finds
+  exercises / seminars / labs from the timetable that ended within the last 3 h (cancelled ones are skipped, a moved
+  one counts after its new end) and, for an active subject without a passed credit and with no attendance recorded
+  for that week yet, creates one `attendance_prompt` notification („Byl jsi na hodině?“, key
+  `attendance:<subject>:<Monday>` = at most one per subject and week). Web Push via `ATTENDANCE_PUSH` (default on);
+  the service worker offers **Byl / Nebyl**, which call the usual `PUT /school/subject/{id}/attendance` (a failure
+  opens School). Any attendance write resolves the notification.
   The cross-module link is the core bridge `backend/class_weeks_service.py` (like `goal_history_service` → WoW):
   the School module imports neither Calendar nor the module registry.
 - Class weeks (MRK-112): a biweekly subject has class in weeks an even number of weeks from its anchor (also before

@@ -71,6 +71,8 @@ def deliverable_types() -> tuple[str, ...]:
         types.append("weekly_review")
     if env_bool("OPS_ALERT_PUSH", True):
         types.append("ops_alert")  # MRK-57: off-machine backup/check failures (fixed text, no secrets)
+    if env_bool("ATTENDANCE_PUSH", True):
+        types.append("attendance_prompt")  # MRK-149: „Byl jsi na hodině?“ s akcemi Byl / Nebyl
     return tuple(types)
 
 
@@ -294,6 +296,11 @@ def notification_message(n: Notification) -> dict:
         # MRK-80: service worker připomínku nechá viset, zavibruje, znovu upozorní při stejném tagu (renotify)
         # a nabídne akce Hotovo / Odložit 10 min (POST na existující endpointy připomínek).
         msg.update(kind="reminder", reminder_id=int(n.source_id))
+    elif n.source_type == "attendance" and n.notification_type == "attendance_prompt":
+        # MRK-149: akce Byl / Nebyl → PUT /school/subject/{id}/attendance (týden z klíče attendance:<id>:<pondělí>)
+        parsed = (n.dedupe_key or "").split(":")
+        if len(parsed) == 3 and parsed[1].isdigit() and len(parsed[2]) == 10:
+            msg.update(kind="attendance", subject_id=int(parsed[1]), week_start=parsed[2])
     return msg
 
 

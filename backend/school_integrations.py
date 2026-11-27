@@ -15,10 +15,11 @@ from context_format import MAX_ITEMS, WINDOW_DAYS, list_or_none, short
 from models import Assignment, Exam, Goal, Subject
 from modules.school import integrations as materials
 from modules.school import progress
+from modules.school.attendance_prompt import prompt_attendance
 from module_contracts import (
     ChangeSource, activity_changes, event_changes,
     ContextRequest, ContextSection, DashboardSection, EntityRef, ModuleIntegrations, QuickAddKind, QuickAddRule,
-    SearchSource, TimelineItem, TimelineSource, TodaySource,
+    SearchSource, TimelineItem, TimelineSource, TodaySource, ScheduledStep,
 )
 from statuses import (
     ASSIGNMENT_DONE_STATUSES, EXAM_OPEN_STATUSES, GOAL_INACTIVE_STATUSES, is_assignment_done, is_exam_open, norm,
@@ -416,6 +417,8 @@ def timeline_school(req) -> list[TimelineItem]:
 
 
 INTEGRATIONS = ModuleIntegrations(
+    # MRK-149: po cvičení / semináři / laborce z rozvrhu push „Byl jsi?“ (Byl / Nebyl rovnou z oznámení)
+    hourly=(ScheduledStep("school attendance prompt", prompt_attendance),),
     timeline=(TimelineSource("school", 20, timeline_school),),
     # MRK-28: dokončení/znovuotevření = doménové události, ostatní změny školy z Aktivity
     changes=(ChangeSource(
