@@ -276,6 +276,48 @@ function TIMETABLE() {
   ] };
 }
 let timetableState = TIMETABLE();
+// MRK-153: syntetické statistiky WoT – „teď“ = 11. 10. 2026 10:00 UTC (týden fixture Dnes), data od 1. 9. 2026
+const WOT_STATS_NOW = Date.parse("2026-10-11T10:00:00Z");
+const WOT_STATS_SINCE = Date.parse("2026-09-01T08:00:00Z");
+const WOT_PERIODS = [["today", "Dnes", 1], ["3d", "3 dny", 3], ["week", "Týden", 7], ["month", "Měsíc", 30], ["half", "Půl roku", 182], ["all", "Celkově", null]];
+function wotStatsMock(period) {
+  const p = WOT_PERIODS.find((x) => x[0] === period) ?? WOT_PERIODS[2];
+  const days = p[2];
+  const dayMs = 86400000;
+  const from = days ? Date.parse("2026-10-11T00:00:00+02:00") - (days - 1) * dayMs : null;
+  const iso = (t) => new Date(t).toISOString().replace(".000Z", "Z");
+  const summ = (b, w, dmg, fr, xp, sv) => ({ battles: b, wins: w, win_rate: b ? Math.round(1000 * w / b) / 10 : null,
+    avg_damage: b ? Math.round(10 * dmg / b) / 10 : null, avg_frags: b ? Math.round(10 * fr / b) / 10 : null,
+    avg_xp: b ? Math.round(10 * xp / b) / 10 : null, survival: b ? Math.round(1000 * sv / b) / 10 : null });
+  const daily = days && days > 1 ? Array.from({ length: days }, (_, i) => {
+    const d = new Date(from + i * dayMs + 3 * 3600000).toISOString().slice(0, 10);
+    const b = Date.parse(d) < WOT_STATS_SINCE ? 0 : (i * 7 + 3) % 9;
+    return { date: d, ...summ(b, Math.round(b * 0.55), b * 3100, b, b * 900, Math.round(b * 0.4)) };
+  }) : [];
+  const total = days === null ? 1520 : days === 1 ? 6 : daily.reduce((a, d) => a + d.battles, 0);
+  const tanks = [["Object 279 (e)", 10, 0.4], ["Kranvagn", 10, 0.35], ["Progetto 65", 8, 0.25]].map(([name, tier, share], i) => {
+    const b = Math.max(0, Math.round(total * share));
+    return { tank_id: i + 1, name, tier, tag: null, ...summ(b, Math.round(b * (0.6 - i * 0.05)), b * (3600 - i * 400), b * 1.1, b * 950, Math.round(b * 0.45)) };
+  }).filter((t) => t.battles > 0);
+  const series = (start, step) => {
+    const pts = [];
+    for (let t = WOT_STATS_SINCE, v = start; t <= WOT_STATS_NOW; t += 2 * dayMs, v += step) pts.push({ at: iso(t), value: Math.round(v) });
+    if (from === null) return pts;
+    const before = pts.filter((x) => Date.parse(x.at) < from);
+    return [...(before.length ? [{ ...before[before.length - 1], at: iso(from) }] : []), ...pts.filter((x) => Date.parse(x.at) >= from)];
+  };
+  const rating = series(5100, 7);
+  const sum = tanks.reduce((a, t) => [a[0] + t.battles, a[1] + t.wins], [0, 0]);
+  return {
+    period: p[0], label: p[1], periods: WOT_PERIODS.map(([key, label]) => ({ key, label })),
+    from: from === null ? null : iso(from), to: iso(WOT_STATS_NOW), data_since: iso(WOT_STATS_SINCE),
+    partial: from !== null && from < WOT_STATS_SINCE,
+    summary: summ(sum[0], sum[1], tanks.reduce((a, t) => a + t.avg_damage * t.battles, 0), sum[0] * 1.1, sum[0] * 950, Math.round(sum[0] * 0.45)),
+    best_tank: tanks[0] ?? null, tanks, daily, rating, rating_now: rating.length ? rating[rating.length - 1].value : null,
+    rating_change: rating.length > 1 ? rating[rating.length - 1].value - rating[0].value : null,
+    resources: { credits: series(7_800_000, 45_000), gold: series(12_500, 0), free_xp: series(150_000, 2_000), bonds: series(5_900, 20) },
+  };
+}
 // MRK-105: propojení s Wargamingem
 // amounts = hodnoty po synchronizaci; bump = příští GET /wot/account (pomalý) je „načte z Wargamingu“;
 // loginFail = příští POST /wot/account/login selže (opakování bez obnovení stránky)
@@ -917,6 +959,8 @@ createServer(async (req, res) => {
     return respond(200, { ok: true, grind: g, completion }, 350);
   }
   if (url.pathname === "/wot/grinds/completed" && req.method === "GET") return respond(200, wotState.completed);
+  // MRK-153: statistiky po bitvách (tvar wot_stats_service.stats) – deterministická syntetická data podle období
+  if (url.pathname === "/wot/stats" && req.method === "GET") return respond(200, wotStatsMock(url.searchParams.get("period") || "week"), 150);
   if (url.pathname === "/wot/mastery" && req.method === "GET") return respond(200, wotMasteryOverview(), 150);
   if (url.pathname === "/wot/mastery/refresh" && req.method === "POST") {
     // první obnova „najde“ M na IS-3 → milník čekající na replay (jako wot_mastery_service._record_ace)

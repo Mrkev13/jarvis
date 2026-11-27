@@ -13,6 +13,8 @@ from module_contracts import (
 )
 from wot_account_router import router as account_router
 from wot_mastery_router import router as mastery_router
+from wot_stats_router import router as stats_router
+import wot_stats_service
 from text_utils import format_date_cz, format_num_cz, join_parts
 from time_utils import to_local
 
@@ -80,7 +82,7 @@ def context_wot(req: ContextRequest) -> list[str]:
     grinds.sort(key=lambda g: PRIORITY_RANK.get((g.priority or "").lower(), 3))
     grind_items = [f"{short(g.tank, 25)} {fmt_num(float(g.xp_remaining or 0))} XP ({g.priority})" for g in grinds[:MAX_ITEMS]]
     return [f"WoT zdroje: {resources or 'žádné'}", f"WoT aktivní grindy: {list_or_none(grind_items, len(grinds))}",
-            *_mastery_lines(db), *context_mastery(req)]
+            *_mastery_lines(db), *context_mastery(req), *wot_stats_service.context_lines(db)]
 
 
 MASTERY_TOP = 5  # „který tank má nejvíc" – pár míst navíc kvůli shodám
@@ -159,5 +161,5 @@ INTEGRATIONS = ModuleIntegrations(
     ),
     hourly=(ScheduledStep("wot mastery sync", hourly_mastery),  # MRK-146: každou hodinu (nejvýš 1× za 50 min), bez klíčů nic
             ScheduledStep("wot resources sync", hourly_resources)),  # MRK-105: jen s propojeným účtem
-    routers=(mastery_router, account_router),
+    routers=(mastery_router, account_router, stats_router),
 )

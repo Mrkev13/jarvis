@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import wot_stats_service
 import wot_wargaming
 from activity_service import log_activity
 from domain_events import append_domain_event
@@ -151,11 +152,19 @@ def sync(db: Session, client: wot_wargaming.Client | None, *, now: datetime | No
     if not force and newest is not None and newest > now - SYNC_EVERY:
         return {"result": "skipped"}
     try:
-        stats = client.tank_stats(client.account_id())
+        account_id = client.account_id()
+        stats = client.tank_stats(account_id)
         missing = [s["tank_id"] for s in stats if s["tank_id"] not in existing or not existing[s["tank_id"]].name]
         info = client.vehicles(missing) if missing else {}
     except wot_wargaming.WargamingError as err:
         return {"result": err.code}
+    # MRK-153: statistiky po bitvách – snímek tanků (jen změněné) a osobní hodnocení; chyba hodnocení nic neblokuje
+    wot_stats_service.record_tanks(db, stats, now)
+    try:
+        rating = client.account_rating(account_id)
+        wot_stats_service.record_rating(db, rating["global_rating"], rating["battles"], now)
+    except wot_wargaming.WargamingError:
+        pass
     baseline = not existing  # první synchronizace: stará M bez data, žádné milníky
     changed, new_aces = 0, []
     # kdy tank naposledy viděla synchronizace (před tímto během) – M zapsané od té doby je tahle bitva (Codex #116)

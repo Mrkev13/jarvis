@@ -4170,6 +4170,47 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await wotReset();
 }
 
+// ===== 43. MRK-153: statistiky WoT – období, souhrn, hodnocení a zdroje v čase, bitvy po dnech, tanky, karta na přehledu =====
+{
+  for (const [w, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wot/stats", { width: w, height: w < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+    await page.locator("[data-wot-stats]").waitFor({ timeout: 6000 }).catch(() => undefined);
+    const periods = page.locator("[data-wot-periods] button");
+    check(`wot statistiky ${label}: 6 období, výchozí týden`, (await periods.count()) === 6
+      && (await page.locator('[data-wot-periods] button[aria-pressed="true"]').innerText()) === "Týden");
+    check(`wot statistiky ${label}: souhrn týdne`, /24/.test(await page.locator('[aria-labelledby="wot-stats-summary"]').innerText()));
+    check(`wot statistiky ${label}: hodnocení a 4 grafy zdrojů`, (await page.getByTestId("wot-rating-chart").count()) === 1
+      && (await page.locator('[data-testid^="wot-resource-chart-"]').count()) === 4);
+    check(`wot statistiky ${label}: bitvy po dnech (7 dní)`, (await page.getByTestId("wot-daily").count()) === 1);
+    check(`wot statistiky ${label}: tabulka tanků`, (await page.locator("[data-wot-tanks] tbody tr").count()) === 3);
+    check(`wot statistiky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wot-stats-${label}.png`, fullPage: true });
+    if (w > 500) {
+      // najetí na graf hodnocení ukáže hodnotu a čas
+      const hit = page.getByTestId("wot-rating-chart").locator("[data-chart-hit]");
+      const box = await hit.boundingBox();
+      await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
+      check("wot statistiky: tooltip hodnocení", await eventually(async () => (await page.getByTestId("wot-rating-chart").locator("[data-chart-tooltip]").count()) === 1, 2000));
+      // přepnutí období: Celkově → bez grafu po dnech, URL ?period=all
+      await page.locator("[data-wot-periods]").getByRole("button", { name: "Celkově" }).click();
+      check("wot statistiky: celkově", await eventually(async () => (await page.locator('[data-wot-stats="all"]').count()) === 1, 4000)
+        && page.url().includes("period=all") && (await page.getByTestId("wot-daily").count()) === 0
+        && /1\s?520/.test(await page.locator('[aria-labelledby="wot-stats-summary"]').innerText()));
+      await page.locator("[data-wot-periods]").getByRole("button", { name: "Půl roku" }).click();
+      check("wot statistiky: půl roku přizná neúplná data", await eventually(async () => (await page.locator("[data-wot-partial]").count()) === 1, 4000));
+      await page.screenshot({ path: `${OUT}wot-stats-half.png`, fullPage: true });
+    }
+    check(`wot statistiky ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  const card = page.locator('[data-section="wot-today-stats"]');
+  check("wot přehled: karta Dnes ve WoT", await eventually(async () => /6/.test(await card.innerText().catch(() => "")), 5000));
+  check("wot přehled: odkaz na statistiky", (await card.getByRole("link", { name: "Statistiky a grafy" }).getAttribute("href")) === "/wot/stats");
+  check("wot přehled karta: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);
