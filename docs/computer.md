@@ -65,5 +65,14 @@ zařazení příkazu, výsledek a propadnutí. Fakta jsou doménové události (
 Heartbeat (`last_seen_at`, `status`, `apps`) a čas vyzvednutí (`delivered_at`) jsou provozní telemetrie bez Aktivity
 (jako `last_seen_at` přihlašovací session).
 
+## Aplikace pro Windows (MRK-156)
+
+`desktop/` – Tauri 2 aplikace „Jarvis pro PC“ (návod: [desktop/README.md](../desktop/README.md)). Token ve Správci
+pověření Windows, nastavení (bez tokenu) v `%APPDATA%\StandaHub\jarvis-agent.json`. Heartbeat každých 30 s,
+long-poll 15 s, po chybě backoff 5–60 s; odmítnutý token (odvoláno) agenta zastaví, dokud se znovu nespáruje.
+Napájení běží přes časovač v aplikaci (okamžitá akce počká 3 s na nahlášení výsledku). CI: workflow
+`.github/workflows/desktop.yml` (jádro na Linuxu, build + instalátor NSIS na Windows → artefakt
+`jarvis-pro-pc-windows`).
+
 Migrace `0037_computer_devices` (tabulky `devices`, `device_pairing_codes`, `device_commands`), testy
 `backend/tests/test_computer_devices.py`.

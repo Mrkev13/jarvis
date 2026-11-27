@@ -1,0 +1,11 @@
+# MRK-156: Jarvis pro PC – agent pro Windows (docs/computer.md, desktop/README.md).
+# agent-core = čistá logika (protokol, konfigurace, zpracování příkazů) testovatelná i bez Windows;
+# src-tauri = aplikace (tray, okno nastavení, spouštění aplikací a napájení na Windows).
+[workspace]
+resolver = "2"
+members = ["agent-core", "src-tauri"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
