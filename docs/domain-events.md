@@ -68,6 +68,8 @@ declaration. Pilot types:
 | `wot.mastery.ace_detected` | `wot_mastery_service.sync` (MRK-106; a tank's highest mastery badge from the Wargaming API turns to Ace after the first, baseline sync; conditional update, so only once; the milestone with `source="api"` is created in the same transaction) | `milestone_id`, `tank_id`, `tier` |
 | `wow.character.level_up` | `modules/wow/service.sync_character` (MRK-127; only when the snapshot from the Blizzard API shows a higher level than the stored one) | `character_id`, `level`, `previous_level`, `target_level` |
 | `wow.collection.acquired` | `modules/wow/collections.sync_collections` (MRK-128; a wish from the „chci získat“ list appears in the account collection from the Blizzard API; conditional update, so only once; a wish already owned when added is ticked without an event) | `wish_id`, `kind` |
+| `computer.device.paired` / `.revoked` | `modules/computer/service.pair` / `.revoke` (MRK-155; revoke also expires pending commands) | `device_id`, `platform` (paired) |
+| `computer.command.completed` / `.failed` / `.expired` | `modules/computer/service.complete_command` / `expire_stale` (MRK-155; result reported by the PC agent, or the command was not picked up / confirmed in time) | `command_id`, `device_id`, `kind` |
 | `finance.import.completed` | `modules/finance/importing/core.commit_import` (MRK-62; same transaction as the ledger rows) | `import_id`, `account_id`, `counts`, `date_from`, `date_to` – never row values |
 | `system.module.enabled` / `.disabled` | `PUT /modules/{id}` | `module_id`, `enabled`, `previous` |
 
