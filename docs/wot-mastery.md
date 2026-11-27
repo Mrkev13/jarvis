@@ -17,7 +17,7 @@ Ověřeno v oficiální referenci (developers.wargaming.net, 2026-11-24):
 
 ## Jak to funguje
 
-1. Hodinový krok `wot mastery sync` (nejvýš jednou za 6 h) a tlačítko *Obnovit* stáhnou odznaky všech tanků
+1. Hodinový krok `wot mastery sync` (každou hodinu, nejvýš jednou za 50 min – MRK-146) a tlačítko *Obnovit* stáhnou odznaky všech tanků
    do `wot_vehicle_mastery` (migrace `0034_wot_vehicle_mastery`). U nových tanků doplní název, tag, tier, národ
    a typ z `encyclopedia/vehicles`.
 2. **První synchronizace je jen výchozí stav.** Stará M nemají datum, takže žádné milníky nevznikají.

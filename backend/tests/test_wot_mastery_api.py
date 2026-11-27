@@ -169,10 +169,13 @@ class SyncTestCase(MasteryBase):
         finally:
             del VEHICLES[4]
 
-    def test_throttle_six_hours(self):
+    def test_hourly_throttle(self):
+        """MRK-146: hodinový krok načte odznaky každou hodinu; do 50 min od posledního načtení se nevolá."""
         self.sync()
-        self.clock[0] += timedelta(hours=1)
+        self.clock[0] += timedelta(minutes=30)
         self.assertEqual(self.sync(force=False), {"result": "skipped"})
+        self.clock[0] += timedelta(minutes=30)
+        self.assertEqual(self.sync(force=False)["result"], "ok")
 
     def test_hourly_step_uses_the_integration(self):
         out = self.q(lambda db: wot_integrations.hourly_mastery(db))
