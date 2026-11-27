@@ -10,6 +10,9 @@ Všechno se počítá deterministicky tady (žádné LLM): souhrn pro stránku �
 - Rytmus výuky (MRK-112): `Subject.attendance_every` 1 (NULL) = každý týden, 2 = ob týden od pondělí
   `attendance_anchor`. Do docházky se počítají a zapisují jen týdny s výukou; záznam z týdne bez výuky (třeba
   zapsaný před nastavením rytmu) zůstane v DB, ale nepočítá se.
+- Docházka podle rozvrhu (MRK-148): když má předmět v ručním rozvrhu cvičení / seminář / laborku, týdny s výukou
+  se berou z rozvrhu (ob týden, platnost, zrušená a přesunutá hodina); přednášky se nepočítají. Bez takové hodiny
+  (nebo s vypnutým Kalendářem) platí ruční rytmus MRK-112. `Weeks` = mapa předmět → týdny z rozvrhu pro jeden výpočet.
 - Absence: volitelný `Subject.absence_limit` (počet povolených absencí, PATCH /school/subject/{id}). Varování,
   když zbývá poslední povolená absence, limit je vyčerpaný nebo překročený; u splněného zápočtu se nevaruje.
 """
@@ -23,6 +26,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import class_weeks_service
 import database
 from activity_service import log_activity
 from domain_events import ActivityProjection, append_domain_event
@@ -62,16 +66,38 @@ def attendance_every(s: Subject) -> int:
     return 2 if s.attendance_every == 2 and s.attendance_anchor is not None else 1
 
 
-def is_class_week(s: Subject, week: date) -> bool:
-    """MRK-112: má předmět v týdnu od pondělí `week` výuku? Každý týden ano, ob týden podle kotvy (i zpětně)."""
+Weeks = dict[int, set[date]]
+
+
+def timetable_weeks(db, lo: date, hi: date) -> Weeks:
+    """MRK-148: týdny s výukou z rozvrhu (jen když je Kalendář dostupný – jinak ruční rytmus). Most mezi moduly
+    drží jádrový `class_weeks_service` – Škola sama Kalendář ani registr modulů neimportuje."""
+    return class_weeks_service.timetable_weeks(db, lo, hi)
+
+
+def schedule_source(s: Subject, tt: Weeks | None) -> str:
+    return "timetable" if tt is not None and s.id in tt else "manual"
+
+
+def is_class_week(s: Subject, week: date, tt: Weeks | None = None) -> bool:
+    """MRK-112: má předmět v týdnu od pondělí `week` výuku? Každý týden ano, ob týden podle kotvy (i zpětně).
+    MRK-148: má-li předmět cvičení / seminář / laborku v rozvrhu, rozhoduje rozvrh."""
+    if schedule_source(s, tt) == "timetable":
+        return week in tt[s.id]
     if attendance_every(s) == 1:
         return True
     return (week - s.attendance_anchor).days // 7 % 2 == 0
 
 
-def class_weeks(s: Subject, current: date, span: int = HISTORY_SPAN_WEEKS) -> list[date]:
+def class_weeks(s: Subject, current: date, span: int = HISTORY_SPAN_WEEKS, tt: Weeks | None = None) -> list[date]:
     """Týdny s výukou od `current` zpět (`span` kalendářních týdnů), nejnovější první."""
-    return [w for w in (current - timedelta(weeks=i) for i in range(span)) if is_class_week(s, w)]
+    return [w for w in (current - timedelta(weeks=i) for i in range(span)) if is_class_week(s, w, tt)]
+
+
+def _weeks_for(db, current: date, rows: list[SchoolAttendance]) -> Weeks:
+    """Rozvrh pro celý rozsah, který výpočet potřebuje: nabízené týdny i všechny zapsané (počty absencí)."""
+    lo = min([current - timedelta(weeks=HISTORY_SPAN_WEEKS), *(r.week_start for r in rows)])
+    return timetable_weeks(db, lo, current + timedelta(days=6))
 
 
 def week_label(start: date) -> str:
@@ -141,8 +167,8 @@ def _attendance_by_subject(db, subject_ids: list[int]) -> dict[int, list[SchoolA
     return out
 
 
-def absences_for(subject: Subject, rows: list[SchoolAttendance]) -> Absences:
-    rows = [r for r in rows if is_class_week(subject, r.week_start)]
+def absences_for(subject: Subject, rows: list[SchoolAttendance], tt: Weeks | None = None) -> Absences:
+    rows = [r for r in rows if is_class_week(subject, r.week_start, tt)]
     present = sum(1 for r in rows if r.present)
     return Absences(present=present, absent=len(rows) - present, limit=subject.absence_limit)
 
@@ -179,12 +205,13 @@ def subject_progress(db, today: date | None = None, *, include_archived: bool = 
     if ids:
         for e in db.query(Exam).filter(Exam.subject_id.in_(ids)).all():
             exams[e.subject_id].append(e)
+    tt = _weeks_for(db, current, [r for rs in attendance.values() for r in rs])
     items = []
     for s in subjects:
-        rows = [r for r in attendance[s.id] if is_class_week(s, r.week_start)]
-        a = absences_for(s, rows)
+        rows = [r for r in attendance[s.id] if is_class_week(s, r.week_start, tt)]
+        a = absences_for(s, rows, tt)
         this_week = next((r.present for r in rows if r.week_start == current), None)
-        offered = class_weeks(s, current)
+        offered = class_weeks(s, current, tt=tt)
         oldest = offered[-1] if offered else current
         status = credit_status(s)
         items.append({
@@ -203,9 +230,10 @@ def subject_progress(db, today: date | None = None, *, include_archived: bool = 
                           if r.week_start >= oldest],
                 # MRK-112: týdny s výukou, které jde zapsat (nejnovější první; tento týden jen když v něm výuka je)
                 "class_weeks": [w.isoformat() for w in offered],
-                "class_this_week": is_class_week(s, current),
+                "class_this_week": is_class_week(s, current, tt),
             },
-            "schedule": {"every": attendance_every(s),
+            # MRK-148: source "timetable" = týdny z rozvrhu (every/anchor ručního rytmu se pak nepoužijí)
+            "schedule": {"source": schedule_source(s, tt), "every": attendance_every(s),
                          "anchor": s.attendance_anchor.isoformat() if attendance_every(s) == 2 else None},
         })
     return {"week_start": current.isoformat(), "previous_week_start": (current - timedelta(days=7)).isoformat(),
@@ -218,9 +246,10 @@ def warnings(db, today: date | None = None) -> list[tuple[Subject, Absences]]:
                 .order_by(Subject.name, Subject.id).all())
     subjects = [s for s in subjects if credit_status(s) != "passed"]
     attendance = _attendance_by_subject(db, [s.id for s in subjects])
+    tt = _weeks_for(db, week_start(today or today_local()), [r for rs in attendance.values() for r in rs])
     out = []
     for s in subjects:
-        a = absences_for(s, attendance[s.id])
+        a = absences_for(s, attendance[s.id], tt)
         if a.level in WARNING_LEVELS:
             out.append((s, a))
     return out
@@ -276,8 +305,10 @@ def set_attendance(db, subject_id: int, week: date, present: bool | None, *, tod
     s = _subject(db, subject_id)
     if s.active is False:
         raise ProgressError("Předmět je archivovaný.", 409, "archived")
-    if present is not None and not is_class_week(s, week):  # smazat starý záznam jde vždy
-        raise ProgressError("V tomhle týdnu předmět výuku nemá (ob týden).", 422, "no_class_week")
+    tt = timetable_weeks(db, week, week + timedelta(days=6))
+    if present is not None and not is_class_week(s, week, tt):  # smazat starý záznam jde vždy
+        why = "podle rozvrhu" if schedule_source(s, tt) == "timetable" else "ob týden"
+        raise ProgressError(f"V tomhle týdnu předmět výuku nemá ({why}).", 422, "no_class_week")
     row = (db.query(SchoolAttendance)
            .filter(SchoolAttendance.subject_id == s.id, SchoolAttendance.week_start == week).one_or_none())
     old = None if row is None else row.present
@@ -293,6 +324,8 @@ def set_attendance(db, subject_id: int, week: date, present: bool | None, *, tod
     word = {True: "byl", False: "nebyl", None: "nezapsáno"}
     # vlastní klíč pro každou skutečnou změnu: výchozí klíč (souhrn) by Byl → Nebyl → Byl zahodil jako duplikát;
     # opakovaný stejný požadavek sem nedojde (výše `old == present` = nic)
+    from modules.school.attendance_prompt import resolve_prompt  # MRK-149 (líně: attendance_prompt importuje progress)
+    resolve_prompt(db, s.id, week)
     log_activity(db, "school", "update", f"Docházka {s.name}, {week_label(week)}: {word[present]}",
                  entity_type="Subject", entity_id=s.id,
                  delta={"attendance": {"week_start": week.isoformat(), "old": old, "new": present}},
@@ -334,7 +367,8 @@ def context_lines(db, today: date) -> list[str]:
             credits[-1] += f"; zkoušky uzavřené {ex['closed']} (složeno {ex['passed']}, nesloženo {ex['failed']}): {res}"
         a = s["attendance"]
         if a["recorded"] or a["limit"] is not None:
-            every = " (výuka ob týden)" if s["schedule"]["every"] == 2 else ""
+            every = (" (výuka podle rozvrhu)" if s["schedule"]["source"] == "timetable"
+                     else " (výuka ob týden)" if s["schedule"]["every"] == 2 else "")
             attendance.append(f"{s['name']}{every}: {a['text']}")
     lines = ["Zápočty: " + "; ".join(credits)]
     if attendance:

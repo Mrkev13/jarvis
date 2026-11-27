@@ -64,7 +64,8 @@ test("reminder notifications stay, vibrate, renotify and offer done / snooze act
   assert.match(sw, /action: "done", title: "Hotovo"/);
   assert.match(sw, /action: "snooze"/);
   // the only network call is to the API origin from the registration URL, with the session cookie
-  assert.equal((sw.match(/\bfetch\(/g) || []).length, 1, "single fetch");
+  // MRK-149: druhý fetch = docházka z oznámení (stejný origin API, stejná cookie relace)
+  assert.equal((sw.match(/\bfetch\(/g) || []).length, 2, "reminder + attendance fetch only");
   assert.match(sw, /fetch\(`\$\{api\}\$\{path\}\?source=push`/);
   assert.match(sw, /url\.protocol === "https:" \|\| url\.protocol === "http:" \? url\.origin : null/);
   // a failed action opens the app instead of failing silently
@@ -96,4 +97,45 @@ test("permission is requested and the worker registered only from the explicit o
   const outside = settings.replace(enable, "");
   assert.doesNotMatch(outside, /requestPermission|serviceWorker\.register/, "nothing prompts or registers on load");
   assert.match(settings, /onClick=\{\(\) => void enable\(\)\}/, "enable() runs only from a click");
+});
+
+
+// MRK-149: docházka z oznámení – service worker spuštěný ve vm s falešným self / fetch / clients.
+test("attendance notification offers Byl / Nebyl and writes attendance through the API origin", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const listeners = {};
+  const shown = [];
+  const calls = [];
+  const opened = [];
+  let ok = true;
+  const self = {
+    location: { href: "https://hub.test/sw.js?api=https%3A%2F%2Fapi.test", origin: "https://hub.test" },
+    addEventListener: (name, fn) => { listeners[name] = fn; },
+    registration: { showNotification: (title, options) => { shown.push({ title, options }); return Promise.resolve(); } },
+    clients: { matchAll: async () => [], openWindow: async (url) => { opened.push(url); } },
+    skipWaiting: () => {},
+  };
+  const fetch = async (url, init) => { calls.push({ url, init }); return { ok }; };
+  runInNewContext(read("public/sw.js"), { self, fetch, URL, JSON, Promise, Number, console });
+  const push = (data) => new Promise((resolve) => listeners.push({ data: { json: () => data }, waitUntil: resolve }));
+  await push({ title: "Byl jsi na hodině?", body: "Fyzika", url: "/school?subject=3", kind: "attendance",
+    subject_id: 3, week_start: "2026-11-09" });
+  const { options } = shown.at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(options.actions.map((a) => a.title))), ["Byl", "Nebyl"]);
+  const click = (action, data = options.data) => new Promise((resolve) =>
+    listeners.notificationclick({ action, notification: { data, close: () => {} }, waitUntil: resolve }));
+  await click("absent");
+  assert.equal(calls.at(-1).url, "https://api.test/school/subject/3/attendance");
+  assert.equal(calls.at(-1).init.method, "PUT");
+  assert.equal(calls.at(-1).init.credentials, "include");
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { week_start: "2026-11-09", present: false });
+  ok = false;  // zápis selhal (offline / týden bez výuky) → otevře Školu
+  await click("present");
+  assert.equal(opened.at(-1), "https://hub.test/school?subject=3");
+  // podvržená data ze zprávy nic neodešlou
+  const before = calls.length;
+  await push({ kind: "attendance", subject_id: "3; rm", week_start: "../x" });
+  assert.equal(shown.at(-1).options.actions, undefined);
+  await click("present", shown.at(-1).options.data);
+  assert.equal(calls.length, before);
 });

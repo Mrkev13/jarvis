@@ -41,11 +41,13 @@ class EnvConfigTestCase(unittest.TestCase):
             self.assertTrue(briefing_service.briefing_enabled())
             self.assertTrue(weekly_review_service.review_enabled())
             self.assertIs(env_bool("DAILY_BRIEFING_ENABLED", False), True)
-        with patch.dict(os.environ, {"DAILY_BRIEFING_PUSH": "off", "WEEKLY_REVIEW_PUSH": "0", "OPS_ALERT_PUSH": "no"}):
+        with patch.dict(os.environ, {"DAILY_BRIEFING_PUSH": "off", "WEEKLY_REVIEW_PUSH": "0", "OPS_ALERT_PUSH": "no",
+                                     "ATTENDANCE_PUSH": "false"}):
             self.assertEqual(delivery_service.deliverable_types(), ("reminder",))
-        with patch.dict(os.environ, {"DAILY_BRIEFING_PUSH": "", "WEEKLY_REVIEW_PUSH": "", "OPS_ALERT_PUSH": ""}):
-            self.assertEqual(delivery_service.deliverable_types(),
-                             ("reminder", "daily_briefing", "weekly_review", "ops_alert"))  # MRK-57 ops alerts
+        with patch.dict(os.environ, {"DAILY_BRIEFING_PUSH": "", "WEEKLY_REVIEW_PUSH": "", "OPS_ALERT_PUSH": "",
+                                     "ATTENDANCE_PUSH": ""}):
+            self.assertEqual(delivery_service.deliverable_types(),  # MRK-57 ops alerts, MRK-149 docházka
+                             ("reminder", "daily_briefing", "weekly_review", "ops_alert", "attendance_prompt"))
 
 
 if __name__ == "__main__":

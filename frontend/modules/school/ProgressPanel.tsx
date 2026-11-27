@@ -225,7 +225,8 @@ function SubjectCard({
   const [olderShown, setOlderShown] = useState(OLDER_STEP);
   const exams = examsSummary(s.exams);
   const tone = absenceTone(s.attendance);
-  const biweekly = s.schedule.every === 2;
+  const fromTimetable = s.schedule.source === "timetable"; // MRK-148
+  const biweekly = s.schedule.every === 2 || fromTimetable; // „Minulá výuka“ = poslední týden s výukou
   const weeks = attendanceWeeks(s, week);
   const olderMissing = weeks.older.filter((w) => weekState(s, w) === null).length;
   return (
@@ -243,7 +244,11 @@ function SubjectCard({
       >
         <p className="text-ink-2">
           <span className="font-medium text-ink">Docházka:</span> {s.attendance.text}
-          {biweekly ? <span className="text-ink-muted"> · ob týden</span> : null}
+          {fromTimetable ? (
+            <span className="text-ink-muted"> · podle rozvrhu</span>
+          ) : biweekly ? (
+            <span className="text-ink-muted"> · ob týden</span>
+          ) : null}
         </p>
         {s.attendance.warning ? (
           <p className={cx("mt-1 text-xs font-medium", tone === "danger" ? "text-danger" : "text-warning")}>{s.attendance.warning}</p>
@@ -298,6 +303,11 @@ function SubjectCard({
         </div>
       ) : null}
 
+      {fromTimetable ? (
+        <p className="text-xs text-ink-muted" data-schedule-source="timetable">
+          Výuka <span className="text-ink-2">podle rozvrhu</span> – cvičení, semináře a laborky (zrušené hodiny se nepočítají)
+        </p>
+      ) : (
       <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-muted">
         Výuka
         <select
@@ -314,6 +324,7 @@ function SubjectCard({
           ))}
         </select>
       </label>
+      )}
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-ink-muted">

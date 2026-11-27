@@ -46,7 +46,7 @@ test("MRK-142: rhythm every other week round-trips through the form", () => {
   const entry = (every, week_anchor) => ({
     id: 1, subject_id: 3, subject_name: "X", title: "X", kind: "exercise", kind_label: "Cvičení", room: null, weekday: 0,
     weekday_label: "pondělí", start: "09:00", end: "10:30", valid_from: "2026-10-05", valid_until: "2027-01-31",
-    every, week_anchor, next_date: null, exceptions: [],
+    every, week_anchor, next_date: null, next_regular_date: null, exceptions: [],
   });
   // kotva 5. 10.: týden od 23. 11. je o 7 týdnů dál → výuka příští týden; kotva 12. 10. → tento týden
   assert.equal(draftFrom(entry(2, "2026-10-05"), "2026-11-26").rhythm, "next");

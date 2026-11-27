@@ -83,6 +83,16 @@ def _run_hourly_job() -> None:
             run_scheduled(db)
         except Exception:
             print("[scheduler] off-site step failed")
+        try:
+            # MRK-151: zastavené nasazení (stavový soubor updateru, read-only mount) → jedno oznámení na cíl
+            from deploy_notice import check_updater_status
+            result = check_updater_status(db)
+            db.commit()
+            if result != "none":
+                print(f"[scheduler] updater status: {result}")
+        except Exception:
+            db.rollback()
+            print("[scheduler] updater status check failed")
     except Exception:
         tracker.failed("standa_hub_hourly")
         print("[scheduler] hourly job failed")

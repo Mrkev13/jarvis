@@ -2,7 +2,8 @@
    Zprávu šifruje backend (RFC 8291); obsah: { title, body, url, tag, kind?, reminder_id? }.
    MRK-80: připomínka (kind "reminder") zůstane viset do odkliknutí, zavibruje, při stejném tagu upozorní znovu
    (renotify) a má akce Hotovo / Odložit 10 min. Adresu API dostane worker v query registrace (/sw.js?api=…),
-   protože backend běží na jiném originu než frontend. */
+   protože backend běží na jiném originu než frontend.
+   MRK-149: docházka (kind "attendance", subject_id, week_start) má akce Byl / Nebyl → PUT docházky přímo z oznámení. */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
@@ -35,13 +36,20 @@ self.addEventListener("push", (event) => {
   const title = typeof data.title === "string" && data.title ? data.title : "Standa Hub";
   const tag = typeof data.tag === "string" ? data.tag : undefined;
   const reminderId = data.kind === "reminder" ? positiveId(data.reminder_id) : null;
+  const attendance = data.kind === "attendance" ? attendanceRef(data.subject_id, data.week_start) : null;
   const options = {
     body: typeof data.body === "string" ? data.body : "",
     tag,
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    data: { url: typeof data.url === "string" ? data.url : "/reminders", reminderId },
+    data: { url: typeof data.url === "string" ? data.url : "/reminders", reminderId, attendance },
   };
+  if (attendance && apiOrigin()) {
+    options.actions = [
+      { action: "present", title: "Byl" },
+      { action: "absent", title: "Nebyl" },
+    ];
+  }
   if (reminderId) {
     Object.assign(options, {
       requireInteraction: true,
@@ -73,6 +81,29 @@ async function reminderAction(action, reminderId) {
   }
 }
 
+/** MRK-149: jen kladné id předmětu a datum YYYY-MM-DD – nic jiného z obsahu zprávy se do požadavku nedostane. */
+function attendanceRef(subjectId, week) {
+  const id = positiveId(subjectId);
+  return id && typeof week === "string" && /^\d{4}-\d{2}-\d{2}$/.test(week) ? { subjectId: id, week } : null;
+}
+
+/** Byl / Nebyl přímo z oznámení (cookie relace, stejný endpoint jako stránka Škola). */
+async function attendanceAction(ref, present) {
+  const api = apiOrigin();
+  if (!api) return false;
+  try {
+    const res = await fetch(`${api}/school/subject/${ref.subjectId}/attendance`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ week_start: ref.week, present }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function openApp(path) {
   const target = new URL(path, self.location.origin).href;
   return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
@@ -93,6 +124,16 @@ self.addEventListener("notificationclick", (event) => {
   const raw = data.url;
   const path = typeof raw === "string" && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/reminders";
   const reminderId = positiveId(data.reminderId);
+  const attendance = data.attendance ? attendanceRef(data.attendance.subjectId, data.attendance.week) : null;
+  if (attendance && (event.action === "present" || event.action === "absent")) {
+    event.waitUntil(
+      attendanceAction(attendance, event.action === "present").then((ok) =>
+        // nepovedlo se (offline, odhlášeno, týden bez výuky…) → otevřít Školu, ať to jde zapsat ručně
+        ok ? undefined : openApp(`/school?subject=${attendance.subjectId}`),
+      ),
+    );
+    return;
+  }
   if (reminderId && (event.action === "done" || event.action === "snooze")) {
     event.waitUntil(
       reminderAction(event.action, reminderId).then((ok) =>

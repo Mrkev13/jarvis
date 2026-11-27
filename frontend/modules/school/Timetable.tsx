@@ -218,7 +218,7 @@ function ExceptionForm({ entry, today, busy, onSubmit, onCancel }: {
   entry: TimetableEntry; today: string; busy: boolean; onCancel: () => void;
   onSubmit: (body: Record<string, string>, label: string) => Promise<void>;
 }) {
-  const [day, setDay] = useState(() => entry.next_date ?? nextWeekday(today > entry.valid_from ? today : entry.valid_from, entry.weekday));
+  const [day, setDay] = useState(() => entry.next_regular_date ?? nextWeekday(today > entry.valid_from ? today : entry.valid_from, entry.weekday));
   const [action, setAction] = useState<"cancel" | "move">("cancel");
   const [newDay, setNewDay] = useState(day);
   const [start, setStart] = useState(entry.start);

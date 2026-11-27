@@ -144,7 +144,9 @@ const PROGRESS_PREV = "2026-09-28";
 const CREDIT_LABELS = { pending: "nesplněn", passed: "splněn", failed: "neuznán" };
 // MRK-112: rytmus výuky jako backend (každý týden / ob týden od kotvy), 26 kalendářních týdnů zpět
 const isoAddWeeks = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 7 * 86400000).toISOString().slice(0, 10);
-const isClassWeek = (p, iso) => p.every !== 2 || Math.round((Date.parse(iso) - Date.parse(p.anchor)) / (7 * 86400000)) % 2 === 0;
+// MRK-148: p.timetable = týdny s výukou z rozvrhu (cvičení / semináře / laborky) – přebíjí ruční rytmus
+const isClassWeek = (p, iso) => (p.timetable ? p.timetable.includes(iso)
+  : p.every !== 2 || Math.round((Date.parse(iso) - Date.parse(p.anchor)) / (7 * 86400000)) % 2 === 0);
 // stejné texty a úrovně jako backend modules/school/progress.py (zjednodušeně, jen pro UI kontroly)
 function subjectProgress(s) {
   const p = schoolState.progress[s.id] ?? (schoolState.progress[s.id] = { credit: "pending", creditDate: null, limit: null, weeks: {} });
@@ -173,7 +175,7 @@ function subjectProgress(s) {
     attendance: { present, absent, recorded: weeks.length, limit: p.limit, remaining, level, text, warning,
       this_week: isClassWeek(p, PROGRESS_WEEK) ? p.weeks[PROGRESS_WEEK] ?? null : null, weeks,
       class_weeks: classWeeks, class_this_week: isClassWeek(p, PROGRESS_WEEK) },
-    schedule: { every: p.every === 2 ? 2 : 1, anchor: p.every === 2 ? p.anchor : null },
+    schedule: { source: p.timetable ? "timetable" : "manual", every: p.every === 2 ? 2 : 1, anchor: p.every === 2 ? p.anchor : null },
   };
 }
 const progressCalls = [];
@@ -261,7 +263,8 @@ function timetableEntry(id, b) {
     kind: b.kind, kind_label: TIMETABLE_KINDS[b.kind] ?? null, room: b.room ?? null, weekday: Number(b.weekday), weekday_label: TT_DAYS[Number(b.weekday)],
     start: b.start, end: b.end, valid_from: b.valid_from, valid_until: b.valid_until,
     // MRK-142: rytmus (každý / ob týden); next_date backend počítá z dneška, mock ho jen opakuje z fixture
-    every: Number(b.every) === 2 ? 2 : 1, week_anchor: b.week_anchor ?? b.valid_from, next_date: b.next_date ?? null, exceptions: [] };
+    every: Number(b.every) === 2 ? 2 : 1, week_anchor: b.week_anchor ?? b.valid_from, next_date: b.next_date ?? null,
+    next_regular_date: b.next_regular_date ?? b.next_date ?? null, exceptions: [] };
 }
 function TIMETABLE() {
   const subjects = fixture("school-subjects") || [];
@@ -739,6 +742,12 @@ createServer(async (req, res) => {
   if (url.pathname === "/actions/undo" && req.method === "POST" && String(body?.action_id || "").startsWith("today-")) {
     todayState.calls.push(`undo:${body.action_id}`);
     return respond(200, { ok: true, pending_action: { id: `today-undo-${body.action_id}`, tool: "undo_change", arguments: { _source: "today" } } }, 250);
+  }
+  if (url.pathname === "/__mock/school/timetable") {  // MRK-148: předmět s cvičením ob týden v rozvrhu (výuka tento týden)
+    const id = Number(url.searchParams.get("subject"));
+    subjectProgress(schoolState.subjects.find((x) => x.id === id) ?? { id, name: "" });
+    schoolState.progress[id].timetable = Array.from({ length: 6 }, (_, i) => isoAddWeeks(PROGRESS_WEEK, -2 * i));
+    return respond(200, { ok: true });
   }
   if (url.pathname === "/__mock/school/reset") {
     resetSchool();

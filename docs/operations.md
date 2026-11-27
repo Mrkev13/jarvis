@@ -414,8 +414,10 @@ they need a proper isolation boundary for the reviewer and the fixer (see that i
 Production (Ubuntu) deploys the branch `mrk-101-ubuntu-production`, not `main`. Changes reach it only through a
 release PR:
 
-1. **Actions → Release to production → Run workflow** (branch `main`; optional SHA of a commit on `main`, empty =
-   current `main`).
+1. **Automatically (MRK-150)** after every successful CI push run on `main` (`workflow_run`, the exact commit CI
+   checked). The new release PR closes older open release PRs whose commit it contains (comment with a link; a newer
+   release or a non-release PR is never closed). By hand as before: **Actions → Release to production → Run
+   workflow** (branch `main`; optional SHA of a commit on `main`, empty = current `main`).
 2. The workflow (`.github/scripts/release_pr.py`) requires a successful push run of `ci.yml` for exactly that commit
    on `main` (otherwise it fails and creates nothing), pushes `release/main-<sha12>` pinned to that commit and opens
    or updates the PR into the production branch: source commit, included commits/PRs, Alembic heads, trial-merge
@@ -430,6 +432,21 @@ The workflow never merges. One-time setting: Settings → Actions → General �
 approve pull requests* (only creating is used). A PR created with the workflow token does not start other workflows;
 the release PR head is the source commit, so its CI checks from the `main` push are shown on it, the review gate
 picks it up on its 10-minute pass.
+
+### Deploy notifications (MRK-151)
+
+- **Hub aktualizován:** on startup the backend checks `APP_COMMIT`. For a commit it has not announced yet it creates
+  one `ops_alert` notification (bell + Web Push via `OPS_ALERT_PUSH`), key `deploy:<commit>`, and resolves the
+  previous one. A restart on the same commit sends nothing. Without `APP_COMMIT` (local, tests) nothing happens
+  (`backend/deploy_notice.py`).
+- **Nasazení čeká na migraci / se zastavilo:** the hourly job reads the updater status file `UPDATER_STATUS_FILE`
+  (default `/data/backups/ops/updater-status.json` = `/srv/standa-hub-data/backups/ops` on the host, already mounted;
+  no compose template change). Format, no secrets: `{"at": ISO UTC, "state": "blocked"|"ok"|"waiting", "reason":
+  "MIGRATION_HEAD_CHANGED"|"BACKUP_NOT_FRESH"|"DEPLOY_FAILED"|"", "target": <40 hex>}`. `waiting` (CI of the new
+  version still running) is ignored. A blocked
+  state = one `ops_alert` per target and reason. `ok` resolves it. A file older than 2 h, invalid or missing = nothing.
+  Unknown reasons become a generic „Nasazení se nepovedlo“. The writer on the server is a `deploy/v3` change (a PR
+  into the production branch, `manual-merge`). Until it is installed, the file simply does not exist.
 
 ## LOCAL Windows acceptance (not performed in cloud)
 

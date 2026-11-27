@@ -17,6 +17,21 @@ Manual, per subject, no timetable (per-lesson attendance needs MRK-41) and no UI
 - Attendance can be written only for an active subject and only up to the current week, any past week included;
   writing the same value is a no-op; `present: null` removes the row. Every write is an Activity entry (same
   transaction).
+- Attendance from the timetable (MRK-148): a subject with at least one exercise / seminar / lab in the manual
+  timetable (MRK-41/142) takes its class weeks from it – every other week and validity from the timetable, a cancelled
+  lesson = no class that week, a moved lesson counts in the week it moved to. Lectures never count. Without such a
+  lesson (or with the Calendar module off) the manual rhythm below applies. `schedule.source` is `timetable` or
+  `manual`; the UI shows „Výuka podle rozvrhu“ instead of the rhythm select. Writing attendance into a week without
+  class is 422 `no_class_week` („podle rozvrhu“).
+- Attendance from a notification (MRK-149): the hourly School step (`modules/school/attendance_prompt.py`) finds
+  exercises / seminars / labs from the timetable that ended within the last 3 h (cancelled ones are skipped, a moved
+  one counts after its new end) and, for an active subject without a passed credit and with no attendance recorded
+  for that week yet, creates one `attendance_prompt` notification („Byl jsi na hodině?“, key
+  `attendance:<subject>:<Monday>` = at most one per subject and week). Web Push via `ATTENDANCE_PUSH` (default on);
+  the service worker offers **Byl / Nebyl**, which call the usual `PUT /school/subject/{id}/attendance` (a failure
+  opens School). Any attendance write resolves the notification.
+  The cross-module link is the core bridge `backend/class_weeks_service.py` (like `goal_history_service` → WoW):
+  the School module imports neither Calendar nor the module registry.
 - Class weeks (MRK-112): a biweekly subject has class in weeks an even number of weeks from its anchor (also before
   it). Only class weeks count and can be written (`422 no_class_week` otherwise; deleting a row is always allowed).
   A row recorded in a non-class week (e.g. before the rhythm was set) stays in the DB but does not count.
