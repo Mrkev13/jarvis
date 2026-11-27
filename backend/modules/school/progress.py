@@ -26,6 +26,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import class_weeks_service
 import database
 from activity_service import log_activity
 from domain_events import ActivityProjection, append_domain_event
@@ -69,12 +70,9 @@ Weeks = dict[int, set[date]]
 
 
 def timetable_weeks(db, lo: date, hi: date) -> Weeks:
-    """MRK-148: týdny s výukou z rozvrhu (jen když je Kalendář dostupný – jinak ruční rytmus)."""
-    from module_registry import current_access  # líně: module_registry importuje integrace modulů (cyklus)
-    if not current_access().is_available("calendar"):
-        return {}
-    from modules.calendar import timetable  # líně: Škola nezávisí na Kalendáři při importu
-    return timetable.attendance_weeks(db, lo, hi)
+    """MRK-148: týdny s výukou z rozvrhu (jen když je Kalendář dostupný – jinak ruční rytmus). Most mezi moduly
+    drží jádrový `class_weeks_service` – Škola sama Kalendář ani registr modulů neimportuje."""
+    return class_weeks_service.timetable_weeks(db, lo, hi)
 
 
 def schedule_source(s: Subject, tt: Weeks | None) -> str:
