@@ -52,3 +52,14 @@ media/
 
 # idempotent dev bootstrap stamps (scripts/setup-dev.sh)
 .dev-setup/
+
+# Public configuration example
+!frontend/.env.example
+
+# PostgreSQL credentials
+/postgres/.env
+
+!/postgres/.env.example
+
+# Public Docker production configuration template
+!/backend/.env.docker.example

@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""Fake `docker` for backend/tests/test_deploy_v3.py (MRK-108 v3). State lives in $FAKE_DIR/state.json.
+
+Models just enough of docker / docker compose for deploy-transaction-v3.sh and auto-update-v3.sh: image tags -> IDs,
+image labels and Alembic head, two containers with image, APP_COMMIT and Compose config-hash, `compose config`,
+`compose up`, `build --iidfile`, `run ... alembic heads`. Failure injection via $FAKE_DIR/inject.json:
+  {"fail_up": ["frontend"], "kill_on_up": ["backend"], "fail_build": true}
+Each "kill_on_up" entry is used once: the calling script gets SIGKILL before the container changes (power loss).
+
+MRK-114 (deploy-migration-v3.sh): state["prod_db"] = revision of the production database; image meta "compat" =
+revisions the code works on (default: its own head); throwaway PostgreSQL copies and rehearsal app containers on
+internal networks; `exec` answers psql (alembic_version, restore from a gzip dump "REVISION=<rev>"), the app /health
+and the ORM smoke (`python -`, passes when the database revision is in the image's compat list);
+`run ... alembic upgrade head` moves the copy (DATABASE_URL in -e) or production (network postgres_default) to the
+image's head. More injections: {"fail_migrate": ["copy"|"prod"], "kill_after_migrate": ["prod"],
+"kill_before_migrate": ["prod"]} (each used once).
+
+MRK-120 (restart-v3.sh), opt-in with FAKE_COMPOSE_ENV_FILE=1 so the older tests keep their hashes: like real Compose the
+backend template inlines the raw `env_file` (BACKEND_ENV_FILE) into `environment` (so the config-hash covers the
+values), containers keep that environment, `inspect` lists image env + container env, `image inspect` the image env
+(meta "env", default PATH), and `run --env-file F --entrypoint python IMAGE -c CODE` really runs CODE with the file's
+variables (FAKE_PYTHON, cwd/PYTHONPATH = FAKE_BACKEND_DIR) - the restart's validation uses production.py itself.
+
+MRK-121 (frontend-template-v3.sh), opt-in with FAKE_COMPOSE_TEMPLATE_HASH=1: like real Compose the config-hash also
+covers the template itself (a volume added to the YAML changes it), and `inspect` shows the frontend's environment
+(NEXT_PUBLIC_API_URL) - the script reads the API URL from the running container.
+"""
+import hashlib
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+FAKE = Path(os.environ["FAKE_DIR"])
+STATE = FAKE / "state.json"
+
+
+def load():
+    return json.loads(STATE.read_text())
+
+
+def save(s):
+    STATE.write_text(json.dumps(s, indent=1))
+
+
+def inject():
+    p = FAKE / "inject.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def log(*parts):
+    with open(FAKE / "calls.log", "a") as f:
+        f.write(" ".join(parts) + "\n")
+
+
+def resolve(s, ref):
+    if ref == PG_IMAGE_ID:
+        return PG_IMAGE_ID
+    if ref in s["tags"]:
+        return s["tags"][ref]
+    if ref in s["meta"]:
+        return ref
+    return None
+
+
+def read_env_file(path):
+    """Compose `format: raw`: KEY=VALUE taken literally (no quote stripping); blank lines and # comments skipped."""
+    out = {}
+    for line in Path(path).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value
+    return out
+
+
+def image_env(s, image_id):
+    return s["meta"].get(image_id, {}).get("env", ["PATH=/usr/bin"])
+
+
+def config_hash(resolved):
+    """Like Compose: the hash covers the whole resolved service config (image, environment, pull_policy...)."""
+    return hashlib.sha256(json.dumps(resolved, sort_keys=True).encode()).hexdigest()
+
+
+def reread(svc, service):
+    """Re-reading a rendered config: `$$` is a literal `$` again; the env_file values (rendered only with
+    FAKE_RENDER_ENV_FILE) stay out of the config-hash, as in deploy_running."""
+    if os.environ.get("FAKE_RENDER_ENV_FILE") != "1" or service != "backend" or "environment" not in svc:
+        return svc
+    skip = set(read_env_file(os.environ["BACKEND_ENV_FILE"])) if os.environ.get("BACKEND_ENV_FILE") else set()
+    return {**svc, "environment": {k: v.replace("$$", "$") if isinstance(v, str) else v
+                                   for k, v in svc["environment"].items() if k not in skip}}
+
+
+def compose(args, s):
+    project, files, i = None, [], 0
+    while args[i] in ("-p", "-f"):
+        if args[i] == "-p":
+            project = args[i + 1]
+        else:
+            files.append(args[i + 1])
+        i += 2
+    sub, rest = args[i], args[i + 1:]
+    service = project
+    env_key = f"{service.upper()}_IMAGE"
+    resolved = {}
+    for f in files:
+        if f == "-":
+            resolved.update(reread(json.load(sys.stdin)["services"][service], service))
+        elif f.endswith(".json"):  # snapshot / override: merged over what came before
+            resolved.update(reread(json.loads(Path(f).read_text())["services"][service], service))
+        else:  # managed YAML template: values from the environment
+            image = os.environ.get(env_key)
+            if not image:
+                print(f"{env_key} required", file=sys.stderr)
+                return 1
+            env = ({"APP_COMMIT": os.environ.get("APP_COMMIT", "")} if service == "backend"
+                   else {"NEXT_PUBLIC_API_URL": os.environ.get("NEXT_PUBLIC_API_URL", "")})
+            if service == "backend" and os.environ.get("FAKE_COMPOSE_ENV_FILE") == "1":
+                env = {**read_env_file(os.environ["BACKEND_ENV_FILE"]), **env}  # `environment` wins over env_file
+            resolved.update({"image": image, "environment": env})
+            if os.environ.get("FAKE_COMPOSE_TEMPLATE_HASH") == "1":
+                resolved["template_sha256"] = hashlib.sha256(Path(f).read_bytes()).hexdigest()
+                if "# FAKE_UNHEALTHY" in Path(f).read_text():  # a template that breaks the service
+                    resolved["fake_unhealthy"] = True
+    resolved.pop("container_name", None)
+    image = resolved.get("image")
+    if sub == "config":
+        if "--hash" in rest:
+            print(f"{service} {config_hash(resolved)}")
+        elif "--format" in rest:
+            out = {**resolved, "container_name": f"standa-hub-{service}"}
+            env = dict(resolved.get("environment") or {})
+            if service == "backend" and os.environ.get("FAKE_RENDER_ENV_FILE") == "1" and os.environ.get("BACKEND_ENV_FILE"):
+                # MRK-114: the rendered config carries the env_file values (only here, the config-hash stays as before)
+                env = {**read_env_file(os.environ["BACKEND_ENV_FILE"]), **env}
+            if os.environ.get("FAKE_RENDER_ENV_FILE") == "1":
+                # like real Compose (verified with v5.6): a literal `$` is printed as `$$`
+                env = {k: v.replace("$", "$$") if isinstance(v, str) else v for k, v in env.items()}
+            out["environment"] = env
+            print(json.dumps({"name": project, "services": {service: out}}))
+        return 0
+    if sub == "up":
+        inj = inject()
+        log("up", service, image)
+        if service in inj.get("kill_on_up", []):
+            inj["kill_on_up"].remove(service)
+            (FAKE / "inject.json").write_text(json.dumps(inj))
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        if service in inj.get("fail_up", []):
+            print(f"container {service} failed to start", file=sys.stderr)
+            return 1
+        image_id = resolve(s, image)
+        if image_id is None:
+            print(f"No such image: {image}", file=sys.stderr)
+            return 1
+        s["containers"][f"standa-hub-{service}"] = {
+            "image_ref": image, "image_id": image_id, "running": True,
+            "app_commit": resolved.get("environment", {}).get("APP_COMMIT", ""),
+            "hash": config_hash(resolved), "project": project, "service": service,
+            "env": resolved.get("environment", {}), "fake_unhealthy": bool(resolved.get("fake_unhealthy"))}
+        save(s)
+        return 0
+    return 2
+
+
+PG_IMAGE = "postgres:18.6"
+PG_IMAGE_ID = "sha256:" + "5" * 64  # the image ID the production database container runs
+OPTS_WITH_VALUE = {"--name", "--network", "--env-file", "-e", "--tmpfs", "--pull", "--entrypoint"}
+
+
+def parse_run(args):
+    opts, i = {"-e": [], "flags": []}, 0
+    while i < len(args) and args[i].startswith("-"):
+        if args[i] in OPTS_WITH_VALUE:
+            if args[i] == "-e":
+                opts["-e"].append(args[i + 1])
+            else:
+                opts[args[i]] = args[i + 1]
+            i += 2
+        else:
+            opts["flags"].append(args[i])
+            i += 1
+    return opts, args[i], args[i + 1:]
+
+
+def env_value(opts, key):
+    for item in opts["-e"]:
+        if item.startswith(key + "="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def app_start_error(opts):
+    """Like backend production.guard_production_environment at import: with APP_ENV=production the database NAME in
+    DATABASE_URL must equal PRODUCTION_DATABASE_NAME and AUTH_PIN_HASH must be a bcrypt hash (an escaped `$$` is not).
+    The env-file is read literally, as docker does; `-e` wins."""
+    env = read_env_file(opts["--env-file"]) if opts.get("--env-file") else {}
+    env.update(dict(item.split("=", 1) for item in opts["-e"] if "=" in item))
+    if env.get("APP_ENV") != "production":
+        return None
+    if (env.get("DATABASE_URL") or "").rsplit("/", 1)[-1] != env.get("PRODUCTION_DATABASE_NAME"):
+        return "PRODUCTION_DATABASE_NAME must match the selected database"
+    pin = env.get("AUTH_PIN_HASH") or ""
+    if not pin.startswith("$2") or "$$" in pin:
+        return "AUTH_PIN_HASH must be a valid bcrypt hash"
+    return None
+
+
+def db_host(url):
+    return url.split("@", 1)[1].split(":", 1)[0] if url and "@" in url else None
+
+
+def take_injection(name, target):
+    inj = inject()
+    if target in inj.get(name, []):
+        inj[name].remove(target)
+        (FAKE / "inject.json").write_text(json.dumps(inj))
+        return True
+    return False
+
+
+def db_revision_for(s, container):
+    """Database revision seen by an app container: a rehearsal copy or production."""
+    app = s.get("apps", {}).get(container)
+    if app is not None:
+        return s["copies"][app["db"]]["revision"]
+    return s.get("prod_db")
+
+
+def image_of(s, container):
+    app = s.get("apps", {}).get(container)
+    return app["image_id"] if app else s["containers"][container]["image_id"]
+
+
+def health(s, container):
+    rev, image = db_revision_for(s, container), image_of(s, container)
+    head = s["meta"][image]["head"]
+    ok = rev == head and image not in s.get("unhealthy", [])
+    # like backend health_service: a revision the code does not know (newer than its head - the revision ids here are
+    # numbered) is reported as "unknown", never by name (MRK-114: old app on the migrated database)
+    known = rev is not None and rev <= head
+    return {"status": "healthy" if ok else "unhealthy", "database": {"status": "reachable"},
+            "migrations": {"status": "current" if rev == head else "mismatch", "current": [rev if known else "unknown"],
+                           "head": [head]}}
+
+
+def smoke_ok(s, container):
+    image = image_of(s, container)
+    return db_revision_for(s, container) in s["meta"][image].get("compat", [s["meta"][image]["head"]])
+
+
+def run_cmd(args, s):
+    opts, image, cmd = parse_run(args)
+    s.setdefault("copies", {})
+    s.setdefault("apps", {})
+    if "-d" in opts["flags"]:  # detached: throwaway database or rehearsal app
+        name = opts["--name"]
+        if image in (PG_IMAGE, PG_IMAGE_ID):
+            s["copies"][name] = {"revision": None, "network": opts.get("--network")}
+        else:
+            image_id = resolve(s, image)
+            if image_id is None:
+                return 1
+            s["apps"][name] = {"image_id": image_id, "db": db_host(env_value(opts, "DATABASE_URL")),
+                               "crashed": app_start_error(opts)}
+        save(s)
+        print(name)
+        return 0
+    image_id = resolve(s, image)
+    if opts.get("--entrypoint") == "python" and cmd[:1] == ["-c"] and "--env-file" in opts:
+        if image_id is None:
+            return 1
+        return run_python(opts, image_id, cmd, s)
+    if opts.get("--entrypoint") == "alembic" and cmd == ["heads"]:
+        print(f"{s['meta'][image_id]['head']} (head)")
+        return 0
+    if opts.get("--entrypoint") == "alembic" and cmd == ["upgrade", "head"]:
+        if app_start_error(opts):  # alembic env.py imports models -> database -> the same guard
+            print(f"ValueError: {app_start_error(opts)}", file=sys.stderr)
+            return 1
+        host = db_host(env_value(opts, "DATABASE_URL"))
+        target = "copy" if host else "prod"
+        log("migrate", target, s["meta"][image_id]["head"])
+        if target == "prod" and take_injection("kill_before_migrate", "prod"):
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        if take_injection("fail_migrate", target):
+            print("alembic: migration failed", file=sys.stderr)
+            return 1
+        if host:
+            s["copies"][host]["revision"] = s["meta"][image_id]["head"]
+        else:
+            s["prod_db"] = s["meta"][image_id]["head"]
+        save(s)
+        if target == "prod" and take_injection("kill_after_migrate", "prod"):
+            os.kill(os.getppid(), signal.SIGKILL)
+            return 137
+        return 0
+    print(f"fake docker: unsupported run {args}", file=sys.stderr)
+    return 2
+
+
+def exec_cmd(args, s):
+    interactive = args[0] == "-i"
+    if interactive:
+        args = args[1:]
+    name, cmd = args[0], args[1:]
+    copies = s.get("copies", {})
+    if name == "standa-postgres":
+        if "-tAc" in cmd:
+            print(s.get("prod_db") or "")
+            return 0
+        return 2
+    if name in copies:
+        if cmd[0] == "pg_isready":
+            return 0
+        if "-tAc" in cmd:
+            print(copies[name]["revision"] or "")
+            return 0
+        if "--single-transaction" in cmd:  # restore: the fake dump says which revision it holds
+            text = sys.stdin.read()
+            copies[name]["revision"] = text.split("REVISION=", 1)[1].split()[0]
+            save(s)
+            return 0
+        return 2
+    if s.get("apps", {}).get(name, {}).get("crashed"):  # the container exited at import
+        print(f"Error response from daemon: container {name} is not running", file=sys.stderr)
+        return 1
+    if name in s.get("apps", {}) or name in s["containers"]:
+        if cmd[:2] == ["python", "-c"]:
+            print(json.dumps(health(s, name)))
+            return 0
+        if cmd == ["python", "-"]:
+            sys.stdin.read()
+            if smoke_ok(s, name):
+                print("ORM_SMOKE_OK mapped=42")
+                return 0
+            print("sqlalchemy.exc.ProgrammingError: column does not exist", file=sys.stderr)
+            return 1
+    print(f"fake docker: unsupported exec {args}", file=sys.stderr)
+    return 2
+
+
+def remove(args, s):
+    for name in [a for a in args if not a.startswith("-")]:
+        s.get("apps", {}).pop(name, None)
+        s.get("copies", {}).pop(name, None)
+    save(s)
+    return 0
+
+
+def container_env(s, c):
+    opted_in = os.environ.get("FAKE_COMPOSE_ENV_FILE") == "1" or os.environ.get("FAKE_COMPOSE_TEMPLATE_HASH") == "1"
+    if "env" not in c or not opted_in:
+        return f"PATH=/usr/bin\nAPP_COMMIT={c['app_commit']}"
+    own = c["env"]
+    base = [line for line in image_env(s, c["image_id"]) if line.split("=", 1)[0] not in own]
+    return "\n".join(base + [f"{k}={v}" for k, v in own.items()])
+
+
+def run_python(opts, image_id, cmd, s):
+    """`run --env-file F --entrypoint python IMAGE -c CODE`: really run CODE with the image env + the file's variables."""
+    import subprocess
+    log("run-python", opts.get("--network", ""), image_id)
+    env = dict(line.split("=", 1) for line in image_env(s, image_id))
+    env.update(read_env_file(opts["--env-file"]))
+    env["PATH"] = os.environ["PATH"]
+    backend = os.environ["FAKE_BACKEND_DIR"]
+    env["PYTHONPATH"] = backend
+    r = subprocess.run([os.environ.get("FAKE_PYTHON", sys.executable), *cmd], env=env, cwd=backend,
+                       capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
+def main(argv):
+    s = load()
+    log(*argv)
+    if argv[0] == "compose":
+        return compose(argv[1:], s)
+    if argv[:2] == ["image", "inspect"]:
+        image_id = resolve(s, argv[2])
+        if image_id is None:
+            print(f"No such image: {argv[2]}", file=sys.stderr)
+            return 1
+        fmt = argv[argv.index("--format") + 1]
+        if fmt == "{{range .Config.Env}}{{println .}}{{end}}":
+            print("\n".join(image_env(s, image_id)))
+            return 0
+        print(image_id if fmt == "{{.Id}}" else s["meta"][image_id]["revision"])
+        return 0
+    if argv[:2] == ["image", "tag"]:
+        image_id = resolve(s, argv[2])
+        if image_id is None:
+            return 1
+        s["tags"][argv[3]] = image_id
+        save(s)
+        return 0
+    if argv[0] == "inspect" and argv[1] == "standa-postgres":
+        print(PG_IMAGE_ID if "{{.Image}}" in argv else PG_IMAGE)
+        return 0
+    if argv[0] == "inspect":
+        c = s["containers"].get(argv[1])
+        if c is None:
+            return 1
+        if "--format" not in argv:
+            print(json.dumps([{"State": {"Running": c["running"]}, "Config": {"Labels": {
+                "com.docker.compose.project": c["project"], "com.docker.compose.service": c["service"]}}}]))
+            return 0
+        fmt = argv[argv.index("--format") + 1]
+        out = {
+            "{{.Image}}": c["image_id"],
+            "{{.Config.Image}}": c["image_ref"],
+            "{{range .Config.Env}}{{println .}}{{end}}": container_env(s, c),
+            '{{index .Config.Labels "com.docker.compose.config-hash"}}': c["hash"],
+            '{{index .Config.Labels "com.docker.compose.project"}}': c["project"],
+        }[fmt]
+        print(out)
+        return 0
+    if argv[0] == "run":
+        return run_cmd(argv[1:], s)
+    if argv[0] == "exec":
+        return exec_cmd(argv[1:], s)
+    if argv[0] == "rm":
+        return remove(argv[1:], s)
+    if argv[:2] == ["network", "create"]:
+        s.setdefault("networks", []).append(argv[-1])
+        save(s)
+        return 0
+    if argv[:2] == ["network", "rm"]:
+        nets = s.setdefault("networks", [])
+        if argv[-1] not in nets:
+            return 1
+        nets.remove(argv[-1])
+        save(s)
+        return 0
+    if argv[0] == "build":
+        if inject().get("fail_build"):
+            print("build failed", file=sys.stderr)
+            return 1
+        ctx = Path(argv[-1])
+        tag = argv[argv.index("-t") + 1]
+        revision = next(a.split("=", 1)[1] for a in argv if a.startswith("org.opencontainers.image.revision="))
+        content = b"".join((ctx / n).read_bytes() for n in sorted(os.listdir(ctx)) if (ctx / n).is_file())
+        image_id = "sha256:" + hashlib.sha256(tag.split(":")[0].encode() + content).hexdigest()
+        head_file = ctx.parent / "backend" / "ALEMBIC_HEAD"
+        s["meta"][image_id] = {"revision": revision, "head": head_file.read_text().strip()}
+        s["tags"][tag] = image_id
+        Path(argv[argv.index("--iidfile") + 1]).write_text(image_id)
+        save(s)
+        return 0
+    print(f"fake docker: unsupported {argv}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,8 +1,18 @@
+> **Current production (November 2026): Ubuntu Server + Docker Compose.**
+> The Windows deployment instructions below describe the previous
+> hosting environment and are retained for historical reference.
+> Do not run Windows auto-update scripts against the Ubuntu server.
+> See [Ubuntu deployment](ubuntu-deployment.md) for the current setup.
+
+---
+
 # Production runtime (MRK-23 v2)
 
-Current target: Windows, native Python/Node processes, one backend scheduler owner.
-**Docker Desktop is not required.** Future Linux service integration is separate;
-the application commands below remain portable. This branch has cloud proof only.
+**Legacy (until November 2026):** Windows, native Python/Node processes, one backend scheduler owner,
+Docker Desktop not required. Everything below about Windows services, Task Scheduler and `scripts/windows/*.ps1`
+describes that previous installation only - **never run it against the Ubuntu server**. Current production is
+Ubuntu + Docker Compose: [Ubuntu deployment](ubuntu-deployment.md) and `deploy/v3/README.md` (automatic updates,
+controlled migrations). The configuration, health, CI and review-gate rules below apply to both.
 
 ## Configuration and preparation
 

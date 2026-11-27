@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Fake `gh api` for backend/tests/test_deploy_v3.py: returns $FAKE_DIR/ci_runs.json unfiltered (check-ci.sh must
+filter by SHA, branch, event and workflow itself) and logs the requested URL."""
+import os
+import sys
+from pathlib import Path
+
+fake = Path(os.environ["FAKE_DIR"])
+with open(fake / "calls.log", "a") as f:
+    f.write("gh " + " ".join(sys.argv[1:]) + "\n")
+runs = fake / "ci_runs.json"
+print(runs.read_text() if runs.exists() else '{"workflow_runs": []}')

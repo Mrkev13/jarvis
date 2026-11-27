@@ -67,6 +67,38 @@ Tankopedia, re-extracts the currency icons and rebuilds the manifest. Without `W
 Tankopedia it is already in the manifest. Never put the application id in a committed file; the script refuses to
 write a manifest that would contain it.
 
+### Production on the Ubuntu server (MRK-121)
+
+The images are not in Git, so they are not in the frontend image either. Production keeps them outside the app in
+`/srv/standa-hub-data/game-assets` (root-owned), mounted **read-only** into the frontend container at
+`/app/public/game-assets` (`deploy/v3/mrk108/frontend-managed.yaml`, `frontend/compose.yaml`).
+
+- `next start` (Next 16) serves files of `public/` that exist **when the server starts**, not files added while it
+  runs (verified on 16.3.4: added at runtime → 404, after a restart → 200). Files fetched later are served by
+  `app/game-assets/[...path]/route.ts` (`lib/gameAssetFiles.ts`) from the same directory, so a refresh needs no
+  frontend restart. Root: `GAME_ASSETS_DIR` (absolute) or `<cwd>/public/game-assets`.
+- The handler serves only `manifest.json` and paths that pass `safeAssetFile` (lower-case, image extensions, no
+  `..`), only regular files ≤ 5 MB whose real path (after symlinks) stays inside the root, with `nosniff`, a
+  sandbox CSP for SVG and private caching. Everything else is 404 → the UI shows the fallback monogram.
+- Like the rest of the app it is behind the login (`proxy.ts`).
+
+Fill or refresh the directory on the server with the script inside a throwaway container of the running frontend
+image (Node, `scripts/` and `lib/` are in it; nothing to install on the host). The application id is read without
+echo and passed by name only, so it is not in the shell history or the process list:
+
+```bash
+sudo install -d -o root -g root -m 755 /srv/standa-hub-data/game-assets
+IMAGE=$(sudo docker inspect standa-hub-frontend --format '{{.Config.Image}}')
+read -rs -p 'WG application_id: ' WG_APPLICATION_ID; echo; export WG_APPLICATION_ID
+sudo --preserve-env=WG_APPLICATION_ID docker run --rm -e WG_APPLICATION_ID -e WG_REGION=eu \
+  -v /srv/standa-hub-data/game-assets:/app/public/game-assets "$IMAGE" node scripts/fetch-game-assets.mjs
+unset WG_APPLICATION_ID
+```
+
+(Copying the folder from the old Windows installation works too; then run the same container with
+`node scripts/fetch-game-assets.mjs --manifest-only` to rebuild the manifest.) Adding the volume to the running
+frontend is a template change: `deploy/v3/lib/frontend-template-v3.sh` (`deploy/v3/README.md`).
+
 ## Matching (`resolveTank` in `lib/gameAssets.ts`)
 
 Names are compared after `normalizeGameName`: no diacritics/punctuation, lower case, `Obj.` = `Object`, `Dr.` =
