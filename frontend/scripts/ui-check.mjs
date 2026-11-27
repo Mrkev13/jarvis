@@ -4056,6 +4056,41 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await fetch(`${MOCK}/timetable/reset`, { method: "POST" });
 }
 
+// ===== 41. MRK-105: WoT zdroje z Wargamingu (propojení, návrat z přihlášení, odkud a kdy je hodnota, odpojení) =====
+{
+  await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
+  for (const [label, viewport] of [["desktop", { width: 1366, height: 900 }], ["mobil", { width: 390, height: 844 }]]) {
+    const { ctx, page, errors } = await open("/wot", viewport);
+    const link = page.locator("[data-wot-wargaming]");
+    check(`wot wargaming ${label}: nabídka propojení`, await eventually(async () => (await link.getAttribute("data-wot-wargaming").catch(() => null)) === "not_connected", 5000));
+    check(`wot wargaming ${label}: tlačítko Propojit`, await page.getByRole("button", { name: "Propojit s Wargamingem" }).isVisible());
+    check(`wot wargaming ${label}: ručně zadaná hodnota má původ`, (await page.locator("#resources").innerText()).includes("ručně"));
+    await page.screenshot({ path: `${OUT}wot-wargaming-${label}.png` });
+    check(`wot wargaming ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/wot", { width: 1366, height: 900 });
+    await page.getByRole("button", { name: "Propojit s Wargamingem" }).click();
+    // mock „Wargaming“ vrátí rovnou na /wot/connect/<state>?…access_token=… → stránka pošle connect a vrátí se na /wot
+    check("wot wargaming: návrat z přihlášení → propojeno", await eventually(async () => (await page.locator("[data-wot-wargaming]").getAttribute("data-wot-wargaming").catch(() => null)) === "connected", 8000));
+    check("wot wargaming: token není v adrese", !page.url().includes("access_token"), page.url());
+    check("wot wargaming: hodnoty z Wargamingu", (await page.locator("#resources").innerText()).includes("z Wargamingu"));
+    await page.screenshot({ path: `${OUT}wot-wargaming-connected.png` });
+    await page.getByRole("button", { name: "Odpojit" }).click();
+    check("wot wargaming: odpojení", await eventually(async () => (await page.locator("[data-wot-wargaming]").getAttribute("data-wot-wargaming").catch(() => null)) === "not_connected", 4000));
+    check("wot wargaming akce: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open("/wot/connect/bad-state-0123456789abcdef?status=ok&access_token=zzz&account_id=1&expires_at=1");
+    check("wot wargaming: neplatný návrat = srozumitelná chyba", await eventually(async () => (await page.locator("main").innerText()).includes("neplatný nebo starý"), 5000));
+    check("wot wargaming: neplatný návrat – token pryč z adresy", !page.url().includes("access_token"), page.url());
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

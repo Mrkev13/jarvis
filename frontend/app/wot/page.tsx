@@ -8,6 +8,7 @@ import { GameImage } from "@/components/games/GameImage";
 import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
 import { GrindRow } from "@/components/wot/GrindRow";
 import { MasteryTable } from "@/components/wot/MasteryTable";
+import { WargamingLink } from "@/components/wot/WargamingLink";
 import { MilestoneCard } from "@/components/wot/MilestoneCard";
 import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiFetch, jsonBody } from "@/lib/api";
-import { formatNumber, plural, pragueDayKey } from "@/lib/format";
+import { formatDateTime, formatNumber, plural, pragueDayKey } from "@/lib/format";
 import { pulseJarvis } from "@/lib/jarvisSignals";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
@@ -52,13 +53,21 @@ import {
   type GrindDraft,
   type WotGrind,
   type WotMilestone,
+  type WotAccount,
   type WotResources,
 } from "@/lib/wot";
 
 const LOAD_ERROR = "Nepodařilo se načíst data z backendu.";
 
+/** MRK-105: odkud a kdy je hodnota zdroje. */
+function resourceHint(meta: WotAccount["resources"][keyof WotAccount["resources"]]): string | undefined {
+  if (!meta?.updated_at) return undefined;
+  return `${meta.source === "wargaming" ? "z Wargamingu" : "ručně"} · ${formatDateTime(meta.updated_at)}`;
+}
+
 export default function WotPage() {
   const resourcesRes = useApiResource<WotResources>("/wot/resources");
+  const accountRes = useApiResource<WotAccount>("/wot/account"); // MRK-105: propojení s Wargamingem
   const grindsRes = useApiResource<WotGrind[]>("/wot/grinds");
   // Game Enrichment B: historie splnění a milníky – vlastní zdroje, chyba jednoho nesmí shodit stránku
   const completedRes = useApiResource<CompletedGrind[]>("/wot/grinds/completed");
@@ -365,9 +374,11 @@ export default function WotPage() {
                     </span>
                   }
                   value={formatNumber(resources[key])}
+                  hint={resourceHint(accountRes.data?.resources?.[key])}
                 />
               ))}
             </StatGrid>
+            <WargamingLink account={accountRes.data} onChange={() => Promise.all([accountRes.reload(), resourcesRes.reload()])} />
 
             {showResourceForm && (
               <form id="wot-resource-form" onSubmit={handleResourceSubmit} className="mt-4 space-y-4 border-t border-line-subtle pt-4">

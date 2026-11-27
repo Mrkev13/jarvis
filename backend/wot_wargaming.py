@@ -9,6 +9,11 @@ Použité metody (developers.wargaming.net, ověřeno 2026-11-24): `account/list
 0 = žádný, 1 = 3. třída, 2 = 2. třída, 3 = 1. třída, 4 = Ace Tanker – jen NEJVYŠŠÍ odznak, ne počet) a
 `encyclopedia/vehicles` (název, tag, tier, národ). Veřejná data: stačí `application_id`, žádný `access_token`.
 
+MRK-105 – SOUKROMÁ data účtu (kredity, zlato, volné XP, bondy) přes Wargaming OpenID (ověřeno 2026-11-27):
+`auth/login` (prohlížeč, `redirect_uri` dostane `status`, `access_token`, `expires_at`, `account_id`), `account/info`
+s `access_token` (`private.credits|gold|free_xp|bonds`), `auth/prolongate` (POST, nový token, nejvýš 2 týdny) a
+`auth/logout` (POST). Token posílá jen tento modul a jen v těle / parametrech požadavku na pevný host.
+
 Bezpečnost: HTTPS na pevné hosty, bez přesměrování, timeout, omezená velikost odpovědi. Chyby nesou jen kód
 (`WargamingError.code`), nikdy URL (obsahuje application_id) ani odpověď serveru.
 """
@@ -31,7 +36,8 @@ VEHICLE_BATCH = 100  # encyclopedia/vehicles: nejvýš 100 tank_id na požadavek
 
 
 class WargamingError(Exception):
-    """`code`: not_configured | not_found | unauthorized | rate_limited | unavailable | invalid_response | private."""
+    """`code`: not_configured | not_found | unauthorized | rate_limited | unavailable | invalid_response | private |
+    token_invalid (MRK-105: vypršelý / zrušený access_token)."""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -72,8 +78,9 @@ _API_ERRORS = {
     "INVALID_APPLICATION_ID": "unauthorized", "APPLICATION_IS_BLOCKED": "unauthorized",
     "INVALID_IP_ADDRESS": "unauthorized", "REQUEST_LIMIT_EXCEEDED": "rate_limited",
     "SOURCE_NOT_AVAILABLE": "unavailable", "ACCOUNT_ID_NOT_SPECIFIED": "not_found",
-    "INVALID_ACCOUNT_ID": "not_found",
+    "INVALID_ACCOUNT_ID": "not_found", "INVALID_ACCESS_TOKEN": "token_invalid",
 }
+TOKEN_TTL_SECONDS = 14 * 24 * 3600  # nejvíc, co auth/login i auth/prolongate dovolí
 
 
 class Client:
@@ -81,11 +88,14 @@ class Client:
         self.cfg = cfg
         self.transport = transport or requests.request
 
-    def _get(self, method: str, params: dict) -> Any:
+    def _get(self, method: str, params: dict, http: str = "GET") -> Any:
         url = f"{self.cfg.api_root}/{method}/"
+        payload = {"application_id": self.cfg.application_id, **params}
         try:
-            resp = self.transport("GET", url, params={"application_id": self.cfg.application_id, **params},
-                                  timeout=TIMEOUT, allow_redirects=False)
+            if http == "POST":  # token v těle, ne v URL
+                resp = self.transport("POST", url, data=payload, timeout=TIMEOUT, allow_redirects=False)
+            else:
+                resp = self.transport("GET", url, params=payload, timeout=TIMEOUT, allow_redirects=False)
         except WargamingError:
             raise
         except Exception:
@@ -139,6 +149,40 @@ class Client:
             out.append({"tank_id": r["tank_id"], "mark_of_mastery": mastery if mastery in (0, 1, 2, 3, 4) else 0,
                         "battles": battles if _int(battles) is not None else None})
         return out
+
+    # ---------- MRK-105: soukromá data přes access_token ----------
+
+    def login_url(self, redirect_uri: str) -> str:
+        """Adresa přihlášení Wargaming OpenID, kam se přesměruje prohlížeč (bez síťového volání)."""
+        from urllib.parse import urlencode
+        query = urlencode({"application_id": self.cfg.application_id, "redirect_uri": redirect_uri,
+                           "expires_at": TOKEN_TTL_SECONDS, "display": "page"})
+        return f"{self.cfg.api_root}/auth/login/?{query}"
+
+    def private_resources(self, account_id: int, access_token: str) -> dict[str, int | None]:
+        """→ {credits, gold, free_xp, bonds}. `private` null = token nepatří k účtu / neplatí → token_invalid."""
+        data = self._get("account/info", {"account_id": str(account_id), "access_token": access_token,
+                                          "fields": "private.credits,private.gold,private.free_xp,private.bonds"},
+                         http="POST")
+        row = data.get(str(account_id)) if isinstance(data, dict) else None
+        if row is None:
+            raise WargamingError("not_found")
+        private = row.get("private") if isinstance(row, dict) else None
+        if not isinstance(private, dict):
+            raise WargamingError("token_invalid")
+        return {k: _int(private.get(k)) for k in ("credits", "gold", "free_xp", "bonds")}
+
+    def prolongate(self, access_token: str) -> tuple[str, int]:
+        """Nový token (platnost nejvýš 2 týdny) → (access_token, expires_at UNIX)."""
+        data = self._get("auth/prolongate", {"access_token": access_token, "expires_at": TOKEN_TTL_SECONDS}, http="POST")
+        token = data.get("access_token") if isinstance(data, dict) else None
+        expires = _int(data.get("expires_at"), 1, 2**40) if isinstance(data, dict) else None  # UNIX > 10^9
+        if not isinstance(token, str) or not token or len(token) > 200 or not expires:
+            raise WargamingError("invalid_response")
+        return token, expires
+
+    def logout(self, access_token: str) -> None:
+        self._get("auth/logout", {"access_token": access_token}, http="POST")
 
     def vehicles(self, tank_ids: list[int]) -> dict[int, dict]:
         """Tankopedie pro dané tanky (po dávkách) → {tank_id: {name, short_name, tag, tier, nation, type}}."""

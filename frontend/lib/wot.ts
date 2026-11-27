@@ -354,3 +354,28 @@ export function galleryStep(index: number, count: number, dir: 1 | -1): number {
   return (index + dir + count) % count;
 }
 
+
+/** MRK-105: propojení s Wargaming účtem – `GET /wot/account` (nikdy token ani account_id). */
+export type WotAccountStatus = "connected" | "expired" | "not_connected";
+export type WotAccount = {
+  configured: boolean;
+  missing: string[];
+  connected: boolean;
+  status: WotAccountStatus;
+  expires_at: string | null;
+  last_sync_at: string | null;
+  error: string | null;
+  error_text: string | null;
+  resources: Partial<Record<ResourceKey, { amount: number; source: "manual" | "wargaming" | null; updated_at: string | null }>>;
+};
+
+/** Parametry návratu z přihlášení Wargaming (`?status=ok&access_token=…&expires_at=…&account_id=…`) → tělo connect. */
+export function connectBody(state: string, query: URLSearchParams) {
+  return {
+    state,
+    status: query.get("status") ?? "",
+    access_token: query.get("access_token") ?? "",
+    account_id: query.get("account_id") ?? "",
+    expires_at: query.get("expires_at") ?? "",
+  };
+}

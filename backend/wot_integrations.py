@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from context_format import MAX_ITEMS, PRIORITY_RANK, fmt_num, list_or_none, short
 from models import WotGrind, WotMilestone, WotReplay, WotResource
+import wot_account_service
 import wot_mastery_service
 import wot_wargaming
 from module_contracts import (
     ChangeSource, activity_changes, event_changes, ContextRequest, ContextSection, DashboardSection, ModuleIntegrations,
     ScheduledStep, SearchSource,
 )
+from wot_account_router import router as account_router
 from wot_mastery_router import router as mastery_router
 from text_utils import format_date_cz, format_num_cz, join_parts
 from time_utils import to_local
@@ -129,6 +131,11 @@ def hourly_mastery(db):
     return wot_mastery_service.sync(db, wot_wargaming.client())
 
 
+def hourly_resources(db):
+    """MRK-105: zdroje z propojeného Wargaming účtu (bez propojení nic, žádná síť)."""
+    return wot_account_service.sync(db, wot_wargaming.client())
+
+
 EVENTS = (wot_mastery_service.ACE_EVENT,)
 
 
@@ -150,6 +157,7 @@ INTEGRATIONS = ModuleIntegrations(
                                " mko", " mka", "mistr", "oceneni", "mastery", "odznak"), order=70,
                        build=context_wot, covered_tools=("get_wot_resources", "get_wot_grinds"), name_hints=tank_names),
     ),
-    hourly=(ScheduledStep("wot mastery sync", hourly_mastery),),  # MRK-106: nejvýš 1× za 6 h, bez klíčů nic
-    routers=(mastery_router,),
+    hourly=(ScheduledStep("wot mastery sync", hourly_mastery),  # MRK-106: nejvýš 1× za 6 h, bez klíčů nic
+            ScheduledStep("wot resources sync", hourly_resources)),  # MRK-105: jen s propojeným účtem
+    routers=(mastery_router, account_router),
 )

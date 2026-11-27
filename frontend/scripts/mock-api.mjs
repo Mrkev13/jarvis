@@ -270,6 +270,17 @@ function TIMETABLE() {
   ] };
 }
 let timetableState = TIMETABLE();
+// MRK-105: propojení s Wargamingem
+const WOT_ACCOUNT = () => ({ connected: false, last_sync_at: null });
+let wotAccount = WOT_ACCOUNT();
+function wotAccountStatus() {
+  const src = wotAccount.connected ? "wargaming" : "manual";
+  const at = wotAccount.connected ? wotAccount.last_sync_at : "2026-10-09T17:30:00+00:00";
+  const res = fixture("wot-resources") || {};
+  return { configured: true, missing: [], connected: wotAccount.connected, status: wotAccount.connected ? "connected" : "not_connected",
+    expires_at: wotAccount.connected ? "2026-10-25T08:00:00+00:00" : null, last_sync_at: wotAccount.last_sync_at, error: null, error_text: null,
+    resources: Object.fromEntries(Object.entries(res).map(([k, v]) => [k, { amount: v, source: src, updated_at: at }])) };
+}
 const wowState = { configured: true, forever: false, characters: WOW_CHARS(), seq: 10, collections: WOW_COLLECTIONS() };
 function wowCollections() {
   const h = wowState.collections.history;
@@ -847,6 +858,21 @@ createServer(async (req, res) => {
     resetWot();
     return respond(200, { ok: true });
   }
+  // MRK-105: propojení s Wargamingem (tvar wot_account_service.status) – výchozí stav nepropojeno
+  if (url.pathname === "/__mock/wot-account/reset") { wotAccount = WOT_ACCOUNT(); return respond(200, { ok: true }); }
+  if (url.pathname === "/wot/account" && req.method === "GET") return respond(200, wotAccountStatus(), 120);
+  if (url.pathname === "/wot/account" && req.method === "DELETE") { wotAccount = WOT_ACCOUNT(); return respond(200, wotAccountStatus(), 200); }
+  if (url.pathname === "/wot/account/login" && req.method === "POST") {
+    const b = body || {};
+    return respond(200, { location: `${b.origin}/wot/connect/mock-state-0123456789abcdef?status=ok&access_token=mocktoken0123456789&account_id=1&expires_at=1800000000` }, 150);
+  }
+  if (url.pathname === "/wot/account/connect" && req.method === "POST") {
+    const b = body || {};
+    if (b.state !== "mock-state-0123456789abcdef" || b.status !== "ok") return respond(400, { detail: { code: "bad_state", message: "Odkaz z přihlášení je neplatný nebo starý – zkus propojení znovu." } }, 200);
+    wotAccount = { connected: true, last_sync_at: "2026-10-11T08:00:00+00:00" };
+    return respond(200, wotAccountStatus(), 250);
+  }
+  if (url.pathname === "/wot/account/sync" && req.method === "POST") return respond(200, { ...wotAccountStatus(), sync: "ok" }, 250);
   const wotComplete = /^\/wot\/grind\/(\d+)\/complete$/.exec(url.pathname);
   if (wotComplete && req.method === "POST") {
     const g = wotState.grinds.find((x) => x.id === Number(wotComplete[1]));
