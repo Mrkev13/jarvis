@@ -33,6 +33,9 @@ struct Shared {
     state: Mutex<AgentState>,
     timer: Arc<Mutex<PowerTimer>>,
     config_path: PathBuf,
+    /// Generace relace (review #139): párování, odpárování a pauza ji zvýší. Agent provádí každý příkaz pod tímhle
+    /// zámkem a jen pro generaci, se kterou poll začal – odpověď staré relace tak nic nespustí ani nenastaví.
+    session: Mutex<u64>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -68,6 +71,19 @@ impl Shared {
             .map_err(|e| format!("Nastavení se nepodařilo uložit: {e}"))
     }
 
+    /// Nová relace: zvýší generaci a vrátí její zámek, ať volající dokončí změnu dřív, než agent cokoli provede.
+    fn new_session(&self) -> MutexGuard<'_, u64> {
+        let mut g = lock(&self.session);
+        *g += 1;
+        g
+    }
+
+    fn set_paused(&self, paused: Option<bool>) -> Result<(), String> {
+        let _session = self.new_session();
+        self.update_config(|c| c.paused = paused.unwrap_or(!c.paused))
+            .map(|_| ())
+    }
+
     fn update_config(&self, f: impl FnOnce(&mut AgentConfig)) -> Result<AgentConfig, String> {
         let mut cfg = lock(&self.config);
         f(&mut cfg);
@@ -83,7 +99,14 @@ fn agent_loop(shared: Arc<Shared>) {
     let mut agent = Agent::new(VERSION);
     agent.timer = shared.timer.clone();
     let mut failures = 0u32;
+    let mut current_session = u64::MAX;
     loop {
+        let session = *lock(&shared.session);
+        if session != current_session {
+            agent.reset(); // dávka i výsledky staré relace (jiný token / pauza) se zahodí
+            current_session = session;
+            failures = 0;
+        }
         let cfg = lock(&shared.config).clone();
         let token = load_token();
         let blocked = lock(&shared.state).unauthorized;
@@ -101,8 +124,10 @@ fn agent_loop(shared: Arc<Shared>) {
             &shared.state,
             &Instant::now,
             POLL_WAIT_SECONDS,
+            &shared.session,
+            session,
         ) {
-            TickOutcome::Ok => failures = 0,
+            TickOutcome::Ok | TickOutcome::Stale => failures = 0,
             // odvoláno v Hubu: agent stojí, dokud se znovu nespáruje (okno to ukáže)
             TickOutcome::Unauthorized => failures = 0,
             TickOutcome::Retry => {
@@ -202,6 +227,7 @@ async fn pair(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+    let _session = shared.new_session();
     save_token(&resp.token)?;
     shared.update_config(|c| {
         c.hub_url = url;
@@ -217,6 +243,7 @@ async fn pair(
 
 #[tauri::command]
 fn unpair(shared: State<'_, Arc<Shared>>) -> Result<(), String> {
+    let _session = shared.new_session();
     delete_token();
     lock(&shared.timer).cancel();
     shared.update_config(|c| c.device_id = None)?;
@@ -228,7 +255,7 @@ fn unpair(shared: State<'_, Arc<Shared>>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_paused(shared: State<'_, Arc<Shared>>, paused: bool) -> Result<(), String> {
-    shared.update_config(|c| c.paused = paused).map(|_| ())
+    shared.set_paused(Some(paused))
 }
 
 #[tauri::command]
@@ -338,7 +365,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             match event.id().as_ref() {
                 "open" => show_window(app),
                 "pause" => {
-                    let _ = shared.update_config(|c| c.paused = !c.paused);
+                    let _ = shared.set_paused(None);
                 }
                 "cancel" => {
                     lock(&shared.timer).cancel();
@@ -384,6 +411,7 @@ fn main() {
         state: Mutex::new(AgentState::default()),
         timer: Arc::new(Mutex::new(PowerTimer::default())),
         config_path: path,
+        session: Mutex::new(0),
     });
 
     tauri::Builder::default()

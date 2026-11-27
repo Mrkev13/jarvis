@@ -209,12 +209,26 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Vyzvednutý příkaz čekající na provedení (Hub ho už označil `delivered` – nesmí se ztratit).
+struct Pending {
+    cmd: Command,
+    received: Instant,
+}
+
 /// Jedna obrátka smyčky agenta. Čas dalšího heartbeatu drží sám; časovač napájení a stav jsou sdílené (zámky se
 /// drží jen krátce – nikdy přes long-poll), ať okno může časovač zrušit hned. Síť a systém jsou vstřiknuté.
+///
+/// Review #139:
+/// - vyzvednutá dávka (`inbox`) a neodeslané výsledky (`outbox`) přežijí chybu sítě – další obrátka nejdřív
+///   dohlásí výsledky, pak dokončí dávku a teprve potom znovu vyzvedává; provedený příkaz se nikdy neopakuje;
+/// - `session` = generace párování/pauzy (mění ji okno). Každý příkaz se provádí pod jejím zámkem a jen když
+///   generace sedí – rozpracovaný poll staré relace po odpárování / pozastavení nic nespustí ani nenastaví.
 pub struct Agent {
     pub timer: Arc<Mutex<PowerTimer>>,
     next_heartbeat: Option<Instant>,
     pub version: String,
+    inbox: VecDeque<Pending>,
+    outbox: VecDeque<(i64, CommandResult)>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -249,6 +263,10 @@ pub fn run_due_power(
         pending.map(|(a, at)| (a, at.saturating_duration_since(now).as_secs()));
 }
 
+/// Příkaz, který agent nestihl provést do té doby (např. dlouhý výpadek po vyzvednutí), se už neprovede –
+/// Hub ho tou dobou stejně bere jako propadlý (platnost 2 min).
+pub const LOCAL_COMMAND_TTL: Duration = Duration::from_secs(120);
+
 #[derive(Debug, PartialEq)]
 pub enum TickOutcome {
     /// vše v pořádku
@@ -257,6 +275,8 @@ pub enum TickOutcome {
     Retry,
     /// token neplatí – agent se zastaví, dokud se znovu nespáruje
     Unauthorized,
+    /// relace se mezitím změnila (odpárování / pauza / nové párování) – zbytek dávky se zahodil bez provedení
+    Stale,
 }
 
 impl Agent {
@@ -265,10 +285,26 @@ impl Agent {
             timer: Arc::new(Mutex::new(PowerTimer::default())),
             next_heartbeat: None,
             version: version.into(),
+            inbox: VecDeque::new(),
+            outbox: VecDeque::new(),
         }
     }
 
+    /// Nová relace (jiný token / pauza): rozpracovaná dávka i neodeslané výsledky staré relace se zahodí.
+    pub fn reset(&mut self) {
+        self.inbox.clear();
+        self.outbox.clear();
+        self.next_heartbeat = None;
+    }
+
+    /// Kolik vyzvednutých příkazů a výsledků ještě čeká (pro testy a diagnostiku).
+    pub fn backlog(&self) -> (usize, usize) {
+        (self.inbox.len(), self.outbox.len())
+    }
+
     /// `clock` = aktuální čas (po long-pollu se čte znovu, ať časovač napájení neběží o dobu čekání kratší).
+    /// `session` / `expected` = generace relace, pro kterou tahle obrátka běží (viz typ `Agent`).
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         hub: &dyn HubApi,
@@ -277,6 +313,8 @@ impl Agent {
         state: &Mutex<AgentState>,
         clock: &dyn Fn() -> Instant,
         poll_wait: u32,
+        session: &Mutex<u64>,
+        expected: u64,
     ) -> TickOutcome {
         let now = clock();
         if self.next_heartbeat.is_none_or(|t| now >= t) {
@@ -290,40 +328,79 @@ impl Agent {
                 Err(e) => return self.fail(state, e),
             }
         }
-        let commands = match hub.poll(poll_wait) {
-            Ok(c) => c,
-            Err(e) => return self.fail(state, e),
-        };
+        // 1) nejdřív dohlásit výsledky, které minule neprošly (příkazy se znovu neprovádí)
+        if let Err(outcome) = self.flush(hub, state) {
+            return outcome;
+        }
+        // 2) nové příkazy jen tehdy, když z minulé dávky nic nezbylo
+        if self.inbox.is_empty() {
+            match hub.poll(poll_wait) {
+                Ok(commands) => {
+                    let received = clock();
+                    self.inbox
+                        .extend(commands.into_iter().map(|cmd| Pending { cmd, received }));
+                }
+                Err(e) => return self.fail(state, e),
+            }
+        }
         {
             let mut st = lock(state);
             st.connected = true;
             st.last_error = None;
             st.unauthorized = false;
         }
-        for cmd in commands {
-            let (ok, message) = handle_command(&cmd, cfg, exec, &mut lock(&self.timer), clock());
-            // výsledek se hlásí dřív, než proběhne okamžité vypnutí (IMMEDIATE_GRACE)
-            let reported = hub.report(
-                cmd.id,
-                &CommandResult {
-                    ok,
-                    message: Some(message.clone()),
-                },
-            );
+        // 3) provést dávku; každý výsledek hned hlásit (před okamžitým vypnutím – IMMEDIATE_GRACE)
+        while let Some(p) = self.inbox.pop_front() {
+            let (ok, message) = {
+                let current = lock(session);
+                if *current != expected {
+                    self.inbox.clear();
+                    return TickOutcome::Stale;
+                }
+                let now = clock();
+                if now.saturating_duration_since(p.received) > LOCAL_COMMAND_TTL {
+                    (
+                        false,
+                        "Příkaz propadl – agent ho nestihl provést včas.".to_string(),
+                    )
+                } else {
+                    handle_command(&p.cmd, cfg, exec, &mut lock(&self.timer), now)
+                }
+            };
             push_recent(
                 &mut lock(state),
                 RecentCommand {
-                    label: command_label(&cmd, cfg),
+                    label: command_label(&p.cmd, cfg),
                     ok,
-                    message,
+                    message: message.clone(),
                     at_unix: unix_now(),
                 },
             );
-            if let Err(e) = reported {
-                return self.fail(state, e);
+            self.outbox.push_back((
+                p.cmd.id,
+                CommandResult {
+                    ok,
+                    message: Some(message),
+                },
+            ));
+            if let Err(outcome) = self.flush(hub, state) {
+                return outcome;
             }
         }
         TickOutcome::Ok
+    }
+
+    /// Odešle čekající výsledky popořadě. 404/409 = Hub příkaz už uzavřel (propadl) → výsledek se zahodí.
+    fn flush(&mut self, hub: &dyn HubApi, state: &Mutex<AgentState>) -> Result<(), TickOutcome> {
+        while let Some((id, result)) = self.outbox.front() {
+            match hub.report(*id, result) {
+                Ok(()) | Err(ApiError::Http(404 | 409, _)) => {
+                    self.outbox.pop_front();
+                }
+                Err(e) => return Err(self.fail(state, e)),
+            }
+        }
+        Ok(())
     }
 
     fn fail(&mut self, state: &Mutex<AgentState>, err: ApiError) -> TickOutcome {
@@ -383,14 +460,23 @@ mod tests {
         }
     }
 
+    static SESSION: Mutex<u64> = Mutex::new(0);
+
     #[derive(Default)]
     struct FakeHub {
         heartbeats: RefCell<usize>,
+        polls: RefCell<usize>,
         queue: RefCell<Vec<Command>>,
         reports: RefCell<Vec<(i64, bool, String)>>,
         events: RefCell<Vec<String>>,
         unauthorized: bool,
         offline: bool,
+        /// kolik dalších reportů selže síťovou chybou
+        failing_reports: RefCell<u32>,
+        /// odpověď Hubu na report (např. 409 = příkaz už propadl)
+        report_status: Option<u16>,
+        /// spustí se během long-pollu (simulace odpárování / pauzy v okně)
+        during_poll: Option<Box<dyn Fn()>>,
     }
 
     impl HubApi for FakeHub {
@@ -408,10 +494,21 @@ mod tests {
             if self.offline {
                 return Err(ApiError::Network("connection refused".into()));
             }
+            *self.polls.borrow_mut() += 1;
+            if let Some(f) = &self.during_poll {
+                f();
+            }
             Ok(std::mem::take(&mut *self.queue.borrow_mut()))
         }
         fn report(&self, id: i64, r: &CommandResult) -> Result<(), ApiError> {
             self.events.borrow_mut().push(format!("report {id}"));
+            if *self.failing_reports.borrow() > 0 {
+                *self.failing_reports.borrow_mut() -= 1;
+                return Err(ApiError::Network("connection reset".into()));
+            }
+            if let Some(code) = self.report_status {
+                return Err(ApiError::Http(code, "Příkaz už je uzavřený.".into()));
+            }
             self.reports
                 .borrow_mut()
                 .push((id, r.ok, r.message.clone().unwrap_or_default()));
@@ -551,7 +648,7 @@ mod tests {
         let mut agent = Agent::new("0.1.0");
         let now = Instant::now();
         assert_eq!(
-            agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0),
+            agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0, &SESSION, 0),
             TickOutcome::Ok
         );
         assert_eq!(
@@ -584,7 +681,7 @@ mod tests {
         );
         let mut agent = Agent::new("0.1.0");
         let now = Instant::now();
-        agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0);
+        agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0, &SESSION, 0);
         agent.tick(
             &hub,
             &exec,
@@ -592,9 +689,20 @@ mod tests {
             &state,
             &|| now + Duration::from_secs(10),
             0,
+            &SESSION,
+            0,
         );
         assert_eq!(*hub.heartbeats.borrow(), 1);
-        agent.tick(&hub, &exec, &cfg(), &state, &|| now + HEARTBEAT_EVERY, 0);
+        agent.tick(
+            &hub,
+            &exec,
+            &cfg(),
+            &state,
+            &|| now + HEARTBEAT_EVERY,
+            0,
+            &SESSION,
+            0,
+        );
         assert_eq!(*hub.heartbeats.borrow(), 2);
         assert!(state.lock().unwrap().connected);
         let offline = FakeHub {
@@ -608,6 +716,8 @@ mod tests {
                 &cfg(),
                 &state,
                 &|| now + Duration::from_secs(31),
+                0,
+                &SESSION,
                 0
             ),
             TickOutcome::Retry
@@ -623,12 +733,136 @@ mod tests {
             &state,
             &|| now + Duration::from_secs(32),
             0,
+            &SESSION,
+            0,
         );
         assert_eq!(
             *hub.heartbeats.borrow(),
             3,
             "po výpadku se stav ohlásí hned"
         );
+    }
+
+    fn launch(id: i64) -> Command {
+        cmd(id, "launch_app", json!({"app_id": "wot"}))
+    }
+
+    #[test]
+    fn failed_report_keeps_rest_of_batch_and_never_reruns() {
+        // review #139: Hub už označil [A, B] delivered – výpadek při hlášení A nesmí ztratit B ani zopakovat A
+        let (hub, exec, state) = (
+            FakeHub::default(),
+            FakeExec::default(),
+            Mutex::new(AgentState::default()),
+        );
+        hub.queue.borrow_mut().extend([
+            launch(1),
+            cmd(2, "power", json!({"action": "lock", "delay_seconds": 600})),
+        ]);
+        *hub.failing_reports.borrow_mut() = 1;
+        let mut agent = Agent::new("0.1.0");
+        let now = Instant::now();
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0, &SESSION, 0),
+            TickOutcome::Retry
+        );
+        assert_eq!(exec.launched.borrow().len(), 1, "A provedeno");
+        assert!(lock(&agent.timer).pending().is_none(), "B ještě ne");
+        assert_eq!(
+            agent.backlog(),
+            (1, 1),
+            "B čeká, výsledek A čeká na odeslání"
+        );
+        let later = now + Duration::from_secs(5);
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &|| later, 0, &SESSION, 0),
+            TickOutcome::Ok
+        );
+        assert_eq!(exec.launched.borrow().len(), 1, "A se neopakuje");
+        assert!(lock(&agent.timer).pending().is_some(), "B provedeno");
+        let reported: Vec<i64> = hub.reports.borrow().iter().map(|r| r.0).collect();
+        assert_eq!(reported, vec![1, 2]);
+        assert_eq!(
+            *hub.polls.borrow(),
+            1,
+            "dokud dávka nedoběhla, nový poll se nedělá"
+        );
+        assert_eq!(agent.backlog(), (0, 0));
+    }
+
+    #[test]
+    fn report_for_already_closed_command_is_dropped() {
+        let hub = FakeHub {
+            report_status: Some(409),
+            ..Default::default()
+        };
+        let (exec, state) = (FakeExec::default(), Mutex::new(AgentState::default()));
+        hub.queue.borrow_mut().extend([launch(1), launch(2)]);
+        let mut agent = Agent::new("0.1.0");
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0, &SESSION, 0),
+            TickOutcome::Ok
+        );
+        assert_eq!(
+            agent.backlog(),
+            (0, 0),
+            "409 = Hub příkaz uzavřel, výsledek se zahodí"
+        );
+        assert_eq!(exec.launched.borrow().len(), 2);
+    }
+
+    #[test]
+    fn stale_batch_is_not_executed() {
+        let (exec, state) = (FakeExec::default(), Mutex::new(AgentState::default()));
+        let mut agent = Agent::new("0.1.0");
+        let now = Instant::now();
+        // odložený příkaz po dlouhém výpadku se neprovede
+        let hub = FakeHub::default();
+        hub.queue.borrow_mut().extend([launch(1), launch(2)]);
+        *hub.failing_reports.borrow_mut() = 1;
+        agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0, &SESSION, 0);
+        let late = now + LOCAL_COMMAND_TTL + Duration::from_secs(1);
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &|| late, 0, &SESSION, 0),
+            TickOutcome::Ok
+        );
+        assert_eq!(exec.launched.borrow().len(), 1, "druhé spuštění propadlo");
+        assert!(
+            !hub.reports.borrow().last().unwrap().1,
+            "nahlášeno jako chyba"
+        );
+    }
+
+    #[test]
+    fn unpair_or_pause_during_poll_cancels_the_batch() {
+        // review #139: okno během long-pollu změní relaci (odpárování / pauza) → odpověď staré relace nic neprovede
+        let session = std::rc::Rc::new(Mutex::new(5u64));
+        let (exec, state) = (FakeExec::default(), Mutex::new(AgentState::default()));
+        let s2 = session.clone();
+        let hub = FakeHub {
+            during_poll: Some(Box::new(move || *s2.lock().unwrap() += 1)),
+            ..Default::default()
+        };
+        hub.queue.borrow_mut().extend([
+            launch(1),
+            cmd(
+                2,
+                "power",
+                json!({"action": "shutdown", "delay_seconds": 60}),
+            ),
+        ]);
+        let mut agent = Agent::new("0.1.0");
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0, &session, 5),
+            TickOutcome::Stale
+        );
+        assert!(exec.launched.borrow().is_empty(), "nic nespuštěno");
+        assert!(
+            lock(&agent.timer).pending().is_none(),
+            "časovač se znovu nenastavil"
+        );
+        assert!(hub.reports.borrow().is_empty());
+        assert_eq!(agent.backlog(), (0, 0));
     }
 
     #[test]
@@ -643,7 +877,7 @@ mod tests {
         );
         let mut agent = Agent::new("0.1.0");
         assert_eq!(
-            agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0),
+            agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0, &SESSION, 0),
             TickOutcome::Unauthorized
         );
         assert!(state.lock().unwrap().unauthorized);
