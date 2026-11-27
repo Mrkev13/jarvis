@@ -259,14 +259,17 @@ function timetableEntry(id, b) {
   const subject = (fixture("school-subjects") || []).find((s) => s.id === Number(b.subject_id));
   return { id, subject_id: Number(b.subject_id), subject_name: subject ? subject.name : `Předmět ${b.subject_id}`, title: subject ? subject.name : "",
     kind: b.kind, kind_label: TIMETABLE_KINDS[b.kind] ?? null, room: b.room ?? null, weekday: Number(b.weekday), weekday_label: TT_DAYS[Number(b.weekday)],
-    start: b.start, end: b.end, valid_from: b.valid_from, valid_until: b.valid_until, exceptions: [] };
+    start: b.start, end: b.end, valid_from: b.valid_from, valid_until: b.valid_until,
+    // MRK-142: rytmus (každý / ob týden); next_date backend počítá z dneška, mock ho jen opakuje z fixture
+    every: Number(b.every) === 2 ? 2 : 1, week_anchor: b.week_anchor ?? b.valid_from, next_date: b.next_date ?? null, exceptions: [] };
 }
 function TIMETABLE() {
   const subjects = fixture("school-subjects") || [];
   const first = subjects[0] ? subjects[0].id : 1;
   return { seq: 10, entries: [
     timetableEntry(1, { subject_id: first, kind: "lecture", weekday: 0, start: "09:00", end: "10:30", room: "S5", valid_from: "2026-10-01", valid_until: "2027-01-31" }),
-    timetableEntry(2, { subject_id: first, kind: "exercise", weekday: 2, start: "12:20", end: "13:50", room: "K2", valid_from: "2026-10-01", valid_until: "2027-01-31" }),
+    timetableEntry(2, { subject_id: first, kind: "exercise", weekday: 2, start: "12:20", end: "13:50", room: "K2", valid_from: "2026-10-01", valid_until: "2027-01-31",
+      every: 2, week_anchor: "2026-10-05", next_date: "2026-12-09" }),
   ] };
 }
 let timetableState = TIMETABLE();
