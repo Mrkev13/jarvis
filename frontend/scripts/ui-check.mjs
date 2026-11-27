@@ -2081,8 +2081,13 @@ const byAlt = (list, alt) => list.find((x) => x.alt === alt);
   // Game Enrichment B: splněné grindy jsou v historii (malá miniatura), milníky mají tank taky
   const done = await imageState(page, '[data-section="wot-completed"] [data-game-image="tank"]');
   check("wot obrázky: splněný grind v historii má tank (mimo manifest = monogram)", byAlt(done, "Tank T-100 LT")?.state === "image" && byAlt(done, "Tank Progetto 65")?.state === "fallback" && done.length === 2, JSON.stringify(done.map((x) => [x.alt, x.state])));
+  // MRK-152: milníky jsou na vlastní stránce
+  await page.goto(BASE + "/wot/milestones", { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   const ms = await imageState(page, '[aria-label="Milníky"] [data-game-image="tank"]');
   check("wot obrázky: milník (Mko) má tank z manifestu", ms.length === 4 && byAlt(ms, "Tank Kranvagn")?.state === "image" && ms.every((x) => x.state === "image" || x.state === "fallback"), JSON.stringify(ms.map((x) => [x.alt, x.state])));
+  await page.goto(BASE + "/wot", { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   const res = await imageState(page, '#resources [data-game-image="resource"]');
   check("wot měny: oficiální ikona u všech čtyř měn", res.length === 4 && res.every((x) => x.state === "image" && x.loaded === true), JSON.stringify(res.map((x) => [x.state, x.src])));
   check("wot měny: Credits / Gold / Bonds / Free XP ze správného souboru", JSON.stringify(res.map((x) => x.src).sort()) === JSON.stringify(["wot/resources/bonds.svg", "wot/resources/credits.svg", "wot/resources/free_xp.svg", "wot/resources/gold.svg"]), JSON.stringify(res.map((x) => x.src)));
@@ -3948,6 +3953,8 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("wot M-ka: hledání bez diakritiky", await eventually(async () => (await card.getByRole("list", { name: "Odznaky tanků" }).locator("li").count()) === 1, 2000));
     await card.getByRole("button", { name: "Obnovit" }).click();
     check("wot M-ka: obnova ohlásí nové M", await eventually(async () => (await card.getByRole("status").innerText().catch(() => "")).includes("Nová M: 1"), 4000));
+    // MRK-152: milníky jsou na /wot/milestones
+    await page.goto(BASE + "/wot/milestones", { waitUntil: "networkidle" });
     const pending = page.locator('[data-testid="pending-replay"]');
     check("wot M-ka: nové M v milnících čeká na replay", await eventually(async () => (await pending.count()) === 1, 4000));
     check("wot M-ka: odkaz na nahrání replaye", (await page.locator('[data-testid="milestone-upload-replay"] a').getAttribute("href")) === "/wot/replays");
