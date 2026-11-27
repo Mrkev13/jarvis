@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ReplayDetail } from "@/components/wot/replays/ReplayDetail";
 import { ReplayForm } from "@/components/wot/replays/ReplayForm";
@@ -27,6 +27,7 @@ import { useGameAssetManifest } from "@/hooks/useGameAssets";
 import { apiFetch, jsonBody } from "@/lib/api";
 import { plural, pragueDayKey } from "@/lib/format";
 import { resolveTankTag } from "@/lib/gameAssets";
+import { takePendingReplay } from "@/lib/pendingReplay";
 import { MASTERY_OPTIONS, type WotMilestone } from "@/lib/wot";
 import {
   activeFilterCount,
@@ -127,6 +128,23 @@ function ReplayLibrary() {
       setUploading(false);
     }
   }
+
+  // MRK-152: „Přidat replay“ z přehledu WoT – soubor vybraný tam se nahraje tady, jakmile je tankopedie načtená
+  // (lidský název tanku), nejpozději po 2 s i bez ní; `?upload=1` se pak z adresy odstraní.
+  const wantsUpload = params.get("upload") === "1";
+  const [uploadWaited, setUploadWaited] = useState(false);
+  useEffect(() => {
+    if (!wantsUpload) return;
+    const t = window.setTimeout(() => setUploadWaited(true), 2000);
+    return () => window.clearTimeout(t);
+  }, [wantsUpload]);
+  useEffect(() => {
+    if (!wantsUpload || (!manifest && !uploadWaited)) return;
+    const file = takePendingReplay();
+    router.replace("/wot/replays", { scroll: false });
+    if (file) window.setTimeout(() => void upload(file), 0); // mimo tělo efektu (upload mění stav)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- jednorázově po načtení tankopedie
+  }, [wantsUpload, manifest, uploadWaited]);
 
   async function toggleFavorite(r: WotReplay) {
     setBusyId(r.id);

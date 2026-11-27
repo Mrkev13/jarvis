@@ -25,14 +25,16 @@ test("MRK-12: validation and sorting retain identical-tank Ace records", () => {
   assert.deepEqual(records.map((m) => m.id), [1, 2], "sorting does not mutate source data");
 });
 
-test("MRK-12: actual WoT page renders both records from the API list", () => {
+test("MRK-12: actual WoT milestones page renders both records from the API list", () => {
+  // MRK-152: milníky jsou na /wot/milestones (dřív dole na /wot)
   // Execute the real page with resource data and inert UI shells. No browser,
   // API, or Next server is needed; the page's list selection/map runs unchanged.
   const require = createRequire(import.meta.url);
   const shell = ({ children }) => React.createElement("div", null,
     typeof children === "function" ? null : children);
   const modules = {
-    react: React,
+    react: { ...React, Suspense: ({ children }) => children },
+    "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push() {}, replace() {} }) },
     "@/lib/wot": wot,
     "@/hooks/useApiResource": { useApiResource: (path) => ({
       data: path === "/wot/milestones" ? records : path === "/wot/resources" ? {} : [],
@@ -55,7 +57,7 @@ test("MRK-12: actual WoT page renders both records from the API list", () => {
     "@/lib/motion": { prefersReducedMotion: () => true },
     "@/lib/api": { apiFetch: () => { throw Error("Unexpected API request"); }, jsonBody: () => {} },
   };
-  const source = readFileSync(new URL("../app/wot/page.tsx", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../app/wot/milestones/page.tsx", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;

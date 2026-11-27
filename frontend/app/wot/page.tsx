@@ -4,12 +4,11 @@ import { HangarHero } from "@/components/wot/HangarHero";
 import { medalRank } from "@/lib/wotHangar";
 import { AskJarvis } from "@/components/ai/AskJarvis";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { GameImage } from "@/components/games/GameImage";
 import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
 import { GrindRow } from "@/components/wot/GrindRow";
-import { MasteryTable } from "@/components/wot/MasteryTable";
 import { WargamingLink } from "@/components/wot/WargamingLink";
-import { MilestoneCard } from "@/components/wot/MilestoneCard";
 import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
   AreaBadge,
@@ -35,6 +34,7 @@ import { useApiResource } from "@/hooks/useApiResource";
 import { apiFetch, jsonBody } from "@/lib/api";
 import { formatDateTime, formatNumber, plural, pragueDayKey } from "@/lib/format";
 import { pulseJarvis } from "@/lib/jarvisSignals";
+import { setPendingReplay } from "@/lib/pendingReplay";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
@@ -93,8 +93,8 @@ export default function WotPage() {
   );
 
   const [milestoneForm, setMilestoneForm] = useState<{ open: boolean; milestone: WotMilestone | null }>({ open: false, milestone: null });
-  const [deletingMilestone, setDeletingMilestone] = useState<WotMilestone | null>(null);
-  const [busyMilestone, setBusyMilestone] = useState<number | null>(null);
+  const router = useRouter();
+  const replayInput = useRef<HTMLInputElement>(null);
   const [todayIso] = useState(() => pragueDayKey(new Date())); // pražské datum pro „ne v budoucnu"
 
   const [showResourceForm, setShowResourceForm] = useState(false);
@@ -238,36 +238,6 @@ export default function WotPage() {
     }
   }
 
-  async function toggleFavorite(m: WotMilestone) {
-    setBusyMilestone(m.id);
-    setError(null);
-    try {
-      const res = await apiFetch(`/wot/milestones/${m.id}`, jsonBody("PATCH", { favorite: !m.favorite }));
-      if (!res.ok) throw new Error("favorite failed");
-      await milestonesRes.reload();
-    } catch (err) {
-      console.error(err);
-      setError("Nepodařilo se změnit oblíbení.");
-    } finally {
-      setBusyMilestone(null);
-    }
-  }
-
-  async function confirmDeleteMilestone() {
-    const m = deletingMilestone;
-    if (!m) return;
-    try {
-      const res = await apiFetch(`/wot/milestones/${m.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("delete failed");
-      await milestonesRes.reload();
-    } catch (err) {
-      console.error(err);
-      setError("Milník se nepodařilo smazat.");
-    } finally {
-      setDeletingMilestone(null);
-    }
-  }
-
   const visibleGrinds = activeGrinds(grinds).concat(celebrating && !activeGrinds(grinds).some((g) => g.id === celebrating.id) ? [celebrating] : []);
   const knownTanks = [...new Set([...grinds.map((g) => g.tank), ...completions.map((c) => c.tank), ...milestones.map((m) => m.tank)])].sort((a, b) =>
     a.localeCompare(b, "cs"),
@@ -281,13 +251,8 @@ export default function WotPage() {
       <PageHeader
         eyebrow={<HudLabel>Modul · World of Tanks</HudLabel>}
         title="World of Tanks"
-        subtitle="Zdroje a grindy tanků."
+        subtitle="Zdroje, Mka a grindy tanků."
         meta={<AreaBadge area="wot" />}
-        actions={
-          <Button size="sm" variant="primary" onClick={() => setMilestoneForm({ open: true, milestone: null })} aria-haspopup="dialog">
-            Přidat Mko
-          </Button>
-        }
       />
 
       {error ? <ErrorState message={error} /> : null}
@@ -303,53 +268,6 @@ export default function WotPage() {
         <ErrorState message={LOAD_ERROR} onRetry={() => void loadData()} retrying={refreshing} />
       ) : (
         <div className="space-y-6 md:space-y-8" aria-busy={refreshing || undefined}>
-          {/* ===== POČÍTADLO M-EK (MRK-82) – stejné pravidlo jako automatický cíl „wot_ace_mastery_count" ===== */}
-          <Card as="section" aria-labelledby="wot-mastery" data-section="wot-mastery" index={0} className="border-t-2 border-t-amber-400/40">
-            <CardHeader
-              title={<span id="wot-mastery">Mka</span>}
-              actions={
-                <ButtonLink href="#wot-milestones" size="sm" variant="ghost">
-                  Všechny milníky
-                </ButtonLink>
-              }
-            />
-            {milestonesRes.loading ? (
-              <LoadingState lines={1} label="Počítám Mka…" />
-            ) : milestonesRes.status === "error" ? (
-              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – milníky níže ukážou chybu.</p>
-            ) : (
-              <>
-                <StatGrid cols={2}>
-                  <MetricCard label="Mka celkem" value={formatNumber(mastery.total)} />
-                  <MetricCard label="Tanků s Mkem" value={formatNumber(mastery.tanks)} />
-                </StatGrid>
-                {mastery.byTank.length > 0 ? (
-                  // MRK-138: síň slávy – každý tank s Mkem jako medaile (bronz / stříbro / zlato podle počtu)
-                  <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-label="Mka podle tanků">
-                    {mastery.byTank.slice(0, 12).map((t, i) => (
-                      <li
-                        key={t.tank}
-                        data-medal={medalRank(t.count)}
-                        className="wot-medal flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 py-1.5 pl-1.5 pr-2.5 text-sm text-ink"
-                        style={{ ["--i" as string]: Math.min(i, 11) } as React.CSSProperties}
-                      >
-                        <MedalIcon rank={medalRank(t.count)} />
-                        <GameImage kind="tank" name={t.tank} size="xs" />
-                        <span className="min-w-0 flex-1 truncate">{t.tank}</span>
-                        {t.count > 1 ? <span className="font-semibold tabular-nums text-ink-muted">×{t.count}</span> : null}
-                      </li>
-                    ))}
-                    {mastery.byTank.length > 12 ? (
-                      <li className="self-center text-sm text-ink-muted">+{mastery.byTank.length - 12} dalších</li>
-                    ) : null}
-                  </ul>
-                ) : (
-                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem nahoře.</p>
-                )}
-              </>
-            )}
-          </Card>
-
           {/* ===== ZDROJE ===== */}
           <Card as="section" id="resources" aria-labelledby="wot-resources" index={0} className="border-t-2 border-t-orange-400/40">
             <CardHeader
@@ -418,6 +336,78 @@ export default function WotPage() {
                 </div>
               </form>
             )}
+          </Card>
+
+          {/* ===== POČÍTADLO M-EK (MRK-82) – stejné pravidlo jako automatický cíl „wot_ace_mastery_count" ===== */}
+          <Card as="section" aria-labelledby="wot-mastery" data-section="wot-mastery" index={0} className="border-t-2 border-t-amber-400/40">
+            <CardHeader
+              title={<span id="wot-mastery">Mka</span>}
+              description="Síň slávy – detaily, bitvy a odznaky všech tanků na vlastních stránkách."
+            />
+            {milestonesRes.loading ? (
+              <LoadingState lines={1} label="Počítám Mka…" />
+            ) : milestonesRes.status === "error" ? (
+              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – milníky níže ukážou chybu.</p>
+            ) : (
+              <>
+                <StatGrid cols={2}>
+                  <MetricCard label="Mka celkem" value={formatNumber(mastery.total)} />
+                  <MetricCard label="Tanků s Mkem" value={formatNumber(mastery.tanks)} />
+                </StatGrid>
+                {mastery.byTank.length > 0 ? (
+                  // MRK-138: síň slávy – každý tank s Mkem jako medaile (bronz / stříbro / zlato podle počtu)
+                  <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-label="Mka podle tanků">
+                    {mastery.byTank.slice(0, 12).map((t, i) => (
+                      <li
+                        key={t.tank}
+                        data-medal={medalRank(t.count)}
+                        className="wot-medal flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-line-subtle bg-surface-2 py-1.5 pl-1.5 pr-2.5 text-sm text-ink"
+                        style={{ ["--i" as string]: Math.min(i, 11) } as React.CSSProperties}
+                      >
+                        <MedalIcon rank={medalRank(t.count)} />
+                        <GameImage kind="tank" name={t.tank} size="xs" />
+                        <span className="min-w-0 flex-1 truncate">{t.tank}</span>
+                        {t.count > 1 ? <span className="font-semibold tabular-nums text-ink-muted">×{t.count}</span> : null}
+                      </li>
+                    ))}
+                    {mastery.byTank.length > 12 ? (
+                      <li className="self-center text-sm text-ink-muted">+{mastery.byTank.length - 12} dalších</li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem nahoře.</p>
+                )}
+              </>
+            )}
+            {/* MRK-152: cesty z M-ek – podstránky a rychlé přidání */}
+            <nav aria-label="M-ka – další" className="mt-4 flex flex-wrap gap-2 border-t border-line-subtle pt-4" data-wot-mastery-links>
+              <ButtonLink href="/wot/mastery" size="sm" variant="secondary">M-ka všech tanků</ButtonLink>
+              <ButtonLink href="/wot/milestones" size="sm" variant="secondary">M-ka a nejlepší bitvy</ButtonLink>
+              <ButtonLink href="/wot/replays" size="sm" variant="ghost">Knihovna replayů</ButtonLink>
+              <span className="hidden flex-1 sm:block" aria-hidden />
+              <Button size="sm" variant="primary" onClick={() => setMilestoneForm({ open: true, milestone: null })} aria-haspopup="dialog">
+                Přidat Mko
+              </Button>
+              <Button size="sm" variant="primary" onClick={() => replayInput.current?.click()}>
+                Přidat replay
+              </Button>
+              <input
+                ref={replayInput}
+                type="file"
+                accept=".wotreplay"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                data-testid="overview-replay-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setPendingReplay(file); // knihovna replayů ho nahraje stejnou cestou jako vlastní tlačítko
+                  router.push("/wot/replays?upload=1");
+                }}
+              />
+            </nav>
           </Card>
 
           {/* ===== GRINDY ===== */}
@@ -568,56 +558,6 @@ export default function WotPage() {
             <CompletedGrinds items={completions} highlightId={completedNotice?.id || null} />
           )}
 
-          {/* ===== M-KA VŠECH TANKŮ (MRK-106, Wargaming API) ===== */}
-          <MasteryTable onSynced={() => void milestonesRes.reload()} />
-
-          {/* ===== MILNÍKY ===== */}
-          <PageSection
-            labelledBy="wot-milestones"
-            title="Mka & nejlepší bitvy"
-            description="Památné bitvy se statistikami a screenshoty. Nové Mko přidáš tlačítkem v záhlaví stránky."
-          >
-            {milestonesRes.loading ? (
-              <LoadingState lines={2} label="Načítám milníky…" />
-            ) : milestonesRes.status === "error" ? (
-              <ErrorState message="Milníky se nepodařilo načíst." onRetry={() => void milestonesRes.reload()} />
-            ) : milestones.length === 0 ? (
-              <EmptyState
-                action={
-                  <Button size="sm" variant="secondary" onClick={() => setMilestoneForm({ open: true, milestone: null })}>
-                    Přidat první Mko
-                  </Button>
-                }
-              >
-                Zatím žádné uložené Mko ani památná bitva.
-              </EmptyState>
-            ) : (
-              <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-label="Milníky">
-                {milestones.map((m) => (
-                  <MilestoneCard
-                    key={m.id}
-                    milestone={m}
-                    busy={busyMilestone === m.id}
-                    onEdit={() => setMilestoneForm({ open: true, milestone: m })}
-                    onToggleFavorite={() => void toggleFavorite(m)}
-                    onDelete={() => setDeletingMilestone(m)}
-                  />
-                ))}
-              </ul>
-            )}
-          </PageSection>
-          {/* ===== KNIHOVNA REPLAYŮ (Game Enrichment C) – na /wot jen odkaz ===== */}
-          <Card as="section" aria-labelledby="wot-replays-link" data-section="wot-replays">
-            <CardHeader
-              title={<span id="wot-replays-link">Knihovna replayů</span>}
-              description="Originální .wotreplay soubory se štítky, filtry a propojením na Mka."
-              actions={
-                <ButtonLink href="/wot/replays" variant="secondary" size="sm">
-                  Otevřít knihovnu
-                </ButtonLink>
-              }
-            />
-          </Card>
         </div>
       )}
 
@@ -630,15 +570,6 @@ export default function WotPage() {
         danger={false}
         onConfirm={confirmCompleteGrind}
         onCancel={() => setCompleting(null)}
-      />
-      <ConfirmDialog
-        open={deletingMilestone != null}
-        title={`Smazat milník ${deletingMilestone?.tank ?? ""}?`}
-        message="Smaže se záznam i všechny jeho screenshoty. Tato akce je nevratná."
-        confirmLabel="Smazat milník"
-        busyLabel="Mažu…"
-        onConfirm={confirmDeleteMilestone}
-        onCancel={() => setDeletingMilestone(null)}
       />
       <MilestoneForm
         open={milestoneForm.open}
