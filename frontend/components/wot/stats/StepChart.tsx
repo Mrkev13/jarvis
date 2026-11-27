@@ -2,9 +2,10 @@
 
 import { useId, useState } from "react";
 import { compactNumber, linePoints, nearestIndex, niceTicks, pointLabel, SERIES_COLOR, stepPath, tickLabel, type WotPoint } from "@/lib/wotStats";
+import { useWidth } from "./useWidth";
 
 const SMALL = { w: 320, h: 140, l: 44, r: 8, t: 10, b: 22 };
-const WIDE = { w: 720, h: 200, l: 48, r: 8, t: 10, b: 22 }; // přes celou šířku karty – stejná velikost písma jako malé grafy
+const WIDE = { w: 720, h: 200, l: 48, r: 8, t: 10, b: 22 }; // přes celou šířku karty – šířka viewBoxu = skutečná šířka (useWidth)
 
 /**
  * MRK-153: jedna veličina v čase (hodnocení, kredity…). Schodovitá 2px čára – stav se mění skokem při synchronizaci.
@@ -13,7 +14,8 @@ const WIDE = { w: 720, h: 200, l: 48, r: 8, t: 10, b: 22 }; // přes celou ší�
 export function StepChart({ title, points, from, to, format = compactNumber, testId, wide = false }: {
   title: string; points: WotPoint[]; from: string | null; to: string; format?: (v: number) => string; testId?: string; wide?: boolean;
 }) {
-  const PLOT = wide ? WIDE : SMALL;
+  const [boxRef, width] = useWidth(WIDE.w);
+  const PLOT = wide ? { ...WIDE, w: Math.max(280, width), h: width < 500 ? 150 : WIDE.h } : SMALL;
   const [hover, setHover] = useState<number | null>(null);
   const titleId = useId();
   if (points.length === 0) {
@@ -44,7 +46,7 @@ export function StepChart({ title, points, from, to, format = compactNumber, tes
         <span className="font-medium text-ink">{title}</span>
         <span className="tabular-nums text-ink-2" data-chart-current>{format(values[values.length - 1])}</span>
       </figcaption>
-      <div className="relative">
+      <div className="relative" ref={wide ? boxRef : undefined}>
         <svg viewBox={`0 0 ${PLOT.w} ${PLOT.h}`} className="h-auto w-full" role="img" aria-labelledby={titleId}>
           <title id={titleId}>{`${title}: ${points.length} ${points.length === 1 ? "stav" : "stavů"}, poslední ${format(values[values.length - 1])}`}</title>
           {ticks.map((t) => (

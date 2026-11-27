@@ -2,14 +2,17 @@
 
 import { useId, useState } from "react";
 import { dayLabel, niceTicks, pct, SERIES_COLOR, type WotDaily } from "@/lib/wotStats";
+import { useWidth } from "./useWidth";
 
-const PLOT = { w: 640, h: 180, l: 32, r: 8, t: 10, b: 24 };
+const BASE = { w: 640, h: 180, l: 32, r: 8, t: 10, b: 24 }; // šířka viewBoxu = skutečná šířka (useWidth)
 
 /**
  * MRK-153: bitvy po dnech – sloupce od nuly, 4px zaoblený vrch, 2px mezera. Najetí / dotyk ukáže den, bitvy,
  * % výher a průměrný damage; popisky osy x jen u části dní (čitelnost na mobilu). Pod grafem tabulka.
  */
 export function DailyBars({ days }: { days: WotDaily[] }) {
+  const [boxRef, width] = useWidth(BASE.w);
+  const PLOT = { ...BASE, w: Math.max(280, width), h: width < 500 ? 150 : BASE.h };
   const [hover, setHover] = useState<number | null>(null);
   const titleId = useId();
   const max = Math.max(1, ...days.map((d) => d.battles));
@@ -19,13 +22,13 @@ export function DailyBars({ days }: { days: WotDaily[] }) {
   const slot = innerW / days.length;
   const barW = Math.max(2, Math.min(28, slot - 2));
   const sy = (v: number) => PLOT.t + (1 - v / top) * (PLOT.h - PLOT.t - PLOT.b);
-  const every = Math.ceil(days.length / 8);
+  const every = Math.ceil(days.length / (width < 500 ? 5 : 8));
   const active = hover != null ? days[hover] : null;
 
   return (
     <figure className="space-y-2" data-testid="wot-daily">
       <figcaption className="text-sm font-medium text-ink">Bitvy po dnech</figcaption>
-      <div className="relative">
+      <div className="relative" ref={boxRef}>
         <svg viewBox={`0 0 ${PLOT.w} ${PLOT.h}`} className="h-auto w-full" role="img" aria-labelledby={titleId} onPointerLeave={() => setHover(null)}>
           <title id={titleId}>{`Bitvy po dnech, celkem ${days.reduce((a, d) => a + d.battles, 0)}`}</title>
           {ticks.map((t) => (

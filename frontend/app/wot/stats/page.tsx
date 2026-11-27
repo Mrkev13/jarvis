@@ -97,9 +97,11 @@ function Stats() {
               </StatGrid>
             )}
             {s.best_tank ? (
-              <p className="mt-4 flex items-center gap-2 text-sm text-ink-2" data-wot-best>
-                <GameImage kind="tank" name={s.best_tank.name} size="xs" />
-                Nejlíp ti šel <span className="font-medium text-ink">{s.best_tank.name}</span>
+              <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-2" data-wot-best>
+                <span className="flex items-center gap-2">
+                  <GameImage kind="tank" name={s.best_tank.name} size="xs" />
+                  <span>Nejlíp ti šel <span className="font-medium text-ink">{s.best_tank.name}</span></span>
+                </span>
                 <span className="tabular-nums text-ink-muted">· {s.best_tank.battles} bitev · Ø {compactNumber(s.best_tank.avg_damage)} dmg · výhry {pct(s.best_tank.win_rate)}</span>
               </p>
             ) : null}
@@ -136,14 +138,14 @@ function Stats() {
             <Card as="section" aria-labelledby="wot-stats-tanks">
               <CardHeader title={<span id="wot-stats-tanks">Tanky</span>} description="Seřazeno podle počtu bitev." />
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[480px] text-sm" aria-label="Tanky za období" data-wot-tanks>
+                <table className="w-full text-sm" aria-label="Tanky za období" data-wot-tanks>
                   <thead>
                     <tr className="text-left text-xs text-ink-muted">
                       <th className="py-1.5 font-normal">Tank</th>
                       <th className="py-1.5 text-right font-normal">Bitvy</th>
                       <th className="py-1.5 text-right font-normal">Výhry</th>
-                      <th className="py-1.5 text-right font-normal">Ø damage</th>
-                      <th className="py-1.5 text-right font-normal">Ø zničení</th>
+                      <th className="py-1.5 pl-2 text-right font-normal">Ø dmg</th>
+                      <th className="hidden py-1.5 text-right font-normal sm:table-cell">Ø zničení</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line-subtle">
@@ -153,13 +155,13 @@ function Stats() {
                           <span className="flex items-center gap-2">
                             <GameImage kind="tank" name={t.name} size="xs" />
                             <span className="text-ink">{t.name}</span>
-                            {t.tier ? <span className="text-xs text-ink-muted">tier {t.tier}</span> : null}
+                            {t.tier ? <span className="hidden text-xs text-ink-muted sm:inline">tier {t.tier}</span> : null}
                           </span>
                         </td>
                         <td className="py-1.5 text-right tabular-nums">{t.battles}</td>
                         <td className="py-1.5 text-right tabular-nums">{pct(t.win_rate)}</td>
                         <td className="py-1.5 text-right tabular-nums">{compactNumber(t.avg_damage)}</td>
-                        <td className="py-1.5 text-right tabular-nums">{t.avg_frags ?? "–"}</td>
+                        <td className="hidden py-1.5 text-right tabular-nums sm:table-cell">{t.avg_frags ?? "–"}</td>
                       </tr>
                     ))}
                   </tbody>
