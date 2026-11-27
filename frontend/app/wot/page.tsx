@@ -349,7 +349,7 @@ export default function WotPage() {
             {milestonesRes.loading ? (
               <LoadingState lines={1} label="Počítám Mka…" />
             ) : milestonesRes.status === "error" ? (
-              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – milníky níže ukážou chybu.</p>
+              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – zkus obnovit stránku.</p>
             ) : (
               <>
                 <StatGrid cols={2}>
@@ -377,7 +377,7 @@ export default function WotPage() {
                     ) : null}
                   </ul>
                 ) : (
-                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem nahoře.</p>
+                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem Přidat Mko níže.</p>
                 )}
               </>
             )}
