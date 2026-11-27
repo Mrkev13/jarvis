@@ -1,6 +1,6 @@
 """MRK-106: tabulka M-ek všech tanků z Wargaming API, automatické první M a párování s replayem. Bez LLM.
 
-- Synchronizace (hodinový krok nejvýš jednou za 6 h, ručně hned) uloží u každého odehraného tanku nejvyšší odznak
+- Synchronizace (hodinový krok, nejvýš jednou za 50 min – MRK-146; ručně hned) uloží u každého odehraného tanku nejvyšší odznak
   (`wot_vehicle_mastery`). API dává jen NEJVYŠŠÍ odznak – kolikrát má tank M, neví; opakovaná M zůstávají ruční.
 - První synchronizace je jen výchozí stav (stará M nemají datum, žádné milníky nevznikají). Každá další, která uvidí
   přechod tanku na 4 (Ace), založí milník `source="api"` (cíl „M-ka celkem“ ho započítá) a doménovou událost
@@ -24,7 +24,7 @@ from models import WotMilestone, WotReplay, WotVehicleMastery
 from time_utils import to_local, today_local, utc_now
 
 AREA = "wot"
-SYNC_EVERY = timedelta(hours=6)
+SYNC_EVERY = timedelta(minutes=50)  # MRK-146: každý hodinový běh (dřív 6 h), rezerva na posun scheduleru
 PAIR_AFTER_DETECTION = timedelta(days=1)   # replay bitvy odehrané po detekci + 1 den = jiné (opakované) M
 ACE = 4
 MARK_LABELS = {4: "M", 3: "I", 2: "II", 1: "III", 0: "–"}

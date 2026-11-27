@@ -89,7 +89,7 @@ export function MasteryTable({ onSynced }: { onSynced?: () => void }) {
           <code>WG_REGION</code> a <code>WOT_NICKNAME</code> a restartuj backend – tabulka se pak naplní sama.
         </EmptyState>
       ) : data.tanks.length === 0 ? (
-        <EmptyState compact>Zatím nenačteno – server odznaky stáhne nejvýš jednou za 6 h, nebo hned tlačítkem Obnovit.</EmptyState>
+        <EmptyState compact>Zatím nenačteno – server odznaky stáhne každou hodinu, nebo hned tlačítkem Obnovit.</EmptyState>
       ) : (
         <div className="mt-3 space-y-3">
           <dl className="flex flex-wrap gap-2" aria-label="Souhrn odznaků">

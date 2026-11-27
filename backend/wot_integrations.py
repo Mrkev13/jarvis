@@ -157,7 +157,7 @@ INTEGRATIONS = ModuleIntegrations(
                                " mko", " mka", "mistr", "oceneni", "mastery", "odznak"), order=70,
                        build=context_wot, covered_tools=("get_wot_resources", "get_wot_grinds"), name_hints=tank_names),
     ),
-    hourly=(ScheduledStep("wot mastery sync", hourly_mastery),  # MRK-106: nejvýš 1× za 6 h, bez klíčů nic
+    hourly=(ScheduledStep("wot mastery sync", hourly_mastery),  # MRK-146: každou hodinu (nejvýš 1× za 50 min), bez klíčů nic
             ScheduledStep("wot resources sync", hourly_resources)),  # MRK-105: jen s propojeným účtem
     routers=(mastery_router, account_router),
 )
