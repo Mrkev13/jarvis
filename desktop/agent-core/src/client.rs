@@ -36,13 +36,16 @@ pub trait HubApi {
 pub fn normalize_hub_url(raw: &str) -> Result<String, String> {
     let url = raw.trim().trim_end_matches('/').to_string();
     let lower = url.to_ascii_lowercase();
-    let local = ["http://localhost", "http://127.0.0.1"]
-        .iter()
-        .any(|p| lower == *p || lower.starts_with(&format!("{p}:")) || lower.starts_with(&format!("{p}/")));
+    let local = ["http://localhost", "http://127.0.0.1"].iter().any(|p| {
+        lower == *p || lower.starts_with(&format!("{p}:")) || lower.starts_with(&format!("{p}/"))
+    });
     if !(lower.starts_with("https://") || local) {
-        return Err("Adresa Hubu musí začínat https:// (stejná jako adresa API v prohlížeči).".into());
+        return Err(
+            "Adresa Hubu musí začínat https:// (stejná jako adresa API v prohlížeči).".into(),
+        );
     }
-    if url.len() < 12 || url.contains(char::is_whitespace) || url.contains('?') || url.contains('#') {
+    if url.len() < 12 || url.contains(char::is_whitespace) || url.contains('?') || url.contains('#')
+    {
         return Err("Neplatná adresa Hubu.".into());
     }
     Ok(url)
@@ -77,7 +80,8 @@ fn map_err(err: ureq::Error) -> ApiError {
 pub fn pair(hub_url: &str, body: &PairRequest) -> Result<PairResponse, ApiError> {
     let url = format!("{hub_url}/device/agent/pair");
     let resp = agent().post(&url).send_json(body).map_err(map_err)?;
-    resp.into_json::<PairResponse>().map_err(|e| ApiError::Network(e.to_string()))
+    resp.into_json::<PairResponse>()
+        .map_err(|e| ApiError::Network(e.to_string()))
 }
 
 pub struct HttpHub {
@@ -88,7 +92,11 @@ pub struct HttpHub {
 
 impl HttpHub {
     pub fn new(base: &str, token: &str) -> Self {
-        Self { base: base.to_string(), token: token.to_string(), agent: agent() }
+        Self {
+            base: base.to_string(),
+            token: token.to_string(),
+            agent: agent(),
+        }
     }
 
     fn auth(&self) -> String {
@@ -121,7 +129,10 @@ impl HubApi for HttpHub {
 
     fn report(&self, command_id: i64, result: &CommandResult) -> Result<(), ApiError> {
         self.agent
-            .post(&format!("{}/device/agent/commands/{command_id}/result", self.base))
+            .post(&format!(
+                "{}/device/agent/commands/{command_id}/result",
+                self.base
+            ))
             .set("Authorization", &self.auth())
             .send_json(result)
             .map(|_| ())
@@ -135,11 +146,20 @@ mod tests {
 
     #[test]
     fn hub_url_must_be_https_except_localhost() {
-        assert_eq!(normalize_hub_url(" https://hub.example.ts.net:8443/ ").unwrap(), "https://hub.example.ts.net:8443");
+        assert_eq!(
+            normalize_hub_url(" https://hub.example.ts.net:8443/ ").unwrap(),
+            "https://hub.example.ts.net:8443"
+        );
         assert!(normalize_hub_url("http://hub.example.ts.net:8443").is_err());
         assert!(normalize_hub_url("http://localhost.evil.com").is_err());
-        assert_eq!(normalize_hub_url("http://localhost:8000").unwrap(), "http://localhost:8000");
-        assert_eq!(normalize_hub_url("http://127.0.0.1:8000").unwrap(), "http://127.0.0.1:8000");
+        assert_eq!(
+            normalize_hub_url("http://localhost:8000").unwrap(),
+            "http://localhost:8000"
+        );
+        assert_eq!(
+            normalize_hub_url("http://127.0.0.1:8000").unwrap(),
+            "http://127.0.0.1:8000"
+        );
         assert!(normalize_hub_url("https://a b").is_err());
         assert!(normalize_hub_url("https://hub?x=1").is_err());
         assert!(normalize_hub_url("ftp://hub").is_err());

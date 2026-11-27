@@ -85,10 +85,20 @@ impl PowerTimer {
 }
 
 /// Provede jeden příkaz z Hubu. Vrací (ok, zpráva pro Hub a historii).
-pub fn handle_command(cmd: &Command, cfg: &AgentConfig, exec: &dyn Executor, timer: &mut PowerTimer, now: Instant) -> (bool, String) {
+pub fn handle_command(
+    cmd: &Command,
+    cfg: &AgentConfig,
+    exec: &dyn Executor,
+    timer: &mut PowerTimer,
+    now: Instant,
+) -> (bool, String) {
     match cmd.kind.as_str() {
         "launch_app" => {
-            let id = cmd.payload.get("app_id").and_then(|v| v.as_str()).unwrap_or("");
+            let id = cmd
+                .payload
+                .get("app_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             match cfg.app(id) {
                 None => (false, "Aplikace není v seznamu tohoto PC.".into()),
                 Some(app) => match exec.launch(app) {
@@ -98,19 +108,39 @@ pub fn handle_command(cmd: &Command, cfg: &AgentConfig, exec: &dyn Executor, tim
             }
         }
         "power" => {
-            let action = cmd.payload.get("action").and_then(|v| v.as_str()).and_then(PowerAction::parse);
+            let action = cmd
+                .payload
+                .get("action")
+                .and_then(|v| v.as_str())
+                .and_then(PowerAction::parse);
             let delay = cmd.payload.get("delay_seconds").map(|v| v.as_u64());
             match (action, delay) {
                 (None, _) => (false, "Neznámá akce napájení.".into()),
                 (Some(_), Some(None)) => (false, "Neplatný časovač.".into()),
-                (Some(_), Some(Some(d))) if d > MAX_DELAY_SECONDS => (false, "Časovač může být nejvýš 4 hodiny.".into()),
+                (Some(_), Some(Some(d))) if d > MAX_DELAY_SECONDS => {
+                    (false, "Časovač může být nejvýš 4 hodiny.".into())
+                }
                 (Some(action), delay) => {
                     let secs = delay.flatten().unwrap_or(0);
-                    let wait = if secs == 0 { IMMEDIATE_GRACE } else { Duration::from_secs(secs) };
+                    let wait = if secs == 0 {
+                        IMMEDIATE_GRACE
+                    } else {
+                        Duration::from_secs(secs)
+                    };
                     let replaced = timer.pending().is_some();
                     timer.set(action, now + wait);
-                    let when = if secs == 0 { "hned".to_string() } else if secs >= 60 { format!("za {} min", secs / 60) } else { format!("za {secs} s") };
-                    let note = if replaced { " (nahradilo předchozí časovač)" } else { "" };
+                    let when = if secs == 0 {
+                        "hned".to_string()
+                    } else if secs >= 60 {
+                        format!("za {} min", secs / 60)
+                    } else {
+                        format!("za {secs} s")
+                    };
+                    let note = if replaced {
+                        " (nahradilo předchozí časovač)"
+                    } else {
+                        ""
+                    };
                     (true, format!("{} {when}{note}", action.label()))
                 }
             }
@@ -148,12 +178,24 @@ pub struct AgentState {
 pub fn command_label(cmd: &Command, cfg: &AgentConfig) -> String {
     match cmd.kind.as_str() {
         "launch_app" => {
-            let id = cmd.payload.get("app_id").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("Spustit {}", cfg.app(id).map(|a| a.name.as_str()).unwrap_or(id))
+            let id = cmd
+                .payload
+                .get("app_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            format!(
+                "Spustit {}",
+                cfg.app(id).map(|a| a.name.as_str()).unwrap_or(id)
+            )
         }
         "power" => {
-            let a = cmd.payload.get("action").and_then(|v| v.as_str()).and_then(PowerAction::parse);
-            a.map(|a| a.label().to_string()).unwrap_or_else(|| "Napájení".into())
+            let a = cmd
+                .payload
+                .get("action")
+                .and_then(|v| v.as_str())
+                .and_then(PowerAction::parse);
+            a.map(|a| a.label().to_string())
+                .unwrap_or_else(|| "Napájení".into())
         }
         "power_cancel" => "Zrušit časovač".into(),
         other => other.to_string(),
@@ -161,7 +203,10 @@ pub fn command_label(cmd: &Command, cfg: &AgentConfig) -> String {
 }
 
 fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Jedna obrátka smyčky agenta. Čas dalšího heartbeatu drží sám; časovač napájení a stav jsou sdílené (zámky se
@@ -178,21 +223,30 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Provede časovač napájení, pokud nastal (volá se každou sekundu ze samostatného vlákna, nezávisle na long-pollu),
 /// a obnoví `pending_power` pro okno.
-pub fn run_due_power(timer: &Mutex<PowerTimer>, exec: &dyn Executor, state: &Mutex<AgentState>, now: Instant) {
+pub fn run_due_power(
+    timer: &Mutex<PowerTimer>,
+    exec: &dyn Executor,
+    state: &Mutex<AgentState>,
+    now: Instant,
+) {
     let (due, pending) = {
         let mut t = lock(timer);
         (t.take_due(now), t.pending())
     };
     if let Some(action) = due {
         let res = exec.power(action);
-        push_recent(&mut lock(state), RecentCommand {
-            label: action.label().into(),
-            ok: res.is_ok(),
-            message: res.err().unwrap_or_else(|| "Provedeno.".into()),
-            at_unix: unix_now(),
-        });
+        push_recent(
+            &mut lock(state),
+            RecentCommand {
+                label: action.label().into(),
+                ok: res.is_ok(),
+                message: res.err().unwrap_or_else(|| "Provedeno.".into()),
+                at_unix: unix_now(),
+            },
+        );
     }
-    lock(state).pending_power = pending.map(|(a, at)| (a, at.saturating_duration_since(now).as_secs()));
+    lock(state).pending_power =
+        pending.map(|(a, at)| (a, at.saturating_duration_since(now).as_secs()));
 }
 
 #[derive(Debug, PartialEq)]
@@ -207,15 +261,30 @@ pub enum TickOutcome {
 
 impl Agent {
     pub fn new(version: &str) -> Self {
-        Self { timer: Arc::new(Mutex::new(PowerTimer::default())), next_heartbeat: None, version: version.into() }
+        Self {
+            timer: Arc::new(Mutex::new(PowerTimer::default())),
+            next_heartbeat: None,
+            version: version.into(),
+        }
     }
 
     /// `clock` = aktuální čas (po long-pollu se čte znovu, ať časovač napájení neběží o dobu čekání kratší).
-    pub fn tick(&mut self, hub: &dyn HubApi, exec: &dyn Executor, cfg: &AgentConfig, state: &Mutex<AgentState>,
-                clock: &dyn Fn() -> Instant, poll_wait: u32) -> TickOutcome {
+    pub fn tick(
+        &mut self,
+        hub: &dyn HubApi,
+        exec: &dyn Executor,
+        cfg: &AgentConfig,
+        state: &Mutex<AgentState>,
+        clock: &dyn Fn() -> Instant,
+        poll_wait: u32,
+    ) -> TickOutcome {
         let now = clock();
         if self.next_heartbeat.is_none_or(|t| now >= t) {
-            let hb = Heartbeat { status: exec.status(&cfg.apps), apps: cfg.app_refs(), agent_version: self.version.clone() };
+            let hb = Heartbeat {
+                status: exec.status(&cfg.apps),
+                apps: cfg.app_refs(),
+                agent_version: self.version.clone(),
+            };
             match hub.heartbeat(&hb) {
                 Ok(()) => self.next_heartbeat = Some(now + HEARTBEAT_EVERY),
                 Err(e) => return self.fail(state, e),
@@ -234,8 +303,22 @@ impl Agent {
         for cmd in commands {
             let (ok, message) = handle_command(&cmd, cfg, exec, &mut lock(&self.timer), clock());
             // výsledek se hlásí dřív, než proběhne okamžité vypnutí (IMMEDIATE_GRACE)
-            let reported = hub.report(cmd.id, &CommandResult { ok, message: Some(message.clone()) });
-            push_recent(&mut lock(state), RecentCommand { label: command_label(&cmd, cfg), ok, message, at_unix: unix_now() });
+            let reported = hub.report(
+                cmd.id,
+                &CommandResult {
+                    ok,
+                    message: Some(message.clone()),
+                },
+            );
+            push_recent(
+                &mut lock(state),
+                RecentCommand {
+                    label: command_label(&cmd, cfg),
+                    ok,
+                    message,
+                    at_unix: unix_now(),
+                },
+            );
             if let Err(e) = reported {
                 return self.fail(state, e);
             }
@@ -293,7 +376,10 @@ mod tests {
             Ok(())
         }
         fn status(&self, _apps: &[AppEntry]) -> Status {
-            Status { cpu_percent: Some(10.0), ..Default::default() }
+            Status {
+                cpu_percent: Some(10.0),
+                ..Default::default()
+            }
         }
     }
 
@@ -326,39 +412,85 @@ mod tests {
         }
         fn report(&self, id: i64, r: &CommandResult) -> Result<(), ApiError> {
             self.events.borrow_mut().push(format!("report {id}"));
-            self.reports.borrow_mut().push((id, r.ok, r.message.clone().unwrap_or_default()));
+            self.reports
+                .borrow_mut()
+                .push((id, r.ok, r.message.clone().unwrap_or_default()));
             Ok(())
         }
     }
 
     fn cfg() -> AgentConfig {
         AgentConfig {
-            apps: vec![AppEntry { id: "wot".into(), name: "World of Tanks".into(), target: "C:\\WoT.exe".into(), args: vec![], process: None, detected: true }],
+            apps: vec![AppEntry {
+                id: "wot".into(),
+                name: "World of Tanks".into(),
+                target: "C:\\WoT.exe".into(),
+                args: vec![],
+                process: None,
+                detected: true,
+            }],
             ..Default::default()
         }
     }
 
     fn cmd(id: i64, kind: &str, payload: serde_json::Value) -> Command {
-        Command { id, kind: kind.into(), payload }
+        Command {
+            id,
+            kind: kind.into(),
+            payload,
+        }
     }
 
     #[test]
     fn launch_only_apps_from_local_list() {
         let (exec, mut timer, now) = (FakeExec::default(), PowerTimer::default(), Instant::now());
-        assert_eq!(handle_command(&cmd(1, "launch_app", json!({"app_id": "wot"})), &cfg(), &exec, &mut timer, now),
-                   (true, "Spuštěno: World of Tanks".into()));
-        let (ok, _) = handle_command(&cmd(2, "launch_app", json!({"app_id": "cmd", "target": "C:\\evil.exe"})), &cfg(), &exec, &mut timer, now);
+        assert_eq!(
+            handle_command(
+                &cmd(1, "launch_app", json!({"app_id": "wot"})),
+                &cfg(),
+                &exec,
+                &mut timer,
+                now
+            ),
+            (true, "Spuštěno: World of Tanks".into())
+        );
+        let (ok, _) = handle_command(
+            &cmd(
+                2,
+                "launch_app",
+                json!({"app_id": "cmd", "target": "C:\\evil.exe"}),
+            ),
+            &cfg(),
+            &exec,
+            &mut timer,
+            now,
+        );
         assert!(!ok);
         assert_eq!(*exec.launched.borrow(), vec!["wot".to_string()]);
-        let failing = FakeExec { fail_launch: true, ..Default::default() };
-        let (ok, msg) = handle_command(&cmd(3, "launch_app", json!({"app_id": "wot"})), &cfg(), &failing, &mut timer, now);
+        let failing = FakeExec {
+            fail_launch: true,
+            ..Default::default()
+        };
+        let (ok, msg) = handle_command(
+            &cmd(3, "launch_app", json!({"app_id": "wot"})),
+            &cfg(),
+            &failing,
+            &mut timer,
+            now,
+        );
         assert!(!ok && msg.contains("soubor nenalezen"));
     }
 
     #[test]
     fn unknown_kinds_are_rejected() {
         let (exec, mut timer) = (FakeExec::default(), PowerTimer::default());
-        let (ok, _) = handle_command(&cmd(1, "shell", json!({"cmd": "format c:"})), &cfg(), &exec, &mut timer, Instant::now());
+        let (ok, _) = handle_command(
+            &cmd(1, "shell", json!({"cmd": "format c:"})),
+            &cfg(),
+            &exec,
+            &mut timer,
+            Instant::now(),
+        );
         assert!(!ok);
         assert!(exec.launched.borrow().is_empty() && exec.power.borrow().is_empty());
     }
@@ -366,15 +498,39 @@ mod tests {
     #[test]
     fn power_uses_timer_and_can_be_cancelled() {
         let (exec, mut timer, now) = (FakeExec::default(), PowerTimer::default(), Instant::now());
-        let (ok, msg) = handle_command(&cmd(1, "power", json!({"action": "shutdown", "delay_seconds": 3600})), &cfg(), &exec, &mut timer, now);
+        let (ok, msg) = handle_command(
+            &cmd(
+                1,
+                "power",
+                json!({"action": "shutdown", "delay_seconds": 3600}),
+            ),
+            &cfg(),
+            &exec,
+            &mut timer,
+            now,
+        );
         assert!(ok);
         assert_eq!(msg, "Vypnutí za 60 min");
         assert!(exec.power.borrow().is_empty(), "nic se neprovede hned");
         assert_eq!(timer.take_due(now + Duration::from_secs(3599)), None);
-        assert_eq!(handle_command(&cmd(2, "power_cancel", json!({})), &cfg(), &exec, &mut timer, now).1, "Časovač zrušen.");
+        assert_eq!(
+            handle_command(
+                &cmd(2, "power_cancel", json!({})),
+                &cfg(),
+                &exec,
+                &mut timer,
+                now
+            )
+            .1,
+            "Časovač zrušen."
+        );
         assert_eq!(timer.take_due(now + Duration::from_secs(4000)), None);
         // neplatné
-        for bad in [json!({"action": "format"}), json!({"action": "sleep", "delay_seconds": 99999}), json!({"action": "sleep", "delay_seconds": "x"})] {
+        for bad in [
+            json!({"action": "format"}),
+            json!({"action": "sleep", "delay_seconds": 99999}),
+            json!({"action": "sleep", "delay_seconds": "x"}),
+        ] {
             assert!(!handle_command(&cmd(3, "power", bad), &cfg(), &exec, &mut timer, now).0);
         }
         assert!(timer.pending().is_none());
@@ -382,15 +538,35 @@ mod tests {
 
     #[test]
     fn immediate_power_is_reported_before_it_runs() {
-        let (hub, exec, state) = (FakeHub::default(), FakeExec::default(), Mutex::new(AgentState::default()));
-        hub.queue.borrow_mut().push(cmd(7, "power", json!({"action": "shutdown", "delay_seconds": 0})));
+        let (hub, exec, state) = (
+            FakeHub::default(),
+            FakeExec::default(),
+            Mutex::new(AgentState::default()),
+        );
+        hub.queue.borrow_mut().push(cmd(
+            7,
+            "power",
+            json!({"action": "shutdown", "delay_seconds": 0}),
+        ));
         let mut agent = Agent::new("0.1.0");
         let now = Instant::now();
-        assert_eq!(agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0), TickOutcome::Ok);
-        assert_eq!(*hub.reports.borrow(), vec![(7, true, "Vypnutí hned".to_string())]);
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0),
+            TickOutcome::Ok
+        );
+        assert_eq!(
+            *hub.reports.borrow(),
+            vec![(7, true, "Vypnutí hned".to_string())]
+        );
         run_due_power(&agent.timer, &exec, &state, now);
-        assert!(exec.power.borrow().is_empty(), "ještě běží lhůta na nahlášení");
-        assert_eq!(state.lock().unwrap().pending_power, Some((PowerAction::Shutdown, 3)));
+        assert!(
+            exec.power.borrow().is_empty(),
+            "ještě běží lhůta na nahlášení"
+        );
+        assert_eq!(
+            state.lock().unwrap().pending_power,
+            Some((PowerAction::Shutdown, 3))
+        );
         run_due_power(&agent.timer, &exec, &state, now + IMMEDIATE_GRACE);
         assert_eq!(*exec.power.borrow(), vec![PowerAction::Shutdown]);
         assert_eq!(state.lock().unwrap().recent[0].label, "Vypnutí");
@@ -401,30 +577,75 @@ mod tests {
 
     #[test]
     fn heartbeat_every_30s_and_after_failure() {
-        let (hub, exec, state) = (FakeHub::default(), FakeExec::default(), Mutex::new(AgentState::default()));
+        let (hub, exec, state) = (
+            FakeHub::default(),
+            FakeExec::default(),
+            Mutex::new(AgentState::default()),
+        );
         let mut agent = Agent::new("0.1.0");
         let now = Instant::now();
         agent.tick(&hub, &exec, &cfg(), &state, &|| now, 0);
-        agent.tick(&hub, &exec, &cfg(), &state, &|| now + Duration::from_secs(10), 0);
+        agent.tick(
+            &hub,
+            &exec,
+            &cfg(),
+            &state,
+            &|| now + Duration::from_secs(10),
+            0,
+        );
         assert_eq!(*hub.heartbeats.borrow(), 1);
         agent.tick(&hub, &exec, &cfg(), &state, &|| now + HEARTBEAT_EVERY, 0);
         assert_eq!(*hub.heartbeats.borrow(), 2);
         assert!(state.lock().unwrap().connected);
-        let offline = FakeHub { offline: true, ..Default::default() };
-        assert_eq!(agent.tick(&offline, &exec, &cfg(), &state, &|| now + Duration::from_secs(31), 0), TickOutcome::Retry);
+        let offline = FakeHub {
+            offline: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            agent.tick(
+                &offline,
+                &exec,
+                &cfg(),
+                &state,
+                &|| now + Duration::from_secs(31),
+                0
+            ),
+            TickOutcome::Retry
+        );
         {
             let st = state.lock().unwrap();
             assert!(!st.connected && st.last_error.as_deref().unwrap().contains("není dostupný"));
         }
-        agent.tick(&hub, &exec, &cfg(), &state, &|| now + Duration::from_secs(32), 0);
-        assert_eq!(*hub.heartbeats.borrow(), 3, "po výpadku se stav ohlásí hned");
+        agent.tick(
+            &hub,
+            &exec,
+            &cfg(),
+            &state,
+            &|| now + Duration::from_secs(32),
+            0,
+        );
+        assert_eq!(
+            *hub.heartbeats.borrow(),
+            3,
+            "po výpadku se stav ohlásí hned"
+        );
     }
 
     #[test]
     fn revoked_token_stops_agent() {
-        let (hub, exec, state) = (FakeHub { unauthorized: true, ..Default::default() }, FakeExec::default(), Mutex::new(AgentState::default()));
+        let (hub, exec, state) = (
+            FakeHub {
+                unauthorized: true,
+                ..Default::default()
+            },
+            FakeExec::default(),
+            Mutex::new(AgentState::default()),
+        );
         let mut agent = Agent::new("0.1.0");
-        assert_eq!(agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0), TickOutcome::Unauthorized);
+        assert_eq!(
+            agent.tick(&hub, &exec, &cfg(), &state, &Instant::now, 0),
+            TickOutcome::Unauthorized
+        );
         assert!(state.lock().unwrap().unauthorized);
     }
 

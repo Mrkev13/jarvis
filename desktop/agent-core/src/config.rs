@@ -44,7 +44,8 @@ pub fn valid_app_id(id: &str) -> bool {
     !b.is_empty()
         && b.len() <= 40
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
 /// Id z názvu („Counter-Strike 2“ → „counter-strike-2“), bez diakritiky; prázdné → „app“.
@@ -52,9 +53,18 @@ pub fn slugify(name: &str) -> String {
     let mut out = String::new();
     for ch in name.chars() {
         let c = match ch {
-            'á' | 'Á' | 'ä' | 'Ä' => 'a', 'č' | 'Č' => 'c', 'ď' | 'Ď' => 'd', 'é' | 'É' | 'ě' | 'Ě' => 'e',
-            'í' | 'Í' => 'i', 'ň' | 'Ň' => 'n', 'ó' | 'Ó' | 'ö' | 'Ö' => 'o', 'ř' | 'Ř' => 'r',
-            'š' | 'Š' => 's', 'ť' | 'Ť' => 't', 'ú' | 'Ú' | 'ů' | 'Ů' | 'ü' | 'Ü' => 'u', 'ý' | 'Ý' => 'y',
+            'á' | 'Á' | 'ä' | 'Ä' => 'a',
+            'č' | 'Č' => 'c',
+            'ď' | 'Ď' => 'd',
+            'é' | 'É' | 'ě' | 'Ě' => 'e',
+            'í' | 'Í' => 'i',
+            'ň' | 'Ň' => 'n',
+            'ó' | 'Ó' | 'ö' | 'Ö' => 'o',
+            'ř' | 'Ř' => 'r',
+            'š' | 'Š' => 's',
+            'ť' | 'Ť' => 't',
+            'ú' | 'Ú' | 'ů' | 'Ů' | 'ü' | 'Ü' => 'u',
+            'ý' | 'Ý' => 'y',
             'ž' | 'Ž' => 'z',
             c => c.to_ascii_lowercase(),
         };
@@ -66,7 +76,11 @@ pub fn slugify(name: &str) -> String {
     }
     let out: String = out.trim_matches('-').chars().take(40).collect();
     let out = out.trim_end_matches('-').to_string();
-    if out.is_empty() { "app".into() } else { out }
+    if out.is_empty() {
+        "app".into()
+    } else {
+        out
+    }
 }
 
 impl AgentConfig {
@@ -87,7 +101,10 @@ impl AgentConfig {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self).expect("config serializes"))?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(self).expect("config serializes"),
+        )?;
         std::fs::rename(tmp, path)
     }
 
@@ -96,7 +113,13 @@ impl AgentConfig {
     }
 
     pub fn app_refs(&self) -> Vec<AppRef> {
-        self.apps.iter().map(|a| AppRef { id: a.id.clone(), name: a.name.clone() }).collect()
+        self.apps
+            .iter()
+            .map(|a| AppRef {
+                id: a.id.clone(),
+                name: a.name.clone(),
+            })
+            .collect()
     }
 
     /// Sloučí nově nalezené aplikace: ručně přidané zůstávají, automaticky nalezené se nahradí aktuálními.
@@ -118,7 +141,11 @@ pub fn clean_apps(apps: Vec<AppEntry>) -> Vec<AppEntry> {
     for mut a in apps {
         a.name = a.name.trim().chars().take(80).collect();
         a.target = a.target.trim().to_string();
-        if valid_app_id(&a.id) && !a.name.is_empty() && !a.target.is_empty() && !out.iter().any(|x| x.id == a.id) {
+        if valid_app_id(&a.id)
+            && !a.name.is_empty()
+            && !a.target.is_empty()
+            && !out.iter().any(|x| x.id == a.id)
+        {
             out.push(a);
         }
         if out.len() >= MAX_APPS {
@@ -133,7 +160,14 @@ mod tests {
     use super::*;
 
     fn app(id: &str, detected: bool) -> AppEntry {
-        AppEntry { id: id.into(), name: id.to_uppercase(), target: format!("C:\\{id}.exe"), args: vec![], process: None, detected }
+        AppEntry {
+            id: id.into(),
+            name: id.to_uppercase(),
+            target: format!("C:\\{id}.exe"),
+            args: vec![],
+            process: None,
+            detected,
+        }
     }
 
     #[test]
@@ -152,9 +186,20 @@ mod tests {
 
     #[test]
     fn merge_keeps_manual_apps_and_refreshes_detected() {
-        let mut cfg = AgentConfig { apps: vec![app("wot", true), app("moje", false), app("steam", true)], ..Default::default() };
-        cfg.merge_detected(vec![app("wot", false), app("discord", false), app("moje", false)]);
-        let ids: Vec<_> = cfg.apps.iter().map(|a| (a.id.as_str(), a.detected)).collect();
+        let mut cfg = AgentConfig {
+            apps: vec![app("wot", true), app("moje", false), app("steam", true)],
+            ..Default::default()
+        };
+        cfg.merge_detected(vec![
+            app("wot", false),
+            app("discord", false),
+            app("moje", false),
+        ]);
+        let ids: Vec<_> = cfg
+            .apps
+            .iter()
+            .map(|a| (a.id.as_str(), a.detected))
+            .collect();
         assert_eq!(ids, vec![("moje", false), ("wot", true), ("discord", true)]);
     }
 
@@ -162,7 +207,12 @@ mod tests {
     fn clean_drops_invalid_and_duplicates() {
         let mut bad = app("x", false);
         bad.target = " ".into();
-        let apps = clean_apps(vec![app("a", false), app("a", false), app("Bad Id", false), bad]);
+        let apps = clean_apps(vec![
+            app("a", false),
+            app("a", false),
+            app("Bad Id", false),
+            bad,
+        ]);
         assert_eq!(apps.len(), 1);
     }
 
@@ -170,11 +220,21 @@ mod tests {
     fn save_and_load_roundtrip() {
         let dir = std::env::temp_dir().join(format!("jarvis-agent-test-{}", std::process::id()));
         let path = dir.join("config.json");
-        let cfg = AgentConfig { hub_url: "https://hub".into(), device_name: "PC".into(), device_id: Some(3), apps: vec![app("wot", true)], paused: true };
+        let cfg = AgentConfig {
+            hub_url: "https://hub".into(),
+            device_name: "PC".into(),
+            device_id: Some(3),
+            apps: vec![app("wot", true)],
+            paused: true,
+        };
         cfg.save(&path).unwrap();
         assert_eq!(AgentConfig::load(&path), cfg);
         std::fs::write(&path, "{broken").unwrap();
-        assert_eq!(AgentConfig::load(&path), AgentConfig::default(), "rozbitý soubor = výchozí nastavení");
+        assert_eq!(
+            AgentConfig::load(&path),
+            AgentConfig::default(),
+            "rozbitý soubor = výchozí nastavení"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

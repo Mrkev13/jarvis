@@ -11,7 +11,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agent_core::agent::{backoff, run_due_power, Agent, AgentState, PowerTimer, TickOutcome, POLL_WAIT_SECONDS};
+use agent_core::agent::{
+    backoff, run_due_power, Agent, AgentState, PowerTimer, TickOutcome, POLL_WAIT_SECONDS,
+};
 use agent_core::client::{self, HttpHub};
 use agent_core::config::{clean_apps, slugify, AgentConfig, AppEntry};
 use agent_core::protocol::PairRequest;
@@ -62,7 +64,8 @@ fn delete_token() {
 
 impl Shared {
     fn save_config(&self, cfg: &AgentConfig) -> Result<(), String> {
-        cfg.save(&self.config_path).map_err(|e| format!("Nastavení se nepodařilo uložit: {e}"))
+        cfg.save(&self.config_path)
+            .map_err(|e| format!("Nastavení se nepodařilo uložit: {e}"))
     }
 
     fn update_config(&self, f: impl FnOnce(&mut AgentConfig)) -> Result<AgentConfig, String> {
@@ -84,13 +87,21 @@ fn agent_loop(shared: Arc<Shared>) {
         let cfg = lock(&shared.config).clone();
         let token = load_token();
         let blocked = lock(&shared.state).unauthorized;
-        let (Some(token), false, false) = (token, cfg.paused || cfg.hub_url.is_empty(), blocked) else {
+        let (Some(token), false, false) = (token, cfg.paused || cfg.hub_url.is_empty(), blocked)
+        else {
             lock(&shared.state).connected = false;
             thread::sleep(Duration::from_secs(1));
             continue;
         };
         let hub = HttpHub::new(&cfg.hub_url, &token);
-        match agent.tick(&hub, &exec, &cfg, &shared.state, &Instant::now, POLL_WAIT_SECONDS) {
+        match agent.tick(
+            &hub,
+            &exec,
+            &cfg,
+            &shared.state,
+            &Instant::now,
+            POLL_WAIT_SECONDS,
+        ) {
             TickOutcome::Ok => failures = 0,
             // odvoláno v Hubu: agent stojí, dokud se znovu nespáruje (okno to ukáže)
             TickOutcome::Unauthorized => failures = 0,
@@ -115,7 +126,11 @@ fn tray_tooltip(shared: &Shared, paired: bool) -> String {
         "nepřipojeno"
     };
     match st.pending_power {
-        Some((action, secs)) => format!("Jarvis pro PC – {status} · {} za {} min", action.label(), secs.div_ceil(60)),
+        Some((action, secs)) => format!(
+            "Jarvis pro PC – {status} · {} za {} min",
+            action.label(),
+            secs.div_ceil(60)
+        ),
         None => format!("Jarvis pro PC – {status}"),
     }
 }
@@ -168,10 +183,20 @@ fn get_state(app: AppHandle, shared: State<'_, Arc<Shared>>) -> View {
 }
 
 #[tauri::command]
-async fn pair(shared: State<'_, Arc<Shared>>, hub_url: String, code: String, name: String) -> Result<String, String> {
+async fn pair(
+    shared: State<'_, Arc<Shared>>,
+    hub_url: String,
+    code: String,
+    name: String,
+) -> Result<String, String> {
     let url = client::normalize_hub_url(&hub_url)?;
     let name = name.trim().chars().take(80).collect::<String>();
-    let body = PairRequest { code, name: name.clone(), platform: "windows".into(), agent_version: VERSION.into() };
+    let body = PairRequest {
+        code,
+        name: name.clone(),
+        platform: "windows".into(),
+        agent_version: VERSION.into(),
+    };
     let request_url = url.clone();
     let resp = tauri::async_runtime::spawn_blocking(move || client::pair(&request_url, &body))
         .await
@@ -209,7 +234,11 @@ fn set_paused(shared: State<'_, Arc<Shared>>, paused: bool) -> Result<(), String
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     let launcher = app.autolaunch();
-    let res = if enabled { launcher.enable() } else { launcher.disable() };
+    let res = if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    };
     res.map_err(|e| e.to_string())
 }
 
@@ -229,7 +258,13 @@ fn detect_apps(shared: State<'_, Arc<Shared>>) -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn add_app(shared: State<'_, Arc<Shared>>, name: String, target: String, args: String, process: String) -> Result<(), String> {
+fn add_app(
+    shared: State<'_, Arc<Shared>>,
+    name: String,
+    target: String,
+    args: String,
+    process: String,
+) -> Result<(), String> {
     let name = name.trim().to_string();
     let target = target.trim().trim_matches('"').to_string();
     if name.is_empty() || target.is_empty() {
@@ -246,12 +281,22 @@ fn add_app(shared: State<'_, Arc<Shared>>, name: String, target: String, args: S
     }
     let process = process.trim();
     let process = if process.is_empty() {
-        std::path::Path::new(&target).file_name().map(|f| f.to_string_lossy().into_owned()).filter(|f| f.to_ascii_lowercase().ends_with(".exe"))
+        std::path::Path::new(&target)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .filter(|f| f.to_ascii_lowercase().ends_with(".exe"))
     } else {
         Some(process.to_string())
     };
     let mut apps = cfg.apps.clone();
-    apps.push(AppEntry { id, name, target, args: args.split_whitespace().map(str::to_string).collect(), process, detected: false });
+    apps.push(AppEntry {
+        id,
+        name,
+        target,
+        args: args.split_whitespace().map(str::to_string).collect(),
+        process,
+        detected: false,
+    });
     let before = apps.len();
     cfg.apps = clean_apps(apps);
     if cfg.apps.len() < before {
@@ -262,7 +307,9 @@ fn add_app(shared: State<'_, Arc<Shared>>, name: String, target: String, args: S
 
 #[tauri::command]
 fn remove_app(shared: State<'_, Arc<Shared>>, id: String) -> Result<(), String> {
-    shared.update_config(|c| c.apps.retain(|a| a.id != id)).map(|_| ())
+    shared
+        .update_config(|c| c.apps.retain(|a| a.id != id))
+        .map(|_| ())
 }
 
 // ---------- okno a ikona ----------
@@ -302,7 +349,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
                 show_window(tray.app_handle());
             }
         });
@@ -314,7 +366,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn config_path() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("StandaHub").join("jarvis-agent.json")
+    dirs::config_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("StandaHub")
+        .join("jarvis-agent.json")
 }
 
 fn main() {
@@ -332,11 +387,24 @@ fn main() {
     });
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_window(app)
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![
-            get_state, pair, unpair, set_paused, set_autostart, cancel_power, detect_apps, add_app, remove_app
+            get_state,
+            pair,
+            unpair,
+            set_paused,
+            set_autostart,
+            cancel_power,
+            detect_apps,
+            add_app,
+            remove_app
         ])
         .setup(move |app| {
             build_tray(app.handle())?;
@@ -345,9 +413,13 @@ fn main() {
                 show_window(app.handle());
             }
             let s1 = shared.clone();
-            thread::Builder::new().name("agent".into()).spawn(move || agent_loop(s1))?;
+            thread::Builder::new()
+                .name("agent".into())
+                .spawn(move || agent_loop(s1))?;
             let (s2, handle) = (shared.clone(), app.handle().clone());
-            thread::Builder::new().name("power".into()).spawn(move || power_loop(s2, handle))?;
+            thread::Builder::new()
+                .name("power".into())
+                .spawn(move || power_loop(s2, handle))?;
             Ok(())
         })
         .on_window_event(|window, event| {

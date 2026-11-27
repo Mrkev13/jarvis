@@ -14,7 +14,9 @@ pub struct SystemExecutor {
 
 impl SystemExecutor {
     pub fn new() -> Self {
-        Self { sys: Mutex::new(System::new()) }
+        Self {
+            sys: Mutex::new(System::new()),
+        }
     }
 }
 
@@ -39,10 +41,18 @@ impl Executor for SystemExecutor {
         } else {
             None
         };
-        let names: Vec<String> = sys.processes().values().map(|p| p.name().to_string_lossy().to_lowercase()).collect();
+        let names: Vec<String> = sys
+            .processes()
+            .values()
+            .map(|p| p.name().to_string_lossy().to_lowercase())
+            .collect();
         let running = apps
             .iter()
-            .filter(|a| a.process.as_deref().is_some_and(|p| names.iter().any(|n| n == &p.to_lowercase())))
+            .filter(|a| {
+                a.process
+                    .as_deref()
+                    .is_some_and(|p| names.iter().any(|n| n == &p.to_lowercase()))
+            })
             .map(|a| a.id.clone())
             .collect();
         let disks = Disks::new_with_refreshed_list()
@@ -51,7 +61,13 @@ impl Executor for SystemExecutor {
             .filter(|d| d.total_space() > 0)
             .take(12)
             .map(|d| Disk {
-                name: d.mount_point().to_string_lossy().trim_end_matches(['\\', '/']).chars().take(10).collect::<String>(),
+                name: d
+                    .mount_point()
+                    .to_string_lossy()
+                    .trim_end_matches(['\\', '/'])
+                    .chars()
+                    .take(10)
+                    .collect::<String>(),
                 free_gb: (d.available_space() as f64 / GB * 10.0).round() / 10.0,
                 total_gb: (d.total_space() as f64 / GB * 10.0).round() / 10.0,
             })
@@ -121,7 +137,9 @@ mod platform {
         match action {
             PowerAction::Shutdown => run_hidden("shutdown.exe", &["/s", "/t", "0"]),
             // pozn.: se zapnutou hibernací Windows místo uspání hibernuje (docs/computer.md)
-            PowerAction::Sleep => run_hidden("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"]),
+            PowerAction::Sleep => {
+                run_hidden("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"])
+            }
             PowerAction::Lock => run_hidden("rundll32.exe", &["user32.dll,LockWorkStation"]),
         }
     }
@@ -159,21 +177,47 @@ mod platform {
         // World of Tanks – běžná umístění klienta; jinak Wargaming Game Center
         let mut wot_dirs: Vec<PathBuf> = Vec::new();
         for drive in ["C:", "D:", "E:"] {
-            for dir in ["Games\\World_of_Tanks_EU", "Games\\World_of_Tanks", "Wargaming.net\\Games\\World_of_Tanks_EU"] {
+            for dir in [
+                "Games\\World_of_Tanks_EU",
+                "Games\\World_of_Tanks",
+                "Wargaming.net\\Games\\World_of_Tanks_EU",
+            ] {
                 wot_dirs.push(PathBuf::from(format!("{drive}\\{dir}")));
             }
         }
-        if let Some(exe) = wot_dirs.iter().map(|d| d.join("WorldOfTanks.exe")).find(|p| p.is_file()) {
-            apps.push(entry("wot", "World of Tanks", &exe, &[], "WorldOfTanks.exe"));
+        if let Some(exe) = wot_dirs
+            .iter()
+            .map(|d| d.join("WorldOfTanks.exe"))
+            .find(|p| p.is_file())
+        {
+            apps.push(entry(
+                "wot",
+                "World of Tanks",
+                &exe,
+                &[],
+                "WorldOfTanks.exe",
+            ));
         }
-        if let Some(wgc) = env_path("ProgramData").map(|p| p.join("Wargaming.net\\GameCenter\\wgc.exe")).filter(|p| p.is_file()) {
+        if let Some(wgc) = env_path("ProgramData")
+            .map(|p| p.join("Wargaming.net\\GameCenter\\wgc.exe"))
+            .filter(|p| p.is_file())
+        {
             apps.push(entry("wgc", "Wargaming Game Center", &wgc, &[], "wgc.exe"));
         }
         if let Some(steam) = steam_exe() {
             apps.push(entry("steam", "Steam", &steam, &[], "steam.exe"));
         }
-        if let Some(update) = env_path("LOCALAPPDATA").map(|p| p.join("Discord\\Update.exe")).filter(|p| p.is_file()) {
-            apps.push(entry("discord", "Discord", &update, &["--processStart", "Discord.exe"], "Discord.exe"));
+        if let Some(update) = env_path("LOCALAPPDATA")
+            .map(|p| p.join("Discord\\Update.exe"))
+            .filter(|p| p.is_file())
+        {
+            apps.push(entry(
+                "discord",
+                "Discord",
+                &update,
+                &["--processStart", "Discord.exe"],
+                "Discord.exe",
+            ));
         }
         apps
     }
