@@ -1,7 +1,9 @@
 name: Release to production
 
 # MRK-113: controlled propagation main -> mrk-101-ubuntu-production (the branch the Ubuntu updater deploys).
-# Run by hand: Actions -> Release to production -> Run workflow (branch main, optional commit SHA from main).
+# MRK-150: runs AUTOMATICALLY after a successful CI push run on main (workflow_run, the exact commit CI checked) and
+# closes older open release PRs it contains. By hand: Actions -> Release to production -> Run workflow (branch main,
+# optional commit SHA from main).
 # The logic is .github/scripts/release_pr.py (tests: backend/tests/test_release_pr.py):
 # - the source commit must be on main and its push run of ci.yml must be completed/success, otherwise it fails and
 #   creates nothing (a failed CI blocks the propagation);
@@ -15,6 +17,10 @@ name: Release to production
 # requests" (creating only; nothing approves).
 
 on:
+  workflow_run:            # MRK-150: after CI on main; the job below runs only for a successful push run
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       sha:
@@ -34,6 +40,10 @@ jobs:
     name: Release PR (main → produkce)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     permissions:
       contents: write        # push only the release/main-<sha12> branch (production itself is ruleset-protected)
       pull-requests: write   # create / update the release PR and its labels
@@ -54,5 +64,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SOURCE_SHA: ${{ inputs.sha }}
+          SOURCE_SHA: ${{ inputs.sha || github.event.workflow_run.head_sha }}  # validated by the script (hex only)
         run: python3 .github/scripts/release_pr.py --sha "$SOURCE_SHA"

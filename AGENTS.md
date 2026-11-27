@@ -110,7 +110,7 @@ Podrobně: `docs/operations.md` → *Release to production*, na produkční vět
 `deploy/v3/PRODUCTION_CHANGES.md`.
 
 - Produkce nasazuje větev `mrk-101-ubuntu-production`, ne `main`. Z `main` se tam jde **jen přes release PR**
-  (Actions → *Release to production*, MRK-113). Změny `deploy/` jdou PR přímo do produkční větve, vždy `manual-merge`.
+  (Actions → *Release to production*, MRK-113; od MRK-150 se otevře sám po zeleném CI na `main`). Změny `deploy/` jdou PR přímo do produkční větve, vždy `manual-merge`.
 - Updater (timer 10 min) nasadí sám jen commit se zeleným push CI na produkční větvi; změna Alembic head ho zastaví
   (`MIGRATION_HEAD_CHANGED` je správně).
 - Migrace v produkci jen ručně: `deploy-migration-v3.sh --check SHA`, pak `--apply SHA` (MRK-114). DB se nikdy

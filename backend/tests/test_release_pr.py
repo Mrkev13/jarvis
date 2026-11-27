@@ -29,8 +29,10 @@ with open(os.path.join(fake, "calls.jsonl"), "a") as f:
 api = json.load(open(os.path.join(fake, "api.json")))
 if method == "GET" and "/actions/workflows/ci.yml/runs" in path:
     print(json.dumps({"workflow_runs": api.get("runs", [])}))
-elif method == "GET" and "/pulls?" in path:
+elif method == "GET" and "/pulls?" in path and "head=" in path:
     print(json.dumps(api.get("open_prs", [])))
+elif method == "GET" and "/pulls?" in path:  # MRK-150: všechny otevřené PR do produkce
+    print(json.dumps(api.get("all_prs", [])))
 elif method == "POST" and path.endswith("/pulls"):
     print(json.dumps({"number": 77}))
 elif method == "POST" and path.endswith("/labels") and "/issues/" not in path:
@@ -270,9 +272,40 @@ def test_dry_run_pushes_and_creates_nothing(w):
     assert [c['method'] for c in w.calls()] == ['GET']
 
 
-def test_workflow_is_manual_from_main_and_never_merges():
+def test_older_release_prs_are_superseded_newer_and_manual_ones_kept(w):
+    """MRK-150: nový release zavře starší otevřené release PR (jejich commit obsahuje), nic jiného."""
+    w.write('app.txt', 'v2\n')
+    old = w.commit('first change')
+    w.write('app.txt', 'v3\n')
+    sha = w.commit('second change')
+    w.write('app.txt', 'v4\n')
+    newer = w.commit('third change (not released yet)')
+    git('push', '-q', 'origin', f'{sha}:main', cwd=w.work, env=w.genv)
+    w.ci(sha)
+    data = json.loads((w.fake / 'api.json').read_text())
+    data['all_prs'] = [
+        {'number': 70, 'head': {'ref': f'release/main-{old[:12]}', 'sha': old}},       # starší → zavřít
+        {'number': 71, 'head': {'ref': 'stanislavpetr06/mrk-1-x', 'sha': old}},       # ruční PR → nechat
+        {'number': 72, 'head': {'ref': f'release/main-{newer[:12]}', 'sha': newer}},   # novější → nechat
+        {'number': 77, 'head': {'ref': f'release/main-{sha[:12]}', 'sha': sha}},       # sám sebe → nechat
+    ]
+    w.api(data)
+    r = w.run()
+    assert r.returncode == 0 and 'RELEASE_PR_SUPERSEDED: #70' in r.stdout, r.stdout + r.stderr
+    closed = [c['path'] for c in w.calls() if c['method'] == 'PATCH' and c['body'] == {'state': 'closed'}]
+    assert closed == ['repos/Mrkev13/jarvis/pulls/70']
+    comment = next(c for c in w.calls() if c['path'].endswith('/issues/70/comments'))
+    assert '#77' in comment['body']['body']
+    assert not any('/merge' in c['path'] for c in w.calls())
+
+
+def test_workflow_runs_after_green_ci_on_main_and_never_merges():
     text = WORKFLOW.read_text()
-    assert 'workflow_dispatch:' in text and 'pull_request' not in text.split('jobs:')[0].replace('pull-requests', '')
+    triggers = text.split('jobs:')[0]
+    assert 'workflow_dispatch:' in text and 'pull_request' not in triggers.replace('pull-requests', '')
+    assert 'workflow_run:' in triggers and 'workflows: [CI]' in triggers and 'branches: [main]' in triggers
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "github.event.workflow_run.event == 'push'" in text
     assert "github.ref != 'refs/heads/main'" in text
     assert '${{ inputs.sha }}' not in text.split('run:')[-1], 'input only via env (no script injection)'
     script = SCRIPT.read_text()

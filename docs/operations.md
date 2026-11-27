@@ -404,8 +404,10 @@ they need a proper isolation boundary for the reviewer and the fixer (see that i
 Production (Ubuntu) deploys the branch `mrk-101-ubuntu-production`, not `main`. Changes reach it only through a
 release PR:
 
-1. **Actions → Release to production → Run workflow** (branch `main`; optional SHA of a commit on `main`, empty =
-   current `main`).
+1. **Automatically (MRK-150)** after every successful CI push run on `main` (`workflow_run`, the exact commit CI
+   checked). The new release PR closes older open release PRs whose commit it contains (comment with a link; a newer
+   release or a non-release PR is never closed). By hand as before: **Actions → Release to production → Run
+   workflow** (branch `main`; optional SHA of a commit on `main`, empty = current `main`).
 2. The workflow (`.github/scripts/release_pr.py`) requires a successful push run of `ci.yml` for exactly that commit
    on `main` (otherwise it fails and creates nothing), pushes `release/main-<sha12>` pinned to that commit and opens
    or updates the PR into the production branch: source commit, included commits/PRs, Alembic heads, trial-merge
