@@ -146,7 +146,7 @@ def tank_names(db):
 
 INTEGRATIONS = ModuleIntegrations(
     changes=(ChangeSource("wot", areas=frozenset({"wot"}),
-                          from_event=event_changes({"milestone": "/wot"}, {wot_mastery_service.ACE_EVENT: "WoT: nové M"}),
+                          from_event=event_changes({"milestone": "/wot/milestones?milestone={id}"}, {wot_mastery_service.ACE_EVENT: "WoT: nové M"}),
                           from_activity=activity_changes({"wot_grind": "/wot?grind={id}",
                                                           "wot_replay": "/wot/replays?replay={id}"}, "/wot")),),
     search=(SearchSource("wot", 90, search_wot),),
