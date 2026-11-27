@@ -151,19 +151,29 @@ def pair(db: Session, code: str, name: str, platform: str = "windows", agent_ver
     row = None
     if len(clean) == CODE_LEN:
         row = db.query(DevicePairingCode).filter(DevicePairingCode.code_hash == hash_secret(clean)).first()
-    if row is None or row.used_at is not None or row.expires_at <= now:
-        raise DeviceError(401, "Párovací kód neplatí – vytvoř v Hubu nový.")
     platform = (platform or "").strip().lower()
-    if platform not in PLATFORMS:
+    if row is not None and platform not in PLATFORMS:
         raise DeviceError(422, "Nepodporovaná platforma.")
+    # Atomický claim (review #138): kód spotřebuje jen ten, komu podmíněný UPDATE změní řádek. Souběžný druhý
+    # požadavek (i se zastaralým načteným řádkem) dostane 0 řádků → 401; v PostgreSQL čeká na zámek řádku.
+    claimed = 0
+    if row is not None:
+        claimed = (db.query(DevicePairingCode)
+                   .filter(DevicePairingCode.id == row.id, DevicePairingCode.used_at.is_(None),
+                           DevicePairingCode.expires_at > now)
+                   .update({DevicePairingCode.used_at: now}, synchronize_session=False))
+    if claimed != 1:
+        raise DeviceError(401, "Párovací kód neplatí – vytvoř v Hubu nový.")
+    if db.query(Device).filter(Device.revoked_at.is_(None)).count() >= MAX_ACTIVE_DEVICES:
+        raise DeviceError(409, f"Spárovat jde nejvýš {MAX_ACTIVE_DEVICES} zařízení – nejdřív nějaké odvolej.")
     name = _clean_text(name, 80) or "Počítač"
     token = secrets.token_urlsafe(32)
     device = Device(name=name, platform=platform, agent_version=_clean_text(agent_version, 40) or None,
                     token_hash=hash_secret(token), created_at=now, last_seen_at=now)
     db.add(device)
     db.flush()
-    row.used_at = now
-    row.device_id = device.id
+    (db.query(DevicePairingCode).filter(DevicePairingCode.id == row.id)
+     .update({DevicePairingCode.device_id: device.id}, synchronize_session=False))
     append_domain_event(
         db, event_type="computer.device.paired", aggregate_type="device", aggregate_id=device.id,
         payload={"device_id": device.id, "platform": platform}, now=now,
@@ -190,7 +200,11 @@ def revoke(db: Session, device_id: int, now: datetime | None = None) -> Device:
     """Odvolá zařízení: token přestane platit hned, čekající příkazy propadnou. Řádek zůstává (historie příkazů)."""
     now = now or utc_now()
     device = get_device(db, device_id)
-    device.revoked_at = now
+    # CAS: souběžné druhé odvolání nic nezapíše ani nevytvoří druhou událost
+    if (db.query(Device).filter(Device.id == device.id, Device.revoked_at.is_(None))
+            .update({Device.revoked_at: now}, synchronize_session=False)) != 1:
+        raise DeviceError(404, "Zařízení neexistuje nebo bylo odvoláno.")
+    db.refresh(device)
     pending = (db.query(DeviceCommand)
                .filter(DeviceCommand.device_id == device.id, DeviceCommand.status.in_(("queued", "delivered"))).all())
     for cmd in pending:
@@ -316,10 +330,22 @@ def create_command(db: Session, device_id: int, kind: str, payload: dict | None,
     return cmd
 
 
-def _expire(db: Session, cmd: DeviceCommand, device: Device | None, now: datetime, reason: str) -> None:
-    cmd.status = "expired"
-    cmd.completed_at = now
-    cmd.result_message = reason[:300]
+def _transition(db: Session, cmd: DeviceCommand, from_states: tuple[str, ...], values: dict, extra=None) -> bool:
+    """Podmíněný přechod stavu (CAS): uspěje jen z očekávaného stavu; jinak se nic nezapíše (souběh vyhrál jiný)."""
+    q = db.query(DeviceCommand).filter(DeviceCommand.id == cmd.id, DeviceCommand.status.in_(from_states))
+    if extra is not None:
+        q = q.filter(extra)
+    if q.update(values, synchronize_session=False) != 1:
+        return False
+    db.refresh(cmd)
+    return True
+
+
+def _expire(db: Session, cmd: DeviceCommand, device: Device | None, now: datetime, reason: str,
+            from_states: tuple[str, ...] = ("queued", "delivered")) -> bool:
+    if not _transition(db, cmd, from_states, {DeviceCommand.status: "expired", DeviceCommand.completed_at: now,
+                                              DeviceCommand.result_message: reason[:300]}):
+        return False
     name = device.name if device else "?"
     append_domain_event(
         db, event_type="computer.command.expired", aggregate_type="command", aggregate_id=cmd.id,
@@ -328,6 +354,7 @@ def _expire(db: Session, cmd: DeviceCommand, device: Device | None, now: datetim
                                     f"Počítač „{name}“: {command_label(cmd.kind, cmd.payload or {}, device)} – propadlo",
                                     entity_type="device_command", entity_id=cmd.id, user_context="system"),
     )
+    return True
 
 
 def expire_stale(db: Session, now: datetime | None = None) -> int:
@@ -338,10 +365,12 @@ def expire_stale(db: Session, now: datetime | None = None) -> int:
             .filter(((DeviceCommand.status == "queued") & (DeviceCommand.expires_at <= now))
                     | ((DeviceCommand.status == "delivered") & (DeviceCommand.delivered_at <= now - DELIVERED_TIMEOUT)))
             .all())
+    done = 0
     for cmd in rows:
-        reason = "PC příkaz nevyzvedlo včas." if cmd.status == "queued" else "PC nepotvrdilo provedení."
-        _expire(db, cmd, db.get(Device, cmd.device_id), now, reason)
-    return len(rows)
+        state = cmd.status
+        reason = "PC příkaz nevyzvedlo včas." if state == "queued" else "PC nepotvrdilo provedení."
+        done += _expire(db, cmd, db.get(Device, cmd.device_id), now, reason, from_states=(state,))
+    return done
 
 
 def take_commands(db: Session, device: Device, now: datetime | None = None) -> list[dict]:
@@ -354,11 +383,12 @@ def take_commands(db: Session, device: Device, now: datetime | None = None) -> l
             .filter(DeviceCommand.device_id == device.id, DeviceCommand.status == "queued",
                     DeviceCommand.expires_at > now)
             .order_by(DeviceCommand.id).limit(10).all())
-    for cmd in rows:
-        cmd.status = "delivered"
-        cmd.delivered_at = now
-    db.flush()
-    return [{"id": c.id, "kind": c.kind, "payload": c.payload or {}, "expires_at": _iso(c.expires_at)} for c in rows]
+    # Atomický claim (review #138): příkaz vrátí jen poll, kterému podmíněný UPDATE queued→delivered změní řádek –
+    # dva souběžné polly tak nikdy nedostanou tentýž příkaz (agent by ho provedl dvakrát).
+    won = [c for c in rows
+           if _transition(db, c, ("queued",), {DeviceCommand.status: "delivered", DeviceCommand.delivered_at: now},
+                          extra=DeviceCommand.expires_at > now)]
+    return [{"id": c.id, "kind": c.kind, "payload": c.payload or {}, "expires_at": _iso(c.expires_at)} for c in won]
 
 
 def complete_command(db: Session, device: Device, command_id: int, ok: bool, message: str | None = None,
@@ -367,11 +397,10 @@ def complete_command(db: Session, device: Device, command_id: int, ok: bool, mes
     cmd = db.get(DeviceCommand, command_id)
     if cmd is None or cmd.device_id != device.id:
         raise DeviceError(404, "Příkaz neexistuje.")
-    if cmd.status != "delivered":
+    values = {DeviceCommand.status: "succeeded" if ok else "failed", DeviceCommand.completed_at: now,
+              DeviceCommand.result_message: _clean_text(message, 300) or None}
+    if not _transition(db, cmd, ("delivered",), values):
         raise DeviceError(409, "Příkaz už je uzavřený.")
-    cmd.status = "succeeded" if ok else "failed"
-    cmd.completed_at = now
-    cmd.result_message = _clean_text(message, 300) or None
     label = command_label(cmd.kind, cmd.payload or {}, device)
     summary = f"Počítač „{device.name}“: {label} – " + ("hotovo" if ok else f"selhalo{': ' + cmd.result_message if cmd.result_message else ''}")
     append_domain_event(

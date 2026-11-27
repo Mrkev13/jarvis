@@ -180,6 +180,113 @@ class DeviceServiceTestCase(unittest.TestCase):
         self.assertEqual(service.take_commands(self.db, b, NOW), [], "cizí příkazy nevidí")
 
 
+class ConcurrencyTestCase(unittest.TestCase):
+    """Review #138: dvě oddělené sessions nad souborovou SQLite. Session A si načte řádek (zastaralý stav v identity
+    mapě; pysqlite SELECT nezamyká), session B mezitím operaci dokončí a commitne – A pak nesmí uspět podruhé."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.engine = create_engine(f"sqlite+pysqlite:///{self.tmp.name}/hub.db", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        self.a, self.b = self.Session(), self.Session()
+
+    def tearDown(self):
+        self.a.close()
+        self.b.close()
+        self.engine.dispose()
+        self.tmp.cleanup()
+
+    def _code(self):
+        s = self.Session()
+        code = service.create_pairing_code(s, NOW)["code"]
+        s.commit()
+        s.close()
+        return code
+
+    def test_pairing_code_is_consumed_once_under_race(self):
+        code = self._code()
+        stale = self.a.query(DevicePairingCode).one()  # A přečetla nepoužitý kód
+        self.assertIsNone(stale.used_at)
+        service.pair(self.b, code, "PC B", now=NOW + timedelta(seconds=1))
+        self.b.commit()
+        with self.assertRaises(service.DeviceError) as ctx:
+            service.pair(self.a, code, "PC A", now=NOW + timedelta(seconds=2))
+        self.assertEqual(ctx.exception.status, 401)
+        self.a.rollback()
+        check = self.Session()
+        self.assertEqual(check.query(Device).count(), 1, "jeden kód = jedno zařízení")
+        self.assertEqual(check.query(DevicePairingCode).one().device_id, check.query(Device).one().id)
+        check.close()
+
+    def _online_device_with_command(self):
+        s = self.Session()
+        code = service.create_pairing_code(s, NOW)["code"]
+        device, _ = service.pair(s, code, "PC", now=NOW)
+        service.heartbeat(s, device, {}, APPS, now=NOW)
+        cmd = service.create_command(s, device.id, "power", {"action": "shutdown"}, now=NOW)
+        s.commit()
+        ids = device.id, cmd.id
+        s.close()
+        return ids
+
+    def test_two_polls_never_get_the_same_command(self):
+        """A načte queued příkazy, B je mezi čtením a zápisem A vyzvedne a commitne (přesné proložení z review)."""
+        from sqlalchemy.orm import Query
+        device_id, cmd_id = self._online_device_with_command()
+        real_all, state = Query.all, {"armed": True, "got_b": None}
+
+        def interleaved_all(query):
+            rows = real_all(query)
+            if state["armed"] and query.session is self.a and any(isinstance(r, DeviceCommand) for r in rows):
+                state["armed"] = False
+                state["got_b"] = service.take_commands(self.b, self.b.get(Device, device_id), NOW + timedelta(seconds=1))
+                self.b.commit()
+            return rows
+
+        with patch.object(Query, "all", interleaved_all):
+            got_a = service.take_commands(self.a, self.a.get(Device, device_id), NOW + timedelta(seconds=2))
+            self.a.commit()
+        self.assertFalse(state["armed"], "proložení proběhlo")
+        self.assertEqual([c["id"] for c in state["got_b"]], [cmd_id])
+        self.assertEqual(got_a, [], "příkaz už vyzvedl jiný poll")
+
+    def test_result_and_expiry_respect_current_state(self):
+        device_id, cmd_id = self._online_device_with_command()
+        service.take_commands(self.b, self.b.get(Device, device_id), NOW)
+        self.b.commit()
+        stale = self.a.get(DeviceCommand, cmd_id)  # A vidí delivered
+        self.assertEqual(stale.status, "delivered")
+        service.complete_command(self.b, self.b.get(Device, device_id), cmd_id, True, now=NOW + timedelta(seconds=1))
+        self.b.commit()
+        # A se zastaralým „delivered“ nesmí výsledek přepsat ani nechat příkaz propadnout
+        with self.assertRaises(service.DeviceError) as ctx:
+            service.complete_command(self.a, self.a.get(Device, device_id), cmd_id, False, "x", now=NOW + timedelta(seconds=2))
+        self.assertEqual(ctx.exception.status, 409)
+        self.a.rollback()
+        self.assertFalse(service._expire(self.a, self.a.get(DeviceCommand, cmd_id), None, NOW, "x"))
+        self.a.commit()
+        check = self.Session()
+        self.assertEqual(check.get(DeviceCommand, cmd_id).status, "succeeded")
+        self.assertEqual(check.query(DomainEvent).filter_by(event_type="computer.command.completed").count(), 1)
+        self.assertEqual(check.query(DomainEvent).filter(DomainEvent.event_type.in_(
+            ["computer.command.failed", "computer.command.expired"])).count(), 0)
+        check.close()
+
+    def test_double_revoke_emits_one_event(self):
+        device_id, _cmd_id = self._online_device_with_command()
+        self.a.get(Device, device_id)  # A vidí aktivní zařízení
+        service.revoke(self.b, device_id, NOW)
+        self.b.commit()
+        with self.assertRaises(service.DeviceError):
+            service.revoke(self.a, device_id, NOW)
+        self.a.rollback()
+        check = self.Session()
+        self.assertEqual(check.query(DomainEvent).filter_by(event_type="computer.device.revoked").count(), 1)
+        check.close()
+
+
 class DeviceApiTestCase(unittest.TestCase):
     PIN = "4821"
 
