@@ -1007,12 +1007,14 @@ def add_wot_resource(request: WotResourceRequest):
         if existing:
             old_amount = float(existing.amount or 0.0)
             existing.amount = request.amount
+            existing.source, existing.updated_at = "manual", utc_now()  # MRK-105: odkud a kdy
             item_id = existing.id
             action_type = "update"
         else:
             item = WotResource(
                 resource=request.resource,
-                amount=request.amount
+                amount=request.amount,
+                source="manual", updated_at=utc_now(),  # MRK-105
             )
             db.add(item)
             db.flush()

@@ -8,6 +8,7 @@ import { GameImage } from "@/components/games/GameImage";
 import { CompletedGrinds } from "@/components/wot/CompletedGrinds";
 import { GrindRow } from "@/components/wot/GrindRow";
 import { MasteryTable } from "@/components/wot/MasteryTable";
+import { WargamingLink } from "@/components/wot/WargamingLink";
 import { MilestoneCard } from "@/components/wot/MilestoneCard";
 import { MilestoneForm } from "@/components/wot/MilestoneForm";
 import {
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiFetch, jsonBody } from "@/lib/api";
-import { formatNumber, plural, pragueDayKey } from "@/lib/format";
+import { formatDateTime, formatNumber, plural, pragueDayKey } from "@/lib/format";
 import { pulseJarvis } from "@/lib/jarvisSignals";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
@@ -52,18 +53,28 @@ import {
   type GrindDraft,
   type WotGrind,
   type WotMilestone,
+  displayResources,
+  type WotAccount,
   type WotResources,
 } from "@/lib/wot";
 
 const LOAD_ERROR = "Nepodařilo se načíst data z backendu.";
 
+/** MRK-105: odkud a kdy je hodnota zdroje. */
+function resourceHint(meta: { source: string | null; updated_at: string | null } | undefined): string | undefined {
+  if (!meta?.updated_at) return undefined;
+  return `${meta.source === "wargaming" ? "z Wargamingu" : "ručně"} · ${formatDateTime(meta.updated_at)}`;
+}
+
 export default function WotPage() {
   const resourcesRes = useApiResource<WotResources>("/wot/resources");
+  const accountRes = useApiResource<WotAccount>("/wot/account"); // MRK-105: propojení s Wargamingem
   const grindsRes = useApiResource<WotGrind[]>("/wot/grinds");
   // Game Enrichment B: historie splnění a milníky – vlastní zdroje, chyba jednoho nesmí shodit stránku
   const completedRes = useApiResource<CompletedGrind[]>("/wot/grinds/completed");
   const milestonesRes = useApiResource<WotMilestone[]>("/wot/milestones");
   const resources = resourcesRes.data ?? {};
+  const shown = displayResources(resources, accountRes.data); // MRK-105: částka + původ z jednoho snímku
   const grinds = grindsRes.data ?? [];
   const completions = completedRes.data ?? [];
   const milestones = sortMilestones(milestonesRes.data ?? []);
@@ -103,11 +114,12 @@ export default function WotPage() {
   const refreshing = resourcesRes.refreshing || grindsRes.refreshing;
 
   async function loadData() {
-    await Promise.all([resourcesRes.reload(), grindsRes.reload()]);
+    // MRK-105: i snímek účtu – po ručním zápisu musí zobrazená částka i „ručně · čas“ sedět
+    await Promise.all([resourcesRes.reload(), grindsRes.reload(), accountRes.reload()]);
   }
 
   function openResourceForm() {
-    setResourceDraft(resources);
+    setResourceDraft(Object.fromEntries(RESOURCE_KEYS.map((k) => [k, shown[k].amount])) as WotResources);
     setShowResourceForm(true);
   }
 
@@ -364,10 +376,12 @@ export default function WotPage() {
                       {RESOURCE_LABELS[key]}
                     </span>
                   }
-                  value={formatNumber(resources[key])}
+                  value={formatNumber(shown[key].amount)}
+                  hint={resourceHint(shown[key])}
                 />
               ))}
             </StatGrid>
+            <WargamingLink account={accountRes.data} onChange={() => Promise.all([accountRes.reload(), resourcesRes.reload()])} />
 
             {showResourceForm && (
               <form id="wot-resource-form" onSubmit={handleResourceSubmit} className="mt-4 space-y-4 border-t border-line-subtle pt-4">
