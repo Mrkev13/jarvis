@@ -35,6 +35,7 @@ import { apiFetch, jsonBody } from "@/lib/api";
 import { formatDateTime, formatNumber, plural, pragueDayKey } from "@/lib/format";
 import { pulseJarvis } from "@/lib/jarvisSignals";
 import { setPendingReplay } from "@/lib/pendingReplay";
+import { compactNumber, pct, type WotStats } from "@/lib/wotStats";
 import { prefersReducedMotion } from "@/lib/motion";
 import {
   activeGrinds,
@@ -73,6 +74,7 @@ export default function WotPage() {
   // Game Enrichment B: historie splnění a milníky – vlastní zdroje, chyba jednoho nesmí shodit stránku
   const completedRes = useApiResource<CompletedGrind[]>("/wot/grinds/completed");
   const milestonesRes = useApiResource<WotMilestone[]>("/wot/milestones");
+  const todayStats = useApiResource<WotStats>("/wot/stats?period=today"); // MRK-153: karta „Dnes ve WoT“
   const resources = resourcesRes.data ?? {};
   const shown = displayResources(resources, accountRes.data); // MRK-105: částka + původ z jednoho snímku
   const grinds = grindsRes.data ?? [];
@@ -347,7 +349,7 @@ export default function WotPage() {
             {milestonesRes.loading ? (
               <LoadingState lines={1} label="Počítám Mka…" />
             ) : milestonesRes.status === "error" ? (
-              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – milníky níže ukážou chybu.</p>
+              <p className="text-sm text-ink-muted">Počítadlo se nepodařilo načíst – zkus obnovit stránku.</p>
             ) : (
               <>
                 <StatGrid cols={2}>
@@ -375,7 +377,7 @@ export default function WotPage() {
                     ) : null}
                   </ul>
                 ) : (
-                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem nahoře.</p>
+                  <p className="mt-3 text-sm text-ink-muted">Zatím žádné Mko. Přidej první tlačítkem Přidat Mko níže.</p>
                 )}
               </>
             )}
@@ -550,6 +552,32 @@ export default function WotPage() {
               )}
             </div>
           </PageSection>
+
+          {/* ===== DNES VE WOT (MRK-153) – souhrn dne, grafy a období na /wot/stats ===== */}
+          <Card as="section" aria-labelledby="wot-today-stats" data-section="wot-today-stats">
+            <CardHeader
+              title={<span id="wot-today-stats">Dnes ve WoT</span>}
+              description="Automaticky z Wargaming API – bitvy, hodnocení a zdroje v čase."
+              actions={<ButtonLink href="/wot/stats" size="sm" variant="secondary">Statistiky a grafy</ButtonLink>}
+            />
+            {todayStats.data ? (
+              todayStats.data.summary.battles > 0 ? (
+                <StatGrid cols={4}>
+                  <MetricCard label="Bitvy" value={todayStats.data.summary.battles.toLocaleString("cs-CZ")} />
+                  <MetricCard label="Výhry" value={pct(todayStats.data.summary.win_rate)} />
+                  <MetricCard label="Ø damage" value={compactNumber(todayStats.data.summary.avg_damage)} />
+                  <MetricCard label="Hodnocení" value={todayStats.data.rating_now?.toLocaleString("cs-CZ") ?? "–"}
+                    hint={todayStats.data.rating_change ? `${todayStats.data.rating_change > 0 ? "+" : ""}${todayStats.data.rating_change} dnes` : undefined} />
+                </StatGrid>
+              ) : (
+                <p className="text-sm text-ink-muted">Dnes zatím žádné bitvy{todayStats.data.rating_now ? ` · hodnocení ${todayStats.data.rating_now.toLocaleString("cs-CZ")}` : ""}.</p>
+              )
+            ) : todayStats.status === "error" ? (
+              <p className="text-sm text-ink-muted">Statistiky se nepodařilo načíst.</p>
+            ) : (
+              <LoadingState lines={1} label="Načítám dnešní statistiky…" />
+            )}
+          </Card>
 
           {/* ===== SPLNĚNÉ GRINDY ===== */}
           {completedRes.status === "error" ? (
