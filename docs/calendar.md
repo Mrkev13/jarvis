@@ -307,7 +307,9 @@ No own model and **no migration** (`backend/modules/calendar/timetable.py`):
 - Every other week (MRK-142): `every` 1 | 2 + `week_anchor` (any day of a week with class; the UI sends Monday of
   this or next week, like attendance MRK-112 – no odd/even ISO week numbers, schools count them differently). Stored as
   `RRULE:FREQ=WEEKLY;INTERVAL=2`; the first occurrence is the first matching weekday from „Platí od“ in an anchor-parity
-  week. Entries expose `every`, `week_anchor` (Monday of the first occurrence) and `next_date`.
+  week. Entries expose `every`, `week_anchor` (Monday of the first occurrence), `next_date` (MRK-147: the actual next
+  class – cancelled occurrences skipped, a moved one counts on its new day) and `next_regular_date` (next series
+  occurrence without an exception, the default day of the exception form).
 - Removing a class cancels the series and its moved occurrences (no hard delete), so nothing orphaned stays in the
   calendar. Every change appends `calendar.event.*` with its Activity
   projection in the same transaction.

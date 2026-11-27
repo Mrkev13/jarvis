@@ -261,7 +261,8 @@ function timetableEntry(id, b) {
     kind: b.kind, kind_label: TIMETABLE_KINDS[b.kind] ?? null, room: b.room ?? null, weekday: Number(b.weekday), weekday_label: TT_DAYS[Number(b.weekday)],
     start: b.start, end: b.end, valid_from: b.valid_from, valid_until: b.valid_until,
     // MRK-142: rytmus (každý / ob týden); next_date backend počítá z dneška, mock ho jen opakuje z fixture
-    every: Number(b.every) === 2 ? 2 : 1, week_anchor: b.week_anchor ?? b.valid_from, next_date: b.next_date ?? null, exceptions: [] };
+    every: Number(b.every) === 2 ? 2 : 1, week_anchor: b.week_anchor ?? b.valid_from, next_date: b.next_date ?? null,
+    next_regular_date: b.next_regular_date ?? b.next_date ?? null, exceptions: [] };
 }
 function TIMETABLE() {
   const subjects = fixture("school-subjects") || [];
