@@ -230,6 +230,8 @@ async def lifespan(_app: FastAPI):
         print("[startup] RUN_ALEMBIC_UPGRADE_AT_STARTUP=false – schéma musí být na head (alembic upgrade head).")
     _seed_default_subjects()
     _recover_pending_actions()
+    from deploy_notice import announce_from_env
+    announce_from_env(SessionLocal)  # MRK-151: „Hub aktualizován“ jednou na nový APP_COMMIT
     start_scheduler()
     try:
         yield
