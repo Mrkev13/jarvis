@@ -15,6 +15,7 @@ import type { WidgetDef } from "./dashboardLayout.ts";
 import { HABITS_UI } from "../modules/habits/manifest.ts";
 import { WOW_UI } from "../modules/wow/manifest.ts";
 import { TRADING_UI } from "../modules/trading/manifest.ts";
+import { COMPUTER_UI } from "../modules/computer/manifest.ts";
 import { FITNESS_UI } from "../modules/fitness/manifest.ts";
 import { CALENDAR_UI } from "../modules/calendar/manifest.ts";
 
@@ -55,6 +56,7 @@ export const MODULES: ModuleDef[] = [
   { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
   { id: "wow", label: "World of Warcraft", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["wow_character", "wow_wish", "wow_collection"], routes: ["/wow"], quickAddKinds: [] },
   { id: "trading", label: "Trading", defaultEnabled: true, implemented: true, capabilities: ["nav"], entityTypes: [], routes: ["/trading"], quickAddKinds: [] },
+  { id: "computer", label: "Počítač", defaultEnabled: true, implemented: true, capabilities: [], entityTypes: [], routes: ["/devices", "/device"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),
@@ -105,6 +107,7 @@ export const MODULE_UI: Record<string, ModuleUi> = {
   habits: HABITS_UI,
   wow: WOW_UI,
   trading: TRADING_UI,
+  computer: COMPUTER_UI,
   calendar: CALENDAR_UI,
   fitness: FITNESS_UI,
   goals: {

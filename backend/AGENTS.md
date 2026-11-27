@@ -865,6 +865,13 @@ print(_hash_pin("123456"))
 - Bez `ai_context` / kontextu / toolů – finance do AI nejde (MRK-60, test `test_module_has_no_ai_surface`).
   Podrobně `docs/trading.md`, testy `tests/test_trading_module.py`.
 
+## 23e. Počítač – Jarvis na PC (MRK-155, `modules/computer/`, migrace 0037)
+
+- Párování PC s agentem (jednorázový kód → token zařízení, v DB jen hash), heartbeat se stavem a fronta potvrzených
+  příkazů (`launch_app` / `power` / `power_cancel`, platnost 2 min) – `/devices/*` (session) a `/device/agent/*`
+  (jen `Authorization: Bearer <token zařízení>`; `main.require_auth` tuhle cestu propouští, hlídá ji
+  `router.require_device`). Podrobně `docs/computer.md`, testy `tests/test_computer_devices.py`.
+
 ## 24. Architektonická pravidla (Roadmap 3.5)
 
 - Trvalé principy: `docs/architecture-principles.md`; audit a dluh: `docs/architecture-audit.md`;
