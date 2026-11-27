@@ -7,7 +7,7 @@ o nasazení se vyřeší, ať ve zvonečku visí jen poslední. Text je pevný: 
 Bez `APP_COMMIT` (lokální vývoj, testy) se nic neděje.
 
 Zastavené nasazení (MRK-151, část 2): updater na serveru po každém běhu zapíše stavový soubor (bez tajemství) do
-adresáře, který má backend připojený jen pro čtení (`UPDATER_STATUS_FILE`, výchozí `/data/ops/updater-status.json`).
+adresáře, který backend vidí (`UPDATER_STATUS_FILE`, výchozí `/data/backups/ops/updater-status.json`).
 `check_updater_status` (hodinový job) z něj pošle jedno oznámení „Nasazení čeká na migraci“ / „Nasazení se zastavilo“
 na cílový commit a po úspěšném nasazení ho vyřeší. Důvod je jen kód z allowlistu, text oznámení je pevný.
 """
@@ -70,14 +70,16 @@ STATUS_MAX_AGE = timedelta(hours=2)  # updater běží každých 10 min; starš�
 REASONS = {
     "MIGRATION_HEAD_CHANGED": ("Nasazení čeká na migraci",
                                "Nová verze mění databázi – spusť ruční migraci (deploy-migration-v3.sh --check / --apply)."),
-    "CI_NOT_GREEN": ("Nasazení se zastavilo", "CI pro produkční commit není zelené."),
-    "BACKUP_NOT_FRESH": ("Nasazení se zastavilo", "Chybí čerstvá záloha – updater nic nenasadí."),
-    "DEPLOY_FAILED": ("Nasazení se nepovedlo", "Updater nasazení vrátil zpět – podrobnosti v journalu updateru."),
+    "BACKUP_NOT_FRESH": ("Nasazení se zastavilo", "Chybí čerstvá ověřená záloha – updater nic nenasadí."),
+    "DEPLOY_FAILED": ("Nasazení se nepovedlo", "Updater nové verze skončil chybou – podrobnosti v journalu updateru."),
 }
+# Stav „waiting“ (CI nové verze ještě běží) i jiné neznámé stavy se ignorují – nic nehlásit, nic nevyřešit.
 
 
 def _status_path() -> str:
-    return env_str("UPDATER_STATUS_FILE", "/data/ops/updater-status.json")
+    # zapisuje deploy/v3/lib/updater-status-v3.sh do /srv/standa-hub-data/backups/ops (už připojené jako /data/backups;
+    # backend ho jen čte, žádná změna compose šablony)
+    return env_str("UPDATER_STATUS_FILE", "/data/backups/ops/updater-status.json")
 
 
 def read_updater_status(path: str | None = None, now: datetime | None = None) -> dict | None:

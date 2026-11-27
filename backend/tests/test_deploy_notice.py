@@ -110,6 +110,7 @@ def test_unknown_reason_is_generic_and_nothing_raw_leaks(Session, tmp_path):
     json.dumps({"at": "2026-11-27T08:00:00Z", "target": B, "state": "blocked", "reason": "MIGRATION_HEAD_CHANGED"}),  # starý
     json.dumps({"at": "2026-11-27T11:50:00Z", "target": "abc", "state": "blocked"}),
     json.dumps({"at": "2026-11-27T11:50:00Z", "target": B, "state": "weird"}),
+    json.dumps({"at": "2026-11-27T11:50:00Z", "target": B, "state": "waiting"}),  # CI nové verze ještě běží
     "x" * 5000,
 ])
 def test_missing_stale_or_invalid_status_is_ignored(Session, tmp_path, content):

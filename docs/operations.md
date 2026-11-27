@@ -428,8 +428,10 @@ picks it up on its 10-minute pass.
   previous one. A restart on the same commit sends nothing. Without `APP_COMMIT` (local, tests) nothing happens
   (`backend/deploy_notice.py`).
 - **Nasazení čeká na migraci / se zastavilo:** the hourly job reads the updater status file `UPDATER_STATUS_FILE`
-  (default `/data/ops/updater-status.json`, a read-only mount of `/srv/standa-hub-data/ops`). Format, no secrets:
-  `{"at": ISO UTC, "state": "blocked"|"ok", "reason": "MIGRATION_HEAD_CHANGED"|…, "target": <40 hex>}`. A blocked
+  (default `/data/backups/ops/updater-status.json` = `/srv/standa-hub-data/backups/ops` on the host, already mounted;
+  no compose template change). Format, no secrets: `{"at": ISO UTC, "state": "blocked"|"ok"|"waiting", "reason":
+  "MIGRATION_HEAD_CHANGED"|"BACKUP_NOT_FRESH"|"DEPLOY_FAILED"|"", "target": <40 hex>}`. `waiting` (CI of the new
+  version still running) is ignored. A blocked
   state = one `ops_alert` per target and reason. `ok` resolves it. A file older than 2 h, invalid or missing = nothing.
   Unknown reasons become a generic „Nasazení se nepovedlo“. The writer on the server is a `deploy/v3` change (a PR
   into the production branch, `manual-merge`). Until it is installed, the file simply does not exist.
