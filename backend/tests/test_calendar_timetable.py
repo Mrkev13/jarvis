@@ -314,3 +314,19 @@ def test_next_date_weekly_unchanged_without_exceptions(db, monkeypatch):
     monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 10, 14))
     entry = create(db)
     assert (entry["next_date"], entry["next_regular_date"]) == ("2026-10-19", "2026-10-19")
+
+
+def test_next_date_includes_move_past_the_series_end(db, monkeypatch):
+    """Regrese (review #128): poslední hodina 30. 11. přesunutá na 2. 12. (za konec platnosti) je „příště“
+    i 29. 11., i 1. 12. (po konci série) – stejně jako ji ukazuje Kalendář."""
+    entry = create(db)  # pondělí, platnost do 30. 11.
+    timetable.set_exception(db, entry["id"], {"date": "2026-11-30", "action": "move", "new_date": "2026-12-02",
+                                              "start": "09:00", "end": "10:30"})
+    db.commit()
+    assert "2026-12-02 09:00" in local_starts(window(db, date(2026, 11, 28), date(2026, 12, 7)))
+    for today in (date(2026, 11, 29), date(2026, 12, 1)):
+        monkeypatch.setattr(timetable, "today_local", lambda t=today: t)
+        listed = timetable.list_entries(db)["entries"][0]
+        assert (listed["next_date"], listed["next_regular_date"]) == ("2026-12-02", None), today
+    monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 12, 3))
+    assert timetable.list_entries(db)["entries"][0]["next_date"] is None

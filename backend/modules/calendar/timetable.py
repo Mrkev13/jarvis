@@ -105,8 +105,8 @@ def _monday(d: date) -> date:
 
 
 def _next_dates(row: CalendarEvent, overrides: list[CalendarEvent], today: date) -> tuple[str | None, str | None]:
-    """→ (next_date, next_regular_date), oba od dneška včetně, až do konce platnosti série
-    (několik zrušených hodin za sebou nesmí „příště“ schovat).
+    """→ (next_date, next_regular_date), oba od dneška včetně. Pravidelné výskyty až do konce platnosti série
+    (několik zrušených hodin za sebou nesmí „příště“ schovat); přesunuté hodiny kdykoli od dneška.
 
     `next_date` = skutečná příští hodina (MRK-147): zrušené výskyty přeskočí, přesunutý výskyt se počítá v novém
     termínu. `next_regular_date` = příští výskyt podle série BEZ výjimky – výchozí den pro formulář výjimky
@@ -114,12 +114,13 @@ def _next_dates(row: CalendarEvent, overrides: list[CalendarEvent], today: date)
     lo = datetime.combine(today, time.min, tzinfo=APP_TZ)
     until = _until(row) or row.starts_at.astimezone(APP_TZ).date()
     hi = datetime.combine(until + timedelta(days=1), time.min, tzinfo=APP_TZ)
-    if hi <= lo:
-        return None, None
-    found = _instances(row, lo.astimezone(timezone.utc), hi.astimezone(timezone.utc), 120)  # rok týdně = 53
     excepted = {o.recurrence_id for o in overrides}
-    regular = sorted(v for k, v in found.items() if isinstance(v, datetime) and k not in excepted)
-    moved = [o.starts_at for o in overrides if o.status == "active" and lo <= o.starts_at < hi]
+    regular = []
+    if hi > lo:  # konec platnosti omezuje jen pravidelné opakování …
+        found = _instances(row, lo.astimezone(timezone.utc), hi.astimezone(timezone.utc), 120)  # rok týdně = 53
+        regular = sorted(v for k, v in found.items() if isinstance(v, datetime) and k not in excepted)
+    # … přesunutá hodina platí v novém termínu, i když leží za koncem série (review #128)
+    moved = [o.starts_at for o in overrides if o.status == "active" and o.starts_at >= lo]
     actual = sorted([*regular, *moved])
     day = lambda v: v.astimezone(APP_TZ).date().isoformat()  # noqa: E731
     return (day(actual[0]) if actual else None), (day(regular[0]) if regular else None)
