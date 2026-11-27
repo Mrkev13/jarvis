@@ -83,6 +83,14 @@ export function compactNumber(v: number | null | undefined): string {
   return Math.round(v).toLocaleString("cs-CZ");
 }
 
+/** Popisek značky osy podle kroku – sousední značky se nikdy neslijí do stejného textu („13 k, 13 k“). */
+export function tickLabel(v: number, step: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000 && step >= 100_000) return `${(v / 1_000_000).toLocaleString("cs-CZ", { maximumFractionDigits: step >= 1_000_000 ? 0 : 1 })} M`;
+  if (a >= 10_000 && step >= 1000) return `${(v / 1000).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} k`;
+  return Math.round(v).toLocaleString("cs-CZ");
+}
+
 export function pct(v: number | null | undefined): string {
   return v == null ? "–" : `${v.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} %`;
 }

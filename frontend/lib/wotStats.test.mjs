@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changeLabel, compactNumber, dayLabel, linePoints, nearestIndex, niceTicks, pct, stepPath } from "./wotStats.ts";
+import { changeLabel, compactNumber, dayLabel, linePoints, nearestIndex, niceTicks, pct, stepPath, tickLabel } from "./wotStats.ts";
 
 test("nice axis ticks", () => {
   assert.deepEqual(niceTicks(5100, 5180), [5100, 5120, 5140, 5160, 5180]);
@@ -37,4 +37,14 @@ test("labels", () => {
   assert.equal(changeLabel([{ at: "a", value: 2_000_000 }, { at: "b", value: 800_000 }]), "−1,2 M");
   assert.equal(changeLabel([{ at: "a", value: 1 }, { at: "b", value: 1 }]), "beze změny");
   assert.equal(changeLabel([{ at: "a", value: 1 }]), null);
+});
+
+test("axis tick labels never merge into the same text", () => {
+  const sp = (x) => x.replace(/\s/g, " ");
+  const gold = niceTicks(11875, 13125, 3);
+  const labels = gold.map((t) => sp(tickLabel(t, gold[1] - gold[0])));
+  assert.equal(new Set(labels).size, labels.length, labels.join(" | "));
+  assert.equal(sp(tickLabel(8_600_000, 100_000)), "8,6 M");
+  assert.equal(sp(tickLabel(190_000, 5000)), "190 k");
+  assert.equal(sp(tickLabel(5240, 10)), "5 240");
 });

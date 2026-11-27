@@ -1,17 +1,19 @@
 "use client";
 
 import { useId, useState } from "react";
-import { compactNumber, linePoints, nearestIndex, niceTicks, pointLabel, SERIES_COLOR, stepPath, type WotPoint } from "@/lib/wotStats";
+import { compactNumber, linePoints, nearestIndex, niceTicks, pointLabel, SERIES_COLOR, stepPath, tickLabel, type WotPoint } from "@/lib/wotStats";
 
-const PLOT = { w: 320, h: 140, l: 44, r: 8, t: 10, b: 22 };
+const SMALL = { w: 320, h: 140, l: 44, r: 8, t: 10, b: 22 };
+const WIDE = { w: 720, h: 200, l: 48, r: 8, t: 10, b: 22 }; // přes celou šířku karty – stejná velikost písma jako malé grafy
 
 /**
  * MRK-153: jedna veličina v čase (hodnocení, kredity…). Schodovitá 2px čára – stav se mění skokem při synchronizaci.
  * Jedna osa, jedna barva (bez legendy – název nese nadpis), najetí / dotyk ukáže hodnotu a čas, pod grafem tabulka.
  */
-export function StepChart({ title, points, from, to, format = compactNumber, testId }: {
-  title: string; points: WotPoint[]; from: string | null; to: string; format?: (v: number) => string; testId?: string;
+export function StepChart({ title, points, from, to, format = compactNumber, testId, wide = false }: {
+  title: string; points: WotPoint[]; from: string | null; to: string; format?: (v: number) => string; testId?: string; wide?: boolean;
 }) {
+  const PLOT = wide ? WIDE : SMALL;
   const [hover, setHover] = useState<number | null>(null);
   const titleId = useId();
   if (points.length === 0) {
@@ -48,7 +50,7 @@ export function StepChart({ title, points, from, to, format = compactNumber, tes
           {ticks.map((t) => (
             <g key={t}>
               <line x1={PLOT.l} x2={PLOT.w - PLOT.r} y1={sy(t)} y2={sy(t)} className="stroke-line-subtle" strokeWidth="1" />
-              <text x={PLOT.l - 6} y={sy(t) + 3.5} textAnchor="end" className="fill-ink-muted text-[10px] tabular-nums">{compactNumber(t)}</text>
+              <text x={PLOT.l - 6} y={sy(t) + 3.5} textAnchor="end" className="fill-ink-muted text-[10px] tabular-nums">{tickLabel(t, ticks.length > 1 ? ticks[1] - ticks[0] : 1)}</text>
             </g>
           ))}
           <text x={PLOT.l} y={PLOT.h - 6} className="fill-ink-muted text-[10px]">{pointLabel(new Date(x0).toISOString())}</text>

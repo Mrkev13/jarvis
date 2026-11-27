@@ -110,7 +110,7 @@ function Stats() {
               title={<span id="wot-stats-rating">Hodnocení</span>}
               description={`Osobní hodnocení Wargamingu${s.rating_change != null ? ` · ${s.rating_change > 0 ? "+" : ""}${s.rating_change} za období` : ""}. WN8 přijde později.`}
             />
-            <StepChart title="Osobní hodnocení" points={s.rating} from={s.from} to={s.to} format={(v) => Math.round(v).toLocaleString("cs-CZ")} testId="wot-rating-chart" />
+            <StepChart title="Osobní hodnocení" points={s.rating} from={s.from} to={s.to} format={(v) => Math.round(v).toLocaleString("cs-CZ")} testId="wot-rating-chart" wide />
           </Card>
 
           <Card as="section" aria-labelledby="wot-stats-resources">
