@@ -113,3 +113,19 @@ def test_passed_credit_inactive_subject_and_calendar_off(db):
     with patch("module_registry.current_access", lambda: ModuleAccess({"calendar": False})):
         assert run(db, 11, 7) == 0
     assert run(db, 11, 7) == 1
+
+
+@pytest.mark.parametrize("hh,mm", [(17, 5), (18, 5), (19, 5)])  # 5 / 65 / 125 min po konci
+def test_long_block_lab_is_not_skipped(db, hh, mm):
+    """Regrese (review #133): laborka 08:00–18:00 Praha (konec 17:00 UTC) – výběr podle začátku ji nesmí vynechat."""
+    lesson(db, kind="lab", start="08:00", end="18:00")
+    assert run(db, hh, mm) == 1
+
+
+def test_moved_long_lesson_is_not_skipped(db):
+    e = lesson(db)
+    timetable.set_exception(db, e["id"], {"date": TUESDAY.isoformat(), "action": "move", "new_date": "2026-11-10",
+                                          "start": "07:00", "end": "19:30"})
+    db.commit()
+    assert run(db, 18, 0) == 0, "přesunutý blok ještě běží (konec 18:30 UTC)"
+    assert run(db, 20, 30) == 1

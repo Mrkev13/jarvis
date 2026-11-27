@@ -22,7 +22,10 @@ from time_utils import APP_TZ, utc_now
 NOTIFICATION_TYPE = "attendance_prompt"
 SOURCE_TYPE = "attendance"
 WINDOW = timedelta(hours=3)        # hodinový krok + rezerva; starší hodiny se nedoptávají
-LONGEST_LESSON = timedelta(hours=6)
+# Hodina rozvrhu (i přesunutá) leží celá v jednom dni: začátek i konec jsou HH:MM toho dne a konec > začátek
+# (timetable._validated / set_exception). Nejdelší možná hodina je tedy kratší než den – 25 h pokryje i den se
+# změnou času. Výběr podle začátku s tímto zpětným rozsahem tak nevynechá žádnou hodinu končící v okně (review #133).
+LONGEST_LESSON = timedelta(hours=25)
 
 
 def prompt_key(subject_id: int, week) -> str:
