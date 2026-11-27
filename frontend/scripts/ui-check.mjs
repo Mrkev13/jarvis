@@ -4008,6 +4008,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check(`rozvrh ${label}: sekce na stránce Škola`, await eventually(async () => (await tt.locator("[data-timetable-entry]").count()) === 2, 5000));
     check(`rozvrh ${label}: po dnech (pondělí, středa)`, (await tt.locator("[data-timetable-day]").evaluateAll((els) => els.map((e) => e.getAttribute("data-timetable-day")))).join(",") === "0,2");
     check(`rozvrh ${label}: hodina s časem, druhem a místností`, /09:00–10:30.*Dějepis[\s\S]*Přednáška · S5/.test(await tt.locator('[data-timetable-entry="1"]').innerText()));
+    check(`rozvrh ${label}: cvičení ob týden s příštím termínem`, /Cvičení · K2 · ob týden · příště 9\. 12\./.test(await tt.locator('[data-timetable-entry="2"]').innerText()));
     check(`rozvrh ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
     await tt.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${OUT}school-timetable-${label}.png` });
@@ -4026,8 +4027,10 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("rozvrh: konec před začátkem = chyba", await eventually(async () => (await form.innerText()).includes("Konec musí být po začátku"), 2000));
     await form.getByLabel("Do", { exact: true }).fill("15:30");
     await form.getByLabel("Místnost").fill("A1");
+    await form.getByLabel("Kdy").selectOption("this");
     await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
     check("rozvrh: nová hodina ve čtvrtek", await eventually(async () => (await tt.locator('[data-timetable-day="3"]').innerText().catch(() => "")).includes("14:00–15:30"), 4000));
+    check("rozvrh: nová hodina ob týden (MRK-142)", (await tt.locator('[data-timetable-day="3"]').innerText()).includes("ob týden"));
     await tt.getByRole("button", { name: /^Zrušit nebo přesunout jednu hodinu: .* Pondělí 09:00/ }).click();
     const exc = tt.locator("[data-timetable-exception]");
     await exc.getByLabel("Která hodina (datum)").fill("2026-12-07");

@@ -18,6 +18,11 @@ export type TimetableEntry = {
   end: string;
   valid_from: string;
   valid_until: string;
+  /** MRK-142: 1 = každý týden, 2 = ob týden; `week_anchor` = pondělí týdne prvního výskytu. */
+  every: 1 | 2;
+  week_anchor: string;
+  /** Nejbližší výskyt podle série (YYYY-MM-DD) do 3 týdnů, nebo null. */
+  next_date: string | null;
   exceptions: TimetableException[];
 };
 export type TimetableResponse = { entries: TimetableEntry[]; kinds: Record<TimetableKind, string> };
@@ -30,12 +35,33 @@ export const KIND_OPTIONS: { value: TimetableKind; label: string }[] = [
   { value: "lab", label: "Laboratoř" },
 ];
 
+/** MRK-142: rytmus ve formuláři – stejně jako docházka (MRK-112) podle týdne s výukou, ne „liché / sudé“ číslo týdne. */
+export type TimetableRhythm = "weekly" | "this" | "next";
+export const RHYTHM_OPTIONS: { value: TimetableRhythm; label: string }[] = [
+  { value: "weekly", label: "Každý týden" },
+  { value: "this", label: "Ob týden – výuka tento týden" },
+  { value: "next", label: "Ob týden – výuka příští týden" },
+];
+
 export type TimetableDraft = {
   subject_id: string; kind: TimetableKind; weekday: string; start: string; end: string; room: string;
-  valid_from: string; valid_until: string;
+  valid_from: string; valid_until: string; rhythm: TimetableRhythm;
 };
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Pondělí týdne daného dne (YYYY-MM-DD). */
+export function mondayOf(dayIso: string): string {
+  const d = new Date(`${dayIso}T12:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return iso(d);
+}
+
+function addDays(dayIso: string, days: number): string {
+  const d = new Date(`${dayIso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return iso(d);
+}
 
 /** Výchozí platnost = aktuální semestr: zimní 1. 10. – 31. 1., letní 15. 2. – 31. 5.; jinak od dneška 4 měsíce. */
 export function defaultSemester(todayIso: string): { valid_from: string; valid_until: string } {
@@ -52,11 +78,18 @@ export function defaultSemester(todayIso: string): { valid_from: string; valid_u
 }
 
 export function emptyDraft(todayIso: string, subjectId = ""): TimetableDraft {
-  return { subject_id: subjectId, kind: "lecture", weekday: "0", start: "09:00", end: "10:30", room: "", ...defaultSemester(todayIso) };
+  return { subject_id: subjectId, kind: "lecture", weekday: "0", start: "09:00", end: "10:30", room: "", rhythm: "weekly",
+    ...defaultSemester(todayIso) };
 }
 
-export function draftFrom(e: TimetableEntry): TimetableDraft {
+export function draftFrom(e: TimetableEntry, todayIso: string): TimetableDraft {
+  let rhythm: TimetableRhythm = "weekly";
+  if (e.every === 2) {
+    const weeks = Math.round((Date.parse(`${mondayOf(todayIso)}T12:00:00Z`) - Date.parse(`${e.week_anchor}T12:00:00Z`)) / 604800000);
+    rhythm = weeks % 2 === 0 ? "this" : "next";
+  }
   return {
+    rhythm,
     subject_id: e.subject_id != null ? String(e.subject_id) : "", kind: e.kind ?? "lecture", weekday: String(e.weekday),
     start: e.start, end: e.end, room: e.room ?? "", valid_from: e.valid_from, valid_until: e.valid_until,
   };
@@ -72,10 +105,13 @@ export function validateDraft(d: TimetableDraft): string | null {
   return null;
 }
 
-export function draftPayload(d: TimetableDraft) {
+export function draftPayload(d: TimetableDraft, todayIso: string) {
+  const thisWeek = mondayOf(todayIso);
   return {
     subject_id: Number(d.subject_id), kind: d.kind, weekday: Number(d.weekday), start: d.start, end: d.end,
     room: d.room.trim() || null, valid_from: d.valid_from, valid_until: d.valid_until,
+    every: d.rhythm === "weekly" ? 1 : 2,
+    week_anchor: d.rhythm === "weekly" ? null : d.rhythm === "this" ? thisWeek : addDays(thisWeek, 7),
   };
 }
 
