@@ -1,0 +1,21 @@
+[package]
+name = "jarvis-agent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Jarvis pro PC – agent Standa Hubu (MRK-156)"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# token zařízení ve Správci pověření Windows (na jiných OS jen pro překlad / vývoj)
+keyring = { version = "3", features = ["windows-native"] }
+sysinfo = "0.32"
+dirs = "5"

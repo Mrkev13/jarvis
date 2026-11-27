@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Okno nastavení: jen vlastní příkazy aplikace (invoke) a základní události okna.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
