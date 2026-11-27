@@ -284,3 +284,100 @@ class TestRest(AccountBase):
             f.filter(record)
         self.assertNotIn(TOKEN, record.getMessage())
         self.assertIn("access_token=***&a=1", record.getMessage())
+
+
+class TestConcurrentRotation(AccountBase):
+    """Regrese (review #125): dva běhy se starým tokenem – vítěz prodlouží token, poražený dostane token_invalid
+    a NESMÍ přepsat novou verzi propojení na expired. Souborová SQLite = skutečně oddělená spojení."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import NullPool
+        from database import Base
+        self.tmp = tempfile.mkdtemp(prefix="wot-race-")
+        self.race_engine = create_engine(f"sqlite+pysqlite:///{self.tmp}/race.db", poolclass=NullPool)
+        Base.metadata.create_all(self.race_engine)
+        self.Race = sessionmaker(bind=self.race_engine, autoflush=False)
+
+    def tearDown(self):
+        import shutil
+        self.race_engine.dispose()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        super().tearDown()
+
+    def run_sync(self, now):
+        db = self.Race()
+        try:
+            out = svc.sync(db, wg.client(), now=now, force=True)
+            db.commit()
+            return out
+        finally:
+            db.close()
+
+    def test_losing_run_does_not_expire_the_new_token(self):
+        db = self.Race()
+        svc.connect(db, {"state": self.start(), "status": "ok", "access_token": TOKEN, "account_id": str(ACCOUNT),
+                         "expires_at": str(unix(NOW + timedelta(days=14)))}, wg.client(), now=NOW,
+                    monotonic=lambda: self.mono[0])
+        db.commit()
+        db.close()
+        later = NOW + timedelta(days=12)  # oba běhy chtějí prodlužovat
+        inner = {}
+        original = self.api.__call__
+
+        def interleave(method, url, **kw):
+            if url.endswith("auth/prolongate/") and not inner:
+                inner["started"] = True
+                inner["out"] = self.run_sync(later)  # druhý běh mezitím prodlouží a commitne
+            return original(method, url, **kw)
+
+        with patch.object(wg, "client", lambda: wg.Client(wg.load_config(), interleave)):
+            first = self.run_sync(later)
+        self.assertEqual(inner["out"]["result"], "ok")
+        self.assertEqual(first["result"], "superseded")
+        db = self.Race()
+        try:
+            link = db.query(WotAccountLink).one()
+            self.assertEqual((link.status, link.last_error), ("connected", None))
+            self.assertEqual(Fernet(KEY.encode()).decrypt(link.token_enc.encode()).decode(), TOKEN2)
+            self.assertEqual(link.expires_at, NOW + timedelta(days=20))
+            self.assertFalse([a for a in db.query(ActivityLog) if "vypršelo" in a.summary])
+        finally:
+            db.close()
+
+    def test_reconnect_during_sync_wins(self):
+        db = self.Race()
+        svc.connect(db, {"state": self.start(), "status": "ok", "access_token": TOKEN, "account_id": str(ACCOUNT),
+                         "expires_at": str(unix(NOW + timedelta(days=14)))}, wg.client(), now=NOW,
+                    monotonic=lambda: self.mono[0])
+        db.commit()
+        db.close()
+        original = self.api.__call__
+        done = {}
+
+        def interleave(method, url, **kw):
+            if url.endswith("account/info/") and not done:
+                done["x"] = True
+                self.api.valid = {TOKEN2}  # uživatel se mezitím znovu přihlásil novým tokenem
+                d2 = self.Race()
+                svc.connect(d2, {"state": self.start(), "status": "ok", "access_token": TOKEN2,
+                                 "account_id": str(ACCOUNT), "expires_at": str(unix(NOW + timedelta(days=14)))},
+                            wg.Client(wg.load_config(), original), now=NOW + timedelta(hours=1),
+                            monotonic=lambda: self.mono[0])
+                d2.commit()
+                d2.close()
+            return original(method, url, **kw)
+
+        with patch.object(wg, "client", lambda: wg.Client(wg.load_config(), interleave)):
+            out = self.run_sync(NOW + timedelta(hours=1))
+        self.assertEqual(out["result"], "superseded")
+        db = self.Race()
+        try:
+            link = db.query(WotAccountLink).one()
+            self.assertEqual(link.status, "connected")
+            self.assertEqual(Fernet(KEY.encode()).decrypt(link.token_enc.encode()).decode(), TOKEN2)
+        finally:
+            db.close()

@@ -47,7 +47,7 @@ const GET_ROUTES = {
   "/work/sessions": () => fixture("work-sessions"),
   "/work/summary": () => fixture("work-summary"),
   "/wot/grinds": () => wotState.grinds,
-  "/wot/resources": () => fixture("wot-resources"),
+  "/wot/resources": () => ({ ...fixture("wot-resources"), ...wotAccount.amounts }),  // MRK-105: + synchronizované
   "/activity": () => fixture("activity"),
   // Roadmap 4G: GET /today ze skutečného today_service (ne 11. 10. 2026 14:30 Praha). Prázdný den a částečnou
   // chybu (fixtures/today-empty.json, today-partial.json) podstrkuje ui-check přes page.route.
@@ -274,12 +274,14 @@ function TIMETABLE() {
 }
 let timetableState = TIMETABLE();
 // MRK-105: propojení s Wargamingem
-const WOT_ACCOUNT = () => ({ connected: false, last_sync_at: null });
+// amounts = hodnoty po synchronizaci; bump = příští GET /wot/account (pomalý) je „načte z Wargamingu“;
+// loginFail = příští POST /wot/account/login selže (opakování bez obnovení stránky)
+const WOT_ACCOUNT = () => ({ connected: false, last_sync_at: null, amounts: {}, bump: null, loginFail: false });
 let wotAccount = WOT_ACCOUNT();
 function wotAccountStatus() {
   const src = wotAccount.connected ? "wargaming" : "manual";
   const at = wotAccount.connected ? wotAccount.last_sync_at : "2026-10-09T17:30:00+00:00";
-  const res = fixture("wot-resources") || {};
+  const res = { ...(fixture("wot-resources") || {}), ...wotAccount.amounts };
   return { configured: true, missing: [], connected: wotAccount.connected, status: wotAccount.connected ? "connected" : "not_connected",
     expires_at: wotAccount.connected ? "2026-10-25T08:00:00+00:00" : null, last_sync_at: wotAccount.last_sync_at, error: null, error_text: null,
     resources: Object.fromEntries(Object.entries(res).map(([k, v]) => [k, { amount: v, source: src, updated_at: at }])) };
@@ -862,17 +864,33 @@ createServer(async (req, res) => {
     return respond(200, { ok: true });
   }
   // MRK-105: propojení s Wargamingem (tvar wot_account_service.status) – výchozí stav nepropojeno
-  if (url.pathname === "/__mock/wot-account/reset") { wotAccount = WOT_ACCOUNT(); return respond(200, { ok: true }); }
-  if (url.pathname === "/wot/account" && req.method === "GET") return respond(200, wotAccountStatus(), 120);
+  if (url.pathname === "/__mock/wot-account/reset") {
+    wotAccount = { ...WOT_ACCOUNT(), loginFail: url.searchParams.get("loginFail") === "1" };
+    return respond(200, { ok: true });
+  }
+  if (url.pathname === "/__mock/wot-account/bump") { wotAccount.bump = Number(url.searchParams.get("credits")); return respond(200, { ok: true }); }
+  if (url.pathname === "/wot/account" && req.method === "GET") {
+    if (wotAccount.connected && wotAccount.bump) {  // synchronizace změní částku; odpověď přijde až po rychlém /wot/resources
+      wotAccount.amounts = { ...wotAccount.amounts, credits: wotAccount.bump };
+      wotAccount.bump = null;
+      wotAccount.last_sync_at = "2026-10-11T09:00:00+00:00";
+      return respond(200, { ...wotAccountStatus(), sync: "ok" }, 1200);
+    }
+    return respond(200, { ...wotAccountStatus(), sync: "skipped" }, 120);
+  }
   if (url.pathname === "/wot/account" && req.method === "DELETE") { wotAccount = WOT_ACCOUNT(); return respond(200, wotAccountStatus(), 200); }
   if (url.pathname === "/wot/account/login" && req.method === "POST") {
+    if (wotAccount.loginFail) {
+      wotAccount.loginFail = false;
+      return respond(503, { detail: { code: "unavailable", message: "Wargaming API teď neodpovídá." } }, 150);
+    }
     const b = body || {};
     return respond(200, { location: `${b.origin}/wot/connect/mock-state-0123456789abcdef?status=ok&access_token=mocktoken0123456789&account_id=1&expires_at=1800000000` }, 150);
   }
   if (url.pathname === "/wot/account/connect" && req.method === "POST") {
     const b = body || {};
     if (b.state !== "mock-state-0123456789abcdef" || b.status !== "ok") return respond(400, { detail: { code: "bad_state", message: "Odkaz z přihlášení je neplatný nebo starý – zkus propojení znovu." } }, 200);
-    wotAccount = { connected: true, last_sync_at: "2026-10-11T08:00:00+00:00" };
+    wotAccount = { ...wotAccount, connected: true, last_sync_at: "2026-10-11T08:00:00+00:00" };
     return respond(200, wotAccountStatus(), 250);
   }
   if (url.pathname === "/wot/account/sync" && req.method === "POST") return respond(200, { ...wotAccountStatus(), sync: "ok" }, 250);

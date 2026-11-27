@@ -379,3 +379,16 @@ export function connectBody(state: string, query: URLSearchParams) {
     expires_at: query.get("expires_at") ?? "",
   };
 }
+
+/**
+ * MRK-105 (review #125): částka i původ / čas z JEDNOHO snímku. `GET /wot/account` nejdřív synchronizuje
+ * s Wargamingem a vrací částky po synchronizaci; rychlejší `GET /wot/resources` může mít ještě staré číslo.
+ * Proto má přednost snímek z účtu (částka + metadata spolu), `/wot/resources` je jen záloha, když účet chybí.
+ */
+export function displayResources(resources: WotResources, account: WotAccount | null | undefined) {
+  return Object.fromEntries(RESOURCE_KEYS.map((k) => {
+    const meta = account?.resources?.[k];
+    return [k, meta ? { amount: meta.amount, source: meta.source, updated_at: meta.updated_at }
+      : { amount: resources[k], source: null, updated_at: null }];
+  })) as Record<ResourceKey, { amount: number | undefined; source: "manual" | "wargaming" | null; updated_at: string | null }>;
+}

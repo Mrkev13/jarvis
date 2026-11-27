@@ -214,19 +214,33 @@ def _apply(db: Session, values: dict, now: datetime, user_context: str) -> list[
     return changes
 
 
-def _expire(db: Session, link: WotAccountLink, now: datetime) -> dict:
-    if link.status != "expired":
-        link.status, link.last_error = "expired", "token_invalid"
-        log_activity(db, "wot", "update", "WoT: přihlášení k Wargamingu vypršelo – propoj účet znovu",
-                     entity_type="WotAccountLink", entity_id=link.id, user_context="system",
-                     dedupe_key=f"wot-token-expired:{link.id}:{link.connected_at.isoformat()}")
+def _cas(db: Session, link: WotAccountLink, snapshot: str, values: dict, *, connected_only: bool = False) -> bool:
+    """Zápis přihlašovacích údajů jen proti verzi tokenu, kterou tento běh načetl (compare-and-set). Souběžný běh
+    (scheduler, otevření /wot, ruční sync, nové propojení) mezitím mohl token prodloužit nebo vyměnit – pak se nic
+    nepřepíše a starý token nesmí zneplatnit novou verzi propojení."""
+    q = db.query(WotAccountLink).filter(WotAccountLink.id == link.id, WotAccountLink.token_enc == snapshot)
+    if connected_only:
+        q = q.filter(WotAccountLink.status == "connected")
+    won = q.update(values, synchronize_session=False) == 1
     db.flush()
+    db.expire(link)
+    return won
+
+
+def _expire(db: Session, link: WotAccountLink, snapshot: str) -> dict:
+    link_id, connected_at = link.id, link.connected_at
+    if not _cas(db, link, snapshot, {"status": "expired", "last_error": "token_invalid"}, connected_only=True):
+        return {"result": "superseded"}
+    log_activity(db, "wot", "update", "WoT: přihlášení k Wargamingu vypršelo – propoj účet znovu",
+                 entity_type="WotAccountLink", entity_id=link_id, user_context="system",
+                 dedupe_key=f"wot-token-expired:{link_id}:{connected_at.isoformat()}")
     return {"result": "token_invalid"}
 
 
 def sync(db: Session, client: wot_wargaming.Client | None, now: datetime | None = None, force: bool = False,
          user_context: str = "scheduler") -> dict:
-    """→ {result: ok | skipped | not_connected | <kód chyby>, changes?}. Nic necommituje."""
+    """→ {result: ok | skipped | not_connected | superseded | <kód chyby>, changes?}. Nic necommituje.
+    `superseded` = jiný běh mezitím token prodloužil / vyměnil; tento běh nic nepřepsal."""
     now = now or utc_now()
     link = _link(db)
     if link is None or link.status != "connected":
@@ -235,25 +249,27 @@ def sync(db: Session, client: wot_wargaming.Client | None, now: datetime | None 
         return {"result": "not_configured"}
     if not force and link.last_sync_at and now - link.last_sync_at < SYNC_EVERY:
         return {"result": "skipped"}
+    snapshot, account_id, expires_at = link.token_enc, int(link.account_id), link.expires_at
     token = _decrypt(link)
     if token is None:  # chybí / změnil se WOT_TOKEN_KEY → token nejde přečíst
-        link.last_error = "key_missing"
-        db.flush()
+        _cas(db, link, snapshot, {"last_error": "key_missing"})
         return {"result": "key_missing"}
-    if link.expires_at <= now:
-        return _expire(db, link, now)
+    if expires_at <= now:
+        return _expire(db, link, snapshot)
     try:
-        if link.expires_at - now < PROLONG_BEFORE:
+        if expires_at - now < PROLONG_BEFORE:
             token, expires = client.prolongate(token)
-            link.token_enc, link.expires_at = _encrypt(token), _from_unix(expires)
-        values = client.private_resources(int(link.account_id), token)
+            new_enc = _encrypt(token)
+            if not _cas(db, link, snapshot, {"token_enc": new_enc, "expires_at": _from_unix(expires)}, connected_only=True):
+                return {"result": "superseded"}
+            snapshot = new_enc
+        values = client.private_resources(account_id, token)
     except wot_wargaming.WargamingError as exc:
         if exc.code == "token_invalid":
-            return _expire(db, link, now)
-        link.last_error = exc.code
-        db.flush()
+            return _expire(db, link, snapshot)
+        _cas(db, link, snapshot, {"last_error": exc.code})
         return {"result": exc.code}
-    link.last_sync_at, link.last_error = now, None
+    _cas(db, link, snapshot, {"last_sync_at": now, "last_error": None})
     changes = _apply(db, values, now, user_context)
     return {"result": "ok", "changes": len(changes)}
 

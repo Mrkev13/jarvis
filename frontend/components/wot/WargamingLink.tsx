@@ -29,9 +29,10 @@ export function WargamingLink({ account, onChange }: { account: WotAccount | nul
       await onChange();
     } catch (err) {
       setError(errorMessage(err, "Akce se nepovedla."));
-    } finally {
-      setBusy((b) => (b === "login" ? b : null));
+      setBusy(null); // i po chybě přihlášení jde propojení zopakovat bez obnovení stránky
+      return;
     }
+    setBusy(null); // (úspěšné přihlášení odešlo na Wargaming už výše – tlačítko zůstane „Přesměrovávám…“)
   }
 
   const expired = account.status === "expired";

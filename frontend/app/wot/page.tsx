@@ -53,6 +53,7 @@ import {
   type GrindDraft,
   type WotGrind,
   type WotMilestone,
+  displayResources,
   type WotAccount,
   type WotResources,
 } from "@/lib/wot";
@@ -60,7 +61,7 @@ import {
 const LOAD_ERROR = "Nepodařilo se načíst data z backendu.";
 
 /** MRK-105: odkud a kdy je hodnota zdroje. */
-function resourceHint(meta: WotAccount["resources"][keyof WotAccount["resources"]]): string | undefined {
+function resourceHint(meta: { source: string | null; updated_at: string | null } | undefined): string | undefined {
   if (!meta?.updated_at) return undefined;
   return `${meta.source === "wargaming" ? "z Wargamingu" : "ručně"} · ${formatDateTime(meta.updated_at)}`;
 }
@@ -73,6 +74,7 @@ export default function WotPage() {
   const completedRes = useApiResource<CompletedGrind[]>("/wot/grinds/completed");
   const milestonesRes = useApiResource<WotMilestone[]>("/wot/milestones");
   const resources = resourcesRes.data ?? {};
+  const shown = displayResources(resources, accountRes.data); // MRK-105: částka + původ z jednoho snímku
   const grinds = grindsRes.data ?? [];
   const completions = completedRes.data ?? [];
   const milestones = sortMilestones(milestonesRes.data ?? []);
@@ -112,11 +114,12 @@ export default function WotPage() {
   const refreshing = resourcesRes.refreshing || grindsRes.refreshing;
 
   async function loadData() {
-    await Promise.all([resourcesRes.reload(), grindsRes.reload()]);
+    // MRK-105: i snímek účtu – po ručním zápisu musí zobrazená částka i „ručně · čas“ sedět
+    await Promise.all([resourcesRes.reload(), grindsRes.reload(), accountRes.reload()]);
   }
 
   function openResourceForm() {
-    setResourceDraft(resources);
+    setResourceDraft(Object.fromEntries(RESOURCE_KEYS.map((k) => [k, shown[k].amount])) as WotResources);
     setShowResourceForm(true);
   }
 
@@ -373,8 +376,8 @@ export default function WotPage() {
                       {RESOURCE_LABELS[key]}
                     </span>
                   }
-                  value={formatNumber(resources[key])}
-                  hint={resourceHint(accountRes.data?.resources?.[key])}
+                  value={formatNumber(shown[key].amount)}
+                  hint={resourceHint(shown[key])}
                 />
               ))}
             </StatGrid>
