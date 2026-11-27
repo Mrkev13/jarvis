@@ -132,9 +132,10 @@ class Client:
         raise WargamingError("not_found")
 
     def tank_stats(self, account_id: int) -> list[dict]:
-        """→ [{tank_id, mark_of_mastery, battles}] všech odehraných tanků. Skrytý profil (data null) = `private`."""
-        data = self._get("tanks/stats", {"account_id": str(account_id),
-                                         "fields": "tank_id,mark_of_mastery,all.battles"})
+        """→ [{tank_id, mark_of_mastery, battles, wins, damage, frags, xp, survived}] všech odehraných tanků
+        (MRK-153: kumulativní součty `all.*` pro statistiky po bitvách). Skrytý profil (data null) = `private`."""
+        data = self._get("tanks/stats", {"account_id": str(account_id), "fields": (
+            "tank_id,mark_of_mastery,all.battles,all.wins,all.damage_dealt,all.frags,all.xp,all.survived_battles")})
         rows = data.get(str(account_id)) if isinstance(data, dict) else None
         if rows is None:
             raise WargamingError("private")
@@ -145,10 +146,23 @@ class Client:
             if not isinstance(r, dict) or not _int(r.get("tank_id")):
                 continue
             mastery = r.get("mark_of_mastery")
-            battles = (r.get("all") or {}).get("battles") if isinstance(r.get("all"), dict) else None
+            totals = r.get("all") if isinstance(r.get("all"), dict) else {}
+            num = lambda key: _int(totals.get(key), 0, 10**12)  # noqa: E731
             out.append({"tank_id": r["tank_id"], "mark_of_mastery": mastery if mastery in (0, 1, 2, 3, 4) else 0,
-                        "battles": battles if _int(battles) is not None else None})
+                        "battles": num("battles"), "wins": num("wins"), "damage": num("damage_dealt"),
+                        "frags": num("frags"), "xp": num("xp"), "survived": num("survived_battles")})
         return out
+
+    def account_rating(self, account_id: int) -> dict:
+        """MRK-153: veřejné osobní hodnocení Wargamingu → {global_rating, battles} (jen application_id)."""
+        data = self._get("account/info", {"account_id": str(account_id),
+                                          "fields": "global_rating,statistics.all.battles"})
+        row = data.get(str(account_id)) if isinstance(data, dict) else None
+        if not isinstance(row, dict):
+            raise WargamingError("not_found")
+        stats = row.get("statistics") if isinstance(row.get("statistics"), dict) else {}
+        all_ = stats.get("all") if isinstance(stats.get("all"), dict) else {}
+        return {"global_rating": _int(row.get("global_rating"), 0, 10**6), "battles": _int(all_.get("battles"), 0, 10**9)}
 
     # ---------- MRK-105: soukromá data přes access_token ----------
 

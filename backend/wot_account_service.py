@@ -23,6 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 import wot_mastery_service
+import wot_stats_service
 import wot_wargaming
 from activity_service import log_activity
 from env_config import env_str
@@ -167,6 +168,7 @@ def connect(db: Session, data: dict, client: wot_wargaming.Client | None, now: d
     log_activity(db, "wot", "update", "WoT: účet propojen s Wargamingem – zdroje se budou načítat samy",
                  entity_type="WotAccountLink", entity_id=link.id, user_context="manual")
     _apply(db, values, now, "manual")
+    wot_stats_service.record_resources(db, values, now)  # MRK-153
     return status(db, client)
 
 
@@ -273,6 +275,7 @@ def sync(db: Session, client: wot_wargaming.Client | None, now: datetime | None 
     if not _cas(db, link, snapshot, {"last_sync_at": now, "last_error": None}, connected_only=True):
         return {"result": "superseded"}
     changes = _apply(db, values, now, user_context)
+    wot_stats_service.record_resources(db, values, now)  # MRK-153: zdroje v čase (jen při změně)
     return {"result": "ok", "changes": len(changes)}
 
 

@@ -2081,8 +2081,13 @@ const byAlt = (list, alt) => list.find((x) => x.alt === alt);
   // Game Enrichment B: splněné grindy jsou v historii (malá miniatura), milníky mají tank taky
   const done = await imageState(page, '[data-section="wot-completed"] [data-game-image="tank"]');
   check("wot obrázky: splněný grind v historii má tank (mimo manifest = monogram)", byAlt(done, "Tank T-100 LT")?.state === "image" && byAlt(done, "Tank Progetto 65")?.state === "fallback" && done.length === 2, JSON.stringify(done.map((x) => [x.alt, x.state])));
+  // MRK-152: milníky jsou na vlastní stránce
+  await page.goto(BASE + "/wot/milestones", { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   const ms = await imageState(page, '[aria-label="Milníky"] [data-game-image="tank"]');
   check("wot obrázky: milník (Mko) má tank z manifestu", ms.length === 4 && byAlt(ms, "Tank Kranvagn")?.state === "image" && ms.every((x) => x.state === "image" || x.state === "fallback"), JSON.stringify(ms.map((x) => [x.alt, x.state])));
+  await page.goto(BASE + "/wot", { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
   const res = await imageState(page, '#resources [data-game-image="resource"]');
   check("wot měny: oficiální ikona u všech čtyř měn", res.length === 4 && res.every((x) => x.state === "image" && x.loaded === true), JSON.stringify(res.map((x) => [x.state, x.src])));
   check("wot měny: Credits / Gold / Bonds / Free XP ze správného souboru", JSON.stringify(res.map((x) => x.src).sort()) === JSON.stringify(["wot/resources/bonds.svg", "wot/resources/credits.svg", "wot/resources/free_xp.svg", "wot/resources/gold.svg"]), JSON.stringify(res.map((x) => x.src)));
@@ -2183,11 +2188,16 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
   await wotReset();
   const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
   await page.waitForTimeout(600);
-  // pořadí sekcí: zdroje → aktivní grindy → splněné → Mka
+  // MRK-152: pořadí přehledu: zdroje → Mka → aktivní grindy → splněné; milníky a tabulka M-ek jsou na podstránkách
   const order = await page.evaluate(() =>
-    ["#resources", '[aria-label="Aktivní grindy"]', '[data-section="wot-completed"]', '[aria-label="Milníky"]'].map((sel) => document.querySelector(sel)?.getBoundingClientRect().top ?? -1),
+    ["#resources", '[data-section="wot-mastery"]', '[aria-label="Aktivní grindy"]', '[data-section="wot-completed"]'].map((sel) => document.querySelector(sel)?.getBoundingClientRect().top ?? -1),
   );
-  check("wot B: pořadí zdroje → aktivní → splněné → Mka", order.every((y, i) => y >= 0 && (i === 0 || y > order[i - 1])), JSON.stringify(order.map(Math.round)));
+  check("wot B: pořadí zdroje → Mka → aktivní → splněné", order.every((y, i) => y >= 0 && (i === 0 || y > order[i - 1])), JSON.stringify(order.map(Math.round)));
+  check("wot přehled: milníky a tabulka M-ek nejsou na přehledu", (await page.locator('[aria-label="Milníky"]').count()) === 0 && (await page.locator("[data-wot-mastery]").count()) === 0);
+  const links = page.locator("[data-wot-mastery-links]");
+  check("wot přehled: odkazy z M-ek", (await links.getByRole("link", { name: "M-ka všech tanků" }).getAttribute("href")) === "/wot/mastery"
+    && (await links.getByRole("link", { name: "M-ka a nejlepší bitvy" }).getAttribute("href")) === "/wot/milestones"
+    && (await links.getByRole("button", { name: "Přidat Mko" }).count()) === 1 && (await links.getByRole("button", { name: "Přidat replay" }).count()) === 1);
   check("wot B: aktivní seznam bez splněných grindů", (await activeRow(page, "Kranvagn").count()) === 1 && (await activeRow(page, "T-100 LT").count()) === 0 && (await activeRow(page, "Progetto 65").count()) === 0);
   check("wot B: průběh grindu z výchozího XP", (await activeRow(page, "Kranvagn").innerText()).includes("75 %") && (await page.getByRole("progressbar", { name: /Kranvagn: 75 %/ }).count()) === 1);
   check("wot B: grind bez výchozího XP nemá vymyšlený průběh", (await activeRow(page, "TVP T 50/51").getByRole("progressbar").count()) === 0);
@@ -2242,6 +2252,9 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
   check("wot B: splnění je nahoře v historii (stabilní id)", hist.length === 3 && /^completion:\d+$/.test(hist[0]) && hist[0] !== "completion:1", hist.join(","));
   check("wot B: nové splnění zvýrazněné v historii", (await page.locator(`[data-completion="${hist[0]}"]`).innerText()).includes("Kranvagn"));
 
+  // MRK-152: milníky jsou na /wot/milestones
+  await page.goto(BASE + "/wot/milestones", { waitUntil: "networkidle" });
+  await page.locator('[aria-label="Milníky"] > li').first().waitFor({ timeout: 5000 }).catch(() => undefined);
   // Mka: oblíbené první, pak podle data; značka Legendární; bez screenshotů žádná galerie
   check("wot B: Mka – oblíbené první, pak nejnovější", JSON.stringify(await milestoneIds(page)) === JSON.stringify(["2", "1", "3", "4"]), (await milestoneIds(page)).join(","));
   check("wot B: oblíbené = viditelná značka", (await milestoneCard(page, "2").getByTestId("favorite-marker").count()) === 1 && (await page.getByTestId("favorite-marker").count()) === 1);
@@ -2344,7 +2357,7 @@ const milestoneCard = (page, id) => page.locator(`[aria-label="Milníky"] > li[d
 }
 for (const [width, label] of [[1366, "laptop"], [390, "mobile"]]) {
   await wotReset();
-  const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+  const { ctx, page, errors } = await open("/wot/milestones", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
   await page.waitForTimeout(600);
   check(`wot B @${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
   const cards = await page.locator('[aria-label="Milníky"] > li').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
@@ -2381,7 +2394,7 @@ const settle = (page, ms = 500) => page.waitForTimeout(ms);
 {
   await wotReset();
   const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
-  await page.locator('[data-section="wot-replays"]').getByRole("link", { name: "Otevřít knihovnu" }).click();
+  await page.locator("[data-wot-mastery-links]").getByRole("link", { name: "Knihovna replayů" }).click();
   await page.waitForURL("**/wot/replays", { timeout: 5000 }).catch(() => undefined);
   await settle(page, 800);
   check("replaye: /wot → knihovna", page.url().endsWith("/wot/replays") && (await page.getByRole("heading", { level: 1 }).innerText()) === "Knihovna replayů", page.url());
@@ -2526,7 +2539,7 @@ const settle = (page, ms = 500) => page.waitForTimeout(ms);
 {
   // Mko → replay (odkaz na kartě milníku) a globální vyhledávání → detail replaye
   await wotReset();
-  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  const { ctx, page, errors } = await open("/wot/milestones", { setup: (p) => withGameAssets(p) });
   const link = page.locator('[aria-label="Milníky"] > li[data-milestone="1"]').getByTestId("milestone-replay-link");
   check("replaye: karta Mka ukazuje propojený replay", (await link.count()) === 1 && (await page.getByTestId("milestone-replay-link").count()) === 2);
   await link.getByRole("link").click();
@@ -3913,7 +3926,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   const MOCK = "http://127.0.0.1:8000/__mock";
   await fetch(`${MOCK}/wot/reset`, { method: "POST" });
   for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
-    const { ctx, page, errors } = await open("/wot", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+    const { ctx, page, errors } = await open("/wot/mastery", { width, height: width < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
     const card = page.locator("[data-wot-mastery]");
     const rows = card.getByRole("list", { name: "Odznaky tanků" }).locator("li");
     check(`wot M-ka ${label}: tabulka zobrazená`, await eventually(async () => (await rows.count()) === 6, 5000));
@@ -3933,13 +3946,15 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await ctx.close();
   }
   {
-    const { ctx, page, errors } = await open("/wot", { width: 1366, height: 900, setup: (p) => withGameAssets(p) });
+    const { ctx, page, errors } = await open("/wot/mastery", { width: 1366, height: 900, setup: (p) => withGameAssets(p) });
     const card = page.locator("[data-wot-mastery]");
     await card.waitFor({ timeout: 5000 }).catch(() => undefined);
     await card.getByPlaceholder("např. Tiger").fill("lowe");
     check("wot M-ka: hledání bez diakritiky", await eventually(async () => (await card.getByRole("list", { name: "Odznaky tanků" }).locator("li").count()) === 1, 2000));
     await card.getByRole("button", { name: "Obnovit" }).click();
     check("wot M-ka: obnova ohlásí nové M", await eventually(async () => (await card.getByRole("status").innerText().catch(() => "")).includes("Nová M: 1"), 4000));
+    // MRK-152: milníky jsou na /wot/milestones
+    await page.goto(BASE + "/wot/milestones", { waitUntil: "networkidle" });
     const pending = page.locator('[data-testid="pending-replay"]');
     check("wot M-ka: nové M v milnících čeká na replay", await eventually(async () => (await pending.count()) === 1, 4000));
     check("wot M-ka: odkaz na nahrání replaye", (await page.locator('[data-testid="milestone-upload-replay"] a').getAttribute("href")) === "/wot/replays");
@@ -4128,6 +4143,72 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await ctx.close();
   }
   await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
+}
+
+// ===== 42. MRK-152: přehled WoT – „Přidat replay“ vybere soubor a knihovna ho nahraje (stejná cesta jako její tlačítko) =====
+{
+  await wotReset();
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  await page.locator("[data-wot-mastery-links]").waitFor({ timeout: 5000 }).catch(() => undefined);
+  await page.getByTestId("overview-replay-input").setInputFiles({ name: "20261005_2105_usa-A67_T57_58_08_ruinberg.wotreplay", mimeType: "application/octet-stream", buffer: REPLAY_FILE });
+  check("wot přehled: Přidat replay → knihovna replayů", await eventually(async () => new URL(page.url()).pathname === "/wot/replays", 5000), page.url());
+  check("wot přehled: replay se rovnou nahraje (kontrola údajů nebo hláška o duplikátu)", await eventually(async () =>
+    (await page.getByTestId("replay-form").count()) === 1 || (await page.getByTestId("replay-notice").count()) === 1, 6000));
+  check("wot přehled: ?upload=1 zmizí z adresy", await eventually(async () => !page.url().includes("upload=1"), 3000), page.url());
+  for (const [w, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    await page.setViewportSize({ width: w, height: w < 500 ? 844 : 900 });
+    await page.goto(BASE + "/wot", { waitUntil: "networkidle" });
+    check(`wot přehled ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wot-overview-${label}.png`, fullPage: true });
+  }
+  for (const path of ["/wot/mastery", "/wot/milestones"]) {
+    await page.goto(BASE + path, { waitUntil: "networkidle" });
+    check(`wot ${path}: odkaz zpět na přehled`, (await page.getByRole("link", { name: "← World of Tanks" }).count()) === 1);
+  }
+  check("wot přehled akce: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
+  await wotReset();
+}
+
+// ===== 43. MRK-153: statistiky WoT – období, souhrn, hodnocení a zdroje v čase, bitvy po dnech, tanky, karta na přehledu =====
+{
+  for (const [w, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/wot/stats", { width: w, height: w < 500 ? 844 : 900, setup: (p) => withGameAssets(p) });
+    await page.locator("[data-wot-stats]").waitFor({ timeout: 6000 }).catch(() => undefined);
+    const periods = page.locator("[data-wot-periods] button");
+    check(`wot statistiky ${label}: 6 období, výchozí týden`, (await periods.count()) === 6
+      && (await page.locator('[data-wot-periods] button[aria-pressed="true"]').innerText()) === "Týden");
+    check(`wot statistiky ${label}: souhrn týdne`, /24/.test(await page.locator('[aria-labelledby="wot-stats-summary"]').innerText()));
+    check(`wot statistiky ${label}: hodnocení a 4 grafy zdrojů`, (await page.getByTestId("wot-rating-chart").count()) === 1
+      && (await page.locator('[data-testid^="wot-resource-chart-"]').count()) === 4);
+    check(`wot statistiky ${label}: bitvy po dnech (7 dní)`, (await page.getByTestId("wot-daily").count()) === 1);
+    check(`wot statistiky ${label}: tabulka tanků`, (await page.locator("[data-wot-tanks] tbody tr").count()) === 3);
+    check(`wot statistiky ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}wot-stats-${label}.png`, fullPage: true });
+    if (w > 500) {
+      // najetí na graf hodnocení ukáže hodnotu a čas
+      const hit = page.getByTestId("wot-rating-chart").locator("[data-chart-hit]");
+      const box = await hit.boundingBox();
+      await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
+      check("wot statistiky: tooltip hodnocení", await eventually(async () => (await page.getByTestId("wot-rating-chart").locator("[data-chart-tooltip]").count()) === 1, 2000));
+      // přepnutí období: Celkově → bez grafu po dnech, URL ?period=all
+      await page.locator("[data-wot-periods]").getByRole("button", { name: "Celkově" }).click();
+      check("wot statistiky: celkově", await eventually(async () => (await page.locator('[data-wot-stats="all"]').count()) === 1, 4000)
+        && page.url().includes("period=all") && (await page.getByTestId("wot-daily").count()) === 0
+        && /1\s?520/.test(await page.locator('[aria-labelledby="wot-stats-summary"]').innerText()));
+      await page.locator("[data-wot-periods]").getByRole("button", { name: "Půl roku" }).click();
+      check("wot statistiky: půl roku přizná neúplná data", await eventually(async () => (await page.locator("[data-wot-partial]").count()) === 1, 4000));
+      await page.screenshot({ path: `${OUT}wot-stats-half.png`, fullPage: true });
+    }
+    check(`wot statistiky ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  const { ctx, page, errors } = await open("/wot", { setup: (p) => withGameAssets(p) });
+  const card = page.locator('[data-section="wot-today-stats"]');
+  check("wot přehled: karta Dnes ve WoT", await eventually(async () => /6/.test(await card.innerText().catch(() => "")), 5000));
+  check("wot přehled: odkaz na statistiky", (await card.getByRole("link", { name: "Statistiky a grafy" }).getAttribute("href")) === "/wot/stats");
+  check("wot přehled karta: bez chyb JS", errors.length === 0, errors.join("; "));
+  await ctx.close();
 }
 
 await browser.close();

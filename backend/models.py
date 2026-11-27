@@ -237,6 +237,45 @@ class WotResource(Base):
     updated_at = Column(DateTime, nullable=True)
 
 
+class WotTankSnapshot(Base):
+    """MRK-153: kumulativní statistiky tanku z `tanks/stats` (všechny bitvy) v čase synchronizace. Řádek vzniká jen
+    při změně (nový tank nebo jiný počet bitev) – rozdíl dvou stavů = odehrané bitvy a jejich výsledky."""
+    __tablename__ = "wot_tank_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    tank_id = Column(Integer, nullable=False)
+    taken_at = Column(DateTime, nullable=False)  # naive UTC
+    battles = Column(Integer, nullable=False)
+    wins = Column(Integer, nullable=True)
+    damage = Column(BigInteger, nullable=True)
+    frags = Column(Integer, nullable=True)
+    xp = Column(BigInteger, nullable=True)
+    survived = Column(Integer, nullable=True)
+
+
+Index("ix_wot_tank_snapshots_tank_taken", WotTankSnapshot.tank_id, WotTankSnapshot.taken_at)
+Index("ix_wot_tank_snapshots_taken", WotTankSnapshot.taken_at)
+
+
+class WotAccountSnapshot(Base):
+    """MRK-153: stav účtu v čase – osobní hodnocení Wargamingu (`kind="rating"`, veřejné) nebo zdroje
+    (`kind="resources"`, z propojeného účtu MRK-105). Řádek vzniká jen při změně hodnot."""
+    __tablename__ = "wot_account_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(20), nullable=False)
+    taken_at = Column(DateTime, nullable=False)  # naive UTC
+    global_rating = Column(Integer, nullable=True)
+    battles = Column(Integer, nullable=True)
+    credits = Column(BigInteger, nullable=True)
+    gold = Column(BigInteger, nullable=True)
+    free_xp = Column(BigInteger, nullable=True)
+    bonds = Column(BigInteger, nullable=True)
+
+
+Index("ix_wot_account_snapshots_kind_taken", WotAccountSnapshot.kind, WotAccountSnapshot.taken_at)
+
+
 class WotAccountLink(Base):
     """MRK-105: propojení s Wargaming účtem (OpenID) pro soukromá data – jeden řádek. `token_enc` = access_token
     zašifrovaný klíčem `WOT_TOKEN_KEY` (Fernet; klíč jen v env serveru) – ani záloha DB token v čitelné podobě nemá.
