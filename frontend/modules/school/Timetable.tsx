@@ -7,11 +7,13 @@ import { apiJson, errorMessage, jsonBody } from "@/lib/api";
 import { pragueDayKey } from "@/lib/format";
 import { cx } from "@/lib/ui";
 import {
-  KIND_OPTIONS, WEEKDAYS, byWeekday, draftFrom, draftPayload, emptyDraft, exceptionLabel, nextWeekday, validateDraft,
+  KIND_OPTIONS, RHYTHM_OPTIONS, WEEKDAYS, byWeekday, draftFrom, draftPayload, emptyDraft, exceptionLabel, nextWeekday, validateDraft,
   type TimetableDraft, type TimetableEntry, type TimetableResponse,
 } from "./timetableLib";
 
 type SubjectOption = { id: number; name: string };
+
+const shortDate = (s: string) => `${Number(s.slice(8, 10))}. ${Number(s.slice(5, 7))}.`;
 
 /**
  * MRK-41: ruční týdenní rozvrh. Hodiny se zadají jednou za semestr (předmět, den, čas, místnost, druh, platnost)
@@ -57,10 +59,10 @@ export function Timetable({ subjects }: { subjects: SubjectOption[] }) {
     if (invalid) return;
     const ok = await act("save", async () => {
       if (editing != null) {
-        await apiJson(`/calendar/timetable/${editing}`, jsonBody("PUT", draftPayload(d)));
+        await apiJson(`/calendar/timetable/${editing}`, jsonBody("PUT", draftPayload(d, today)));
         return "Hodina upravena – kalendář se posunul.";
       }
-      await apiJson("/calendar/timetable", jsonBody("POST", draftPayload(d)));
+      await apiJson("/calendar/timetable", jsonBody("POST", draftPayload(d, today)));
       return "Hodina přidána do rozvrhu a kalendáře.";
     });
     if (ok) {
@@ -92,11 +94,14 @@ export function Timetable({ subjects }: { subjects: SubjectOption[] }) {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-ink"><span className="tabular-nums">{e.start}–{e.end}</span> · {e.subject_name ?? e.title}</p>
-                        <p className="text-xs text-ink-muted">{[e.kind_label, e.room].filter(Boolean).join(" · ")}</p>
+                        <p className="text-xs text-ink-muted">
+                          {[e.kind_label, e.room, e.every === 2 ? "ob týden" : null].filter(Boolean).join(" · ")}
+                          {e.every === 2 && e.next_date ? <span data-timetable-next=""> · příště {shortDate(e.next_date)}</span> : null}
+                        </p>
                       </div>
                       <div className="flex shrink-0 gap-1">
                         <Button size="sm" variant="ghost" aria-label={`Upravit: ${e.subject_name ?? e.title} ${day.label} ${e.start}`}
-                          onClick={() => { setEditing(e.id); setDraft(draftFrom(e)); setFormError(null); }}>Upravit</Button>
+                          onClick={() => { setEditing(e.id); setDraft(draftFrom(e, today)); setFormError(null); }}>Upravit</Button>
                         <Button size="sm" variant="ghost" aria-label={`Zrušit nebo přesunout jednu hodinu: ${e.subject_name ?? e.title} ${day.label} ${e.start}`}
                           onClick={() => setExceptionFor(e)}>Výjimka</Button>
                       </div>
@@ -139,7 +144,7 @@ export function Timetable({ subjects }: { subjects: SubjectOption[] }) {
 
       <Card as="section" aria-labelledby="timetable-form-title" data-timetable-form="">
         <CardHeader as="h3" title={<span id="timetable-form-title">{editing != null ? "Upravit hodinu" : "Přidat hodinu"}</span>}
-          description="Jednou za semestr – opakuje se každý týden v zadaném období." />
+          description="Jednou za semestr – opakuje se každý týden, nebo ob týden, v zadaném období." />
         {subjects.length === 0 ? (
           <EmptyState compact className="mt-2">Nejdřív přidej předmět.</EmptyState>
         ) : (
@@ -162,6 +167,13 @@ export function Timetable({ subjects }: { subjects: SubjectOption[] }) {
               {(p) => (
                 <select {...p} value={draft.weekday} onChange={(e) => set({ weekday: e.target.value })} className={fieldClass}>
                   {WEEKDAYS.map((w, i) => <option key={w} value={i}>{w}</option>)}
+                </select>
+              )}
+            </FormField>
+            <FormField label="Kdy">
+              {(p) => (
+                <select {...p} value={draft.rhythm} onChange={(e) => set({ rhythm: e.target.value as TimetableDraft["rhythm"] })} className={fieldClass}>
+                  {RHYTHM_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               )}
             </FormField>
@@ -206,7 +218,7 @@ function ExceptionForm({ entry, today, busy, onSubmit, onCancel }: {
   entry: TimetableEntry; today: string; busy: boolean; onCancel: () => void;
   onSubmit: (body: Record<string, string>, label: string) => Promise<void>;
 }) {
-  const [day, setDay] = useState(() => nextWeekday(today > entry.valid_from ? today : entry.valid_from, entry.weekday));
+  const [day, setDay] = useState(() => entry.next_date ?? nextWeekday(today > entry.valid_from ? today : entry.valid_from, entry.weekday));
   const [action, setAction] = useState<"cancel" | "move">("cancel");
   const [newDay, setNewDay] = useState(day);
   const [start, setStart] = useState(entry.start);

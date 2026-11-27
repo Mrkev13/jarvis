@@ -303,6 +303,10 @@ No own model and **no migration** (`backend/modules/calendar/timetable.py`):
   Cancel = `status='cancelled'`; move = active override with new times; „Vrátit“ removes the override. Changing the
   class's day or time moves every occurrence; any change (day, time, shortened validity) drops exceptions whose
   original occurrence no longer belongs to the series, exceptions of remaining occurrences stay.
+- Every other week (MRK-142): `every` 1 | 2 + `week_anchor` (any day of a week with class; the UI sends Monday of
+  this or next week, like attendance MRK-112 – no odd/even ISO week numbers, schools count them differently). Stored as
+  `RRULE:FREQ=WEEKLY;INTERVAL=2`; the first occurrence is the first matching weekday from „Platí od“ in an anchor-parity
+  week. Entries expose `every`, `week_anchor` (Monday of the first occurrence) and `next_date`.
 - Removing a class cancels the series and its moved occurrences (no hard delete), so nothing orphaned stays in the
   calendar. Every change appends `calendar.event.*` with its Activity
   projection in the same transaction.

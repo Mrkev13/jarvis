@@ -7,6 +7,9 @@ událost s `RRULE:FREQ=WEEKLY;UNTIL=…`. Výskyty, letní/zimní čas, volné b
 
 - Předmět: `course_ref = "subject:<id>"` (párování Moodle MRK-76 bere jen zdroj `moodle`, nekoliduje).
 - Druh hodiny: `description` = český popisek (Přednáška / Seminář / Cvičení / Laboratoř).
+- Rytmus (MRK-142): každý týden, nebo ob týden (`INTERVAL=2`). U ob týden určuje týdny s výukou kotva = libovolný den
+  týdne s výukou (UI posílá pondělí tohoto nebo příštího týdne) – žádné „liché / sudé“ podle čísla týdne, to se mezi
+  školami liší. První výskyt = první daný den od „Platí od“ v týdnu se stejnou paritou jako kotva.
 - Den, čas a platnost od–do se čtou zpět z události (první výskyt, `UNTIL`) – nic se neukládá dvakrát.
 - Výjimka jednoho výskytu = přepis (override) se stejným `external_uid` a `recurrence_id` = klíč výskytu:
   zrušení = status `cancelled`, přesun = aktivní přepis s novým časem. Obnovení výskytu přepis odstraní.
@@ -26,7 +29,7 @@ from domain_events import ActivityProjection, append_domain_event
 from models import Subject
 from modules.calendar.models import CalendarEvent, CalendarSource, now_utc
 from modules.calendar.occurrences import _instances
-from time_utils import APP_TZ
+from time_utils import APP_TZ, today_local
 
 SOURCE_KEY = "timetable"
 SOURCE_NAME = "Rozvrh"
@@ -91,6 +94,22 @@ def _until(row: CalendarEvent) -> date | None:
         return None
     utc = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
     return utc.astimezone(APP_TZ).date()
+
+
+def _every(row: CalendarEvent) -> int:
+    return 2 if "INTERVAL=2" in (row.rrule or "") else 1
+
+
+def _monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def _next_class(row: CalendarEvent, today: date) -> str | None:
+    """Nejbližší výskyt podle série (od dneška včetně, do 3 týdnů); výjimky jsou zvlášť v `exceptions`."""
+    lo = datetime.combine(today, time.min, tzinfo=APP_TZ)
+    found = _instances(row, lo.astimezone(timezone.utc), (lo + timedelta(days=22)).astimezone(timezone.utc), 5)
+    starts = sorted(v for v in found.values() if isinstance(v, datetime))
+    return starts[0].astimezone(APP_TZ).date().isoformat() if starts else None
 
 
 def _key(start_local: datetime) -> str:
@@ -158,6 +177,8 @@ def entry_dict(db: Session, row: CalendarEvent, subjects: dict[int, str] | None 
         "weekday": start.weekday(), "weekday_label": WEEKDAYS[start.weekday()],
         "start": start.strftime("%H:%M"), "end": end.strftime("%H:%M"),
         "valid_from": start.date().isoformat(), "valid_until": (_until(row) or start.date()).isoformat(),
+        "every": _every(row), "week_anchor": _monday(start.date()).isoformat(),
+        "next_date": _next_class(row, today_local()),
         "exceptions": exceptions,
     }
 
@@ -191,13 +212,22 @@ def _validated(db: Session, data: dict) -> dict:
         raise TimetableError(400, "„Platí do“ musí být po „Platí od“.")
     if (valid_until - valid_from).days > MAX_SPAN_DAYS:
         raise TimetableError(400, "Rozvrh zadávej nejvýš na rok (jeden semestr).")
+    every = data.get("every", 1)
+    if every not in (1, 2) or isinstance(every, bool):
+        raise TimetableError(400, "Rytmus: každý týden (1) nebo ob týden (2).")
     first = valid_from + timedelta(days=(weekday - valid_from.weekday()) % 7)
+    if every == 2:
+        if not data.get("week_anchor"):
+            raise TimetableError(400, "U hodiny ob týden vyber, jestli je výuka tento, nebo příští týden.")
+        anchor = _monday(_day(data.get("week_anchor"), "Týden s výukou"))
+        if (_monday(first) - anchor).days // 7 % 2:
+            first += timedelta(days=7)
     if first > valid_until:
         raise TimetableError(400, "V zadaném období není žádný takový den.")
     room = data.get("room")
     room = room.strip()[:200] or None if isinstance(room, str) else None
     return {"subject": subject, "kind": kind, "start": start, "end": end, "first": first, "until": valid_until,
-            "room": room}
+            "room": room, "every": every}
 
 
 def _apply(row: CalendarEvent, v: dict) -> None:
@@ -209,13 +239,15 @@ def _apply(row: CalendarEvent, v: dict) -> None:
     row.starts_at = starts.astimezone(timezone.utc)
     row.ends_at = _local(v["first"], v["end"]).astimezone(timezone.utc)
     row.timezone = APP_TZ.key
-    row.rrule = f"FREQ=WEEKLY;UNTIL={until_utc:%Y%m%dT%H%M%SZ}"
+    interval = ";INTERVAL=2" if v["every"] == 2 else ""
+    row.rrule = f"FREQ=WEEKLY{interval};UNTIL={until_utc:%Y%m%dT%H%M%SZ}"
     row.course_ref = f"subject:{v['subject'].id}"
 
 
 def _label(row: CalendarEvent) -> str:
     start = row.starts_at.astimezone(APP_TZ)
-    return f"{row.title} ({row.description}, {WEEKDAYS[start.weekday()]} {start:%H:%M})"
+    every = ", ob týden" if _every(row) == 2 else ""
+    return f"{row.title} ({row.description}, {WEEKDAYS[start.weekday()]} {start:%H:%M}{every})"
 
 
 def create_entry(db: Session, data: dict) -> dict:
