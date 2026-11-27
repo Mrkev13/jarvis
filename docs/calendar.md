@@ -250,7 +250,8 @@ TypeScript, pyflakes and production build passed; Alembic head unchanged.
   `CALENDAR_MOODLE_ICS_URL`), `google` → `GOOGLE_ICS_URL`. The key is `CalendarSource.config_key` (≤ 20 chars,
   `kind='ics'`). No migration is needed. Clients only ever name a key, never a URL or an env variable.
 - Google offers a private, read-only ICS address: Google Kalendář → Nastavení kalendáře → „Tajná adresa ve formátu
-  iCal". It is a secret: keep it in the protected env file only. Writing to Google (OAuth) is a separate issue.
+  iCal". It is a secret: keep it in the protected env file only. Writing to Google: one-way projection into a dedicated calendar, see
+  [google-calendar-write.md](google-calendar-write.md) (MRK-88).
 - Sync endpoints:
   - `POST /calendar/sync` syncs every configured source, each in its own savepoint. A failing feed neither blocks
     nor undoes the others. The response holds summed counts plus `sources: {key: counts | {"error": category}}`.
@@ -303,6 +304,10 @@ No own model and **no migration** (`backend/modules/calendar/timetable.py`):
   Cancel = `status='cancelled'`; move = active override with new times; „Vrátit“ removes the override. Changing the
   class's day or time moves every occurrence; any change (day, time, shortened validity) drops exceptions whose
   original occurrence no longer belongs to the series, exceptions of remaining occurrences stay.
+- Every other week (MRK-142): `every` 1 | 2 + `week_anchor` (any day of a week with class; the UI sends Monday of
+  this or next week, like attendance MRK-112 – no odd/even ISO week numbers, schools count them differently). Stored as
+  `RRULE:FREQ=WEEKLY;INTERVAL=2`; the first occurrence is the first matching weekday from „Platí od“ in an anchor-parity
+  week. Entries expose `every`, `week_anchor` (Monday of the first occurrence) and `next_date`.
 - Removing a class cancels the series and its moved occurrences (no hard delete), so nothing orphaned stays in the
   calendar. Every change appends `calendar.event.*` with its Activity
   projection in the same transaction.

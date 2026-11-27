@@ -232,6 +232,25 @@ class WotResource(Base):
     id = Column(Integer, primary_key=True, index=True)
     resource = Column(String(100), unique=True, nullable=False)
     amount = Column(Float, nullable=False)
+    # MRK-105: odkud a kdy je hodnota – "manual" (formulář / Jarvis) nebo "wargaming" (synchronizace); NULL = před 0035
+    source = Column(String(20), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class WotAccountLink(Base):
+    """MRK-105: propojení s Wargaming účtem (OpenID) pro soukromá data – jeden řádek. `token_enc` = access_token
+    zašifrovaný klíčem `WOT_TOKEN_KEY` (Fernet; klíč jen v env serveru) – ani záloha DB token v čitelné podobě nemá.
+    Token se nikdy nevrací v API, nepíše do logu, Aktivity ani AI kontextu. Časy naive UTC."""
+    __tablename__ = "wot_account_links"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(BigInteger, nullable=False)
+    token_enc = Column(Text, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    status = Column(String(20), nullable=False, default="connected")  # connected | expired
+    last_error = Column(String(40), nullable=True)
+    connected_at = Column(DateTime, nullable=False)
+    last_sync_at = Column(DateTime, nullable=True)
 
 class WotGrind(Base):
     __tablename__ = "wot_grinds"

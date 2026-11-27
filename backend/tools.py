@@ -484,10 +484,11 @@ def update_wot_resource(resource: str, amount: float, user_context: str = "manua
         if existing:
             old_amount = float(existing.amount or 0.0)
             existing.amount = amount
+            existing.source, existing.updated_at = "manual", utc_now()  # MRK-105: potvrzená akce = ruční hodnota
             result_id = existing.id
             action_type = "update"
         else:
-            item = WotResource(resource=resource, amount=amount)
+            item = WotResource(resource=resource, amount=amount, source="manual", updated_at=utc_now())
             db.add(item)
             db.flush()
             result_id = item.id

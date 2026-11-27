@@ -233,3 +233,55 @@ def test_shortening_validity_drops_orphaned_exceptions_only(db):
     db.commit()
     starts = local_starts(window(db, date(2026, 10, 1), date(2026, 10, 27)))
     assert starts == ["2026-10-05 09:00", "2026-10-19 09:00", "2026-10-26 09:00"]
+
+
+# ---------- MRK-142: hodina ob týden ----------
+
+def test_biweekly_class_only_in_anchor_weeks_across_dst(db, monkeypatch):
+    monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 10, 14))
+    # výuka v týdnu od 12. 10. → 12. 10., 26. 10. (po konci letního času), 9. 11., 23. 11.; ne 5. 10. ani 19. 10.
+    entry = create(db, kind="exercise", every=2, week_anchor="2026-10-14")
+    assert (entry["every"], entry["valid_from"], entry["week_anchor"], entry["next_date"]) == \
+        (2, "2026-10-12", "2026-10-12", "2026-10-26")
+    occs = window(db, date(2026, 10, 1), date(2026, 12, 7))
+    assert local_starts(occs) == [f"2026-{d} 09:00" for d in ("10-12", "10-26", "11-09", "11-23")]
+    assert occs[0].starts_at.astimezone(UTC).hour == 7 and occs[1].starts_at.astimezone(UTC).hour == 8
+    assert "ob týden" in db.query(ActivityLog).order_by(ActivityLog.id.desc()).first().summary
+    # druhá parita: výuka příští týden (od 19. 10.) → 5. 10., 19. 10., …
+    other = create(db, kind="exercise", every=2, week_anchor="2026-10-19", start="11:00", end="12:30")
+    assert other["valid_from"] == "2026-10-05" and other["next_date"] == "2026-10-19"
+
+
+def test_biweekly_exceptions_and_switching_rhythm(db):
+    entry = create(db, every=2, week_anchor="2026-10-12")
+    with pytest.raises(timetable.TimetableError):  # 19. 10. hodina není
+        timetable.set_exception(db, entry["id"], {"date": "2026-10-19", "action": "cancel"})
+    timetable.set_exception(db, entry["id"], {"date": "2026-10-26", "action": "cancel"})
+    timetable.set_exception(db, entry["id"], {"date": "2026-11-09", "action": "move", "new_date": "2026-11-10",
+                                              "start": "13:00", "end": "14:30"})
+    db.commit()
+    assert local_starts(window(db, date(2026, 10, 1), date(2026, 12, 7))) == \
+        ["2026-10-12 09:00", "2026-11-10 13:00", "2026-11-23 09:00"]
+    # ob týden → každý týden: výjimky platných výskytů zůstanou
+    out = timetable.update_entry(db, entry["id"], {**LECTURE, "subject_id": subject_id(db)})
+    db.commit()
+    assert out["every"] == 1 and {e["date"] for e in out["exceptions"]} == {"2026-10-26", "2026-11-09"}
+    # každý týden → ob týden s druhou paritou: 26. 10. ani 9. 11. do série nepatří → výjimky zmizí
+    out = timetable.update_entry(db, entry["id"], {**LECTURE, "subject_id": subject_id(db), "every": 2,
+                                                   "week_anchor": "2026-10-05"})
+    db.commit()
+    assert out["exceptions"] == [] and out["valid_from"] == "2026-10-05"
+    assert local_starts(window(db, date(2026, 10, 1), date(2026, 11, 3))) == ["2026-10-05 09:00", "2026-10-19 09:00", "2026-11-02 09:00"]
+
+
+@pytest.mark.parametrize("over,msg", [
+    ({"every": 3}, "Rytmus"),
+    ({"every": True}, "Rytmus"),
+    ({"every": 2}, "tento, nebo příští"),
+    ({"every": 2, "week_anchor": "zítra"}, "Týden s výukou"),
+    ({"every": 2, "week_anchor": "2026-10-12", "valid_from": "2026-10-05", "valid_until": "2026-10-10"}, "žádný takový den"),
+])
+def test_biweekly_validation(db, over, msg):
+    with pytest.raises(timetable.TimetableError) as err:
+        timetable.create_entry(db, {**LECTURE, "subject_id": subject_id(db), **over})
+    assert msg in err.value.message

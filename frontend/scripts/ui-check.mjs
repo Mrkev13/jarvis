@@ -4008,6 +4008,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check(`rozvrh ${label}: sekce na stránce Škola`, await eventually(async () => (await tt.locator("[data-timetable-entry]").count()) === 2, 5000));
     check(`rozvrh ${label}: po dnech (pondělí, středa)`, (await tt.locator("[data-timetable-day]").evaluateAll((els) => els.map((e) => e.getAttribute("data-timetable-day")))).join(",") === "0,2");
     check(`rozvrh ${label}: hodina s časem, druhem a místností`, /09:00–10:30.*Dějepis[\s\S]*Přednáška · S5/.test(await tt.locator('[data-timetable-entry="1"]').innerText()));
+    check(`rozvrh ${label}: cvičení ob týden s příštím termínem`, /Cvičení · K2 · ob týden · příště 9\. 12\./.test(await tt.locator('[data-timetable-entry="2"]').innerText()));
     check(`rozvrh ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
     await tt.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${OUT}school-timetable-${label}.png` });
@@ -4026,8 +4027,10 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     check("rozvrh: konec před začátkem = chyba", await eventually(async () => (await form.innerText()).includes("Konec musí být po začátku"), 2000));
     await form.getByLabel("Do", { exact: true }).fill("15:30");
     await form.getByLabel("Místnost").fill("A1");
+    await form.getByLabel("Kdy").selectOption("this");
     await form.getByRole("button", { name: "Přidat do rozvrhu" }).click();
     check("rozvrh: nová hodina ve čtvrtek", await eventually(async () => (await tt.locator('[data-timetable-day="3"]').innerText().catch(() => "")).includes("14:00–15:30"), 4000));
+    check("rozvrh: nová hodina ob týden (MRK-142)", (await tt.locator('[data-timetable-day="3"]').innerText()).includes("ob týden"));
     await tt.getByRole("button", { name: /^Zrušit nebo přesunout jednu hodinu: .* Pondělí 09:00/ }).click();
     const exc = tt.locator("[data-timetable-exception]");
     await exc.getByLabel("Která hodina (datum)").fill("2026-12-07");
@@ -4054,6 +4057,61 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
     await ctx.close();
   }
   await fetch(`${MOCK}/timetable/reset`, { method: "POST" });
+}
+
+// ===== 41. MRK-105: WoT zdroje z Wargamingu (propojení, návrat z přihlášení, odkud a kdy je hodnota, odpojení) =====
+{
+  await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
+  for (const [label, viewport] of [["desktop", { width: 1366, height: 900 }], ["mobil", { width: 390, height: 844 }]]) {
+    const { ctx, page, errors } = await open("/wot", viewport);
+    const link = page.locator("[data-wot-wargaming]");
+    check(`wot wargaming ${label}: nabídka propojení`, await eventually(async () => (await link.getAttribute("data-wot-wargaming").catch(() => null)) === "not_connected", 5000));
+    check(`wot wargaming ${label}: tlačítko Propojit`, await page.getByRole("button", { name: "Propojit s Wargamingem" }).isVisible());
+    check(`wot wargaming ${label}: ručně zadaná hodnota má původ`, (await page.locator("#resources").innerText()).includes("ručně"));
+    await page.screenshot({ path: `${OUT}wot-wargaming-${label}.png` });
+    check(`wot wargaming ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open("/wot", { width: 1366, height: 900 });
+    await page.getByRole("button", { name: "Propojit s Wargamingem" }).click();
+    // mock „Wargaming“ vrátí rovnou na /wot/connect/<state>?…access_token=… → stránka pošle connect a vrátí se na /wot
+    check("wot wargaming: návrat z přihlášení → propojeno", await eventually(async () => (await page.locator("[data-wot-wargaming]").getAttribute("data-wot-wargaming").catch(() => null)) === "connected", 8000));
+    check("wot wargaming: token není v adrese", !page.url().includes("access_token"), page.url());
+    check("wot wargaming: hodnoty z Wargamingu", (await page.locator("#resources").innerText()).includes("z Wargamingu"));
+    await page.screenshot({ path: `${OUT}wot-wargaming-connected.png` });
+    // review #125: pomalá synchronizace změní částku až po rychlém /wot/resources → karta ukáže NOVOU částku
+    await fetch(`${MOCK}/__mock/wot-account/bump?credits=9100000`, { method: "POST" });
+    await page.reload();
+    const credits = page.locator("#resources").getByText("9 100 000");
+    check("wot wargaming: po synchronizaci při otevření nová částka i původ", await eventually(async () => (await credits.count()) > 0, 6000),
+      (await page.locator("#resources").innerText()).slice(0, 300));
+    check("wot wargaming: stará částka zmizela", !(await page.locator("#resources").innerText()).includes("8 450 000"));
+    await page.getByRole("button", { name: "Odpojit" }).click();
+    check("wot wargaming: odpojení", await eventually(async () => (await page.locator("[data-wot-wargaming]").getAttribute("data-wot-wargaming").catch(() => null)) === "not_connected", 4000));
+    check("wot wargaming akce: bez chyb JS", errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+  {
+    // review #125: chyba přihlášení → tlačítko zase funguje bez obnovení stránky
+    await fetch(`${MOCK}/__mock/wot-account/reset?loginFail=1`, { method: "POST" });
+    const { ctx, page } = await open("/wot", { width: 1366, height: 900 });
+    const btn = page.getByRole("button", { name: "Propojit s Wargamingem" });
+    await btn.click();
+    check("wot wargaming: chyba přihlášení je vidět", await eventually(async () => (await page.locator("[data-wot-wargaming]").innerText()).includes("neodpovídá"), 4000));
+    check("wot wargaming: po chybě jde propojit znovu", await eventually(async () => await btn.isEnabled(), 2000));
+    await btn.click();
+    check("wot wargaming: druhý pokus propojí", await eventually(async () => (await page.locator("[data-wot-wargaming]").getAttribute("data-wot-wargaming").catch(() => null)) === "connected", 8000));
+    await ctx.close();
+    await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
+  }
+  {
+    const { ctx, page } = await open("/wot/connect/bad-state-0123456789abcdef?status=ok&access_token=zzz&account_id=1&expires_at=1");
+    check("wot wargaming: neplatný návrat = srozumitelná chyba", await eventually(async () => (await page.locator("main").innerText()).includes("neplatný nebo starý"), 5000));
+    check("wot wargaming: neplatný návrat – token pryč z adresy", !page.url().includes("access_token"), page.url());
+    await ctx.close();
+  }
+  await fetch(`${MOCK}/__mock/wot-account/reset`, { method: "POST" });
 }
 
 await browser.close();

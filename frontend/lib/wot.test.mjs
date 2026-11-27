@@ -153,3 +153,24 @@ test("masterySummary počítá každé Mko, i opakované na stejném tanku, a je
   assert.deepEqual(summary.byTank.map((t) => t.tank).slice(1), ["Bat.-Châtillon 25 t", "Škoda T 56"]);
   assert.deepEqual(masterySummary([]), { total: 0, tanks: 0, byTank: [] });
 });
+
+test("MRK-105: return from Wargaming login becomes the connect body", async () => {
+  const { connectBody } = await import("./wot.ts");
+  const q = new URLSearchParams("status=ok&access_token=abc123&nickname=x&account_id=500123&expires_at=1800000000");
+  assert.deepEqual(connectBody("st4te", q), {
+    state: "st4te", status: "ok", access_token: "abc123", account_id: "500123", expires_at: "1800000000",
+  });
+  assert.deepEqual(connectBody("s", new URLSearchParams("status=error&message=AUTH_CANCEL")), {
+    state: "s", status: "error", access_token: "", account_id: "", expires_at: "",
+  });
+});
+
+test("MRK-105: amount and origin come from one snapshot (slow account sync beats fast stale read)", async () => {
+  const { displayResources } = await import("./wot.ts");
+  const stale = { credits: 100, gold: 5 };
+  const account = { resources: { credits: { amount: 200, source: "wargaming", updated_at: "2026-11-27T10:00:00+00:00" } } };
+  const shown = displayResources(stale, account);
+  assert.deepEqual(shown.credits, { amount: 200, source: "wargaming", updated_at: "2026-11-27T10:00:00+00:00" });
+  assert.deepEqual(shown.gold, { amount: 5, source: null, updated_at: null }, "bez snímku z účtu záloha z /wot/resources");
+  assert.equal(displayResources(stale, null).credits.amount, 100);
+});

@@ -53,7 +53,7 @@ Pro každou datovou doménu existuje právě jeden autoritativní zdroj.
 | Fotky | **Immich** | Hub může později povrchově odkazovat či vyhledávat přes konektor. | Immich se stane autoritativním až po ověřené záloze a obnově fotografií. |
 | Obecný cloudový a dokumentový workspace | **Nextcloud** | Hub může odkazovat a zobrazovat omezená metadata. | Nextcloud vlastní pracovní soubory a sdílení. |
 | Synchronizace složek | **Syncthing je transport**, ne sémantický zdroj pravdy. | Hub jej nepovažuje za druhou databázi. | Synchronizované složky nesmějí vytvářet konkurenční vlastnictví stejných dat. |
-| Kalendář a školní plánování | **Standa Hub Calendar + nakonfigurované upstream importy** | Hub sjednocuje kalendář podle stávající architektury a pravidel importů. | Tento dokument nemění Calendar ani Moodle implementaci. |
+| Kalendář a školní plánování | **Standa Hub Calendar + nakonfigurované upstream importy**; vlastní události v Google Kalendáři vlastní **Google** | Hub sjednocuje kalendář podle stávající architektury a pravidel importů. Google čte jen přes ICS. Data Hubu (rozvrh, školní termíny) smí zapisovat jen do vyhrazeného Google kalendáře „Standa Hub“, který je jejich projekcí (MRK-88, [google-calendar-write.md](google-calendar-write.md)). | Žádná obousměrná synchronizace: úpravy v projekci Hub přepíše, Standovy ostatní Google kalendáře Hub nemění. Zápis jen přes potvrzený tok a nejužší OAuth scope. |
 | Hesla | **Vaultwarden** | Hub ani Jarvis k obsahu trezoru nemají přístup. | Před použitím jako primárního správce je nutná off-machine záloha a restore drill. |
 | Média pro přehrávání | **Jellyfin knihovna / její úložiště** | Hub může později zobrazit stav služby, ne vlastnit katalog. | Nahraditelná média nemají stejnou zálohovací prioritu jako fotky a dokumenty. |
 
@@ -209,7 +209,7 @@ Jellyfin, FreshRSS, Homebox (pokud nebyl potřebný dříve), Frigate a herní s
 - **Life Admin:** Paperless-ngx vlastní dokumenty a Homebox inventář/záruky. Hub vlastní pouze vlastní domény (například subscriptions) a agreguje expirace, připomínky a Jarvis kontext.
 - **Home Assistant:** architektura odpovídá MRK-38: server-side token, read-only kontext a allowlistované potvrzované akce.
 - **Voice:** infrastruktura odpovídá MRK-36 a nezačne před stabilním core serverem.
-- **Calendar:** zůstává podle stávající architektury Hub Calendar + upstream imports; tento dokument Calendar ani Moodle nemění.
+- **Calendar:** zůstává podle stávající architektury Hub Calendar + upstream imports. Zápis do Googlu jen jako jednosměrná projekce do vyhrazeného kalendáře (MRK-88).
 
 Existující roadmap issues se automaticky nemažou ani neruší. Architektonická změna se do nich zapisuje komentářem/vazbou a jejich scope se upraví až při samostatném triage nebo implementaci.
 
