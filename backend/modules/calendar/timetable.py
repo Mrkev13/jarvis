@@ -104,12 +104,26 @@ def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def _next_class(row: CalendarEvent, today: date) -> str | None:
-    """Nejbližší výskyt podle série (od dneška včetně, do 3 týdnů); výjimky jsou zvlášť v `exceptions`."""
+def _next_dates(row: CalendarEvent, overrides: list[CalendarEvent], today: date) -> tuple[str | None, str | None]:
+    """→ (next_date, next_regular_date), oba od dneška včetně. Pravidelné výskyty až do konce platnosti série
+    (několik zrušených hodin za sebou nesmí „příště“ schovat); přesunuté hodiny kdykoli od dneška.
+
+    `next_date` = skutečná příští hodina (MRK-147): zrušené výskyty přeskočí, přesunutý výskyt se počítá v novém
+    termínu. `next_regular_date` = příští výskyt podle série BEZ výjimky – výchozí den pro formulář výjimky
+    (ten pracuje s původními dny série)."""
     lo = datetime.combine(today, time.min, tzinfo=APP_TZ)
-    found = _instances(row, lo.astimezone(timezone.utc), (lo + timedelta(days=22)).astimezone(timezone.utc), 5)
-    starts = sorted(v for v in found.values() if isinstance(v, datetime))
-    return starts[0].astimezone(APP_TZ).date().isoformat() if starts else None
+    until = _until(row) or row.starts_at.astimezone(APP_TZ).date()
+    hi = datetime.combine(until + timedelta(days=1), time.min, tzinfo=APP_TZ)
+    excepted = {o.recurrence_id for o in overrides}
+    regular = []
+    if hi > lo:  # konec platnosti omezuje jen pravidelné opakování …
+        found = _instances(row, lo.astimezone(timezone.utc), hi.astimezone(timezone.utc), 120)  # rok týdně = 53
+        regular = sorted(v for k, v in found.items() if isinstance(v, datetime) and k not in excepted)
+    # … přesunutá hodina platí v novém termínu, i když leží za koncem série (review #128)
+    moved = [o.starts_at for o in overrides if o.status == "active" and o.starts_at >= lo]
+    actual = sorted([*regular, *moved])
+    day = lambda v: v.astimezone(APP_TZ).date().isoformat()  # noqa: E731
+    return (day(actual[0]) if actual else None), (day(regular[0]) if regular else None)
 
 
 def _key(start_local: datetime) -> str:
@@ -163,7 +177,9 @@ def entry_dict(db: Session, row: CalendarEvent, subjects: dict[int, str] | None 
     sid = _subject_id(row)
     kind = next((k for k, v in KINDS.items() if v == row.description), None)
     exceptions = []
-    for o in _overrides(db, row):
+    overrides = _overrides(db, row)
+    next_date, next_regular = _next_dates(row, overrides, today_local())
+    for o in overrides:
         original = datetime.fromisoformat(o.recurrence_id).astimezone(APP_TZ)
         moved = o.status == "active"
         exceptions.append({
@@ -178,7 +194,7 @@ def entry_dict(db: Session, row: CalendarEvent, subjects: dict[int, str] | None 
         "start": start.strftime("%H:%M"), "end": end.strftime("%H:%M"),
         "valid_from": start.date().isoformat(), "valid_until": (_until(row) or start.date()).isoformat(),
         "every": _every(row), "week_anchor": _monday(start.date()).isoformat(),
-        "next_date": _next_class(row, today_local()),
+        "next_date": next_date, "next_regular_date": next_regular,
         "exceptions": exceptions,
     }
 

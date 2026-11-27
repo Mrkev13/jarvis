@@ -21,8 +21,10 @@ export type TimetableEntry = {
   /** MRK-142: 1 = každý týden, 2 = ob týden; `week_anchor` = pondělí týdne prvního výskytu. */
   every: 1 | 2;
   week_anchor: string;
-  /** Nejbližší výskyt podle série (YYYY-MM-DD) do 3 týdnů, nebo null. */
+  /** MRK-147: skutečná příští hodina (zrušené přeskočí, přesunutá v novém dni), nebo null. */
   next_date: string | null;
+  /** Příští výskyt podle série BEZ výjimky – výchozí den formuláře výjimky (pracuje s původními dny). */
+  next_regular_date: string | null;
   exceptions: TimetableException[];
 };
 export type TimetableResponse = { entries: TimetableEntry[]; kinds: Record<TimetableKind, string> };

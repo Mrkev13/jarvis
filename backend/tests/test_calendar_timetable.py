@@ -285,3 +285,48 @@ def test_biweekly_validation(db, over, msg):
     with pytest.raises(timetable.TimetableError) as err:
         timetable.create_entry(db, {**LECTURE, "subject_id": subject_id(db), **over})
     assert msg in err.value.message
+
+
+# ---------- MRK-147: „příště“ podle skutečných výskytů ----------
+
+def test_next_date_skips_cancelled_and_follows_moved(db, monkeypatch):
+    """Reprodukce z review #124: ob týden od 12. 10., dnes 14. 10., 26. 10. zrušeno → příště 9. 11."""
+    monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 10, 14))
+    entry = create(db, kind="exercise", every=2, week_anchor="2026-10-12")
+    out = timetable.set_exception(db, entry["id"], {"date": "2026-10-26", "action": "cancel"})
+    db.commit()
+    assert (out["next_date"], out["next_regular_date"]) == ("2026-11-09", "2026-11-09")
+    # přesun 9. 11. → 5. 11.: skutečná příští hodina je 5. 11., formulář výjimky nabídne 23. 11. (bez výjimky)
+    out = timetable.set_exception(db, entry["id"], {"date": "2026-11-09", "action": "move", "new_date": "2026-11-05",
+                                                    "start": "13:00", "end": "14:30"})
+    db.commit()
+    assert (out["next_date"], out["next_regular_date"]) == ("2026-11-05", "2026-11-23")
+    # přesun dřív než dnes se nepočítá
+    out = timetable.set_exception(db, entry["id"], {"date": "2026-11-09", "action": "move", "new_date": "2026-10-13",
+                                                    "start": "13:00", "end": "14:30"})
+    db.commit()
+    assert out["next_date"] == "2026-11-23"
+    listed = timetable.list_entries(db)["entries"][0]
+    assert (listed["next_date"], listed["next_regular_date"]) == ("2026-11-23", "2026-11-23")
+
+
+def test_next_date_weekly_unchanged_without_exceptions(db, monkeypatch):
+    monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 10, 14))
+    entry = create(db)
+    assert (entry["next_date"], entry["next_regular_date"]) == ("2026-10-19", "2026-10-19")
+
+
+def test_next_date_includes_move_past_the_series_end(db, monkeypatch):
+    """Regrese (review #128): poslední hodina 30. 11. přesunutá na 2. 12. (za konec platnosti) je „příště“
+    i 29. 11., i 1. 12. (po konci série) – stejně jako ji ukazuje Kalendář."""
+    entry = create(db)  # pondělí, platnost do 30. 11.
+    timetable.set_exception(db, entry["id"], {"date": "2026-11-30", "action": "move", "new_date": "2026-12-02",
+                                              "start": "09:00", "end": "10:30"})
+    db.commit()
+    assert "2026-12-02 09:00" in local_starts(window(db, date(2026, 11, 28), date(2026, 12, 7)))
+    for today in (date(2026, 11, 29), date(2026, 12, 1)):
+        monkeypatch.setattr(timetable, "today_local", lambda t=today: t)
+        listed = timetable.list_entries(db)["entries"][0]
+        assert (listed["next_date"], listed["next_regular_date"]) == ("2026-12-02", None), today
+    monkeypatch.setattr(timetable, "today_local", lambda: date(2026, 12, 3))
+    assert timetable.list_entries(db)["entries"][0]["next_date"] is None
