@@ -269,7 +269,9 @@ def sync(db: Session, client: wot_wargaming.Client | None, now: datetime | None 
             return _expire(db, link, snapshot)
         _cas(db, link, snapshot, {"last_error": exc.code})
         return {"result": exc.code}
-    _cas(db, link, snapshot, {"last_sync_at": now, "last_error": None})
+    # odpověď patří k verzi propojení, kterou běh načetl – mezitím nové propojení / odpojení = nic nezapisovat
+    if not _cas(db, link, snapshot, {"last_sync_at": now, "last_error": None}, connected_only=True):
+        return {"result": "superseded"}
     changes = _apply(db, values, now, user_context)
     return {"result": "ok", "changes": len(changes)}
 

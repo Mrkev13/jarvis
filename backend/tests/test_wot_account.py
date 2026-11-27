@@ -381,3 +381,62 @@ class TestConcurrentRotation(AccountBase):
             self.assertEqual(Fernet(KEY.encode()).decrypt(link.token_enc.encode()).decode(), TOKEN2)
         finally:
             db.close()
+
+    def _late_success(self, during):
+        """Starý běh dostane ÚSPĚŠNOU odpověď account/info (starý token u Wargamingu pořád platí), ale ještě před
+        jejím vrácením proběhne `during` (nové propojení / odpojení) v jiné session."""
+        db = self.Race()
+        svc.connect(db, {"state": self.start(), "status": "ok", "access_token": TOKEN, "account_id": str(ACCOUNT),
+                         "expires_at": str(unix(NOW + timedelta(days=14)))}, wg.client(), now=NOW,
+                    monotonic=lambda: self.mono[0])
+        db.commit()
+        db.close()
+        original = self.api.__call__
+        done = {}
+
+        def interleave(method, url, **kw):
+            response = original(method, url, **kw)  # odpověď se starými hodnotami už je „na cestě“
+            if url.endswith("account/info/") and not done:
+                done["x"] = True
+                during()
+            return response
+
+        with patch.object(wg, "client", lambda: wg.Client(wg.load_config(), interleave)):
+            return self.run_sync(NOW + timedelta(hours=1))
+
+    def test_late_success_after_reconnect_does_not_overwrite_new_values(self):
+        def reconnect():
+            self.api.valid = {TOKEN, TOKEN2}
+            self.api.values = {**self.api.values, "credits": 999}
+            d2 = self.Race()
+            svc.connect(d2, {"state": self.start(), "status": "ok", "access_token": TOKEN2, "account_id": str(ACCOUNT),
+                             "expires_at": str(unix(NOW + timedelta(days=14)))},
+                        wg.Client(wg.load_config(), self.api), now=NOW + timedelta(hours=1, minutes=1),
+                        monotonic=lambda: self.mono[0])
+            d2.commit()
+            d2.close()
+
+        self.assertEqual(self._late_success(reconnect)["result"], "superseded")
+        db = self.Race()
+        try:
+            credits = db.query(WotResource).filter_by(resource="credits").one()
+            self.assertEqual(credits.amount, 999, "hodnoty nového propojení zůstanou")
+            self.assertEqual(credits.updated_at, NOW + timedelta(hours=1, minutes=1))
+        finally:
+            db.close()
+
+    def test_late_success_after_disconnect_writes_nothing(self):
+        def disconnect():
+            d2 = self.Race()
+            svc.disconnect(d2, None)
+            d2.commit()
+            d2.close()
+
+        self.assertEqual(self._late_success(disconnect)["result"], "superseded")
+        db = self.Race()
+        try:
+            credits = db.query(WotResource).filter_by(resource="credits").one()
+            self.assertEqual(credits.updated_at, NOW, "po odpojení opožděná odpověď nic nezapsala")
+            self.assertEqual(db.query(WotAccountLink).count(), 0)
+        finally:
+            db.close()
