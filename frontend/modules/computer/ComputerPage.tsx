@@ -160,9 +160,9 @@ function DeviceCard({ device: d, onChanged, onNotice }: {
             Naposledy {lastSeenLabel(d.last_seen_at)}{d.agent_version ? ` · aplikace ${d.agent_version}` : ""}
           </p>
         </div>
-        <StatusBadge tone={d.online ? "success" : "neutral"} dot={d.online} data-device-online={d.online ? "1" : "0"}>
-          {d.online ? "Online" : "Offline"}
-        </StatusBadge>
+        <span data-device-online={d.online ? "1" : "0"}>
+          <StatusBadge tone={d.online ? "success" : "neutral"} dot={d.online}>{d.online ? "Online" : "Offline"}</StatusBadge>
+        </span>
       </div>
 
       {status ? (
