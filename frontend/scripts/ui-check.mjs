@@ -4239,6 +4239,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
       await card.locator('[data-power="shutdown"]').click();
       const dialog = page.getByRole("dialog");
       check("počítač: vypnutí chce potvrzení", await eventually(async () => /Vypnout počítač „Herní PC“\?/.test(await dialog.innerText().catch(() => "")), 3000));
+      await page.waitForTimeout(400); // dokončení animace dialogu, ať je na snímku
       await page.screenshot({ path: `${OUT}computer-confirm.png` });
       await dialog.getByRole("button", { name: /Vypnout za hodinu/ }).click();
       check("počítač: vypnutí za 60 min odesláno", await eventually(async () => /vypnout za 60 min/.test(await page.locator("[data-computer-notice]").innerText().catch(() => "")), 4000));
