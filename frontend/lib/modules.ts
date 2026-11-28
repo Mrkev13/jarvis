@@ -56,7 +56,7 @@ export const MODULES: ModuleDef[] = [
   { id: "calendar", label: "Kalendář", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "today", "ai_context"], entityTypes: ["calendar_event"], routes: ["/calendar"], quickAddKinds: [] },
   { id: "wow", label: "World of Warcraft", defaultEnabled: true, implemented: true, capabilities: ["nav", "search", "dashboard", "ai_context"], entityTypes: ["wow_character", "wow_wish", "wow_collection"], routes: ["/wow"], quickAddKinds: [] },
   { id: "trading", label: "Trading", defaultEnabled: true, implemented: true, capabilities: ["nav"], entityTypes: [], routes: ["/trading"], quickAddKinds: [] },
-  { id: "computer", label: "Počítač", defaultEnabled: true, implemented: true, capabilities: [], entityTypes: [], routes: ["/devices", "/device"], quickAddKinds: [] },
+  { id: "computer", label: "Počítač", defaultEnabled: true, implemented: true, capabilities: ["nav", "ai_context"], entityTypes: [], routes: ["/devices", "/device"], quickAddKinds: [] },
   planned("projects", "Projekty"),
   planned("knowledge", "Znalosti"),
   planned("car", "Auto"),

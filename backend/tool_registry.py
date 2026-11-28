@@ -34,6 +34,9 @@ from mutation_service import (
     propose_modify_records,
     propose_undo,
 )
+from modules.computer.ai_actions import (
+    execute_computer_command, propose_manage_computer,
+)
 from reminder_actions import (
     execute_add_reminder,
     execute_manage_reminder,
@@ -59,6 +62,7 @@ AREA_FINANCE, AREA_WORK, AREA_SCHOOL, AREA_GOALS = "finance", "work", "school", 
 AREA_NOTIFICATIONS, AREA_WOT, AREA_MFF = "notifications", "wot", "mff"
 AREA_MEMORY, AREA_ACTIVITY = "memory", "activity"
 AREA_REMINDERS = "reminders"
+AREA_COMPUTER = "computer"  # MRK-157: Jarvis na PC (modules/computer)
 AREA_SCHOOL_MATERIALS = "school_materials"  # MRK-44: context area of the School module (study materials)
 
 
@@ -494,6 +498,21 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ["action", "target"],
         func=execute_manage_reminder, resolver=propose_manage_reminder, write_intent="mutate",
         areas=[AREA_REMINDERS],
+    ),
+    # MRK-157: Jarvis na PC – návrh příkazu (vždy pending akce + potvrzení). Stav PC nese CURRENT STATE sekce
+    # modulu (modules/computer/integrations.context_computer), samostatný read tool by jen přidal tokeny.
+    _write(
+        "manage_computer",
+        "Prepare a PC command (user confirms): launch an app from the PC list, shutdown/sleep/lock "
+        "(delay_minutes ≤240), cancel_timer.",
+        {
+            "action": {"type": "string", "enum": ["launch_app", "shutdown", "sleep", "lock", "cancel_timer"]},
+            "app": _STR,
+            "delay_minutes": _NUM,
+            "device": _STR,
+        },
+        ["action"],
+        func=execute_computer_command, resolver=propose_manage_computer, areas=[AREA_COMPUTER],
     ),
     _write(
         "undo_change",

@@ -280,6 +280,56 @@ let timetableState = TIMETABLE();
 const WOT_STATS_NOW = Date.parse("2026-10-11T10:00:00Z");
 const WOT_STATS_SINCE = Date.parse("2026-09-01T08:00:00Z");
 const WOT_PERIODS = [["today", "Dnes", 1], ["3d", "3 dny", 3], ["week", "Týden", 7], ["month", "Měsíc", 30], ["half", "Půl roku", 182], ["all", "Celkově", null]];
+// ---------- MRK-157: Počítač (spárovaná PC) ----------
+function devicesInitial() {
+  const at = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString();
+  return {
+    seq: 3,
+    devices: [{
+      id: 1, name: "Herní PC", platform: "windows", agent_version: "0.1.0", created_at: at(60 * 24), revoked: false,
+      status: { cpu_percent: 14.5, ram_percent: 41.3, uptime_minutes: 185, running: ["wot"],
+        disks: [{ name: "C:", free_gb: 120.5, total_gb: 476 }, { name: "D:", free_gb: 40, total_gb: 931 }] },
+      apps: [{ id: "wot", name: "World of Tanks" }, { id: "wgc", name: "Wargaming Game Center" }, { id: "steam", name: "Steam" }, { id: "discord", name: "Discord" }],
+      recent: [
+        { id: 2, kind: "power", payload: { action: "lock", delay_seconds: 0 }, status: "succeeded", label: "zamknout", created_at: at(90), completed_at: at(90), result_message: "Zamknutí hned" },
+        { id: 1, kind: "launch_app", payload: { app_id: "wot" }, status: "succeeded", label: "spustit World of Tanks", created_at: at(180), completed_at: at(180), result_message: "Spuštěno: World of Tanks" },
+      ],
+    }],
+  };
+}
+let devicesState = devicesInitial();
+
+function devicesView() {
+  const now = new Date().toISOString();
+  for (const d of devicesState.devices) {
+    for (const c of d.recent) {
+      // simulace PC: zařazený příkaz je za ~1,5 s hotový
+      if (c.status === "queued" && Date.now() - Date.parse(c.created_at) > 1500) {
+        c.status = "succeeded"; c.completed_at = now; c.result_message = `Provedeno: ${c.label}`;
+      }
+    }
+  }
+  return devicesState.devices.filter((d) => !d.revoked).map((d) => ({ ...d, online: true, last_seen_at: now, recent: d.recent.slice(0, 5) }));
+}
+
+function devicesCommand(d, kind, payload) {
+  const verbs = { shutdown: "vypnout", sleep: "uspat", lock: "zamknout" };
+  let label;
+  if (kind === "launch_app") {
+    const app = d.apps.find((a) => a.id === payload.app_id);
+    if (!app) return null;
+    label = `spustit ${app.name}`;
+  } else if (kind === "power") {
+    const delay = Number(payload.delay_seconds || 0);
+    label = `${verbs[payload.action] || payload.action}${delay >= 60 ? ` za ${delay / 60} min` : ""}`;
+  } else if (kind === "power_cancel") {
+    label = "zrušit časovač vypnutí";
+  } else return null;
+  const cmd = { id: ++devicesState.seq, kind, payload, status: "queued", label, created_at: new Date().toISOString(), completed_at: null, result_message: null };
+  d.recent.unshift(cmd);
+  return cmd;
+}
+
 function wotStatsMock(period) {
   const p = WOT_PERIODS.find((x) => x[0] === period) ?? WOT_PERIODS[2];
   const days = p[2];
@@ -959,6 +1009,23 @@ createServer(async (req, res) => {
     return respond(200, { ok: true, grind: g, completion }, 350);
   }
   if (url.pathname === "/wot/grinds/completed" && req.method === "GET") return respond(200, wotState.completed);
+  // MRK-157: Počítač – stavová simulace spárovaného PC (tvar backend/modules/computer service.list_devices)
+  if (url.pathname === "/__mock/devices/reset") { devicesState = devicesInitial(); return respond(200, { ok: true }); }
+  if (url.pathname === "/devices" && req.method === "GET") return respond(200, { devices: devicesView() }, 120);
+  if (url.pathname === "/devices/pairing-code" && req.method === "POST") {
+    return respond(200, { code: "K7PX-M2QA", expires_at: new Date(Date.now() + 10 * 60000).toISOString() }, 150);
+  }
+  {
+    const m = url.pathname.match(/^\/devices\/(\d+)\/(commands|revoke)$/);
+    if (m && req.method === "POST") {
+      const d = devicesState.devices.find((x) => x.id === Number(m[1]) && !x.revoked);
+      if (!d) return respond(404, { detail: "Zařízení neexistuje nebo bylo odvoláno." });
+      if (m[2] === "revoke") { d.revoked = true; return respond(200, { ok: true, revoked: true }, 150); }
+      const cmd = devicesCommand(d, body?.kind, body?.payload || {});
+      if (!cmd) return respond(422, { detail: "Tuhle aplikaci počítač nenahlásil – spustit jde jen aplikace z jeho seznamu." });
+      return respond(200, { ok: true, command: cmd }, 200);
+    }
+  }
   // MRK-153: statistiky po bitvách (tvar wot_stats_service.stats) – deterministická syntetická data podle období
   if (url.pathname === "/wot/stats" && req.method === "GET") return respond(200, wotStatsMock(url.searchParams.get("period") || "week"), 150);
   if (url.pathname === "/wot/mastery" && req.method === "GET") return respond(200, wotMasteryOverview(), 150);

@@ -871,6 +871,8 @@ print(_hash_pin("123456"))
   příkazů (`launch_app` / `power` / `power_cancel`, platnost 2 min) – `/devices/*` (session) a `/device/agent/*`
   (jen `Authorization: Bearer <token zařízení>`; `main.require_auth` tuhle cestu propouští, hlídá ji
   `router.require_device`). Podrobně `docs/computer.md`, testy `tests/test_computer_devices.py`.
+- MRK-157: stránka `/devices` a Jarvis – write tool `manage_computer` (resolver `modules/computer/ai_actions.py`,
+  pending akce → potvrzení → fronta příkazů), stav PC v CURRENT STATE sekci modulu; testy `tests/test_computer_ai.py`.
 
 ## 24. Architektonická pravidla (Roadmap 3.5)
 

@@ -2,7 +2,7 @@
 
 Agent Jarvise na Windows PC: spustí aplikaci, vypne / uspí / zamkne PC (i s časovačem), hlásí stav a nahrává WoT
 replaye. Tenhle dokument popisuje backendový základ (MRK-155): párování, token zařízení, stav a frontu příkazů.
-Aplikace pro Windows je MRK-156, stránka Počítač a Jarvis MRK-157, replaye MRK-158, postavička MRK-17.
+Aplikace pro Windows je MRK-156, stránka Počítač a Jarvis MRK-157 (níže), replaye MRK-158, postavička MRK-17.
 
 ## Principy bezpečnosti
 
@@ -74,5 +74,33 @@ Napájení běží přes časovač v aplikaci (okamžitá akce počká 3 s na na
 `.github/workflows/desktop.yml` (jádro na Linuxu, build + instalátor NSIS na Windows → artefakt
 `jarvis-pro-pc-windows`).
 
+## Stránka Počítač a Jarvis (MRK-157)
+
+- **Stránka `/devices`** (navigace „Počítač“ ve skupině Další, `frontend/modules/computer/`). Ukazuje:
+  - online / offline, kdy se PC naposledy ohlásilo, procesor, paměť, jak dlouho je zapnuté, co běží a disky;
+  - tlačítka aplikací z místního seznamu PC;
+  - **Napájení**: časovač Hned / 15 min / 30 min / hodina / 2 h / 4 h. Vypnout a uspat jen přes potvrzovací dialog,
+    zamknout hned. K tomu **Zrušit časovač**;
+  - posledních 5 příkazů se stavem (Čeká na PC → Hotovo / Selhalo / Propadlo);
+  - **Spárovat počítač**: kód a adresa Hubu pro aplikaci;
+  - **Odvolat počítač**.
+
+  Klik na tlačítko je potvrzení. Dokud čeká nějaký příkaz, stránka se obnovuje každé 3 s, jinak každých 15 s.
+- **Jarvis**:
+  - jeden write tool `manage_computer`: `launch_app` (aplikace podle názvu nebo id ze seznamu PC), `shutdown` /
+    `sleep` / `lock` (volitelně `delay_minutes` ≤ 240) a `cancel_timer`;
+  - resolver (`modules/computer/ai_actions.py`) ověří PC (jedno, nebo podle názvu), aplikaci (nejednoznačná nebo
+    neznámá → `not_prepared` s kandidáty) a online stav. Do plánu uloží přesný příkaz;
+  - potvrzení pending akce ho zařadí do fronty (`user_context=ai_confirm`). PC mezitím offline, odvolané nebo bez
+    aplikace → `StaleTarget`, nic se neodešle;
+  - stav PC dostává Jarvis v CURRENT STATE sekci modulu (`integrations.context_computer`: online, co běží, co umí
+    spustit, poslední příkaz). Samostatný read tool není, ušetří tokeny.
+- **Routing** (`tool_router.py`):
+  - slovesa `spusť / pusť / vypni / uspi / zamkni / zapni` znamenají write záměr;
+  - s oblastí Počítač a příkazovým slovesem (nebo „zruš“) se nabídne jen `manage_computer`, takže „hodinu“
+    není práce a „WoT“ není grind;
+  - „připomeň mi za hodinu vypnout PC“ zůstává připomínka;
+  - „zapiš 2 hodiny práce na počítači“ zůstává práce.
+
 Migrace `0037_computer_devices` (tabulky `devices`, `device_pairing_codes`, `device_commands`), testy
-`backend/tests/test_computer_devices.py`.
+`backend/tests/test_computer_devices.py`, `backend/tests/test_computer_ai.py`.

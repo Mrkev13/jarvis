@@ -28,6 +28,7 @@ from planner_guard import PLANNER_REQUIRED_TOOLS
 from tool_registry import (
     AREA_ACTIVITY,
     AREA_MEMORY,
+    AREA_COMPUTER,
     AREA_REMINDERS,
     READ_SPECS,
     TOOL_SPECS,
@@ -52,7 +53,9 @@ _FOLLOW_UP_PREFIXES = ("a ", "a co", "a kolik", "a kdy", "jsi si jist", "proc", 
 _WRITE_VERB_RE = re.compile(
     r"\b(prida|pridej|pripis|zapis|zapsa|zaznamen|uloz|nastav|zmen(?:it|te|im)?\b|uprav|aktualiz|vytvor|zaloz|"
     r"oznac|pamatuj|zapamatuj|poznamen|dopln|prepis|zvys|sniz|odecti|pricti|add\b|save\b|update\b|"
-    r"smaz|odstran|vymaz|zrus|oprav|posun|presun|deaktiv|delete\b|pripomen(?:\b|te\b)|odloz|snooze\b)"
+    r"smaz|odstran|vymaz|zrus|oprav|posun|presun|deaktiv|delete\b|pripomen(?:\b|te\b)|odloz|snooze\b|"
+    # MRK-157: příkazy pro PC („pusť WoT", „vypni počítač za hodinu", „zamkni PC")
+    r"spust|pust\b|pustit\b|vypni\b|vypnout\b|uspi\b|uspat\b|zamkni\b|zamknout\b|zapni\b)"
 )
 # Phase B: úprava / mazání / dokončení EXISTUJÍCÍHO záznamu → modify_records (write_intent="mutate").
 _MUTATION_VERB_RE = re.compile(
@@ -70,6 +73,9 @@ _STATEMENT_RE = re.compile(
     r"\b(utratil|zaplatil|koupil|nakoupil|dostal|vydelal|odpracoval|pracoval jsem|splnil|dokoncil|odevzdal|"
     r"ziskal|prodal|platil|udelal jsem|napsal jsem|mam novy|mam novou|mam nove|je hotov|jsou hotov|mam hotov)"
 )
+# MRK-157: příkaz pro PC („vypni počítač za hodinu", „pusť WoT") – zápis jen do oblasti Počítač („hodin" není práce,
+# „WoT" není grind). Bez tohoto slovesa (např. „zapiš 2 hodiny práce na počítači") se routing nemění.
+_PC_COMMAND_RE = re.compile(r"\b(spust|pust\b|pustit\b|vypni\b|vypnout\b|uspi\b|uspat\b|zamkni\b|zamknout\b|zapni\b)")
 _MEMORY_WRITE_RE = re.compile(r"\b(pamatuj|zapamatuj|uloz si|poznamenej si|zapis si)")
 _AMOUNT_RE = re.compile(r"\d[\d\s.,]*\s?(kc|czk|korun)\b")
 _QUESTION_START_RE = re.compile(
@@ -259,6 +265,10 @@ def route_tools(
         if AREA_REMINDERS in keyword_explicit and not undo:
             # „připomeň mi za 2 hodiny…" / „posuň připomínku o hodinu": „hodin" není práce, jen čas připomínky.
             write_areas = frozenset({AREA_REMINDERS})
+        elif AREA_COMPUTER in keyword_explicit and not undo and (_PC_COMMAND_RE.search(folded) or mutate):
+            # „zruš vypnutí počítače" je taky příkaz pro PC (manage_computer cancel_timer), ne úprava záznamu
+            write_areas = frozenset({AREA_COMPUTER})
+            candidates = [s for s in WRITE_SPECS if AREA_COMPUTER in s.areas]
         if write_areas:
             names |= {s.name for s in candidates if set(s.areas) & write_areas}
             reason = REASON_WRITE

@@ -164,8 +164,10 @@ MODULES: tuple[ModuleDef, ...] = (
               capabilities=frozenset({"nav"}), api_prefixes=("/trading",),
               integrations=trading_integrations.INTEGRATIONS),
     # MRK-155: Jarvis na PC – párování počítače s agentem, stav a fronta potvrzených příkazů (docs/computer.md).
-    # Zatím bez stránky (nav) a AI – přijdou s MRK-157. `/device` = endpointy agenta (token zařízení, ne session).
-    ModuleDef("computer", "Počítač", default_enabled=True, implemented=True, capabilities=frozenset(),
+    # MRK-157: stránka /devices + AI (stav, návrhy příkazů přes pending akci). `/device` = endpointy agenta
+    # (token zařízení, ne session).
+    ModuleDef("computer", "Počítač", default_enabled=True, implemented=True,
+              capabilities=frozenset({"nav", "ai_context"}), context_areas=frozenset({"computer"}),
               api_prefixes=("/devices", "/device"), integrations=computer_integrations.INTEGRATIONS,
               event_types=frozenset(computer_integrations.EVENTS)),
     _planned("projects", "Projekty"),
