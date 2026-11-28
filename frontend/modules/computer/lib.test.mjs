@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { codeMinutesLeft, commandStatus, diskLabel, hasPendingCommand, lastSeenLabel, pctLabel, runningNames, uptimeLabel } from "./lib.ts";
+import { capitalize, codeMinutesLeft, commandStatus, diskLabel, hasPendingCommand, lastSeenLabel, pctLabel, runningNames, uptimeLabel } from "./lib.ts";
 
 const sp = (x) => x.replace(/\s/g, " ");
 
@@ -36,4 +36,10 @@ test("pairing code countdown", () => {
   const now = Date.parse("2026-11-28T10:00:00Z");
   assert.equal(codeMinutesLeft("2026-11-28T10:09:30Z", now), 10);
   assert.equal(codeMinutesLeft("2026-11-28T09:59:00Z", now), 0);
+});
+
+test("capitalize", () => {
+  assert.equal(capitalize("zamknout"), "Zamknout");
+  assert.equal(capitalize("úklid"), "Úklid");
+  assert.equal(capitalize(""), "");
 });

@@ -4232,7 +4232,7 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
       check("počítač: spuštění Steamu odesláno", await eventually(async () => /Odesláno: spustit Steam/.test(await page.locator("[data-computer-notice]").innerText().catch(() => "")), 4000));
       check("počítač: výsledek z PC v historii", await eventually(async () => {
         const first = card.locator("[data-device-recent] li").first();
-        return /spustit Steam/.test(await first.innerText().catch(() => "")) && /Hotovo/.test(await first.innerText().catch(() => ""));
+        return /Spustit Steam/.test(await first.innerText().catch(() => "")) && /Hotovo/.test(await first.innerText().catch(() => ""));
       }, 9000));
       // vypnutí za hodinu – jen přes potvrzovací dialog
       await card.locator("[data-power-delay]").selectOption(String(3600));

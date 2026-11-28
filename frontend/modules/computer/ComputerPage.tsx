@@ -17,8 +17,9 @@ import {
 } from "@/components/ui";
 import { useApiResource } from "@/hooks/useApiResource";
 import { apiJson, errorMessage, jsonBody } from "@/lib/api";
+import { cx } from "@/lib/ui";
 import {
-  DELAY_OPTIONS, POWER_LABELS, codeMinutesLeft, commandStatus, diskLabel, hasPendingCommand, lastSeenLabel, pctLabel,
+  DELAY_OPTIONS, POWER_LABELS, capitalize, codeMinutesLeft, commandStatus, diskLabel, hasPendingCommand, lastSeenLabel, pctLabel,
   runningNames, timeLabel, uptimeLabel, type Device, type PairingCode, type PowerAction,
 } from "./lib";
 
@@ -209,7 +210,7 @@ function DeviceCard({ device: d, onChanged, onNotice }: {
         <h3 className="text-sm font-medium text-ink">Napájení</h3>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor={`delay-${d.id}`}>Kdy</label>
-          <select id={`delay-${d.id}`} className={fieldClass} value={delay} onChange={(e) => setDelay(Number(e.target.value))} data-power-delay="">
+          <select id={`delay-${d.id}`} className={cx(fieldClass, "w-full sm:w-44")} value={delay} onChange={(e) => setDelay(Number(e.target.value))} data-power-delay="">
             {DELAY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           {(Object.keys(POWER_LABELS) as PowerAction[]).map((a) => (
@@ -234,7 +235,7 @@ function DeviceCard({ device: d, onChanged, onNotice }: {
               const meta = commandStatus(c.status);
               return (
                 <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
-                  <span className="text-ink">{c.label}<span className="ml-2 text-xs text-ink-muted">{timeLabel(c.created_at)}</span></span>
+                  <span className="text-ink">{capitalize(c.label)}<span className="ml-2 text-xs text-ink-muted">{timeLabel(c.created_at)}</span></span>
                   <span className="flex items-center gap-2">
                     {c.result_message && c.status !== "succeeded" ? <span className="text-xs text-ink-muted">{c.result_message}</span> : null}
                     <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>

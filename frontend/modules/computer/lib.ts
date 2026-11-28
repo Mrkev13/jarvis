@@ -95,3 +95,7 @@ export function timeLabel(iso: string | null): string {
   if (!iso) return "";
   return new Date(iso).toLocaleString("cs-CZ", { timeZone: "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+
+export function capitalize(text: string): string {
+  return text ? text[0].toLocaleUpperCase("cs-CZ") + text.slice(1) : text;
+}
