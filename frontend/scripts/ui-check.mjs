@@ -4211,6 +4211,57 @@ for (const [width, label] of [[1366, "desktop"], [390, "mobil"]]) {
   await ctx.close();
 }
 
+// ===== 44. MRK-157: Počítač – stav PC, spuštění aplikace, napájení s potvrzením, párovací kód, odvolání =====
+{
+  await fetch(`${MOCK}/__mock/devices/reset`).catch(() => undefined);
+  for (const [w, label] of [[1366, "desktop"], [390, "mobil"]]) {
+    const { ctx, page, errors } = await open("/devices", { width: w, height: w < 500 ? 844 : 900 });
+    const card = page.locator("[data-device]");
+    await card.first().waitFor({ timeout: 6000 }).catch(() => undefined);
+    check(`počítač ${label}: karta PC online`, (await card.count()) === 1
+      && (await card.locator('[data-device-online="1"]').count()) === 1 && /Herní PC/.test(await card.innerText()));
+    check(`počítač ${label}: stav (procesor, běží WoT, disky)`, /15 %/.test(await card.locator("[data-device-status]").innerText())
+      && /World of Tanks/.test(await card.locator("[data-device-status]").innerText()) && /C: 121 GB volno/.test(await card.innerText()));
+    check(`počítač ${label}: 4 aplikace ke spuštění`, (await card.locator("[data-launch]").count()) === 4);
+    check(`počítač ${label}: napájení + časovač`, (await card.locator("[data-power]").count()) === 3 && (await card.locator("[data-power-delay] option").count()) === 6);
+    check(`počítač ${label}: bez přetečení`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+    await page.screenshot({ path: `${OUT}computer-${label}.png`, fullPage: true });
+    if (w > 500) {
+      // spuštění aplikace → odesláno, za chvíli „Hotovo“ v posledních příkazech
+      await card.locator('[data-launch="steam"]').click();
+      check("počítač: spuštění Steamu odesláno", await eventually(async () => /Odesláno: spustit Steam/.test(await page.locator("[data-computer-notice]").innerText().catch(() => "")), 4000));
+      check("počítač: výsledek z PC v historii", await eventually(async () => {
+        const first = card.locator("[data-device-recent] li").first();
+        return /spustit Steam/.test(await first.innerText().catch(() => "")) && /Hotovo/.test(await first.innerText().catch(() => ""));
+      }, 9000));
+      // vypnutí za hodinu – jen přes potvrzovací dialog
+      await card.locator("[data-power-delay]").selectOption(String(3600));
+      await card.locator('[data-power="shutdown"]').click();
+      const dialog = page.getByRole("dialog");
+      check("počítač: vypnutí chce potvrzení", await eventually(async () => /Vypnout počítač „Herní PC“\?/.test(await dialog.innerText().catch(() => "")), 3000));
+      await page.screenshot({ path: `${OUT}computer-confirm.png` });
+      await dialog.getByRole("button", { name: /Vypnout za hodinu/ }).click();
+      check("počítač: vypnutí za 60 min odesláno", await eventually(async () => /vypnout za 60 min/.test(await page.locator("[data-computer-notice]").innerText().catch(() => "")), 4000));
+      // zamknutí bez dialogu (bezpečná akce)
+      await card.locator("[data-power-delay]").selectOption("0");
+      await card.locator('[data-power="lock"]').click();
+      check("počítač: zamknutí hned bez dialogu", await eventually(async () => /Odesláno: zamknout\./.test(await page.locator("[data-computer-notice]").innerText().catch(() => "")), 4000));
+      // párovací kód
+      await page.locator("[data-pair-button]").click();
+      check("počítač: párovací kód", await eventually(async () => (await page.locator("[data-pairing-code]").innerText().catch(() => "")) === "K7PX-M2QA", 4000)
+        && /Platí ještě 10 min/.test(await page.locator("[data-pairing-card]").innerText()));
+      await page.screenshot({ path: `${OUT}computer-pairing.png`, fullPage: true });
+      // odvolání → prázdný stav s návodem
+      await card.locator("[data-device-revoke]").click();
+      await page.getByRole("dialog").getByRole("button", { name: "Odvolat" }).click();
+      check("počítač: odvoláno → prázdný stav", await eventually(async () => /Zatím žádný spárovaný počítač/.test(await page.innerText("main")), 5000));
+      await fetch(`${MOCK}/__mock/devices/reset`).catch(() => undefined);
+    }
+    check(`počítač ${label}: bez chyb JS`, errors.length === 0, errors.join("; "));
+    await ctx.close();
+  }
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} kontrol prošlo. Screenshoty: ${OUT}`);

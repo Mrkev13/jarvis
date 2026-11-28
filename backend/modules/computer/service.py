@@ -95,10 +95,16 @@ def command_dict(cmd: DeviceCommand) -> dict:
     }
 
 
-def list_devices(db: Session, now: datetime | None = None) -> list[dict]:
+def list_devices(db: Session, now: datetime | None = None, recent: int = 5) -> list[dict]:
+    """Aktivní zařízení pro stránku Počítač, každé s posledními `recent` příkazy (MRK-157)."""
     now = now or utc_now()
     rows = db.query(Device).filter(Device.revoked_at.is_(None)).order_by(Device.id).all()
-    return [device_dict(d, now) for d in rows]
+    out = []
+    for d in rows:
+        item = device_dict(d, now)
+        item["recent"] = list_commands(db, d.id, recent) if recent else []
+        out.append(item)
+    return out
 
 
 def get_device(db: Session, device_id: int, *, active: bool = True) -> Device:

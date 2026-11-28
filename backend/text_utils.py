@@ -113,6 +113,7 @@ AI_TOOL_LABELS_CZ = {
     "modify_records": "Upravená data",
     "add_reminder": "Přidána připomínka",
     "manage_reminder": "Upravená připomínka",
+    "manage_computer": "Příkaz pro počítač",
     "undo_change": "Vrácená změna",
 }
 
